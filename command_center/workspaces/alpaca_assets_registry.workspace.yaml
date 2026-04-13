@@ -1,0 +1,282 @@
+title: Alpaca Assets Registry
+description: Workspace for Alpaca-backed asset registration and holdings management.
+labels:
+- alpaca
+- assets
+- registry
+category: Markets
+source: user
+schemaVersion: 1
+layoutKind: custom
+grid:
+  columns: 12
+  rowHeight: 18
+  gap: 2
+autoGrid: {}
+companions: []
+controls:
+  refresh:
+    enabled: false
+widgets:
+- id: register-asset-by-ticker
+  widgetId: app-component
+  title: Register Asset By Ticker
+  props:
+    apiTargetMode: main-sequence-resource-release
+    mainSequenceResourceRelease:
+      releaseId: 27
+    authMode: session-jwt
+    method: post
+    path: /v1/app-components/assets/register-ticker
+    requestBodyContentType: application/json
+    bindingSpec:
+      version: 1
+      operationKey: POST /v1/app-components/assets/register-ticker
+      requestPorts:
+      - id: body:ticker
+        fieldKey: body:ticker
+        label: Ticker
+        description: Ticker to register as a MainSequence public asset through Alpaca
+          and FIGI.
+        required: true
+        location: body
+        kind: string
+        accepts:
+        - core.value.string@v1
+        - core.value.number@v1
+        - core.value.integer@v1
+        - core.value.boolean@v1
+      - id: body:include_non_tradable
+        fieldKey: body:include_non_tradable
+        label: Include Non Tradable
+        description: Include Alpaca assets that are active but not tradable.
+        required: false
+        location: body
+        kind: boolean
+        accepts:
+        - core.value.string@v1
+        - core.value.number@v1
+        - core.value.integer@v1
+        - core.value.boolean@v1
+      - id: body:timeout
+        fieldKey: body:timeout
+        label: Timeout
+        description: HTTP timeout in seconds for Alpaca and OpenFIGI requests.
+        required: false
+        location: body
+        kind: number
+        accepts:
+        - core.value.string@v1
+        - core.value.number@v1
+        - core.value.integer@v1
+        - core.value.boolean@v1
+      responsePorts:
+      - id: response:$
+        label: Response Body
+        kind: json
+        contract: core.value.json@v1
+        responsePath: []
+        statusCode: '200'
+        contentType: application/json
+      - id: response:requested_ticker
+        label: Requested Ticker
+        description: null
+        kind: string
+        contract: core.value.string@v1
+        responsePath:
+        - requested_ticker
+        statusCode: '200'
+        contentType: application/json
+      - id: response:alpaca_symbol
+        label: Alpaca Symbol
+        description: null
+        kind: string
+        contract: core.value.string@v1
+        responsePath:
+        - alpaca_symbol
+        statusCode: '200'
+        contentType: application/json
+      - id: response:alpaca_name
+        label: Alpaca Name
+        description: null
+        kind: string
+        contract: core.value.string@v1
+        responsePath:
+        - alpaca_name
+        statusCode: '200'
+        contentType: application/json
+      - id: response:figi
+        label: Figi
+        description: null
+        kind: string
+        contract: core.value.string@v1
+        responsePath:
+        - figi
+        statusCode: '200'
+        contentType: application/json
+      - id: response:classification_pass_name
+        label: Classification Pass Name
+        description: null
+        kind: string
+        contract: core.value.string@v1
+        responsePath:
+        - classification_pass_name
+        statusCode: '200'
+        contentType: application/json
+      - id: response:security_type
+        label: Security Type
+        description: null
+        kind: string
+        contract: core.value.string@v1
+        responsePath:
+        - security_type
+        statusCode: '200'
+        contentType: application/json
+      - id: response:security_type_2
+        label: Security Type 2
+        description: null
+        kind: string
+        contract: core.value.string@v1
+        responsePath:
+        - security_type_2
+        statusCode: '200'
+        contentType: application/json
+      - id: response:exchange_code
+        label: Exchange Code
+        description: null
+        kind: string
+        contract: core.value.string@v1
+        responsePath:
+        - exchange_code
+        statusCode: '200'
+        contentType: application/json
+      - id: response:status
+        label: Status
+        description: null
+        kind: enum
+        contract: core.value.string@v1
+        responsePath:
+        - status
+        statusCode: '200'
+        contentType: application/json
+      - id: response:asset_id
+        label: Asset Id
+        description: null
+        kind: integer
+        contract: core.value.integer@v1
+        responsePath:
+        - asset_id
+        statusCode: '200'
+        contentType: application/json
+      - id: response:created
+        label: Created
+        description: null
+        kind: boolean
+        contract: core.value.boolean@v1
+        responsePath:
+        - created
+        statusCode: '200'
+        contentType: application/json
+      - id: response:already_registered
+        label: Already Registered
+        description: null
+        kind: boolean
+        contract: core.value.boolean@v1
+        responsePath:
+        - already_registered
+        statusCode: '200'
+        contentType: application/json
+      - id: response:missing_from_alpaca
+        label: Missing From Alpaca
+        description: null
+        kind: boolean
+        contract: core.value.boolean@v1
+        responsePath:
+        - missing_from_alpaca
+        statusCode: '200'
+        contentType: application/json
+      - id: response:missing_figi
+        label: Missing Figi
+        description: null
+        kind: boolean
+        contract: core.value.boolean@v1
+        responsePath:
+        - missing_figi
+        statusCode: '200'
+        contentType: application/json
+      - id: response:warnings
+        label: Warnings
+        description: null
+        kind: json
+        contract: core.value.json@v1
+        responsePath:
+        - warnings
+        statusCode: '200'
+        contentType: application/json
+      requestForm:
+        parameterFields: []
+        bodyFields:
+        - key: body:ticker
+          label: Ticker
+          description: Ticker to register as a MainSequence public asset through Alpaca
+            and FIGI.
+          location: body
+          required: true
+          kind: string
+          bodyPath:
+          - ticker
+          rootBodyValue: false
+          contentType: application/json
+          defaultValue: null
+          exampleValue: null
+        - key: body:include_non_tradable
+          label: Include Non Tradable
+          description: Include Alpaca assets that are active but not tradable.
+          location: body
+          required: false
+          kind: boolean
+          bodyPath:
+          - include_non_tradable
+          rootBodyValue: false
+          contentType: application/json
+          defaultValue: false
+          exampleValue: null
+        - key: body:timeout
+          label: Timeout
+          description: HTTP timeout in seconds for Alpaca and OpenFIGI requests.
+          location: body
+          required: false
+          kind: number
+          bodyPath:
+          - timeout
+          rootBodyValue: false
+          contentType: application/json
+          defaultValue: 30.0
+          exampleValue: null
+        bodyMode: generated
+        bodyContentType: application/json
+        bodyRequired: true
+    requestInputMap:
+      version: 1
+      operationKey: POST /v1/app-components/assets/register-ticker
+      fields:
+        body:ticker:
+          label: Ticker
+        body:include_non_tradable:
+          visibleOnCard: false
+          prefillValue: 'false'
+        body:timeout:
+          visibleOnCard: false
+          prefillValue: '30'
+    showHeader: true
+    showResponse: true
+    hideRequestButton: false
+    requestButtonLabel: Register
+    refreshOnDashboardRefresh: false
+  layout:
+    cols: 8
+    rows: 10
+  position:
+    x: 0
+    y: 0
+id: 3
