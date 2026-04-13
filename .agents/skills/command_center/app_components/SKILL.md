@@ -1,6 +1,6 @@
 ---
 name: command-center-app-components
-description: Use this skill when the task is about AppComponent widgets in a Main Sequence project. This skill owns AppComponent input contracts, custom forms, form sections and field definitions, and the boundary between AppComponent input contracts and widget-facing output contracts. It does not own workspace layout, generic FastAPI design, or Streamlit dashboards.
+description: Use this skill when the task is about AppComponent widgets in a Main Sequence project. This skill owns AppComponent input contracts, custom forms, form sections and field definitions, and the boundary between AppComponent input contracts and widget-facing output contracts. Before changing AppComponent payloads or contracts, verify the target widget in the Command Center registry through the CLI. Source order is strict: registry detail first, SDK client models second, local Main Sequence repository docs/models third only if the first two still leave something unresolved. It does not own workspace layout, generic FastAPI design, or Streamlit dashboards.
 ---
 
 # Command Center AppComponents
@@ -28,6 +28,7 @@ This skill is for:
 - review whether an AppComponent form is too thin or too custom
 - separate input contracts from output contracts
 - decide when the API behind an AppComponent must return exact widget-facing response models
+- verify the target widget type in the CLI registry before changing payload or contract logic
 
 ## This Skill Must Not Claim
 
@@ -43,30 +44,37 @@ This skill must not claim ownership of:
 ## Route Adjacent Work
 
 - Command Center workspaces:
-  `agent_scaffold/skills/command_center/workspace_builder/SKILL.md`
+  `.agents/skills/command_center/workspace_builder/SKILL.md`
 - APIs and FastAPI:
-  `agent_scaffold/skills/application_surfaces/api_surfaces/SKILL.md`
+  `.agents/skills/application_surfaces/api_surfaces/SKILL.md`
 - DataNodes:
-  `agent_scaffold/skills/data_publishing/data_nodes/SKILL.md`
+  `.agents/skills/data_publishing/data_nodes/SKILL.md`
 - SimpleTables:
-  `agent_scaffold/skills/data_publishing/simple_tables/SKILL.md`
+  `.agents/skills/data_publishing/simple_tables/SKILL.md`
 - Streamlit dashboards:
-  `agent_scaffold/skills/dashboards/streamlit/SKILL.md`
+  `.agents/skills/dashboards/streamlit/SKILL.md`
 
 ## Read First
 
-1. `docs/knowledge/command_center/forms.md`
-2. `docs/knowledge/command_center/widget_data_contracts.md`
-3. `mainsequence/client/command_center/app_component.py`
+1. Verify the widget catalog through the CLI:
+   - `mainsequence cc registered_widget_type list --json`
+   - identify the target `widget_id`
+   - `mainsequence cc registered_widget_type detail <WIDGET_ID> --json`
+2. `docs/knowledge/command_center/forms.md`
+3. `docs/knowledge/command_center/widget_data_contracts.md`
+4. `mainsequence/client/command_center/app_component.py`
 
 If the AppComponent is backed by project APIs, also read:
 
-4. `agent_scaffold/skills/application_surfaces/api_surfaces/SKILL.md`
+5. `.agents/skills/application_surfaces/api_surfaces/SKILL.md`
 
 ## Inputs This Skill Needs
 
 Before changing an AppComponent backend contract, collect or infer:
 
+- verified `widget_id`
+- registry detail payload from:
+  - `mainsequence cc registered_widget_type detail <WIDGET_ID> --json`
 - what the widget is trying to collect from the user
 - whether the default generated form is already sufficient
 - the fields, sections, and labels the form should expose
@@ -74,6 +82,26 @@ Before changing an AppComponent backend contract, collect or infer:
   - a generic API contract
   - an exact widget-facing contract
 - whether stable field tokens are needed for downstream bindings or draft state
+
+Use this source order strictly:
+
+1. Registry detail first
+   - `mainsequence cc registered_widget_type detail <WIDGET_ID> --json`
+   - this is the first contract source
+2. SDK client models second
+   - `mainsequence/client/command_center/app_component.py`
+   - `mainsequence/client/command_center/data_models.py`
+   - use these before any broader repository exploration
+3. Repository docs/models third
+   - local docs, examples, payload builders, and typed models
+   - only if registry detail plus SDK client models still leave something unresolved
+
+If registry detail is not sufficient, and only after checking the SDK client models, use local Main Sequence repository sources such as:
+
+- `docs/knowledge/command_center/forms.md`
+- `docs/knowledge/command_center/widget_data_contracts.md`
+- `mainsequence/client/command_center/app_component.py`
+- `mainsequence/client/command_center/data_models.py`
 
 If the input contract or output contract is unclear, stop before building the form.
 
@@ -100,6 +128,18 @@ Typical cases where default generation is enough:
 - a few scalar query parameters
 - a small request body with standard primitive fields
 - enums, booleans, dates, and numbers with no specialized layout requirement
+
+### 1.1 Registry verification is mandatory before AppComponent payload work
+
+Before changing an AppComponent payload, form contract, or widget-facing output:
+
+1. run `mainsequence cc registered_widget_type list --json`
+2. identify the target `widget_id`
+3. run `mainsequence cc registered_widget_type detail <WIDGET_ID> --json`
+
+Do not infer `widget_id`, mounted widget identity, or widget-facing behavior without checking the registered widget catalog first.
+
+If registry inspection is unavailable or does not provide enough contract detail, do not jump directly into general repository exploration. Check the SDK client models next. Only then use local docs/models/examples if the contract is still unresolved. If the contract is still unclear after registry detail plus SDK client models, stop and escalate.
 
 ### 2. Use `EditableFormDefinition` only when the form needs to be specialized
 
@@ -152,6 +192,8 @@ Do not return loose dictionaries for a widget boundary when an exact contract mo
 
 When reviewing an AppComponent task, look for:
 
+- inferred or guessed `widget_id` values
+- AppComponent work that skipped `registered_widget_type list/detail`
 - a custom form that should have been auto-generated
 - a flat autogenerated form that should have been specialized
 - unstable or poorly named field tokens
@@ -163,6 +205,10 @@ When reviewing an AppComponent task, look for:
 
 Do not claim success until you have checked:
 
+- the target `widget_id` was verified through:
+  - `mainsequence cc registered_widget_type list --json`
+  - `mainsequence cc registered_widget_type detail <WIDGET_ID> --json`
+- registry detail was used as the first source of truth
 - the choice between autogenerated form and custom form is intentional
 - custom forms use `EditableFormDefinition`
 - sections and fields are explicit where needed
@@ -170,9 +216,15 @@ Do not claim success until you have checked:
 - field kinds reflect business meaning
 - input and output contracts are not mixed together
 - widget-facing outputs use exact SDK response models when applicable
+- registry detail was used first
+- SDK client models were used second
+- local repository docs/models/examples were used only after the first two sources still left unresolved contract questions
 
 ## This Skill Must Stop And Escalate When
 
+- the target widget cannot be identified in the registered widget catalog
+- the task depends on guessed widget behavior without registry verification
+- registry detail is insufficient and the required contract cannot be resolved from Main Sequence docs/models in this repository
 - the task is really about workspace structure instead of AppComponent contracts
 - the form contract is unclear but a custom form is being forced anyway
 - the widget-facing output contract is unclear and no exact SDK model is available

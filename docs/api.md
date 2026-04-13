@@ -6,6 +6,7 @@ The project includes a FastAPI surface for automating:
 
 - asset discovery
 - asset registration
+- single-ticker registration for Command Center AppComponents
 - holdings-category discovery
 - holdings-category synchronization
 
@@ -64,6 +65,16 @@ POST /v1/assets/registration/execute
 
 This runs the FIGI-based registration flow and creates missing MainSequence public assets.
 
+### AppComponent single-ticker registration
+
+```text
+POST /v1/app-components/assets/register-ticker
+```
+
+This is the AppComponent-facing operation for registering exactly one asset by ticker.
+
+It intentionally uses the default generated AppComponent form instead of a custom editable form.
+
 ### Preview holdings category sync
 
 ```text
@@ -90,3 +101,5 @@ uv run uvicorn api.app.main:app --reload
 
 The extractor logic, registration logic, and holdings-category logic remain owned by `src/`.
 The API is only the HTTP contract over those services.
+
+This API does not add `LoggedUserContextMiddleware` because the current routes do not consume request-local MainSequence user context.

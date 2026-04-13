@@ -11,10 +11,10 @@
       
       
       
-        <link rel="prev" href="../../data_nodes/alpaca_bars/">
+        <link rel="prev" href="../../api/">
       
       
-        <link rel="next" href="../development/">
+        <link rel="next" href="../../assets/registration/">
       
       
         
@@ -25,7 +25,7 @@
     
     
       
-        <title>Jobs And Scheduling - Alpaca Connectors</title>
+        <title>Asset Registry AppComponent - Alpaca Connectors</title>
       
     
     
@@ -66,7 +66,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#jobs-and-scheduling" class="md-skip">
+        <a href="#asset-registry-appcomponent" class="md-skip">
           Skip to content
         </a>
       
@@ -102,7 +102,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Jobs And Scheduling
+              Asset Registry AppComponent
             
           </span>
         </div>
@@ -249,8 +249,10 @@
       
   
   
+    
   
   
+  
     
     
     
@@ -261,13 +263,11 @@
       
     
     
-    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
       
         
         
-          
-        
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
         
           
           <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
@@ -288,7 +288,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
           <label class="md-nav__title" for="__nav_3">
             <span class="md-nav__icon md-icon"></span>
             
@@ -303,10 +303,37 @@
                 
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../../command_center/app_component/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Asset Registry AppComponent
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -322,6 +349,103 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#goal" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Goal
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#widget-contract" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Widget Contract
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#api-decision" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        API Decision
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#workspace-builder" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Workspace Builder
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#why-the-widget-uses-a-fastapi-release" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why The Widget Uses A FastAPI Release
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#source-of-truth-for-the-widget-payload" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Source Of Truth For The Widget Payload
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#current-limitation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Current Limitation
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -572,8 +696,6 @@
       
   
   
-    
-  
   
   
     
@@ -586,11 +708,13 @@
       
     
     
-    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
       
         
         
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" checked>
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_6" >
         
           
           <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
@@ -611,7 +735,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="true">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
           <label class="md-nav__title" for="__nav_6">
             <span class="md-nav__icon md-icon"></span>
             
@@ -626,37 +750,10 @@
                 
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Jobs And Scheduling
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../../operations/jobs/" class="md-nav__link">
         
   
   
@@ -672,81 +769,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#current-job-target" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Current Job Target
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#schedule" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Schedule
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#file-shape" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        File Shape
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#important-operational-note" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Important Operational Note
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#submit-the-batch" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Submit The Batch
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -759,7 +781,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../development/" class="md-nav__link">
+      <a href="../../operations/development/" class="md-nav__link">
         
   
   
@@ -814,10 +836,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#current-job-target" class="md-nav__link">
+  <a href="#goal" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Current Job Target
+        Goal
       
     </span>
   </a>
@@ -825,10 +847,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#schedule" class="md-nav__link">
+  <a href="#widget-contract" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Schedule
+        Widget Contract
       
     </span>
   </a>
@@ -836,10 +858,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#file-shape" class="md-nav__link">
+  <a href="#api-decision" class="md-nav__link">
     <span class="md-ellipsis">
       
-        File Shape
+        API Decision
       
     </span>
   </a>
@@ -847,10 +869,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#important-operational-note" class="md-nav__link">
+  <a href="#workspace-builder" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Important Operational Note
+        Workspace Builder
       
     </span>
   </a>
@@ -858,10 +880,32 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#submit-the-batch" class="md-nav__link">
+  <a href="#why-the-widget-uses-a-fastapi-release" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Submit The Batch
+        Why The Widget Uses A FastAPI Release
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#source-of-truth-for-the-widget-payload" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Source Of Truth For The Widget Payload
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#current-limitation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Current Limitation
       
     </span>
   </a>
@@ -885,41 +929,85 @@
 
 
 
-<h1 id="jobs-and-scheduling">Jobs And Scheduling<a class="headerlink" href="#jobs-and-scheduling" title="Permanent link">&para;</a></h1>
-<h2 id="current-job-target">Current Job Target<a class="headerlink" href="#current-job-target" title="Permanent link">&para;</a></h2>
-<p>The project includes:</p>
+<h1 id="asset-registry-appcomponent">Asset Registry AppComponent<a class="headerlink" href="#asset-registry-appcomponent" title="Permanent link">&para;</a></h1>
+<h2 id="goal">Goal<a class="headerlink" href="#goal" title="Permanent link">&para;</a></h2>
+<p>The project includes a Command Center AppComponent configuration for the workspace:</p>
 <ul>
-<li><code>scheduled_jobs.yaml</code></li>
-<li><code>scripts/run_daily_stock_bars_holdings_ivv.py</code></li>
+<li><code>Alpaca Assets Registry</code></li>
 </ul>
-<p>That launcher runs daily bars for:</p>
+<p>This widget is meant to let a user register one Alpaca-backed asset directly by ticker through the project's FastAPI surface.</p>
+<h2 id="widget-contract">Widget Contract<a class="headerlink" href="#widget-contract" title="Permanent link">&para;</a></h2>
+<p>The mounted widget type is:</p>
 <ul>
-<li><code>HOLDINGS__IVV</code></li>
-<li><code>1d</code></li>
-<li><code>sip</code></li>
-<li><code>all</code></li>
+<li><code>app-component</code></li>
 </ul>
-<h2 id="schedule">Schedule<a class="headerlink" href="#schedule" title="Permanent link">&para;</a></h2>
-<p>The current crontab expression is:</p>
-<div class="highlight"><pre><span></span><code>0 0 * * *
+<p>The widget is configured against this API route:</p>
+<ul>
+<li><code>POST /v1/app-components/assets/register-ticker</code></li>
+</ul>
+<p>That route is intentionally simple:</p>
+<ul>
+<li>request body: one ticker plus optional operational flags</li>
+<li>response body: explicit registration result for exactly one ticker</li>
+</ul>
+<p>This is an AppComponent flow, not a <code>data-node-table-visualizer</code> flow, so the response is a normal typed FastAPI model instead of a table-widget SDK contract.</p>
+<h2 id="api-decision">API Decision<a class="headerlink" href="#api-decision" title="Permanent link">&para;</a></h2>
+<p>For this widget, the default generated AppComponent form is sufficient.</p>
+<p>We did not add a custom <code>EditableFormDefinition</code> because the operation only needs:</p>
+<ul>
+<li><code>ticker</code></li>
+<li><code>include_non_tradable</code></li>
+<li><code>timeout</code></li>
+</ul>
+<p>That matches the Command Center rule to prefer autogenerated forms unless the UX truly needs custom sections or field-level specialization.</p>
+<h2 id="workspace-builder">Workspace Builder<a class="headerlink" href="#workspace-builder" title="Permanent link">&para;</a></h2>
+<p>The repo owns the workspace payload builder in:</p>
+<ul>
+<li><code>src/command_center/workspaces.py</code></li>
+</ul>
+<p>and a thin file generator in:</p>
+<ul>
+<li><code>scripts/build_alpaca_assets_registry_workspace.py</code></li>
+</ul>
+<p>Example:</p>
+<div class="highlight"><pre><span></span><code>.venv/bin/python<span class="w"> </span>scripts/build_alpaca_assets_registry_workspace.py<span class="w"> </span>--fastapi-release-id<span class="w"> </span><span class="m">701</span>
 </code></pre></div>
-<p>This means midnight UTC.</p>
-<h2 id="file-shape">File Shape<a class="headerlink" href="#file-shape" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><span class="nt">jobs</span><span class="p">:</span>
-<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;Alpaca</span><span class="nv"> </span><span class="s">Daily</span><span class="nv"> </span><span class="s">Stock</span><span class="nv"> </span><span class="s">Bars</span><span class="nv"> </span><span class="s">HOLDINGS__IVV&quot;</span>
-<span class="w">    </span><span class="nt">execution_path</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;scripts/run_daily_stock_bars_holdings_ivv.py&quot;</span>
-<span class="w">    </span><span class="nt">task_schedule</span><span class="p">:</span>
-<span class="w">      </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;crontab&quot;</span>
-<span class="w">      </span><span class="nt">expression</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;0</span><span class="nv"> </span><span class="s">0</span><span class="nv"> </span><span class="s">*</span><span class="nv"> </span><span class="s">*</span><span class="nv"> </span><span class="s">*&quot;</span>
-<span class="w">    </span><span class="nt">related_image_id</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">0</span>
-<span class="w">    </span><span class="nt">cpu_request</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;0.25&quot;</span>
-<span class="w">    </span><span class="nt">memory_request</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;0.5&quot;</span>
-</code></pre></div>
-<h2 id="important-operational-note">Important Operational Note<a class="headerlink" href="#important-operational-note" title="Permanent link">&para;</a></h2>
-<p>At the time this documentation was written, the project had no project images available from <code>mainsequence project images list</code>, so <code>related_image_id: 0</code> is only a placeholder.</p>
-<p>Before scheduling the batch for real, a valid project image must exist.</p>
-<h2 id="submit-the-batch">Submit The Batch<a class="headerlink" href="#submit-the-batch" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code>/bin/zsh<span class="w"> </span>-lc<span class="w"> </span><span class="s2">&quot;set -a; source .env; export MAINSEQUENCE_AUTH_MODE=jwt; set +a; .venv/bin/mainsequence project schedule_batch_jobs scheduled_jobs.yaml&quot;</span>
+<p>This writes:</p>
+<ul>
+<li><code>command_center/workspaces/alpaca_assets_registry.workspace.yaml</code></li>
+</ul>
+<p>The generated workspace update mounts one widget:</p>
+<ul>
+<li>title: <code>Register Asset By Ticker</code></li>
+<li>widget id: <code>app-component</code></li>
+<li>target mode: <code>main-sequence-resource-release</code></li>
+<li>operation: <code>POST /v1/app-components/assets/register-ticker</code></li>
+</ul>
+<h2 id="why-the-widget-uses-a-fastapi-release">Why The Widget Uses A FastAPI Release<a class="headerlink" href="#why-the-widget-uses-a-fastapi-release" title="Permanent link">&para;</a></h2>
+<p>The intended workspace target is a deployed MainSequence FastAPI resource release, not a localhost URL.</p>
+<p>The widget props therefore use:</p>
+<ul>
+<li><code>apiTargetMode: main-sequence-resource-release</code></li>
+<li><code>mainSequenceResourceRelease.releaseId</code></li>
+</ul>
+<p>instead of a hardcoded local <code>apiBaseUrl</code>.</p>
+<h2 id="source-of-truth-for-the-widget-payload">Source Of Truth For The Widget Payload<a class="headerlink" href="#source-of-truth-for-the-widget-payload" title="Permanent link">&para;</a></h2>
+<p>The local skill docs did not include a concrete mounted AppComponent payload example, so the widget payload was verified against the local Command Center frontend source:</p>
+<ul>
+<li><code>CommandCenter/src/widgets/core/app-component/definition.ts</code></li>
+<li><code>CommandCenter/src/widgets/core/app-component/appComponentModel.ts</code></li>
+</ul>
+<p>Important confirmed details:</p>
+<ul>
+<li>widget id is <code>app-component</code></li>
+<li>the widget can target a Main Sequence FastAPI resource release directly</li>
+<li><code>method</code>, <code>path</code>, and <code>requestBodyContentType</code> are persisted widget props</li>
+<li>runtime OpenAPI discovery can generate the form from the selected operation</li>
+</ul>
+<h2 id="current-limitation">Current Limitation<a class="headerlink" href="#current-limitation" title="Permanent link">&para;</a></h2>
+<p>Applying the generated workspace update to the live platform still requires a valid authenticated MainSequence CLI or SDK session.</p>
+<p>When auth is available, apply the generated file with:</p>
+<div class="highlight"><pre><span></span><code>mainsequence<span class="w"> </span>cc<span class="w"> </span>workspace<span class="w"> </span>update<span class="w"> </span><span class="m">3</span><span class="w"> </span>--file<span class="w"> </span>command_center/workspaces/alpaca_assets_registry.workspace.yaml
 </code></pre></div>
 
 

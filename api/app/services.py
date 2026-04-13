@@ -24,7 +24,12 @@ from .command_center_models import (
     SourceMetadataResponse,
     TableFieldResponse,
 )
-from .schemas import AssetRegistrationRequest, HoldingsCategoryRequest
+from .schemas import (
+    AssetRegistrationByTickerRequest,
+    AssetRegistrationByTickerResponse,
+    AssetRegistrationRequest,
+    HoldingsCategoryRequest,
+)
 
 
 def _coerce_asset_id(asset_or_id: Any) -> int:
@@ -41,6 +46,12 @@ def _serialize_asset_mapping(raw_mapping: dict[str, Any]) -> dict[str, int]:
         symbol: _coerce_asset_id(asset_or_id)
         for symbol, asset_or_id in sorted(raw_mapping.items())
     }
+
+
+def _single_symbol_plan_symbol(plan: Any, requested_ticker: str) -> str | None:
+    if plan.alpaca_assets:
+        return plan.alpaca_assets[0].symbol
+    return plan.requested_symbol_aliases.get(requested_ticker)
 
 
 def _field_type_for_value(value: Any) -> str:
@@ -162,6 +173,94 @@ def execute_asset_registration(
                 "warnings_by_symbol": dict(sorted(registration_result["warnings_by_symbol"].items())),
             }
         ],
+    )
+
+
+def execute_asset_registration_by_ticker(
+    request: AssetRegistrationByTickerRequest,
+) -> AssetRegistrationByTickerResponse:
+    plan = build_alpaca_us_equity_registration_plan(
+        symbols=[request.ticker],
+        include_non_tradable=request.include_non_tradable,
+        timeout=request.timeout,
+    )
+    resolution = resolve_alpaca_us_equity_registration_plan(
+        plan,
+        timeout=request.timeout,
+    )
+
+    resolved_symbol = _single_symbol_plan_symbol(plan, request.ticker)
+    alpaca_asset = next(iter(plan.alpaca_assets), None)
+    match = plan.matches_by_symbol.get(resolved_symbol) if resolved_symbol else None
+
+    if request.ticker in plan.missing_symbols_from_alpaca:
+        return AssetRegistrationByTickerResponse(
+            requested_ticker=request.ticker,
+            alpaca_symbol=None,
+            alpaca_name=None,
+            figi=None,
+            classification_pass_name=None,
+            security_type=None,
+            security_type_2=None,
+            exchange_code=None,
+            status="blocked_missing_alpaca",
+            asset_id=None,
+            created=False,
+            already_registered=False,
+            missing_from_alpaca=True,
+            missing_figi=False,
+            warnings=[],
+        )
+
+    if match is None:
+        warning = None
+        if resolved_symbol:
+            warning = plan.warnings_by_symbol.get(resolved_symbol)
+        if warning is None:
+            warning = plan.warnings_by_symbol.get(request.ticker)
+        return AssetRegistrationByTickerResponse(
+            requested_ticker=request.ticker,
+            alpaca_symbol=resolved_symbol,
+            alpaca_name=alpaca_asset.name if alpaca_asset else None,
+            figi=None,
+            classification_pass_name=None,
+            security_type=None,
+            security_type_2=None,
+            exchange_code=None,
+            status="blocked_missing_figi",
+            asset_id=None,
+            created=False,
+            already_registered=False,
+            missing_from_alpaca=False,
+            missing_figi=True,
+            warnings=[warning] if warning else [],
+        )
+
+    registration_result = register_alpaca_us_equity_assets(
+        registration_resolution=resolution,
+        timeout=request.timeout,
+    )
+    created_asset = registration_result["created_assets"].get(match.symbol)
+    existing_asset = registration_result["existing_assets"].get(match.symbol)
+    asset_or_id = created_asset if created_asset is not None else existing_asset
+    asset_id = _coerce_asset_id(asset_or_id) if asset_or_id is not None else None
+
+    return AssetRegistrationByTickerResponse(
+        requested_ticker=request.ticker,
+        alpaca_symbol=match.symbol,
+        alpaca_name=alpaca_asset.name if alpaca_asset else None,
+        figi=match.figi,
+        classification_pass_name=match.classification_pass_name,
+        security_type=match.security_type,
+        security_type_2=match.security_type_2,
+        exchange_code=match.exchange_code,
+        status="created" if created_asset is not None else "existing",
+        asset_id=asset_id,
+        created=created_asset is not None,
+        already_registered=created_asset is None and existing_asset is not None,
+        missing_from_alpaca=False,
+        missing_figi=False,
+        warnings=[],
     )
 
 

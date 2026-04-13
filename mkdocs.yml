@@ -21,6 +21,8 @@ markdown_extensions:
 nav:
   - Overview: index.md
   - API: api.md
+  - Command Center:
+      - Asset Registry AppComponent: command_center/app_component.md
   - Assets:
       - Registration Flow: assets/registration.md
       - Holdings Categories: assets/holdings_categories.md

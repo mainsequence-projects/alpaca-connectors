@@ -14,7 +14,7 @@
         <link rel="prev" href="..">
       
       
-        <link rel="next" href="../assets/registration/">
+        <link rel="next" href="../command_center/app_component/">
       
       
         
@@ -363,6 +363,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#appcomponent-single-ticker-registration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        AppComponent single-ticker registration
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#preview-holdings-category-sync" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -451,7 +462,7 @@
   <span class="md-ellipsis">
     
   
-    Assets
+    Command Center
   
 
     
@@ -464,6 +475,95 @@
         
         <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
           <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Command Center
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../command_center/app_component/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Asset Registry AppComponent
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Assets
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -586,10 +686,10 @@
         
           
         
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5" >
         
           
-          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
             
   
   
@@ -607,8 +707,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_4">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -675,10 +775,10 @@
         
           
         
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5" >
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_6" >
         
           
-          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
             
   
   
@@ -696,8 +796,8 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_5">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
             <span class="md-nav__icon md-icon"></span>
             
   
@@ -875,6 +975,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#appcomponent-single-ticker-registration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        AppComponent single-ticker registration
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#preview-holdings-category-sync" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -946,6 +1057,7 @@
 <ul>
 <li>asset discovery</li>
 <li>asset registration</li>
+<li>single-ticker registration for Command Center AppComponents</li>
 <li>holdings-category discovery</li>
 <li>holdings-category synchronization</li>
 </ul>
@@ -988,6 +1100,11 @@
 <div class="highlight"><pre><span></span><code>POST /v1/assets/registration/execute
 </code></pre></div>
 <p>This runs the FIGI-based registration flow and creates missing MainSequence public assets.</p>
+<h3 id="appcomponent-single-ticker-registration">AppComponent single-ticker registration<a class="headerlink" href="#appcomponent-single-ticker-registration" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>POST /v1/app-components/assets/register-ticker
+</code></pre></div>
+<p>This is the AppComponent-facing operation for registering exactly one asset by ticker.</p>
+<p>It intentionally uses the default generated AppComponent form instead of a custom editable form.</p>
 <h3 id="preview-holdings-category-sync">Preview holdings category sync<a class="headerlink" href="#preview-holdings-category-sync" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code>POST /v1/holdings-categories/plan
 </code></pre></div>
@@ -1002,6 +1119,7 @@
 <h2 id="important-boundary">Important Boundary<a class="headerlink" href="#important-boundary" title="Permanent link">&para;</a></h2>
 <p>The extractor logic, registration logic, and holdings-category logic remain owned by <code>src/</code>.
 The API is only the HTTP contract over those services.</p>
+<p>This API does not add <code>LoggedUserContextMiddleware</code> because the current routes do not consume request-local MainSequence user context.</p>
 
 
 

@@ -1,6 +1,6 @@
 ---
 name: mainsequence-project
-description: Use this skill to bootstrap work in a Main Sequence repository. This skill owns project context verification, docs-first behavior, success-definition discipline, and routing between specialized domain skills and the maintenance skill. It does not own domain implementation semantics or direct reconciliation of the project-state files under `agent_scaffold/`.
+description: Use this skill to bootstrap work in a Main Sequence repository. This skill owns project context verification, docs-first behavior, success-definition discipline, and routing between specialized domain skills and the maintenance skill. It does not own domain implementation semantics or direct reconciliation of the project-state files under `.agents/`.
 ---
 
 # Main Sequence Project Bootstrap
@@ -14,7 +14,7 @@ This skill is for:
 - establishing project context
 - defining success up front
 - enforcing a docs-first workflow
-- deciding when `agent_scaffold/` maintenance is required
+- deciding when `.agents/` maintenance is required
 - verifying platform context before making claims
 - routing work to the correct specialized skill
 
@@ -24,7 +24,7 @@ This skill is for:
 - define a concrete success condition before implementation starts
 - verify current project and platform context
 - decide which specialized skill owns the actual domain work
-- decide when to hand off to `agent_scaffold/skills/maintenance/local_journal/SKILL.md`
+- decide when to hand off to `.agents/skills/maintenance/local_journal/SKILL.md`
 - enforce standard Main Sequence repository structure expectations
 - separate verified facts from assumptions
 - record documentation mismatches and route follow-up work
@@ -50,44 +50,44 @@ Do not let this skill become a domain manual.
 ## Route Adjacent Work
 
 - DataNodes:
-  `agent_scaffold/skills/data_publishing/data_nodes/SKILL.md`
+  `.agents/skills/data_publishing/data_nodes/SKILL.md`
 - SimpleTables:
-  `agent_scaffold/skills/data_publishing/simple_tables/SKILL.md`
+  `.agents/skills/data_publishing/simple_tables/SKILL.md`
 - platform data discovery before implementation:
-  `agent_scaffold/skills/data_access/exploration/SKILL.md`
+  `.agents/skills/data_access/exploration/SKILL.md`
 - FastAPI and application-facing APIs:
-  `agent_scaffold/skills/application_surfaces/api_surfaces/SKILL.md`
+  `.agents/skills/application_surfaces/api_surfaces/SKILL.md`
 - Command Center workspace creation and widget mounting:
-  `agent_scaffold/skills/command_center/workspace_builder/SKILL.md`
+  `.agents/skills/command_center/workspace_builder/SKILL.md`
 - AppComponents, custom forms, and widget-facing API contracts:
-  `agent_scaffold/skills/command_center/app_components/SKILL.md`
-- project-state reconciliation and local history under `agent_scaffold/`:
-  `agent_scaffold/skills/maintenance/local_journal/SKILL.md`
+  `.agents/skills/command_center/app_components/SKILL.md`
+- project-state reconciliation and local history under `.agents/`:
+  `.agents/skills/maintenance/local_journal/SKILL.md`
 - project status audits, blocker analysis, and upstream SDK assessment:
-  `agent_scaffold/skills/maintenance/bug_auditor/SKILL.md`
+  `.agents/skills/maintenance/bug_auditor/SKILL.md`
 - jobs, schedules, artifacts, images, resources, and releases:
-  `agent_scaffold/skills/platform_operations/orchestration_and_releases/SKILL.md`
+  `.agents/skills/platform_operations/orchestration_and_releases/SKILL.md`
 - RBAC and sharing:
-  `agent_scaffold/skills/platform_operations/access_control_and_sharing/SKILL.md`
+  `.agents/skills/platform_operations/access_control_and_sharing/SKILL.md`
 - assets, categories, and translation tables:
-  `agent_scaffold/skills/markets_platform/assets_and_translation/SKILL.md`
+  `.agents/skills/markets_platform/assets_and_translation/SKILL.md`
 - Virtual Fund Builder:
-  `agent_scaffold/skills/markets_platform/virtualfundbuilder/SKILL.md`
+  `.agents/skills/markets_platform/virtualfundbuilder/SKILL.md`
 - instruments and pricing:
-  `agent_scaffold/skills/markets_platform/instruments_and_pricing/SKILL.md`
+  `.agents/skills/markets_platform/instruments_and_pricing/SKILL.md`
 - Streamlit dashboards:
-  `agent_scaffold/skills/dashboards/streamlit/SKILL.md`
+  `.agents/skills/dashboards/streamlit/SKILL.md`
 
 ## Read First
 
-1. `agent_scaffold/AGENTS.md`
-2. `agent_scaffold/skills/maintenance/local_journal/SKILL.md`
+1. `.agents/AGENTS.md`
+2. `.agents/skills/maintenance/local_journal/SKILL.md`
 3. the latest relevant Main Sequence docs for the task
-4. `agent_scaffold/brief.md`
-5. `agent_scaffold/status.md`
-6. `agent_scaffold/tasks.md`
-7. `agent_scaffold/record.md`
-8. `agent_scaffold/journal.md` when resuming, debugging, or investigating a repeated issue
+4. `.agents/brief.md`
+5. `.agents/status.md`
+6. `.agents/tasks.md`
+7. `.agents/record.md`
+8. `.agents/journal.md` when resuming, debugging, or investigating a repeated issue
 
 Canonical documentation root:
 `https://mainsequence-sdk.github.io/mainsequence-sdk/`
@@ -137,6 +137,8 @@ If the project has recurring scheduled jobs, keep:
 
 - `scheduled_jobs.yaml`
 
+Treat `scheduled_jobs.yaml` as the repository-managed input file for batch job sync/create, not as a separate scheduler system.
+
 Use the standard Main Sequence project structure unless the repository explicitly documents a different layout.
 
 Repository-local execution paths for jobs must:
@@ -161,6 +163,8 @@ Do not start domain work with a vague target.
 
 Use the CLI to confirm the active project and refresh credentials before live checks when needed.
 
+When the result will be consumed programmatically or used as machine-readable evidence, prefer the CLI `--json` flag.
+
 Typical bootstrap checks:
 
 - `mainsequence project current --debug`
@@ -176,7 +180,7 @@ Do not teach domain semantics here.
 
 After material domain work, route to:
 
-- `agent_scaffold/skills/maintenance/local_journal/SKILL.md`
+- `.agents/skills/maintenance/local_journal/SKILL.md`
 
 Use that handoff when the turn changed:
 

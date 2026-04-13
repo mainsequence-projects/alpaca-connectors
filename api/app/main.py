@@ -1,17 +1,19 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Body, FastAPI, HTTPException
-from mainsequence.client.fastapi import LoggedUserContextMiddleware
 
 from .command_center_models import DataNodeTableSourceInputResponse
 
 from .schemas import (
     AssetRegistrationRequest,
+    AssetRegistrationByTickerRequest,
+    AssetRegistrationByTickerResponse,
     HealthResponse,
     HoldingsCategoryRequest,
 )
 from .services import (
     build_asset_registration_discovery,
+    execute_asset_registration_by_ticker,
     build_holdings_category_discovery,
     execute_asset_registration,
     execute_holdings_category_sync,
@@ -26,7 +28,6 @@ app = FastAPI(
         "and holdings-based category management."
     ),
 )
-app.add_middleware(LoggedUserContextMiddleware)
 
 router = APIRouter(prefix="/v1")
 
@@ -96,6 +97,27 @@ def asset_registration_execute(
 ) -> DataNodeTableSourceInputResponse:
     try:
         return execute_asset_registration(request)
+    except (ValueError, RuntimeError) as exc:
+        raise _bad_request(exc) from exc
+
+
+@router.post(
+    "/app-components/assets/register-ticker",
+    response_model=AssetRegistrationByTickerResponse,
+    summary="Register one asset by ticker",
+    description=(
+        "Resolve one ticker against Alpaca and FIGI, then register the corresponding "
+        "MainSequence public asset if it is missing."
+    ),
+)
+def asset_registration_execute_by_ticker(
+    request: AssetRegistrationByTickerRequest = Body(
+        ...,
+        description="Single-ticker registration request for the AppComponent widget.",
+    ),
+) -> AssetRegistrationByTickerResponse:
+    try:
+        return execute_asset_registration_by_ticker(request)
     except (ValueError, RuntimeError) as exc:
         raise _bad_request(exc) from exc
 

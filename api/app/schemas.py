@@ -74,6 +74,34 @@ class AssetRegistrationRequest(BaseModel):
         return self
 
 
+class AssetRegistrationByTickerRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    ticker: str = Field(
+        ...,
+        min_length=1,
+        description="Ticker to register as a MainSequence public asset through Alpaca and FIGI.",
+        examples=["NVDA"],
+    )
+    include_non_tradable: bool = Field(
+        default=False,
+        description="Include Alpaca assets that are active but not tradable.",
+    )
+    timeout: float = Field(
+        default=30.0,
+        gt=0,
+        le=300.0,
+        description="HTTP timeout in seconds for Alpaca and OpenFIGI requests.",
+    )
+
+    @model_validator(mode="after")
+    def normalize_values(self) -> "AssetRegistrationByTickerRequest":
+        self.ticker = self.ticker.strip().upper()
+        if not self.ticker:
+            raise ValueError("ticker must not be empty.")
+        return self
+
+
 class AssetRegistrationDiscoveryResponse(BaseModel):
     request: AssetRegistrationRequest
     plan_summary: dict[str, Any]
@@ -96,6 +124,29 @@ class AssetRegistrationExecuteResponse(BaseModel):
     not_registered_missing_figi_symbols: list[str]
     not_registered_missing_alpaca_symbols: list[str]
     warnings_by_symbol: dict[str, str]
+
+
+class AssetRegistrationByTickerResponse(BaseModel):
+    requested_ticker: str
+    alpaca_symbol: str | None
+    alpaca_name: str | None
+    figi: str | None
+    classification_pass_name: str | None
+    security_type: str | None
+    security_type_2: str | None
+    exchange_code: str | None
+    status: Literal[
+        "created",
+        "existing",
+        "blocked_missing_alpaca",
+        "blocked_missing_figi",
+    ]
+    asset_id: int | None
+    created: bool
+    already_registered: bool
+    missing_from_alpaca: bool
+    missing_figi: bool
+    warnings: list[str] = Field(default_factory=list)
 
 
 class HoldingsCategoryRequest(BaseModel):
@@ -151,4 +202,3 @@ class HoldingsCategoryExecuteResponse(BaseModel):
     request: HoldingsCategoryRequest
     plan_summary: dict[str, Any]
     sync_result: dict[str, Any]
-
