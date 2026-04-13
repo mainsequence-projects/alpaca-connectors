@@ -2,23 +2,81 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "Example Dashboard",
+      "name": "Register Asset From iShares Ticker",
       "type": "python",
       "request": "launch",
-      "module": "streamlit",
-      "args": ["run", "${workspaceFolder}/dashboards/sample_app/app.py"],
+      "program": "${workspaceFolder}/scripts/register_asset.py",
+      "args": ["--seed-tickers", "IVV", "--component-provider", "ishares"],
+      "console": "integratedTerminal",
+      "envFile": "${workspaceFolder}/.env",
       "env": {
         "PYTHONPATH": "${workspaceFolder}"
       },
-      "console": "integratedTerminal",
-      "envFile": "${workspaceFolder}/.env",
       "justMyCode": true
     },
     {
-      "name": "Example Script",
+      "name": "Register Asset From iShares Ticker Execute",
       "type": "python",
       "request": "launch",
-      "program": "${workspaceFolder}/scripts/test_script.py",
+      "program": "${workspaceFolder}/scripts/register_asset.py",
+      "args": ["--seed-tickers", "IVV", "--component-provider", "ishares", "--execute"],
+      "console": "integratedTerminal",
+      "envFile": "${workspaceFolder}/.env",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}"
+      },
+      "justMyCode": true
+    },
+    {
+      "name": "Create Holdings Category IVV",
+      "type": "python",
+      "request": "launch",
+      "program": "${workspaceFolder}/scripts/create_holdings_category.py",
+      "args": ["--etf-ticker", "IVV", "--execute"],
+      "console": "integratedTerminal",
+      "envFile": "${workspaceFolder}/.env",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}"
+      },
+      "justMyCode": true
+    },
+    {
+      "name": "Run Daily Stock Bars HOLDINGS__IVV",
+      "type": "python",
+      "request": "launch",
+      "program": "${workspaceFolder}/scripts/run_daily_stock_bars.py",
+      "args": [
+        "--asset-category-unique-identifier",
+        "HOLDINGS__IVV",
+        "--frequency-id",
+        "1d",
+        "--feed",
+        "sip",
+        "--adjustment",
+        "all"
+      ],
+      "console": "integratedTerminal",
+      "envFile": "${workspaceFolder}/.env",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}"
+      },
+      "justMyCode": true
+    },
+    {
+      "name": "Run Daily Stock Bars NVDA",
+      "type": "python",
+      "request": "launch",
+      "program": "${workspaceFolder}/scripts/run_daily_stock_bars.py",
+      "args": [
+        "--tickers",
+        "NVDA",
+        "--frequency-id",
+        "1d",
+        "--feed",
+        "sip",
+        "--adjustment",
+        "all"
+      ],
       "console": "integratedTerminal",
       "envFile": "${workspaceFolder}/.env",
       "env": {
