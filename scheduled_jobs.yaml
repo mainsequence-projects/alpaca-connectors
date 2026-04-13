@@ -4,6 +4,7 @@ jobs:
     task_schedule:
       type: "crontab"
       expression: "0 0 * * *" # midnight UTC
-    related_image_id: 0 # replace with a real project image id before scheduling
+    related_image_id: 42
     cpu_request: "0.25"
     memory_request: "0.5"
+    spot: false

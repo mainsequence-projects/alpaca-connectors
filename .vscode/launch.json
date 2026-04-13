@@ -83,6 +83,26 @@
         "PYTHONPATH": "${workspaceFolder}"
       },
       "justMyCode": true
+    },
+    {
+      "name": "Run Alpaca Connectors API",
+      "type": "python",
+      "request": "launch",
+      "module": "uvicorn",
+      "args": [
+        "api.app.main:app",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "8001",
+        "--reload"
+      ],
+      "console": "integratedTerminal",
+      "envFile": "${workspaceFolder}/.env",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}"
+      },
+      "justMyCode": true
     }
   ]
 }

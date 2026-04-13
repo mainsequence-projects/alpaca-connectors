@@ -4,9 +4,15 @@
 alpaca-py==0.43.2
     # via alpaca-connectors
 annotated-doc==0.0.4
-    # via typer
+    # via
+    #   fastapi
+    #   typer
 annotated-types==0.7.0
     # via pydantic
+anyio==4.13.0
+    # via
+    #   httpx
+    #   starlette
 babel==2.18.0
     # via mkdocs-material
 backrefs==6.2
@@ -14,13 +20,17 @@ backrefs==6.2
 cachetools==7.0.5
     # via mainsequence
 certifi==2026.2.25
-    # via requests
+    # via
+    #   httpcore
+    #   httpx
+    #   requests
 charset-normalizer==3.4.7
     # via requests
 click==8.3.2
     # via
     #   mkdocs
     #   typer
+    #   uvicorn
 cloudpickle==3.1.2
     # via mainsequence
 colorama==0.4.6
@@ -31,6 +41,8 @@ colorama==0.4.6
     #   tqdm
 concurrent-log-handler==0.9.29
     # via mainsequence
+fastapi==0.135.3
+    # via alpaca-connectors
 ghp-import==2.1.0
     # via mkdocs
 googleapis-common-protos==1.74.0
@@ -41,15 +53,26 @@ greenlet==3.4.0
     # via playwright
 grpcio==1.80.0
     # via opentelemetry-exporter-otlp-proto-grpc
+h11==0.16.0
+    # via
+    #   httpcore
+    #   uvicorn
+httpcore==1.0.9
+    # via httpx
+httpx==0.28.1
+    # via alpaca-connectors
 idna==3.11
-    # via requests
+    # via
+    #   anyio
+    #   httpx
+    #   requests
 importlib-metadata==8.7.1
     # via opentelemetry-api
 jinja2==3.1.6
     # via
     #   mkdocs
     #   mkdocs-material
-mainsequence==3.17.39
+mainsequence==3.17.41
     # via alpaca-connectors
 markdown==3.10.2
     # via
@@ -138,6 +161,7 @@ psutil==7.2.2
 pydantic==2.12.5
     # via
     #   alpaca-py
+    #   fastapi
     #   mainsequence
 pydantic-core==2.41.5
     # via pydantic
@@ -180,6 +204,8 @@ six==1.17.0
     # via python-dateutil
 sseclient-py==1.9.0
     # via alpaca-py
+starlette==1.0.0
+    # via fastapi
 structlog==25.5.0
     # via mainsequence
 tqdm==4.67.3
@@ -188,6 +214,8 @@ typer==0.24.1
     # via mainsequence
 typing-extensions==4.15.0
     # via
+    #   anyio
+    #   fastapi
     #   grpcio
     #   opentelemetry-api
     #   opentelemetry-exporter-otlp-proto-grpc
@@ -197,15 +225,20 @@ typing-extensions==4.15.0
     #   pydantic
     #   pydantic-core
     #   pyee
+    #   starlette
     #   typing-inspection
 typing-inspection==0.4.2
-    # via pydantic
+    # via
+    #   fastapi
+    #   pydantic
 tzdata==2026.1 ; sys_platform == 'emscripten' or sys_platform == 'win32'
     # via pandas
 urllib3==2.6.3
     # via
     #   mainsequence
     #   requests
+uvicorn==0.44.0
+    # via alpaca-connectors
 watchdog==6.0.0
     # via mkdocs
 websockets==16.0
