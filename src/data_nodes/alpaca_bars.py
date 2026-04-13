@@ -229,6 +229,7 @@ class AlpacaStockBarsNode(DataNode):
                 )
                 normalized_frame = normalize_stock_bars_frame(
                     frame=batch_frame,
+                    frequency_id=self.frequency_id,
                     unique_identifier_by_symbol=asset_unique_identifier_by_alpaca_symbol,
                     last_update_by_unique_identifier=last_update_by_unique_identifier,
                     period_cutoff=period_cutoff,

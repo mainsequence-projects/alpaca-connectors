@@ -5,6 +5,7 @@ from collections import defaultdict
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 import requests
@@ -23,6 +24,7 @@ from src.settings import (
 )
 
 UTC = dt.timezone.utc
+NEW_YORK = ZoneInfo("America/New_York")
 SUPPORTED_ALPACA_BAR_FREQUENCIES = (
     "1m",
     "5m",
@@ -344,6 +346,7 @@ def fetch_stock_bars_frame(
 def normalize_stock_bars_frame(
     *,
     frame: pd.DataFrame,
+    frequency_id: str,
     unique_identifier_by_symbol: dict[str, str],
     last_update_by_unique_identifier: dict[str, dt.datetime],
     period_cutoff: dt.datetime,
@@ -351,12 +354,33 @@ def normalize_stock_bars_frame(
     if frame.empty:
         return pd.DataFrame()
 
-    normalized = frame.reset_index().rename(columns={"timestamp": "time_index"})
+    normalized = frame.reset_index().rename(columns={"timestamp": "bar_start_time"})
     normalized["symbol"] = normalized["symbol"].astype(str).str.upper()
-    normalized["time_index"] = pd.to_datetime(normalized["time_index"], utc=True)
+    normalized["bar_start_time"] = (
+        pd.to_datetime(normalized["bar_start_time"], utc=True)
+        .astype("datetime64[ns, UTC]")
+    )
+    if normalize_frequency_id(frequency_id) == "1d":
+        session_date = normalized["bar_start_time"].dt.tz_convert(NEW_YORK).dt.date
+        session_close = [
+            dt.datetime.combine(
+                current_date,
+                dt.time(hour=16, minute=0),
+                tzinfo=NEW_YORK,
+            ).astimezone(UTC)
+            for current_date in session_date
+        ]
+        normalized["time_index"] = pd.to_datetime(session_close, utc=True).astype(
+            "datetime64[ns, UTC]"
+        )
+    else:
+        bar_interval = frequency_id_to_timedelta(frequency_id)
+        normalized["time_index"] = (
+            normalized["bar_start_time"] + pd.Timedelta(bar_interval)
+        ).astype("datetime64[ns, UTC]")
     normalized["unique_identifier"] = normalized["symbol"].map(unique_identifier_by_symbol)
     normalized = normalized[normalized["unique_identifier"].notna()].copy()
-    normalized = normalized[normalized["time_index"] < period_cutoff].copy()
+    normalized = normalized[normalized["bar_start_time"] < period_cutoff].copy()
     if normalized.empty:
         return pd.DataFrame()
 
@@ -392,6 +416,13 @@ def normalize_stock_bars_frame(
     normalized = normalized.sort_values(["time_index", "unique_identifier"])
     normalized = normalized.set_index(["time_index", "unique_identifier"])
     normalized.index = normalized.index.set_names(["time_index", "unique_identifier"])
+    normalized.index = pd.MultiIndex.from_arrays(
+        [
+            normalized.index.get_level_values("time_index").astype("datetime64[ns, UTC]"),
+            normalized.index.get_level_values("unique_identifier"),
+        ],
+        names=["time_index", "unique_identifier"],
+    )
     return normalized
 
 

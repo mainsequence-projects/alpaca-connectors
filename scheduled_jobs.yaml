@@ -1,0 +1,9 @@
+jobs:
+  - name: "Alpaca Daily Stock Bars HOLDINGS__IVV"
+    execution_path: "scripts/run_daily_stock_bars_holdings_ivv.py"
+    task_schedule:
+      type: "crontab"
+      expression: "0 0 * * *" # midnight UTC
+    related_image_id: 0 # replace with a real project image id before scheduling
+    cpu_request: "0.25"
+    memory_request: "0.5"

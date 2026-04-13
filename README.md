@@ -1,13 +1,15 @@
 # alpaca-connectors
 
-
-
 ## Quickstart
 
+```bash
+uv sync
+```
 
+## Documentation
 
 ```bash
-# from the repo root
-pip install -e .
-# or, if 'uv' is available (your scripts install it when using requirements):
-uv pip install -e .
+uv run mkdocs serve
+```
+
+The project documentation lives under `docs/` and is configured by `mkdocs.yml`.

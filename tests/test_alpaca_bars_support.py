@@ -34,7 +34,7 @@ class AlpacaBarsSupportTests(unittest.TestCase):
             [
                 {
                     "symbol": "AAPL",
-                    "timestamp": pd.Timestamp("2026-04-10T00:00:00Z"),
+                    "timestamp": pd.Timestamp("2026-04-10T04:00:00Z"),
                     "open": 100.0,
                     "high": 101.0,
                     "low": 99.0,
@@ -45,7 +45,7 @@ class AlpacaBarsSupportTests(unittest.TestCase):
                 },
                 {
                     "symbol": "AAPL",
-                    "timestamp": pd.Timestamp("2026-04-11T00:00:00Z"),
+                    "timestamp": pd.Timestamp("2026-04-11T04:00:00Z"),
                     "open": 101.0,
                     "high": 102.0,
                     "low": 100.0,
@@ -56,7 +56,7 @@ class AlpacaBarsSupportTests(unittest.TestCase):
                 },
                 {
                     "symbol": "AAPL",
-                    "timestamp": pd.Timestamp("2026-04-11T00:00:00Z"),
+                    "timestamp": pd.Timestamp("2026-04-11T04:00:00Z"),
                     "open": 101.1,
                     "high": 102.1,
                     "low": 100.1,
@@ -70,18 +70,20 @@ class AlpacaBarsSupportTests(unittest.TestCase):
 
         normalized = normalize_stock_bars_frame(
             frame=frame,
+            frequency_id="1d",
             unique_identifier_by_symbol={"AAPL": "FIGI_AAPL"},
             last_update_by_unique_identifier={
-                "FIGI_AAPL": dt.datetime(2026, 4, 10, tzinfo=UTC),
+                "FIGI_AAPL": dt.datetime(2026, 4, 11, 12, 0, tzinfo=UTC),
             },
             period_cutoff=dt.datetime(2026, 4, 12, tzinfo=UTC),
         )
 
         self.assertEqual(list(normalized.index.names), ["time_index", "unique_identifier"])
+        self.assertEqual(str(normalized.index.get_level_values("time_index").dtype), "datetime64[ns, UTC]")
         self.assertEqual(len(normalized), 1)
         self.assertEqual(
             normalized.index[0],
-            (pd.Timestamp("2026-04-11T00:00:00Z"), "FIGI_AAPL"),
+            (pd.Timestamp("2026-04-11T20:00:00Z"), "FIGI_AAPL"),
         )
         self.assertEqual(float(normalized.iloc[0]["close"]), 101.6)
 

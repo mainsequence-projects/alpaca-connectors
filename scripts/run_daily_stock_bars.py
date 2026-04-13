@@ -176,11 +176,11 @@ def main(argv: list[str] | None = None) -> None:
     print("Planned Alpaca stock bars run")
     print(json.dumps(summary, indent=2, sort_keys=True))
 
-    result = node.run(
+    error_on_last_update, update_result = node.run(
         debug_mode=True,
         force_update=args.force_update,
     )
-    if result is None:
+    if update_result is None:
         print("Run completed with no returned frame.")
         return
 
@@ -188,8 +188,9 @@ def main(argv: list[str] | None = None) -> None:
     print(
         json.dumps(
             {
-                "rows_persisted": int(len(result)),
-                "columns": list(result.columns),
+                "error_on_last_update": bool(error_on_last_update),
+                "rows_persisted": int(len(update_result)),
+                "columns": list(update_result.columns),
             },
             indent=2,
             sort_keys=True,
