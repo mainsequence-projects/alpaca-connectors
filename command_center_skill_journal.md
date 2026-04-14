@@ -27,7 +27,13 @@ Purpose:
 - Impact:
   The workspace part is complete, but the operational path exposed two non-skill issues:
   `mainsequence project sync` is broken in this SDK build because it installs `uv`, runs `uv sync`, then fails on `uv export` after `uv` has been removed from `.venv/bin/uv`;
-  `mainsequence project project_resource list` and `create_fastapi` did not agree on the eligible FastAPI resource id for the same pushed commit, so the non-interactive release path failed until the interactive selector exposed the correct resource id.
+  `create_fastapi` filters eligible resources by exact `repo_commit_sha == related_image.project_repo_hash`, and this backend currently stores `ProjectResource.repo_commit_sha` for the same `api/app/main.py` file in mixed short and full commit-hash formats. Exact example:
+  `mainsequence project project_resource list --filter resource_type=fastapi` resolved upstream HEAD to `repo_commit_sha=adb3fbbbb2b35255aef71ab197eeeba408bf08a3` and effectively queried `ProjectResource.filter(project__id=153, repo_commit_sha="adb3fbbbb2b35255aef71ab197eeeba408bf08a3", resource_type="fastapi")`, which surfaced resource `384`;
+  `mainsequence project project_resource create_fastapi --related-image-id 43` used image `43`, whose `project_repo_hash` was the short hash `adb3fbb`, and effectively queried `ProjectResource.filter(project__id=153, repo_commit_sha="adb3fbb", resource_type="fastapi")`, which surfaced resource `379`;
+  the backend rows at that point were both present for the same file:
+  `379 -> path=api/app/main.py, repo_commit_sha="adb3fbb"`
+  `384 -> path=api/app/main.py, repo_commit_sha="adb3fbbbb2b35255aef71ab197eeeba408bf08a3"`;
+  because the CLI does exact string equality on `repo_commit_sha`, passing `--resource-id 384 --related-image-id 43` failed with `Selected resource does not match the selected image commit and release type.`
 - Proposed skill improvement:
   None for the skill itself right now. The skills pointed to the right workflow. The follow-up belongs to SDK/platform issue tracking, not Command Center skill wording.
 - Status:

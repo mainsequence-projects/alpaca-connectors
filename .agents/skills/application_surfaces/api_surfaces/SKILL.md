@@ -1,6 +1,6 @@
 ---
 name: mainsequence-api-surfaces
-description: Use this skill when the task is about building or changing APIs in a Main Sequence repository. In a Main Sequence project, project APIs should be implemented as FastAPI project resources. Unless the user explicitly says the API is standalone or for a non-Command Center client, assume the API is meant to be Command Center integrated, load the related Command Center skills, and use Command Center SDK response models whenever the endpoint can reasonably match them. This skill owns FastAPI structure, request and response contracts, request user binding, APIDataNode and SimpleTable consumption inside APIs, and exact widget-facing API response contracts. It does not own producer-side DataNode or SimpleTable design, workspace payloads, or scheduling and release workflows.
+description: Use this skill when the task is about building or changing APIs in a Main Sequence repository. In a Main Sequence project, project APIs should be implemented as FastAPI project resources. Unless the user explicitly says the API is standalone or for a non-Command Center client, assume the API is meant to be Command Center integrated, load the related Command Center skills, and use Command Center SDK response models whenever the endpoint can reasonably match them. Main Sequence is platform-first: a Command Center-facing project API is not considered usable until it exists as a FastAPI project resource and has a corresponding FastAPI ResourceRelease. Resource and release creation belong to the orchestration-and-releases skill. This skill owns FastAPI structure, request and response contracts, request user binding, APIDataNode and SimpleTable consumption inside APIs, and exact widget-facing API response contracts. It does not own producer-side DataNode or SimpleTable design, workspace payloads, or scheduling and release workflows.
 ---
 
 # Main Sequence API Surfaces
@@ -28,6 +28,7 @@ This skill is for FastAPI structure, request/response contracts, request user co
 - load the related Command Center skills when the API feeds widgets, AppComponents, or workspaces
 - define exact widget-facing API contracts using SDK response models whenever the endpoint can reasonably match those contracts
 - review whether an API route is rebuilding producer logic incorrectly
+- requiring Command Center-facing APIs to be treated as deployed FastAPI resources/releases, not just local servers
 
 ## This Skill Must Not Claim
 
@@ -51,6 +52,8 @@ This skill must not claim ownership of:
   `.agents/skills/command_center/workspace_builder/SKILL.md`
 - AppComponents and custom forms:
   `.agents/skills/command_center/app_components/SKILL.md`
+- predeployment mock API contract validation:
+  `.agents/skills/command_center/api_mock_prototyping/SKILL.md`
 - Jobs, images, resources, and releases:
   `.agents/skills/platform_operations/orchestration_and_releases/SKILL.md`
 - Streamlit dashboards:
@@ -69,6 +72,8 @@ This skill must not claim ownership of:
 Also load:
 
 8. `.agents/skills/command_center/workspace_builder/SKILL.md` when the API is tied to mounted widgets, workspace payloads, or workspace mutation
+9. `.agents/skills/command_center/api_mock_prototyping/SKILL.md` when the contract should be validated in AppComponent mock mode before backend deployment
+10. `.agents/skills/platform_operations/orchestration_and_releases/SKILL.md` when the API must become usable from Command Center or an AppComponent
 
 Do not wait for the user to say "Command Center" explicitly if the API is being built as a platform UI surface. That is the default assumption in Main Sequence projects.
 
@@ -83,6 +88,7 @@ Before changing code, collect or infer:
 - the upstream data sources
 - whether the endpoint is generic or widget-facing
 - whether route handlers need the logged Main Sequence user
+- whether the API already exists as a FastAPI project resource with a FastAPI `ResourceRelease`
 
 Default assumption:
 
@@ -102,6 +108,7 @@ For every non-trivial API task, decide:
 5. Does this task require the AppComponents skill, the workspace-builder skill, or both?
 6. Which Command Center SDK response model fits this endpoint, and if none fits, why is a generic business contract justified?
 7. Should the route own composition only, or is it incorrectly rebuilding producer logic?
+8. Must this API already be usable from Command Center or an AppComponent, and if so, does the FastAPI resource plus FastAPI `ResourceRelease` already exist?
 
 ## Build Rules
 
@@ -151,6 +158,21 @@ That means the implementation should be compatible with:
 - project resource discovery
 - image-based deployment
 - release creation
+
+### 1.4 Command Center-facing APIs must have a FastAPI release
+
+Main Sequence is platform-first.
+
+If a project API is meant to be used from Command Center, AppComponents, or other platform UI surfaces, it is not considered usable until:
+
+- the FastAPI project resource exists
+- the corresponding FastAPI `ResourceRelease` exists
+
+Do not present a local dev server, a local-only route, or an undiscovered API file as a finished platform API.
+
+This skill owns the API contract and implementation. It does not own resource or release creation. Route that work to:
+
+- `.agents/skills/platform_operations/orchestration_and_releases/SKILL.md`
 
 ### 2. Keep route handlers thin
 
@@ -223,6 +245,29 @@ Only fall back to a generic business response model when:
 
 If the endpoint participates in an AppComponent flow, also use the AppComponents skill to validate the input-form side of the contract.
 
+### 6.1 Use notification response contracts for immediate client feedback
+
+When an API action needs immediate user-facing acknowledgment, prefer a response contract carrying:
+
+- `"x-ui-role": "notification"`
+
+Use the SDK `NotificationDefinition` model for this immediate feedback path instead of returning a loose acknowledgment dictionary.
+
+This is the default response-side feedback contract for:
+
+- AppComponent-triggered actions
+- Command Center actions that should acknowledge success, warning, validation failure, or initiation of work
+
+Do not force this onto read-only data endpoints or widget data endpoints whose job is to return structured business data rather than action feedback.
+
+### 6.2 Use platform notifications for long-running asynchronous updates
+
+If the work continues after the request returns, spans subprocesses, or becomes a long-running background workflow, do not rely on the immediate HTTP response as the ongoing user-feedback channel.
+
+Use `mainsequence.client.Notification` for asynchronous user updates in those cases.
+
+The immediate API response may still acknowledge that work started, but ongoing or delayed user feedback belongs in platform notifications rather than a one-shot HTTP response model.
+
 ### 7. Keep FastAPI documentation rich
 
 For FastAPI routes in a Main Sequence project:
@@ -251,10 +296,13 @@ When reviewing an API change, look for:
 - `LoggedUserContextMiddleware` added even though the route does not consume `request.state.user`
 - route parameters that are untyped or weakly documented
 - generic response models where a widget-facing contract should have been used
+- action endpoints returning loose dict acknowledgments where `NotificationDefinition` should have been used
+- long-running or spanning subprocess workflows trying to use a one-shot HTTP response instead of `mainsequence.client.Notification` for asynchronous user updates
 - producer logic duplicated inside routes
 - missing request-user middleware when request-local user access is required
 - widget-facing payloads built without the SDK contract model
 - API routes that really belong in workspace or AppComponent flows instead
+- Command Center-facing APIs being treated as complete before a FastAPI resource and FastAPI `ResourceRelease` exist
 
 ## Validation Checklist
 
@@ -271,8 +319,12 @@ Do not claim success until you have checked:
 - `SimpleTableUpdater.execute_filter(...)` is used when the route reads simple-table rows
 - middleware is present when request-local user context is required
 - middleware is absent when the route does not consume `request.state.user`
+- immediate client feedback endpoints use `NotificationDefinition` with `"x-ui-role": "notification"` when the route is acknowledging an action rather than returning business data
+- long-running or subprocess-spanning workflows use `mainsequence.client.Notification` for asynchronous user updates instead of relying on a one-shot HTTP response
 - widget-facing endpoints use exact SDK response contracts
 - local API docs or route behavior reflect the intended contract
+- any Command Center-facing API that is meant to be usable now already exists as a FastAPI project resource
+- any Command Center-facing API that is meant to be usable now already has a FastAPI `ResourceRelease`
 
 If the endpoint feeds a widget directly, also check:
 
@@ -297,5 +349,6 @@ If the endpoint is part of an AppComponent or workspace flow, also check:
 - request-local user context is required but the request binding path is unclear
 - the task is actually about workspace mutation or AppComponent form design
 - docs and code disagree on the boundary contract
+- the API is expected to be usable from Command Center now, but the FastAPI resource or FastAPI `ResourceRelease` does not exist yet
 
 Do not guess through API contracts.
