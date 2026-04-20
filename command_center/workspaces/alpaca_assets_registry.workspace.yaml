@@ -24,7 +24,7 @@ widgets:
   props:
     apiTargetMode: main-sequence-resource-release
     mainSequenceResourceRelease:
-      releaseId: 27
+      releaseId: 29
     authMode: session-jwt
     method: post
     path: /v1/app-components/assets/register-ticker
@@ -285,7 +285,7 @@ widgets:
   props:
     apiTargetMode: main-sequence-resource-release
     mainSequenceResourceRelease:
-      releaseId: 27
+      releaseId: 29
     authMode: session-jwt
     method: post
     path: /v1/charts/lightweight/ohlc
