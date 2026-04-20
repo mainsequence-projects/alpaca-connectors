@@ -24,7 +24,7 @@ widgets:
   props:
     apiTargetMode: main-sequence-resource-release
     mainSequenceResourceRelease:
-      releaseId: 29
+      releaseId: 31
     authMode: session-jwt
     method: post
     path: /v1/app-components/assets/register-ticker
@@ -285,7 +285,7 @@ widgets:
   props:
     apiTargetMode: main-sequence-resource-release
     mainSequenceResourceRelease:
-      releaseId: 29
+      releaseId: 31
     authMode: session-jwt
     method: post
     path: /v1/charts/lightweight/ohlc
@@ -293,10 +293,10 @@ widgets:
       version: 1
       operationKey: POST /v1/charts/lightweight/ohlc
       requestPorts:
-      - id: query:asset_search
-        fieldKey: query:asset_search
+      - id: query:ticker
+        fieldKey: query:ticker
         label: Ticker
-        description: Search by ticker/name/FIGI and submit the selected ticker.
+        description: Ticker to resolve inside the configured holdings category.
         required: true
         location: query
         kind: string
@@ -324,30 +324,6 @@ widgets:
         required: false
         location: query
         kind: date
-        accepts:
-        - core.value.string@v1
-        - core.value.number@v1
-        - core.value.integer@v1
-        - core.value.boolean@v1
-      - id: query:node_identifier
-        fieldKey: query:node_identifier
-        label: Data Node
-        description: DataNode identifier backing the chart.
-        required: false
-        location: query
-        kind: string
-        accepts:
-        - core.value.string@v1
-        - core.value.number@v1
-        - core.value.integer@v1
-        - core.value.boolean@v1
-      - id: query:asset_category_unique_identifier
-        fieldKey: query:asset_category_unique_identifier
-        label: Search Category
-        description: AssetCategory used to scope ticker search results.
-        required: false
-        location: query
-        kind: string
         accepts:
         - core.value.string@v1
         - core.value.number@v1
@@ -450,13 +426,13 @@ widgets:
         contentType: application/json
       requestForm:
         parameterFields:
-        - key: query:asset_search
+        - key: query:ticker
           label: Ticker
-          description: Search by ticker/name/FIGI and submit the selected ticker.
+          description: Ticker to resolve inside the configured holdings category.
           location: query
           required: true
           kind: string
-          paramName: asset_search
+          paramName: ticker
           defaultValue: null
           exampleValue: null
           uiEnhancement:
@@ -464,7 +440,7 @@ widgets:
             widget: select2
             selectionType: single
             searchFieldKeys:
-            - query:asset_search
+            - query:ticker
             pageFieldKey: query:page
             limitFieldKey: query:limit
             itemsPath:
@@ -494,26 +470,6 @@ widgets:
           paramName: end_date
           defaultValue: null
           exampleValue: null
-        - key: query:node_identifier
-          label: Data Node
-          description: DataNode identifier backing the chart.
-          location: query
-          required: false
-          kind: string
-          paramName: node_identifier
-          defaultValue: alpaca_stock_bars_1d_sip_all
-          exampleValue: null
-          hiddenFromForm: true
-        - key: query:asset_category_unique_identifier
-          label: Search Category
-          description: AssetCategory used to scope ticker search results.
-          location: query
-          required: false
-          kind: string
-          paramName: asset_category_unique_identifier
-          defaultValue: HOLDINGS__IVV
-          exampleValue: null
-          hiddenFromForm: true
         - key: query:page
           label: Search Page
           description: Async selector page.
@@ -542,18 +498,12 @@ widgets:
       version: 1
       operationKey: POST /v1/charts/lightweight/ohlc
       fields:
-        query:asset_search:
+        query:ticker:
           label: Ticker
         query:start_date:
           label: Start Date
         query:end_date:
           label: End Date
-        query:node_identifier:
-          visibleOnCard: false
-          prefillValue: alpaca_stock_bars_1d_sip_all
-        query:asset_category_unique_identifier:
-          visibleOnCard: false
-          prefillValue: HOLDINGS__IVV
         query:page:
           visibleOnCard: false
           prefillValue: '1'

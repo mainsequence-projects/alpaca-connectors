@@ -138,15 +138,11 @@ def holdings_category_execute(
     ),
 )
 def lightweight_ohlc_chart(
-    request: LightweightOhlcChartRequest | None = Body(
-        default=None,
-        description="Optional OHLC chart query body. Query parameters are used by Command Center.",
-    ),
-    asset_search: str | None = Query(
+    ticker: str | None = Query(
         default=None,
         description=(
-            "Ticker, name, FIGI, or unique identifier search text. When dates are present, "
-            "this value is resolved to an asset unique_identifier."
+            "Ticker, name, FIGI, or unique identifier. When dates are present, "
+            "this value is resolved to the asset unique_identifier."
         ),
     ),
     start_date: dt.date | None = Query(
@@ -160,49 +156,53 @@ def lightweight_ohlc_chart(
     node_identifier: str = Query(
         default="alpaca_stock_bars_1d_sip_all",
         description="DataNode identifier that backs the OHLC chart.",
+        include_in_schema=False,
     ),
     asset_category_unique_identifier: str = Query(
         default=DEFAULT_CHART_ASSET_CATEGORY_UNIQUE_IDENTIFIER,
         description="AssetCategory used to scope ticker search options.",
+        include_in_schema=False,
     ),
     page: int = Query(
         default=1,
         ge=1,
         description="Search result page for the async selector.",
+        include_in_schema=False,
     ),
     limit: int = Query(
         default=20,
         ge=1,
         le=50,
         description="Search result page size for the async selector.",
+        include_in_schema=False,
+    ),
+    asset_search: str | None = Query(
+        default=None,
+        include_in_schema=False,
     ),
 ) -> dict[str, Any]:
     try:
-        if asset_search is not None and (start_date is None or end_date is None):
+        ticker_query = ticker or asset_search or ""
+        if start_date is None and end_date is None:
             return search_assets_for_lightweight_ohlc_select(
-                query=asset_search,
+                query=ticker_query,
                 asset_category_unique_identifier=asset_category_unique_identifier,
                 page=page,
                 limit=limit,
             ).model_dump(mode="json")
 
-        chart_request = request
-        if chart_request is None:
-            if asset_search is None or start_date is None or end_date is None:
-                raise ValueError(
-                    "Provide either a JSON chart request body or query parameters "
-                    "asset_search, start_date, and end_date."
-                )
-            unique_identifier = resolve_lightweight_ohlc_asset_unique_identifier(
-                identifier=asset_search,
-                asset_category_unique_identifier=asset_category_unique_identifier,
-            )
-            chart_request = LightweightOhlcChartRequest(
-                unique_identifier=unique_identifier,
-                start_date=start_date,
-                end_date=end_date,
-                node_identifier=node_identifier,
-            )
+        if not ticker_query or start_date is None or end_date is None:
+            raise ValueError("Provide ticker, start_date, and end_date.")
+        unique_identifier = resolve_lightweight_ohlc_asset_unique_identifier(
+            identifier=ticker_query,
+            asset_category_unique_identifier=asset_category_unique_identifier,
+        )
+        chart_request = LightweightOhlcChartRequest(
+            unique_identifier=unique_identifier,
+            start_date=start_date,
+            end_date=end_date,
+            node_identifier=node_identifier,
+        )
 
         return execute_lightweight_ohlc_chart(chart_request).model_dump(mode="json")
     except (ValueError, RuntimeError) as exc:

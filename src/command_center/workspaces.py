@@ -8,7 +8,6 @@ from api.app.schemas import (
     AssetRegistrationByTickerResponse,
     LightweightOhlcChartResponse,
 )
-from api.app.services import DEFAULT_CHART_ASSET_CATEGORY_UNIQUE_IDENTIFIER
 
 ALPACA_ASSETS_REGISTRY_WORKSPACE_ID = 3
 APP_COMPONENT_WIDGET_ID = "app-component"
@@ -228,22 +227,22 @@ def _build_chart_request_ports(parameter_fields: list[dict[str, Any]]) -> list[d
 
 
 def _build_lightweight_ohlc_chart_binding_spec() -> dict[str, Any]:
-    asset_search_key = "query:asset_search"
+    ticker_key = "query:ticker"
     page_key = "query:page"
     limit_key = "query:limit"
     parameter_fields = [
         _build_chart_query_field(
-            name="asset_search",
+            name="ticker",
             label="Ticker",
             description=(
-                "Search by ticker/name/FIGI and submit the selected ticker."
+                "Ticker to resolve inside the configured holdings category."
             ),
             required=True,
             ui_enhancement={
                 "role": "async-select-search",
                 "widget": "select2",
                 "selectionType": "single",
-                "searchFieldKeys": [asset_search_key],
+                "searchFieldKeys": [ticker_key],
                 "pageFieldKey": page_key,
                 "limitFieldKey": limit_key,
                 "itemsPath": ["items"],
@@ -266,22 +265,6 @@ def _build_lightweight_ohlc_chart_binding_spec() -> dict[str, Any]:
             description="Inclusive chart window end date.",
             required=False,
             kind="date",
-        ),
-        _build_chart_query_field(
-            name="node_identifier",
-            label="Data Node",
-            description="DataNode identifier backing the chart.",
-            required=False,
-            default_value="alpaca_stock_bars_1d_sip_all",
-            hidden_from_form=True,
-        ),
-        _build_chart_query_field(
-            name="asset_category_unique_identifier",
-            label="Search Category",
-            description="AssetCategory used to scope ticker search results.",
-            required=False,
-            default_value=DEFAULT_CHART_ASSET_CATEGORY_UNIQUE_IDENTIFIER,
-            hidden_from_form=True,
         ),
         _build_chart_query_field(
             name="page",
@@ -349,7 +332,7 @@ def _build_lightweight_ohlc_chart_request_input_map() -> dict[str, Any]:
         "version": 1,
         "operationKey": CHART_OHLC_OPERATION_KEY,
         "fields": {
-            "query:asset_search": {
+            "query:ticker": {
                 "label": "Ticker",
             },
             "query:start_date": {
@@ -357,14 +340,6 @@ def _build_lightweight_ohlc_chart_request_input_map() -> dict[str, Any]:
             },
             "query:end_date": {
                 "label": "End Date",
-            },
-            "query:node_identifier": {
-                "visibleOnCard": False,
-                "prefillValue": "alpaca_stock_bars_1d_sip_all",
-            },
-            "query:asset_category_unique_identifier": {
-                "visibleOnCard": False,
-                "prefillValue": DEFAULT_CHART_ASSET_CATEGORY_UNIQUE_IDENTIFIER,
             },
             "query:page": {
                 "visibleOnCard": False,

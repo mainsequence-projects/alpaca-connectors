@@ -66,14 +66,22 @@ class CommandCenterWorkspaceBuilderTests(unittest.TestCase):
 
         request_form = widget["props"]["bindingSpec"]["requestForm"]
         self.assertEqual(request_form["bodyMode"], "none")
-        self.assertIn("query:asset_search", {field["key"] for field in request_form["parameterFields"]})
+        field_by_key = {field["key"]: field for field in request_form["parameterFields"]}
+        self.assertEqual(
+            set(field_by_key),
+            {"query:ticker", "query:start_date", "query:end_date", "query:page", "query:limit"},
+        )
+        self.assertTrue(field_by_key["query:page"]["hiddenFromForm"])
+        self.assertTrue(field_by_key["query:limit"]["hiddenFromForm"])
         ticker_field = next(
             field
             for field in request_form["parameterFields"]
-            if field["key"] == "query:asset_search"
+            if field["key"] == "query:ticker"
         )
         self.assertEqual(ticker_field["uiEnhancement"]["role"], "async-select-search")
         self.assertEqual(ticker_field["uiEnhancement"]["widget"], "select2")
+        self.assertEqual(ticker_field["uiEnhancement"]["pageFieldKey"], "query:page")
+        self.assertEqual(ticker_field["uiEnhancement"]["limitFieldKey"], "query:limit")
         self.assertEqual(ticker_field["uiEnhancement"]["itemsPath"], ["items"])
         self.assertEqual(ticker_field["uiEnhancement"]["itemLabelFieldPath"], ["label"])
         self.assertIn(

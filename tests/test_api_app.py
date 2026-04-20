@@ -78,11 +78,17 @@ class ApiAppTests(unittest.TestCase):
             },
             spec_json="{\"fitContent\":true,\"series\":[]}",
         )
-        with patch("api.app.main.execute_lightweight_ohlc_chart", return_value=mocked_response):
+        with (
+            patch(
+                "api.app.main.resolve_lightweight_ohlc_asset_unique_identifier",
+                return_value="BBG000BBJQV0",
+            ),
+            patch("api.app.main.execute_lightweight_ohlc_chart", return_value=mocked_response),
+        ):
             response = self.client.post(
                 "/v1/charts/lightweight/ohlc",
-                json={
-                    "unique_identifier": "BBG000BBJQV0",
+                params={
+                    "ticker": "NVDA",
                     "start_date": "2026-04-01",
                     "end_date": "2026-04-08",
                 },
@@ -112,7 +118,7 @@ class ApiAppTests(unittest.TestCase):
             response = self.client.post(
                 "/v1/charts/lightweight/ohlc",
                 params={
-                    "asset_search": "NVDA",
+                    "ticker": "NVDA",
                     "start_date": "2026-04-01",
                     "end_date": "2026-04-08",
                 },
@@ -143,11 +149,35 @@ class ApiAppTests(unittest.TestCase):
         ):
             response = self.client.post(
                 "/v1/charts/lightweight/ohlc",
-                params={"asset_search": "NVDA"},
+                params={"ticker": "NVDA"},
             )
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["items"][0]["unique_identifier"], "BBG000BBJQV0")
+
+    def test_lightweight_ohlc_chart_route_ignores_empty_json_body_for_selector_bootstrap(self) -> None:
+        response = self.client.post(
+            "/v1/charts/lightweight/ohlc",
+            params={
+                "node_identifier": "alpaca_stock_bars_1d_sip_all",
+                "asset_category_unique_identifier": "HOLDINGS__IVV",
+                "page": 1,
+                "limit": 20,
+            },
+            json={},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["items"], [])
+
+    def test_lightweight_ohlc_chart_openapi_exposes_only_ticker_and_dates(self) -> None:
+        operation = self.client.get("/openapi.json").json()["paths"][
+            "/v1/charts/lightweight/ohlc"
+        ]["post"]
+        parameter_names = {parameter["name"] for parameter in operation["parameters"]}
+
+        self.assertEqual(parameter_names, {"ticker", "start_date", "end_date"})
+        self.assertNotIn("requestBody", operation)
 
     def test_holdings_category_execute_route_returns_400_on_blocker(self) -> None:
         with patch(

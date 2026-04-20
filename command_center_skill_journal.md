@@ -21,6 +21,32 @@ Purpose:
 ### 2026-04-20
 
 - Context:
+  Simplify the OHLC AppComponent form after the live widget showed both ticker/date inputs and the old body fields (`unique_identifier`, duplicate dates, and `node_identifier`).
+- Observation:
+  The FastAPI route exposed both a JSON body model and query parameters, so OpenAPI discovery could generate a mixed form even though the intended interaction is only ticker plus date range. The AppComponent should not ask users for `unique_identifier` or `node_identifier`; the API can resolve the asset unique identifier from the ticker inside `HOLDINGS__IVV` and use the known default node `alpaca_stock_bars_1d_sip_all`.
+- Impact:
+  Local OpenAPI for `POST /v1/charts/lightweight/ohlc` now exposes only `ticker`, `start_date`, and `end_date` and has no request body. Workspace `3` was updated at `2026-04-20T18:06:00.998281Z`; the saved `alpaca-ohlc-chart-request` binding spec keeps Select2 on `query:ticker`, with `query:page` and `query:limit` as hidden pagination fields.
+- Proposed skill improvement:
+  For AppComponent-backed routes, avoid exposing fallback body models in OpenAPI when the desired user form is a query-only workflow. Put internal defaults behind `include_in_schema=False` or resolve them server-side.
+- Status:
+  Implemented locally, tested, and applied to workspace `3`. A new FastAPI release is still required before deployed OpenAPI discovery reflects the local API schema change.
+
+### 2026-04-20
+
+- Context:
+  Investigate Command Center AppComponent error: "The target /openapi.json response did not look like an OpenAPI document."
+- Observation:
+  Local FastAPI schema generation is valid: `GET /openapi.json` returns HTTP 200 JSON with `openapi: 3.1.0`, and `tests.test_api_app` passes. The live workspace still referenced FastAPI release `29`, but `ResourceRelease.get(29)` now returns 404. The current FastAPI release is `31` for resource `437` on project `153`.
+- Impact:
+  Workspace `3` was updated so both AppComponents target release `31` instead of deleted release `29`. A direct unauthenticated request to `https://api-app-437.fapi-development.main-sequence.app/openapi.json` returns 401 JSON, so any remaining OpenAPI-discovery failure after the release-id fix should be treated as session-JWT/header propagation rather than a local schema-generation problem.
+- Proposed skill improvement:
+  None for the Command Center payload skill. This exposed an operational follow-up: stale `mainSequenceResourceRelease.releaseId` values can produce OpenAPI-looking client errors even when local FastAPI schema generation is healthy.
+- Status:
+  Completed. Workspace update returned `Updated At: 2026-04-20T17:53:05.610028Z` and live detail shows both AppComponents with `releaseId: 31`.
+
+### 2026-04-20
+
+- Context:
   Extend workspace `3` (`Alpaca Assets Registry`) with an AppComponent-driven OHLC chart flow: ticker search/select, start/end date inputs, and a bound `lightweight-charts-spec` widget rendered from this project's FastAPI route `POST /v1/charts/lightweight/ohlc`.
 - Observation:
   Registry detail for `app-component` and `lightweight-charts-spec` was sufficient to confirm the contract: the chart widget consumes `props-json` as `core.value.json@v1`, and the AppComponent can publish `response:$` for downstream binding. The AppComponent async select writes the selected option label into the request field, so the API resolves the selected ticker/FIGI/identifier strictly inside `HOLDINGS__IVV` before querying bars.

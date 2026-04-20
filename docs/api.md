@@ -72,31 +72,23 @@ This endpoint has two modes.
 
 Command Center selector mode:
 
-- `asset_search` query parameter only
-- optional `asset_category_unique_identifier` query parameter, defaulting to `HOLDINGS__IVV`
-- optional `page` and `limit` query parameters
+- `ticker` query parameter only
 
 Selector mode returns `items` and `pagination` for the AppComponent `select2` async ticker search.
 Each item exposes a user-facing ticker `label`, a platform `unique_identifier`, and display text.
 
-Chart mode accepts either a JSON body or Command Center query parameters.
-
-Body fields:
-
-- `unique_identifier`
-- `start_date`
-- `end_date`
-- optional `node_identifier` (defaults to `alpaca_stock_bars_1d_sip_all`)
+Chart mode accepts Command Center query parameters only.
 
 Command Center query fields:
 
-- `asset_search`, containing the selected ticker, FIGI, or asset unique identifier
+- `ticker`, containing the selected ticker, FIGI, or asset unique identifier
 - `start_date`
 - `end_date`
-- optional `node_identifier`
 
-In Command Center query mode, the selected `asset_search` ticker/FIGI/identifier is resolved
-strictly inside the selected `AssetCategory` before bars are queried.
+In Command Center query mode, the selected `ticker` value is resolved strictly inside the
+configured `AssetCategory` before bars are queried. The API uses the fixed OHLC DataNode
+identifier `alpaca_stock_bars_1d_sip_all`; the form does not expose DataNode or unique
+identifier inputs.
 
 Returns:
 
