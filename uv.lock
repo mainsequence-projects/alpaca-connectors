@@ -15,7 +15,7 @@ resolution-markers = [
 
 [[package]]
 name = "alpaca-connectors"
-version = "0.1.11"
+version = "0.1.12"
 source = { editable = "." }
 dependencies = [
     { name = "alpaca-py" },
@@ -480,7 +480,7 @@ wheels = [
 
 [[package]]
 name = "mainsequence"
-version = "3.18.7"
+version = "3.18.8"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "cachetools" },
@@ -501,9 +501,9 @@ dependencies = [
     { name = "typer" },
     { name = "urllib3" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/29/4f/5667b815bf15a973376059fcd061c69a4e2bf47532064771067e8f748066/mainsequence-3.18.7.tar.gz", hash = "sha256:04c15f43320382781940615caf0c9d6fe2c58efe420144936d4721d42fb06094", size = 1151454, upload-time = "2026-04-20T16:30:59.432Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/0c/3e/3e9591483f66d610f2f6db3fc9d40e5daeaed6a86740e6e5fd383bc18dc6/mainsequence-3.18.8.tar.gz", hash = "sha256:59eb0383cec2523fb3e32092755cedc872a2de3b7f125f71e854b669271d5c2c", size = 1151818, upload-time = "2026-04-20T16:56:10.001Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/a2/73/85741d32edd846d2033b7556424289f9cd75cf224a5fa524b90a7e2435a4/mainsequence-3.18.7-py3-none-any.whl", hash = "sha256:969f00ba08c004f71b032c7e302dcdf4c0c29039ad91b11cd856004a4de28b3e", size = 1157185, upload-time = "2026-04-20T16:30:57.577Z" },
+    { url = "https://files.pythonhosted.org/packages/e2/a7/5c4e2802215a69ebd43e6f52af6656a5feb96654861b1602ca7f138af591/mainsequence-3.18.8-py3-none-any.whl", hash = "sha256:755bdaa694692f08e0fc487029fc04d1edf3c55c3cf239405f85731ce8c8450a", size = 1157320, upload-time = "2026-04-20T16:56:07.76Z" },
 ]
 
 [[package]]

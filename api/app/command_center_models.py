@@ -1,45 +1,71 @@
 from __future__ import annotations
 
-from functools import lru_cache
-from importlib import util as importlib_util
-from importlib.metadata import distribution
-from pathlib import Path
-from types import ModuleType
+import datetime as dt
+from typing import Any, Literal
+
+from pydantic import BaseModel, ConfigDict, Field
 
 
-@lru_cache(maxsize=1)
-def _load_data_models_module() -> ModuleType:
-    dist = distribution("mainsequence")
-    relative = next(
-        file
-        for file in dist.files or []
-        if str(file).endswith("mainsequence/client/command_center/data_models.py")
+class TableFieldResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    key: str = Field(..., description="Column key.")
+    label: str | None = Field(default=None, description="Human-readable column label.")
+    type: str | None = Field(default=None, description="Normalized field type.")
+    nullable: bool | None = Field(default=None, description="Whether the field may be null.")
+    nativeType: str | None = Field(default=None, description="Optional backend-native type.")
+    provenance: str | None = Field(default=None, description="Field schema provenance.")
+    reason: str | None = Field(default=None, description="Optional schema explanation.")
+    derivedFrom: list[str] | None = Field(
+        default=None,
+        description="Optional source columns used to derive this field.",
     )
-    module_path = Path(dist.locate_file(relative))
-    spec = importlib_util.spec_from_file_location(
-        "mainsequence_command_center_data_models_fallback",
-        module_path,
+    warnings: list[str] | None = Field(
+        default=None,
+        description="Optional non-fatal field warnings.",
     )
-    if spec is None or spec.loader is None:
-        raise RuntimeError(
-            f"Could not load Command Center data models from {module_path}."
-        )
-    module = importlib_util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
 
 
-_data_models = _load_data_models_module()
+class SourceMetadataResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
 
-for _model_name in (
-    "TableFieldResponse",
-    "SourceContextResponse",
-    "SourceMetadataResponse",
-    "DataNodeWidgetInputResponse",
-    "DataNodeTableSourceInputResponse",
-):
-    getattr(_data_models, _model_name).model_rebuild(_types_namespace=_data_models.__dict__)
+    kind: str = Field(..., description="Source descriptor kind.")
+    id: str | int | None = Field(default=None, description="Optional source identifier.")
+    label: str | None = Field(default=None, description="Optional source label.")
+    updatedAtMs: dt.datetime | int | str | None = Field(
+        default=None,
+        description="Optional source freshness timestamp.",
+    )
+    context: dict[str, Any] | None = Field(
+        default=None,
+        description="Optional source-specific metadata.",
+    )
 
-DataNodeTableSourceInputResponse = _data_models.DataNodeTableSourceInputResponse
-SourceMetadataResponse = _data_models.SourceMetadataResponse
-TableFieldResponse = _data_models.TableFieldResponse
+
+class DataNodeTableSourceInputResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    status: Literal["idle", "loading", "ready", "error"] = Field(
+        ...,
+        description="Loading state for the tabular source payload.",
+    )
+    error: str | None = Field(default=None, description="Optional source error.")
+    columns: list[str] = Field(default_factory=list, description="Ordered column keys.")
+    rows: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="JSON-compatible source rows keyed by column name.",
+    )
+    fields: list[TableFieldResponse] | None = Field(
+        default=None,
+        description="Optional normalized field schema.",
+    )
+    source: SourceMetadataResponse | None = Field(
+        default=None,
+        description="Optional source metadata.",
+    )
+    dataNodeId: int | None = Field(default=None, ge=1)
+    limit: int | None = Field(default=None, ge=1)
+    rangeStartMs: dt.datetime | int | str | None = Field(default=None)
+    rangeEndMs: dt.datetime | int | str | None = Field(default=None)
+    uniqueIdentifierList: list[str] | None = Field(default=None)
+    updatedAtMs: dt.datetime | int | str | None = Field(default=None)
