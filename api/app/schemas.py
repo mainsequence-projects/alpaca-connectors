@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import datetime as dt
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -147,6 +148,75 @@ class AssetRegistrationByTickerResponse(BaseModel):
     missing_from_alpaca: bool
     missing_figi: bool
     warnings: list[str] = Field(default_factory=list)
+
+
+class LightweightOhlcChartRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    unique_identifier: str = Field(
+        ...,
+        min_length=1,
+        description="Asset unique identifier used in the bars table index.",
+        examples=["BBG000BBJQV0"],
+    )
+    start_date: dt.date = Field(
+        ...,
+        description="Inclusive start date for the OHLC query window.",
+        examples=["2026-04-01"],
+    )
+    end_date: dt.date = Field(
+        ...,
+        description="Inclusive end date for the OHLC query window.",
+        examples=["2026-04-16"],
+    )
+    node_identifier: str = Field(
+        default="alpaca_stock_bars_1d_sip_all",
+        min_length=1,
+        description="DataNode identifier that backs the OHLC data source.",
+        examples=["alpaca_stock_bars_1d_sip_all"],
+    )
+
+    @model_validator(mode="after")
+    def normalize_values(self) -> "LightweightOhlcChartRequest":
+        self.unique_identifier = self.unique_identifier.strip().upper()
+        self.node_identifier = self.node_identifier.strip()
+        if not self.unique_identifier:
+            raise ValueError("unique_identifier must not be empty.")
+        if self.start_date > self.end_date:
+            raise ValueError("start_date must be less than or equal to end_date.")
+        return self
+
+
+class LightweightOhlcChartResponse(BaseModel):
+    unique_identifier: str
+    node_identifier: str
+    start_date: dt.date
+    end_date: dt.date
+    point_count: int
+    spec: dict[str, Any]
+    spec_json: str
+
+
+class AssetSearchSelectOption(BaseModel):
+    unique_identifier: str
+    label: str
+    ticker: str | None = None
+    name: str | None = None
+    figi: str | None = None
+    display: str
+
+
+class AssetSearchSelectPagination(BaseModel):
+    page: int
+    limit: int
+    hasMore: bool
+
+
+class AssetSearchSelectResponse(BaseModel):
+    query: str
+    asset_category_unique_identifier: str
+    items: list[AssetSearchSelectOption]
+    pagination: AssetSearchSelectPagination
 
 
 class HoldingsCategoryRequest(BaseModel):

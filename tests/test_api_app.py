@@ -5,8 +5,13 @@ from unittest.mock import patch
 from fastapi.testclient import TestClient
 
 from api.app.main import app
-from api.app.schemas import AssetRegistrationByTickerResponse
-from api.app.services import _build_table_source_response
+from api.app.schemas import (
+    AssetRegistrationByTickerResponse,
+    AssetSearchSelectOption,
+    AssetSearchSelectPagination,
+    AssetSearchSelectResponse,
+    LightweightOhlcChartResponse,
+)
 
 
 class ApiAppTests(unittest.TestCase):
@@ -17,37 +22,6 @@ class ApiAppTests(unittest.TestCase):
         response = self.client.get("/health")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), {"status": "ok"})
-
-    def test_registration_plan_route(self) -> None:
-        mocked_response = _build_table_source_response(
-            label="Asset Registration Plan",
-            rows=[
-                {
-                    "request": {
-                        "symbols": ["NVDA"],
-                        "seed_tickers": None,
-                        "component_provider": None,
-                        "include_non_tradable": False,
-                        "timeout": 30.0,
-                    },
-                    "plan_summary": {"alpaca_asset_count": 1},
-                    "resolution_summary": {"missing_symbols_to_register": ["NVDA"]},
-                    "can_register": True,
-                    "unresolved_symbols": [],
-                    "missing_symbols_from_alpaca": [],
-                    "missing_symbols_to_register": ["NVDA"],
-                    "warnings_by_symbol": {},
-                }
-            ],
-        )
-        with patch("api.app.main.build_asset_registration_discovery", return_value=mocked_response):
-            response = self.client.post(
-                "/v1/assets/registration/plan",
-                json={"symbols": ["NVDA"]},
-            )
-
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["rows"][0]["missing_symbols_to_register"], ["NVDA"])
 
     def test_register_ticker_route(self) -> None:
         mocked_response = AssetRegistrationByTickerResponse(
@@ -76,6 +50,104 @@ class ApiAppTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["status"], "created")
         self.assertEqual(response.json()["asset_id"], 101)
+
+    def test_lightweight_ohlc_chart_route(self) -> None:
+        mocked_response = LightweightOhlcChartResponse(
+            unique_identifier="BBG000BBJQV0",
+            node_identifier="alpaca_stock_bars_1d_sip_all",
+            start_date="2026-04-01",
+            end_date="2026-04-08",
+            point_count=2,
+            spec={
+                "fitContent": True,
+                "series": [
+                    {
+                        "id": "ohlc",
+                        "type": "candlestick",
+                        "data": [
+                            {
+                                "time": "2026-04-01",
+                                "open": 100.0,
+                                "high": 101.0,
+                                "low": 99.0,
+                                "close": 100.5,
+                            }
+                        ],
+                    }
+                ],
+            },
+            spec_json="{\"fitContent\":true,\"series\":[]}",
+        )
+        with patch("api.app.main.execute_lightweight_ohlc_chart", return_value=mocked_response):
+            response = self.client.post(
+                "/v1/charts/lightweight/ohlc",
+                json={
+                    "unique_identifier": "BBG000BBJQV0",
+                    "start_date": "2026-04-01",
+                    "end_date": "2026-04-08",
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["unique_identifier"], "BBG000BBJQV0")
+        self.assertEqual(response.json()["point_count"], 2)
+
+    def test_lightweight_ohlc_chart_route_accepts_query_fields(self) -> None:
+        mocked_response = LightweightOhlcChartResponse(
+            unique_identifier="BBG000BBJQV0",
+            node_identifier="alpaca_stock_bars_1d_sip_all",
+            start_date="2026-04-01",
+            end_date="2026-04-08",
+            point_count=1,
+            spec={"series": []},
+            spec_json="{\"series\":[]}",
+        )
+        with (
+            patch(
+                "api.app.main.resolve_lightweight_ohlc_asset_unique_identifier",
+                return_value="BBG000BBJQV0",
+            ),
+            patch("api.app.main.execute_lightweight_ohlc_chart", return_value=mocked_response),
+        ):
+            response = self.client.post(
+                "/v1/charts/lightweight/ohlc",
+                params={
+                    "asset_search": "NVDA",
+                    "start_date": "2026-04-01",
+                    "end_date": "2026-04-08",
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["unique_identifier"], "BBG000BBJQV0")
+
+    def test_lightweight_ohlc_chart_route_returns_search_results(self) -> None:
+        mocked_response = AssetSearchSelectResponse(
+            query="NVDA",
+            asset_category_unique_identifier="HOLDINGS__IVV",
+            items=[
+                AssetSearchSelectOption(
+                    unique_identifier="BBG000BBJQV0",
+                    label="NVDA",
+                    ticker="NVDA",
+                    name="NVIDIA Corporation",
+                    figi="BBG000BBJQV0",
+                    display="NVDA - NVIDIA Corporation",
+                )
+            ],
+            pagination=AssetSearchSelectPagination(page=1, limit=20, hasMore=False),
+        )
+        with patch(
+            "api.app.main.search_assets_for_lightweight_ohlc_select",
+            return_value=mocked_response,
+        ):
+            response = self.client.post(
+                "/v1/charts/lightweight/ohlc",
+                params={"asset_search": "NVDA"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["items"][0]["unique_identifier"], "BBG000BBJQV0")
 
     def test_holdings_category_execute_route_returns_400_on_blocker(self) -> None:
         with patch(

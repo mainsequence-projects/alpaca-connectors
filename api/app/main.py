@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Body, FastAPI, HTTPException
+import datetime as dt
+from typing import Any
+
+from fastapi import APIRouter, Body, FastAPI, HTTPException, Query
 
 from .command_center_models import DataNodeTableSourceInputResponse
 
@@ -10,14 +13,17 @@ from .schemas import (
     AssetRegistrationByTickerResponse,
     HealthResponse,
     HoldingsCategoryRequest,
+    LightweightOhlcChartRequest,
 )
 from .services import (
-    build_asset_registration_discovery,
+    DEFAULT_CHART_ASSET_CATEGORY_UNIQUE_IDENTIFIER,
     execute_asset_registration_by_ticker,
-    build_holdings_category_discovery,
     execute_asset_registration,
     execute_holdings_category_sync,
+    execute_lightweight_ohlc_chart,
     get_discovery_config,
+    resolve_lightweight_ohlc_asset_unique_identifier,
+    search_assets_for_lightweight_ohlc_select,
 )
 
 app = FastAPI(
@@ -57,27 +63,6 @@ def health() -> HealthResponse:
 )
 def discovery_config() -> DataNodeTableSourceInputResponse:
     return get_discovery_config()
-
-
-@router.post(
-    "/assets/registration/plan",
-    response_model=DataNodeTableSourceInputResponse,
-    summary="Preview asset registration",
-    description=(
-        "Build the Alpaca and FIGI registration plan for exact symbols or an ETF seed "
-        "universe without writing assets to MainSequence."
-    ),
-) 
-def asset_registration_plan(
-    request: AssetRegistrationRequest = Body(
-        ...,
-        description="Asset discovery or holdings-expansion request.",
-    ),
-) -> DataNodeTableSourceInputResponse:
-    try:
-        return build_asset_registration_discovery(request)
-    except (ValueError, RuntimeError) as exc:
-        raise _bad_request(exc) from exc
 
 
 @router.post(
@@ -123,27 +108,6 @@ def asset_registration_execute_by_ticker(
 
 
 @router.post(
-    "/holdings-categories/plan",
-    response_model=DataNodeTableSourceInputResponse,
-    summary="Preview holdings category sync",
-    description=(
-        "Extract ETF holdings, validate Alpaca and FIGI coverage, and preview the "
-        "resulting holdings AssetCategory sync without writing to MainSequence."
-    ),
-) 
-def holdings_category_plan(
-    request: HoldingsCategoryRequest = Body(
-        ...,
-        description="Holdings category discovery request.",
-    ),
-) -> DataNodeTableSourceInputResponse:
-    try:
-        return build_holdings_category_discovery(request)
-    except (ValueError, RuntimeError) as exc:
-        raise _bad_request(exc) from exc
-
-
-@router.post(
     "/holdings-categories/execute",
     response_model=DataNodeTableSourceInputResponse,
     summary="Execute holdings category sync",
@@ -160,6 +124,87 @@ def holdings_category_execute(
 ) -> DataNodeTableSourceInputResponse:
     try:
         return execute_holdings_category_sync(request)
+    except (ValueError, RuntimeError) as exc:
+        raise _bad_request(exc) from exc
+
+
+@router.post(
+    "/charts/lightweight/ohlc",
+    summary="Build lightweight OHLC chart spec",
+    description=(
+        "Search registered assets for the Command Center ticker selector, or fetch "
+        "OHLC data for one asset unique_identifier and return a lightweight-charts-spec "
+        "payload suitable for Command Center rendering."
+    ),
+)
+def lightweight_ohlc_chart(
+    request: LightweightOhlcChartRequest | None = Body(
+        default=None,
+        description="Optional OHLC chart query body. Query parameters are used by Command Center.",
+    ),
+    asset_search: str | None = Query(
+        default=None,
+        description=(
+            "Ticker, name, FIGI, or unique identifier search text. When dates are present, "
+            "this value is resolved to an asset unique_identifier."
+        ),
+    ),
+    start_date: dt.date | None = Query(
+        default=None,
+        description="Inclusive start date used by the Command Center chart form.",
+    ),
+    end_date: dt.date | None = Query(
+        default=None,
+        description="Inclusive end date used by the Command Center chart form.",
+    ),
+    node_identifier: str = Query(
+        default="alpaca_stock_bars_1d_sip_all",
+        description="DataNode identifier that backs the OHLC chart.",
+    ),
+    asset_category_unique_identifier: str = Query(
+        default=DEFAULT_CHART_ASSET_CATEGORY_UNIQUE_IDENTIFIER,
+        description="AssetCategory used to scope ticker search options.",
+    ),
+    page: int = Query(
+        default=1,
+        ge=1,
+        description="Search result page for the async selector.",
+    ),
+    limit: int = Query(
+        default=20,
+        ge=1,
+        le=50,
+        description="Search result page size for the async selector.",
+    ),
+) -> dict[str, Any]:
+    try:
+        if asset_search is not None and (start_date is None or end_date is None):
+            return search_assets_for_lightweight_ohlc_select(
+                query=asset_search,
+                asset_category_unique_identifier=asset_category_unique_identifier,
+                page=page,
+                limit=limit,
+            ).model_dump(mode="json")
+
+        chart_request = request
+        if chart_request is None:
+            if asset_search is None or start_date is None or end_date is None:
+                raise ValueError(
+                    "Provide either a JSON chart request body or query parameters "
+                    "asset_search, start_date, and end_date."
+                )
+            unique_identifier = resolve_lightweight_ohlc_asset_unique_identifier(
+                identifier=asset_search,
+                asset_category_unique_identifier=asset_category_unique_identifier,
+            )
+            chart_request = LightweightOhlcChartRequest(
+                unique_identifier=unique_identifier,
+                start_date=start_date,
+                end_date=end_date,
+                node_identifier=node_identifier,
+            )
+
+        return execute_lightweight_ohlc_chart(chart_request).model_dump(mode="json")
     except (ValueError, RuntimeError) as exc:
         raise _bad_request(exc) from exc
 
