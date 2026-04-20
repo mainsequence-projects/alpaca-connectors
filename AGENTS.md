@@ -52,6 +52,15 @@ Working rules for this role:
 - do not blur domain boundaries when a dedicated skill already exists
 - prefer reusable implementation over one-off logic placed directly into dashboards, jobs, or route handlers
 
+User-resolution rule for agents:
+
+- use `User.get_logged_user()` only when code is running with request-bound identity context:
+  - FastAPI middleware
+  - Streamlit
+  - code that explicitly binds `_CURRENT_AUTH_HEADERS`
+- use `User.get_authenticated_user_details()` in standalone authenticated CLI or script code that is not request-bound
+- do not describe this as a CLI versus non-CLI distinction; the boundary is request-bound identity context versus a plain authenticated SDK session
+
 Delegation rules:
 
 - when work is delegated or queued for later, write the task in `.agents/tasks.md` according to the skill that should execute it
@@ -135,6 +144,8 @@ Typical routing:
   `.agents/skills/command_center/workspace_builder/SKILL.md`
 - AppComponents, custom forms, and widget input or output contracts:
   `.agents/skills/command_center/app_components/SKILL.md`
+- predeployment AppComponent/API contract testing through `apiTargetMode: "mock-json"`:
+  `.agents/skills/command_center/api_mock_prototyping/SKILL.md`
 - jobs, schedules, images, project resources, releases, and Artifacts:
   `.agents/skills/platform_operations/orchestration_and_releases/SKILL.md`
 - RBAC, sharing, constants, secrets, and access verification:
@@ -193,8 +204,10 @@ Always use `.agents/skills/project_builder/SKILL.md` as the source of truth for 
 - avoid defensive guards on hot paths unless justified by a verified requirement
 - do not hide failures
 - record the exact failing step, command, or workflow
+- when hitting a roadblock, blocker, or error, report it back to the user clearly and promptly
 - if local code or local docs conflict with the latest Main Sequence docs, record the discrepancy and create follow-up work
 - when unsure, verify
+- if the active virtual environment is missing libraries that are already declared in `requirements.txt`, install those missing libraries into the virtual environment before continuing
 
 ## Main Sequence Verification Rules
 

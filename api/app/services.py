@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import datetime as dt
-import json
 from typing import Any
 
 import pandas as pd
@@ -386,7 +385,6 @@ def execute_lightweight_ohlc_chart(
         end_date=request.end_date,
         point_count=len(ohlc_series_data),
         spec=spec,
-        spec_json=json.dumps(spec, separators=(",", ":"), ensure_ascii=True),
     )
 
 
@@ -440,6 +438,43 @@ def _asset_search_option(asset: Any) -> AssetSearchSelectOption | None:
     )
 
 
+def _asset_unique_identifier(asset: Any) -> str:
+    unique_identifier = getattr(asset, "unique_identifier", None)
+    if not isinstance(unique_identifier, str) or not unique_identifier.strip():
+        raise ValueError(f"Asset {asset!r} does not have a unique_identifier.")
+    return unique_identifier.strip()
+
+
+def _dedupe_assets(assets: list[Any]) -> list[Any]:
+    deduped: dict[str, Any] = {}
+    for asset in assets:
+        try:
+            unique_identifier = _asset_unique_identifier(asset)
+        except ValueError:
+            continue
+        deduped.setdefault(unique_identifier, asset)
+    return list(deduped.values())
+
+
+def _find_backend_assets_by_identifier(identifier: str) -> list[Any]:
+    normalized_identifier = identifier.strip().upper()
+    if not normalized_identifier:
+        return []
+
+    import mainsequence.client as msc
+
+    candidates: list[Any] = []
+    for filters in (
+        {"ticker": normalized_identifier},
+        {"figi": normalized_identifier},
+        {"unique_identifier": normalized_identifier},
+        {"unique_identifier__contains": normalized_identifier},
+        {"name__contains": identifier.strip()},
+    ):
+        candidates.extend(msc.Asset.filter(**filters))
+    return _dedupe_assets(candidates)
+
+
 def search_assets_for_lightweight_ohlc_select(
     *,
     query: str,
@@ -461,30 +496,9 @@ def search_assets_for_lightweight_ohlc_select(
             pagination=AssetSearchSelectPagination(page=page, limit=limit, hasMore=False),
         )
 
-    import mainsequence.client as msc
-
-    category = msc.AssetCategory.get_or_none(
-        unique_identifier=asset_category_unique_identifier,
-    )
-    if category is None:
-        raise ValueError(
-            "Asset category not found: "
-            f"{asset_category_unique_identifier!r}. Create it before using ticker search."
-        )
-
-    asset_ids = [_coerce_asset_id(asset_or_id) for asset_or_id in category.assets]
-    if not asset_ids:
-        return AssetSearchSelectResponse(
-            query=normalized_query,
-            asset_category_unique_identifier=asset_category_unique_identifier,
-            items=[],
-            pagination=AssetSearchSelectPagination(page=page, limit=limit, hasMore=False),
-        )
-
-    matching_assets = msc.Asset.filter(id__in=asset_ids)
     options = [
         option
-        for asset in matching_assets
+        for asset in _find_backend_assets_by_identifier(normalized_query)
         if normalized_query in _asset_search_text(asset)
         for option in [_asset_search_option(asset)]
         if option is not None
@@ -514,30 +528,9 @@ def resolve_lightweight_ohlc_asset_unique_identifier(
     if not normalized_identifier:
         raise ValueError("asset identifier must not be empty.")
 
-    import mainsequence.client as msc
-
-    category = msc.AssetCategory.get_or_none(
-        unique_identifier=asset_category_unique_identifier,
-    )
-    if category is None:
-        raise ValueError(
-            "Asset category not found: "
-            f"{asset_category_unique_identifier!r}. Create it before using chart search."
-        )
-
-    asset_ids = [_coerce_asset_id(asset_or_id) for asset_or_id in category.assets]
-    if not asset_ids:
-        raise ValueError(
-            "Asset category is empty: "
-            f"{asset_category_unique_identifier!r}. Add assets before using chart search."
-        )
-
-    matching_assets = msc.Asset.filter(id__in=asset_ids)
     candidates: list[tuple[str, str | None, str | None]] = []
-    for asset in matching_assets:
-        unique_identifier = getattr(asset, "unique_identifier", None)
-        if not isinstance(unique_identifier, str) or not unique_identifier.strip():
-            continue
+    for asset in _find_backend_assets_by_identifier(normalized_identifier):
+        unique_identifier = _asset_unique_identifier(asset)
 
         ticker = _asset_snapshot_value(asset, "ticker")
         figi = getattr(asset, "figi", None)
@@ -557,12 +550,12 @@ def resolve_lightweight_ohlc_asset_unique_identifier(
         return candidates[0][0]
     if len(candidates) > 1:
         raise ValueError(
-            f"Identifier {identifier!r} matched multiple assets in "
-            f"{asset_category_unique_identifier!r}."
+            f"Identifier {identifier!r} matched multiple backend assets."
         )
     raise ValueError(
-        f"Identifier {identifier!r} was not found in "
-        f"{asset_category_unique_identifier!r} by unique_identifier, ticker, or FIGI."
+        f"Identifier {identifier!r} was not found in backend assets by "
+        "unique_identifier, ticker, or FIGI. Register the ticker first, then "
+        "retry loading the chart."
     )
 
 

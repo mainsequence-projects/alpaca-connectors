@@ -1,10 +1,17 @@
 from __future__ import annotations
+import sys
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
+from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 
 from api.app.main import app
+from api.app.services import (
+    resolve_lightweight_ohlc_asset_unique_identifier,
+    search_assets_for_lightweight_ohlc_select,
+)
 from api.app.schemas import (
     AssetRegistrationByTickerResponse,
     AssetSearchSelectOption,
@@ -22,6 +29,42 @@ class ApiAppTests(unittest.TestCase):
         response = self.client.get("/health")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), {"status": "ok"})
+
+    def test_schema_visible_api_routes_declare_response_models(self) -> None:
+        visible_api_routes = [
+            route
+            for route in app.routes
+            if isinstance(route, APIRoute)
+            and route.include_in_schema
+            and (route.path == "/health" or route.path.startswith("/v1/"))
+        ]
+        missing_response_models = [
+            f"{','.join(sorted(route.methods or []))} {route.path}"
+            for route in visible_api_routes
+            if route.response_model is None
+        ]
+
+        self.assertEqual(missing_response_models, [])
+
+    def test_cors_preflight_allows_local_vite_frontend(self) -> None:
+        response = self.client.options(
+            "/v1/charts/lightweight/ohlc",
+            headers={
+                "Origin": "http://localhost:5173",
+                "Access-Control-Request-Method": "POST",
+                "Access-Control-Request-Headers": "Content-Type, Authorization",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.headers["access-control-allow-origin"],
+            "http://localhost:5173",
+        )
+        self.assertIn("POST", response.headers["access-control-allow-methods"])
+        self.assertIn("OPTIONS", response.headers["access-control-allow-methods"])
+        self.assertIn("Authorization", response.headers["access-control-allow-headers"])
+        self.assertIn("Content-Type", response.headers["access-control-allow-headers"])
 
     def test_register_ticker_route(self) -> None:
         mocked_response = AssetRegistrationByTickerResponse(
@@ -76,7 +119,6 @@ class ApiAppTests(unittest.TestCase):
                     }
                 ],
             },
-            spec_json="{\"fitContent\":true,\"series\":[]}",
         )
         with (
             patch(
@@ -95,8 +137,10 @@ class ApiAppTests(unittest.TestCase):
             )
 
         self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["mode"], "chart")
         self.assertEqual(response.json()["unique_identifier"], "BBG000BBJQV0")
         self.assertEqual(response.json()["point_count"], 2)
+        self.assertNotIn("spec_json", response.json())
 
     def test_lightweight_ohlc_chart_route_accepts_query_fields(self) -> None:
         mocked_response = LightweightOhlcChartResponse(
@@ -106,7 +150,6 @@ class ApiAppTests(unittest.TestCase):
             end_date="2026-04-08",
             point_count=1,
             spec={"series": []},
-            spec_json="{\"series\":[]}",
         )
         with (
             patch(
@@ -125,6 +168,7 @@ class ApiAppTests(unittest.TestCase):
             )
 
         self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["mode"], "chart")
         self.assertEqual(response.json()["unique_identifier"], "BBG000BBJQV0")
 
     def test_lightweight_ohlc_chart_route_returns_search_results(self) -> None:
@@ -153,7 +197,97 @@ class ApiAppTests(unittest.TestCase):
             )
 
         self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["mode"], "selector")
         self.assertEqual(response.json()["items"][0]["unique_identifier"], "BBG000BBJQV0")
+
+    def test_lightweight_ohlc_resolver_uses_backend_asset_unique_identifier(self) -> None:
+        asset = SimpleNamespace(
+            unique_identifier="BBG000BJKPG0",
+            figi="BBG000BJKPG0",
+            current_snapshot=SimpleNamespace(ticker="IVV", name="iShares Core S&P 500 ETF"),
+        )
+
+        class FakeAsset:
+            @staticmethod
+            def filter(**kwargs):
+                return [asset] if kwargs == {"ticker": "IVV"} else []
+
+        fake_client = SimpleNamespace(Asset=FakeAsset)
+        with patch.dict(
+            sys.modules,
+            {
+                "mainsequence": SimpleNamespace(client=fake_client),
+                "mainsequence.client": fake_client,
+            },
+        ):
+            unique_identifier = resolve_lightweight_ohlc_asset_unique_identifier(
+                identifier="IVV",
+            )
+
+        self.assertEqual(unique_identifier, "BBG000BJKPG0")
+
+    def test_lightweight_ohlc_select_searches_backend_assets(self) -> None:
+        asset = SimpleNamespace(
+            unique_identifier="BBG000BBJQV0",
+            figi="BBG000BBJQV0",
+            current_snapshot=SimpleNamespace(ticker="NVDA", name="NVIDIA Corporation"),
+        )
+
+        class FakeAsset:
+            @staticmethod
+            def filter(**kwargs):
+                return [asset] if kwargs == {"ticker": "NVDA"} else []
+
+        fake_client = SimpleNamespace(Asset=FakeAsset)
+        with patch.dict(
+            sys.modules,
+            {
+                "mainsequence": SimpleNamespace(client=fake_client),
+                "mainsequence.client": fake_client,
+            },
+        ):
+            response = search_assets_for_lightweight_ohlc_select(query="NVDA")
+
+        self.assertEqual(response.items[0].ticker, "NVDA")
+        self.assertEqual(response.items[0].unique_identifier, "BBG000BBJQV0")
+
+    def test_lightweight_ohlc_resolver_suggests_registering_missing_ticker(self) -> None:
+        class FakeAsset:
+            @staticmethod
+            def filter(**kwargs):
+                return []
+
+        fake_client = SimpleNamespace(Asset=FakeAsset)
+        with patch.dict(
+            sys.modules,
+            {
+                "mainsequence": SimpleNamespace(client=fake_client),
+                "mainsequence.client": fake_client,
+            },
+        ):
+            with self.assertRaisesRegex(ValueError, "Register the ticker first"):
+                resolve_lightweight_ohlc_asset_unique_identifier(identifier="sadfasdf")
+
+    def test_lightweight_ohlc_chart_route_suggests_registering_missing_ticker(self) -> None:
+        with patch(
+            "api.app.main.resolve_lightweight_ohlc_asset_unique_identifier",
+            side_effect=ValueError(
+                "Identifier 'SADFASDF' was not found in backend assets by "
+                "unique_identifier, ticker, or FIGI. Register the ticker first, "
+                "then retry loading the chart."
+            ),
+        ):
+            response = self.client.post(
+                "/v1/charts/lightweight/ohlc",
+                params={
+                    "ticker": "sadfasdf",
+                    "start_date": "2026-04-01",
+                    "end_date": "2026-04-08",
+                },
+            )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("Register the ticker first", response.json()["detail"])
 
     def test_lightweight_ohlc_chart_route_ignores_empty_json_body_for_selector_bootstrap(self) -> None:
         response = self.client.post(
@@ -171,13 +305,21 @@ class ApiAppTests(unittest.TestCase):
         self.assertEqual(response.json()["items"], [])
 
     def test_lightweight_ohlc_chart_openapi_exposes_only_ticker_and_dates(self) -> None:
-        operation = self.client.get("/openapi.json").json()["paths"][
-            "/v1/charts/lightweight/ohlc"
-        ]["post"]
+        openapi_schema = self.client.get("/openapi.json").json()
+        operation = openapi_schema["paths"]["/v1/charts/lightweight/ohlc"]["post"]
         parameter_names = {parameter["name"] for parameter in operation["parameters"]}
 
         self.assertEqual(parameter_names, {"ticker", "start_date", "end_date"})
         self.assertNotIn("requestBody", operation)
+        response_schema = operation["responses"]["200"]["content"]["application/json"]["schema"]
+
+        self.assertEqual(response_schema["$ref"].rsplit("/", 1)[-1], "LightweightOhlcResponse")
+        self.assertNotIn("anyOf", response_schema)
+        response_properties = openapi_schema["components"]["schemas"]["LightweightOhlcResponse"][
+            "properties"
+        ]
+        self.assertIn("spec", response_properties)
+        self.assertNotIn("spec_json", response_properties)
 
     def test_holdings_category_execute_route_returns_400_on_blocker(self) -> None:
         with patch(

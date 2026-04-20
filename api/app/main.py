@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import datetime as dt
-from typing import Any
+import os
 
 from fastapi import APIRouter, Body, FastAPI, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
 
 from .command_center_models import DataNodeTableSourceInputResponse
 
@@ -14,6 +15,7 @@ from .schemas import (
     HealthResponse,
     HoldingsCategoryRequest,
     LightweightOhlcChartRequest,
+    LightweightOhlcResponse,
 )
 from .services import (
     DEFAULT_CHART_ASSET_CATEGORY_UNIQUE_IDENTIFIER,
@@ -33,6 +35,26 @@ app = FastAPI(
         "Automation API for Alpaca-backed asset discovery, asset registration, "
         "and holdings-based category management."
     ),
+)
+
+
+def _cors_allow_origins() -> list[str]:
+    raw_origins = os.getenv("API_CORS_ALLOW_ORIGINS", "http://localhost:5173")
+    origins = [
+        origin.strip()
+        for origin in raw_origins.split(",")
+        if origin.strip()
+    ]
+    return origins or ["http://localhost:5173"]
+
+
+_cors_origins = _cors_allow_origins()
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_cors_origins,
+    allow_credentials="*" not in _cors_origins,
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization"],
 )
 
 router = APIRouter(prefix="/v1")
@@ -130,6 +152,8 @@ def holdings_category_execute(
 
 @router.post(
     "/charts/lightweight/ohlc",
+    response_model=LightweightOhlcResponse,
+    response_model_exclude_none=True,
     summary="Build lightweight OHLC chart spec",
     description=(
         "Search registered assets for the Command Center ticker selector, or fetch "
@@ -180,16 +204,18 @@ def lightweight_ohlc_chart(
         default=None,
         include_in_schema=False,
     ),
-) -> dict[str, Any]:
+) -> LightweightOhlcResponse:
     try:
         ticker_query = ticker or asset_search or ""
         if start_date is None and end_date is None:
-            return search_assets_for_lightweight_ohlc_select(
-                query=ticker_query,
-                asset_category_unique_identifier=asset_category_unique_identifier,
-                page=page,
-                limit=limit,
-            ).model_dump(mode="json")
+            return LightweightOhlcResponse.from_selector(
+                search_assets_for_lightweight_ohlc_select(
+                    query=ticker_query,
+                    asset_category_unique_identifier=asset_category_unique_identifier,
+                    page=page,
+                    limit=limit,
+                )
+            )
 
         if not ticker_query or start_date is None or end_date is None:
             raise ValueError("Provide ticker, start_date, and end_date.")
@@ -204,7 +230,7 @@ def lightweight_ohlc_chart(
             node_identifier=node_identifier,
         )
 
-        return execute_lightweight_ohlc_chart(chart_request).model_dump(mode="json")
+        return LightweightOhlcResponse.from_chart(execute_lightweight_ohlc_chart(chart_request))
     except (ValueError, RuntimeError) as exc:
         raise _bad_request(exc) from exc
 

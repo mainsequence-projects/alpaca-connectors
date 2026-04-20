@@ -85,6 +85,9 @@ Command Center query fields:
 - `start_date`
 - `end_date`
 
+The generated workspace form defaults to `NVDA`, an end date equal to the workspace
+generation date, and a start date one year before that end date.
+
 In Command Center query mode, the selected `ticker` value is resolved strictly inside the
 configured `AssetCategory` before bars are queried. The API uses the fixed OHLC DataNode
 identifier `alpaca_stock_bars_1d_sip_all`; the form does not expose DataNode or unique
@@ -93,7 +96,10 @@ identifier inputs.
 Returns:
 
 - structured `spec` object matching the `lightweight-charts-spec` widget format
-- `spec_json` string for direct widget-props usage
+
+Both selector mode and chart mode use the same explicit FastAPI response-body
+schema: `LightweightOhlcResponse`. The `mode` field identifies whether the
+payload contains selector results or chart data.
 
 ### Execute holdings category sync
 

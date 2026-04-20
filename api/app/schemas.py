@@ -194,7 +194,6 @@ class LightweightOhlcChartResponse(BaseModel):
     end_date: dt.date
     point_count: int
     spec: dict[str, Any]
-    spec_json: str
 
 
 class AssetSearchSelectOption(BaseModel):
@@ -217,6 +216,44 @@ class AssetSearchSelectResponse(BaseModel):
     asset_category_unique_identifier: str
     items: list[AssetSearchSelectOption]
     pagination: AssetSearchSelectPagination
+
+
+class LightweightOhlcResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    mode: Literal["selector", "chart"]
+    query: str | None = None
+    asset_category_unique_identifier: str | None = None
+    items: list[AssetSearchSelectOption] = Field(default_factory=list)
+    pagination: AssetSearchSelectPagination | None = None
+    unique_identifier: str | None = None
+    node_identifier: str | None = None
+    start_date: dt.date | None = None
+    end_date: dt.date | None = None
+    point_count: int | None = None
+    spec: dict[str, Any] | None = None
+
+    @classmethod
+    def from_selector(cls, response: AssetSearchSelectResponse) -> "LightweightOhlcResponse":
+        return cls(
+            mode="selector",
+            query=response.query,
+            asset_category_unique_identifier=response.asset_category_unique_identifier,
+            items=response.items,
+            pagination=response.pagination,
+        )
+
+    @classmethod
+    def from_chart(cls, response: LightweightOhlcChartResponse) -> "LightweightOhlcResponse":
+        return cls(
+            mode="chart",
+            unique_identifier=response.unique_identifier,
+            node_identifier=response.node_identifier,
+            start_date=response.start_date,
+            end_date=response.end_date,
+            point_count=response.point_count,
+            spec=response.spec,
+        )
 
 
 class HoldingsCategoryRequest(BaseModel):

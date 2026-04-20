@@ -415,15 +415,6 @@ widgets:
         - spec
         statusCode: '200'
         contentType: application/json
-      - id: response:spec_json
-        label: Spec Json
-        description: null
-        kind: string
-        contract: core.value.string@v1
-        responsePath:
-        - spec_json
-        statusCode: '200'
-        contentType: application/json
       requestForm:
         parameterFields:
         - key: query:ticker
@@ -433,7 +424,7 @@ widgets:
           required: true
           kind: string
           paramName: ticker
-          defaultValue: null
+          defaultValue: NVDA
           exampleValue: null
           uiEnhancement:
             role: async-select-search
@@ -446,7 +437,7 @@ widgets:
             itemsPath:
             - items
             itemValueFieldPath:
-            - display
+            - ticker
             itemLabelFieldPath:
             - label
             paginationPath:
@@ -459,7 +450,7 @@ widgets:
           required: false
           kind: date
           paramName: start_date
-          defaultValue: null
+          defaultValue: '2025-04-20'
           exampleValue: null
         - key: query:end_date
           label: End Date
@@ -468,7 +459,7 @@ widgets:
           required: false
           kind: date
           paramName: end_date
-          defaultValue: null
+          defaultValue: '2026-04-20'
           exampleValue: null
         - key: query:page
           label: Search Page
@@ -500,10 +491,13 @@ widgets:
       fields:
         query:ticker:
           label: Ticker
+          prefillValue: NVDA
         query:start_date:
           label: Start Date
+          prefillValue: '2025-04-20'
         query:end_date:
           label: End Date
+          prefillValue: '2026-04-20'
         query:page:
           visibleOnCard: false
           prefillValue: '1'

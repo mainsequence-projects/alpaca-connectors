@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import datetime as dt
 from types import UnionType
 from typing import Any, Literal, get_args, get_origin
 
@@ -33,6 +34,20 @@ CORE_VALUE_SCALAR_CONTRACTS = [
     CORE_VALUE_INTEGER_CONTRACT,
     CORE_VALUE_BOOLEAN_CONTRACT,
 ]
+DEFAULT_CHART_TICKER = "NVDA"
+
+
+def _one_year_before(target_date: dt.date) -> dt.date:
+    try:
+        return target_date.replace(year=target_date.year - 1)
+    except ValueError:
+        return target_date.replace(year=target_date.year - 1, day=28)
+
+
+def _default_chart_date_range(today: dt.date | None = None) -> tuple[str, str]:
+    end_date = today or dt.date.today()
+    start_date = _one_year_before(end_date)
+    return start_date.isoformat(), end_date.isoformat()
 
 
 def _normalize_annotation(annotation: Any) -> Any:
@@ -226,7 +241,12 @@ def _build_chart_request_ports(parameter_fields: list[dict[str, Any]]) -> list[d
     ]
 
 
-def _build_lightweight_ohlc_chart_binding_spec() -> dict[str, Any]:
+def _build_lightweight_ohlc_chart_binding_spec(
+    *,
+    default_ticker: str = DEFAULT_CHART_TICKER,
+    default_start_date: str,
+    default_end_date: str,
+) -> dict[str, Any]:
     ticker_key = "query:ticker"
     page_key = "query:page"
     limit_key = "query:limit"
@@ -238,6 +258,7 @@ def _build_lightweight_ohlc_chart_binding_spec() -> dict[str, Any]:
                 "Ticker to resolve inside the configured holdings category."
             ),
             required=True,
+            default_value=default_ticker,
             ui_enhancement={
                 "role": "async-select-search",
                 "widget": "select2",
@@ -246,7 +267,7 @@ def _build_lightweight_ohlc_chart_binding_spec() -> dict[str, Any]:
                 "pageFieldKey": page_key,
                 "limitFieldKey": limit_key,
                 "itemsPath": ["items"],
-                "itemValueFieldPath": ["display"],
+                "itemValueFieldPath": ["ticker"],
                 "itemLabelFieldPath": ["label"],
                 "paginationPath": ["pagination"],
                 "paginationMoreField": "hasMore",
@@ -258,6 +279,7 @@ def _build_lightweight_ohlc_chart_binding_spec() -> dict[str, Any]:
             description="Inclusive chart window start date.",
             required=False,
             kind="date",
+            default_value=default_start_date,
         ),
         _build_chart_query_field(
             name="end_date",
@@ -265,6 +287,7 @@ def _build_lightweight_ohlc_chart_binding_spec() -> dict[str, Any]:
             description="Inclusive chart window end date.",
             required=False,
             kind="date",
+            default_value=default_end_date,
         ),
         _build_chart_query_field(
             name="page",
@@ -327,19 +350,27 @@ def _build_lightweight_ohlc_chart_binding_spec() -> dict[str, Any]:
     }
 
 
-def _build_lightweight_ohlc_chart_request_input_map() -> dict[str, Any]:
+def _build_lightweight_ohlc_chart_request_input_map(
+    *,
+    default_ticker: str = DEFAULT_CHART_TICKER,
+    default_start_date: str,
+    default_end_date: str,
+) -> dict[str, Any]:
     return {
         "version": 1,
         "operationKey": CHART_OHLC_OPERATION_KEY,
         "fields": {
             "query:ticker": {
                 "label": "Ticker",
+                "prefillValue": default_ticker,
             },
             "query:start_date": {
                 "label": "Start Date",
+                "prefillValue": default_start_date,
             },
             "query:end_date": {
                 "label": "End Date",
+                "prefillValue": default_end_date,
             },
             "query:page": {
                 "visibleOnCard": False,
@@ -397,9 +428,13 @@ def build_lightweight_ohlc_chart_app_component_widget(
     *,
     fastapi_release_id: int,
     instance_id: str = CHART_OHLC_APP_COMPONENT_WIDGET_INSTANCE_ID,
+    default_ticker: str = DEFAULT_CHART_TICKER,
+    today: dt.date | None = None,
 ) -> dict[str, Any]:
     if fastapi_release_id <= 0:
         raise ValueError("fastapi_release_id must be a positive integer.")
+
+    default_start_date, default_end_date = _default_chart_date_range(today=today)
 
     return {
         "id": instance_id,
@@ -413,8 +448,16 @@ def build_lightweight_ohlc_chart_app_component_widget(
             "authMode": "session-jwt",
             "method": "post",
             "path": CHART_OHLC_ROUTE_PATH,
-            "bindingSpec": _build_lightweight_ohlc_chart_binding_spec(),
-            "requestInputMap": _build_lightweight_ohlc_chart_request_input_map(),
+            "bindingSpec": _build_lightweight_ohlc_chart_binding_spec(
+                default_ticker=default_ticker,
+                default_start_date=default_start_date,
+                default_end_date=default_end_date,
+            ),
+            "requestInputMap": _build_lightweight_ohlc_chart_request_input_map(
+                default_ticker=default_ticker,
+                default_start_date=default_start_date,
+                default_end_date=default_end_date,
+            ),
             "showHeader": True,
             "showResponse": False,
             "hideRequestButton": False,

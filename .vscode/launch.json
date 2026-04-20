@@ -100,7 +100,29 @@
       "console": "integratedTerminal",
       "envFile": "${workspaceFolder}/.env",
       "env": {
-        "PYTHONPATH": "${workspaceFolder}"
+        "PYTHONPATH": "${workspaceFolder}",
+        "API_CORS_ALLOW_ORIGINS": "http://localhost:5173"
+      },
+      "justMyCode": true
+    },
+    {
+      "name": "Run Alpaca Connectors API (port 8002)",
+      "type": "python",
+      "request": "launch",
+      "module": "uvicorn",
+      "args": [
+        "api.app.main:app",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "8002",
+        "--reload"
+      ],
+      "console": "integratedTerminal",
+      "envFile": "${workspaceFolder}/.env",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}",
+        "API_CORS_ALLOW_ORIGINS": "http://localhost:5173"
       },
       "justMyCode": true
     }

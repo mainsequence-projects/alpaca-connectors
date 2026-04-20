@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import datetime as dt
 import unittest
 
 from src.command_center.workspaces import (
@@ -52,6 +53,7 @@ class CommandCenterWorkspaceBuilderTests(unittest.TestCase):
     def test_build_lightweight_ohlc_chart_app_component_widget(self) -> None:
         widget = build_lightweight_ohlc_chart_app_component_widget(
             fastapi_release_id=91,
+            today=dt.date(2026, 4, 20),
         )
 
         self.assertEqual(widget["id"], CHART_OHLC_APP_COMPONENT_WIDGET_INSTANCE_ID)
@@ -83,7 +85,15 @@ class CommandCenterWorkspaceBuilderTests(unittest.TestCase):
         self.assertEqual(ticker_field["uiEnhancement"]["pageFieldKey"], "query:page")
         self.assertEqual(ticker_field["uiEnhancement"]["limitFieldKey"], "query:limit")
         self.assertEqual(ticker_field["uiEnhancement"]["itemsPath"], ["items"])
+        self.assertEqual(ticker_field["uiEnhancement"]["itemValueFieldPath"], ["ticker"])
         self.assertEqual(ticker_field["uiEnhancement"]["itemLabelFieldPath"], ["label"])
+        self.assertEqual(field_by_key["query:ticker"]["defaultValue"], "NVDA")
+        self.assertEqual(field_by_key["query:start_date"]["defaultValue"], "2025-04-20")
+        self.assertEqual(field_by_key["query:end_date"]["defaultValue"], "2026-04-20")
+        request_fields = widget["props"]["requestInputMap"]["fields"]
+        self.assertEqual(request_fields["query:ticker"]["prefillValue"], "NVDA")
+        self.assertEqual(request_fields["query:start_date"]["prefillValue"], "2025-04-20")
+        self.assertEqual(request_fields["query:end_date"]["prefillValue"], "2026-04-20")
         self.assertIn(
             "response:$",
             {port["id"] for port in widget["props"]["bindingSpec"]["responsePorts"]},
