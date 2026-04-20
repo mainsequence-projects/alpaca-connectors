@@ -18,6 +18,19 @@ Purpose:
 
 ## Entries
 
+### 2026-04-20
+
+- Context:
+  Extend workspace `3` (`Alpaca Assets Registry`) with an AppComponent-driven OHLC chart flow: ticker search/select, start/end date inputs, and a bound `lightweight-charts-spec` widget rendered from this project's FastAPI route `POST /v1/charts/lightweight/ohlc`.
+- Observation:
+  Registry detail for `app-component` and `lightweight-charts-spec` was sufficient to confirm the contract: the chart widget consumes `props-json` as `core.value.json@v1`, and the AppComponent can publish `response:$` for downstream binding. The AppComponent async select writes the selected option label into the request field, so the API resolves the selected ticker/FIGI/identifier strictly inside `HOLDINGS__IVV` before querying bars.
+- Impact:
+  Workspace `3` now contains three widgets: `register-asset-by-ticker`, `alpaca-ohlc-chart-request`, and `alpaca-ohlc-chart`. Both AppComponents target FastAPI release `29`; the chart widget binds `props-json` to `alpaca-ohlc-chart-request` output `response:$`.
+- Proposed skill improvement:
+  None. The registry-first workflow was correct. Operationally, `mainsequence project images create` still has a CLI gap when no `ProjectBaseImage` rows exist: the CLI prompt path fails with `No options available for Base image id`, while the backend SDK image-create path succeeds with `base_image_id=None`.
+- Status:
+  Completed. Pushed commits: `7c95289` for the API/workspace implementation and `c7a32ce` for the workspace source-of-truth release id update. Project image `1`, FastAPI resource `417`, and FastAPI release `29` were created.
+
 ### 2026-04-13
 
 - Context:
