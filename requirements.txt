@@ -41,7 +41,7 @@ colorama==0.4.6
     #   tqdm
 concurrent-log-handler==0.9.29
     # via mainsequence
-fastapi==0.135.3
+fastapi==0.136.0
     # via alpaca-connectors
 ghp-import==2.1.0
     # via mkdocs
@@ -72,7 +72,7 @@ jinja2==3.1.6
     # via
     #   mkdocs
     #   mkdocs-material
-mainsequence==3.17.51
+mainsequence==3.18.7
     # via alpaca-connectors
 markdown==3.10.2
     # via
@@ -136,7 +136,7 @@ opentelemetry-sdk==1.41.0
     #   opentelemetry-exporter-otlp-proto-http
 opentelemetry-semantic-conventions==0.62b0
     # via opentelemetry-sdk
-packaging==26.0
+packaging==26.1
     # via mkdocs
 paginate==0.5.7
     # via mkdocs-material
@@ -158,12 +158,12 @@ protobuf==6.33.6
     #   opentelemetry-proto
 psutil==7.2.2
     # via mainsequence
-pydantic==2.12.5
+pydantic==2.13.3
     # via
     #   alpaca-py
     #   fastapi
     #   mainsequence
-pydantic-core==2.41.5
+pydantic-core==2.46.3
     # via pydantic
 pyee==13.0.1
     # via playwright
@@ -243,5 +243,5 @@ watchdog==6.0.0
     # via mkdocs
 websockets==16.0
     # via alpaca-py
-zipp==3.23.0
+zipp==3.23.1
     # via importlib-metadata
