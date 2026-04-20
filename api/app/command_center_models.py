@@ -33,7 +33,9 @@ _data_models = _load_data_models_module()
 
 for _model_name in (
     "TableFieldResponse",
+    "SourceContextResponse",
     "SourceMetadataResponse",
+    "DataNodeWidgetInputResponse",
     "DataNodeTableSourceInputResponse",
 ):
     getattr(_data_models, _model_name).model_rebuild(_types_namespace=_data_models.__dict__)
