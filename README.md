@@ -20,3 +20,10 @@ Key pages:
 - `docs/assets/holdings_categories.md`
 - `docs/data_nodes/alpaca_bars.md`
 - `docs/command_center/app_component.md`
+
+Project CLI:
+
+- `alpaca-connectors asset register`
+- `alpaca-connectors holdings-category create`
+- `alpaca-connectors bars run`
+- `alpaca-connectors asset <ticker> update_prices <period>`

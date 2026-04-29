@@ -99,8 +99,11 @@ class AlpacaStockBarsNode(DataNode):
         self.frequency_id = normalize_frequency_id(config.frequency_id)
         self.feed = normalize_feed(config.feed)
         self.adjustment = normalize_adjustment(config.adjustment)
+        identifier = (
+            f"alpaca_stock_bars_{self.frequency_id}_{self.feed}_{self.adjustment}"
+        )
         config.node_metadata = DataNodeMetaData(
-            identifier=f"alpaca_stock_bars_{self.frequency_id}_{self.feed}_{self.adjustment}",
+            identifier=identifier,
             description=(
                 f"Alpaca US equity OHLCV bars at {self.frequency_id} frequency "
                 f"from the {self.feed} feed with {self.adjustment} adjustment."

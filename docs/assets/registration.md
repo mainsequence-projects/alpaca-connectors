@@ -10,7 +10,7 @@ Main module:
 
 Primary CLI:
 
-- `scripts/register_asset.py`
+- `src/cli/`
 
 ## Registration Contract
 
@@ -55,13 +55,13 @@ Slash and dash variants are also considered.
 ### Exact symbols only
 
 ```bash
-.venv/bin/python scripts/register_asset.py --symbols AAPL,MSFT,NVDA
+alpaca-connectors asset register --symbols AAPL,MSFT,NVDA
 ```
 
 ### ETF component expansion
 
 ```bash
-.venv/bin/python scripts/register_asset.py --seed-tickers IVV --component-provider ishares
+alpaca-connectors asset register --seed-tickers IVV --component-provider ishares
 ```
 
 ## Strict Extraction Rule

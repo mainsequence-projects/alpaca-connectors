@@ -1,21 +1,24 @@
 ---
 name: command-center-workspace-builder
-description: Use this skill when the task is about creating, updating, validating, or reviewing Main Sequence Command Center workspaces. This skill owns workspace documents, widget instance payload resolution, layout decisions, shared versus user state, widget-scoped mutation, and grounding those decisions against the richer widget-type registry contract plus the SDK command_center client models. Source order is strict: registry detail first, SDK client models second, local Main Sequence repository docs/models third only when the first two still leave instance payload questions unresolved. Main Sequence is platform-first: if a mounted widget or AppComponent depends on a project API, that API must already exist as a FastAPI project resource and have a corresponding FastAPI ResourceRelease before the workspace flow is considered usable. Resource and release creation belong to the orchestration-and-releases skill. It does not own AppComponent form contracts, API implementation, or Streamlit dashboards.
+description: Use this skill when the task is about creating, updating, validating, or reviewing Main Sequence Command Center workspaces after the workspace design is known. This skill owns workspace documents, widget instance payload resolution, safe mutation, shared versus user state, widget-scoped mutation, connection-backed source widget mounting, and grounding those decisions against the richer widget-type registry contract plus the SDK command_center client models. Use workspace_design first when the task is still about deciding which widgets, layout, narrative, or visualization strategy should express the user intent; use command-center-connections first when source data or query contracts are unresolved. Source order is strict: registry detail first, SDK client models second, local Main Sequence repository docs/models third only when the first two still leave instance payload questions unresolved. Main Sequence is platform-first: if a mounted widget or AppComponent depends on a project API, that API must already exist as a FastAPI project resource and have a corresponding FastAPI ResourceRelease before the workspace flow is considered usable. Resource and release creation belong to the orchestration-and-releases skill. It does not own AppComponent form contracts, API implementation, workspace design, or Streamlit dashboards.
 ---
 
 # Command Center Workspace Builder
 
 ## Overview
 
-Use this skill when the task is about a Command Center workspace document or a mounted widget inside that workspace.
+Use this skill when the task is about a Command Center workspace document or a mounted widget inside that workspace, and the high-level workspace design is already known.
 
-This skill is for workspace structure, widget payload resolution, safe workspace mutation, and grounding those decisions against the actual `mainsequence.client.command_center` client models.
+This skill is for workspace structure execution, widget payload resolution, safe workspace mutation, and grounding those decisions against the actual `mainsequence.client.command_center` client models.
+
+If the task is still deciding what the workspace should communicate, which widgets should be used, or how the workspace should be organized, use `.agents/skills/command_center/workspace_design/SKILL.md` first.
 
 ## This Skill Can Do
 
 - create a new Command Center workspace
 - update an existing workspace document
 - add widgets to a workspace
+- execute a known workspace design
 - verify widget types in the CLI registry before mounting or mutating them
 - inspect the richer widget detail contract before opening repository source
 - inspect SDK client models in `mainsequence/client/command_center/` before opening frontend implementation files
@@ -33,17 +36,24 @@ This skill is for workspace structure, widget payload resolution, safe workspace
 
 This skill must not claim ownership of:
 
+- deciding the workspace narrative or information architecture
+- choosing widgets from user intent when the design is not settled
+- deciding whether a table, chart, KPI, note, AppComponent, or diagnostic widget best expresses the business idea
 - AppComponent custom input forms
 - widget-facing API response contracts
 - generic FastAPI or backend API implementation
 - Streamlit dashboard implementation
-- DataNode producer design
+- tabular or operational data producer design
 - SimpleTable schema design
 
 ## Route Adjacent Work
 
+- Workspace design, widget selection, and visualization strategy:
+  `.agents/skills/command_center/workspace_design/SKILL.md`
 - AppComponents and custom forms:
   `.agents/skills/command_center/app_components/SKILL.md`
+- Connection-backed data access and query contract selection:
+  `.agents/skills/command_center/connections/SKILL.md`
 - predeployment mock API contract validation:
   `.agents/skills/command_center/api_mock_prototyping/SKILL.md`
 - APIs and FastAPI:
@@ -52,19 +62,20 @@ This skill must not claim ownership of:
   `.agents/skills/platform_operations/orchestration_and_releases/SKILL.md`
 - Streamlit dashboards:
   `.agents/skills/dashboards/streamlit/SKILL.md`
-- DataNodes:
-  `.agents/skills/data_publishing/data_nodes/SKILL.md`
 - SimpleTables:
   `.agents/skills/data_publishing/simple_tables/SKILL.md`
 
 ## Read First
 
+0. If widget selection, layout narrative, or visualization strategy is not already decided, use:
+   - `.agents/skills/command_center/workspace_design/SKILL.md`
 1. Verify the widget catalog through the CLI:
    - `mainsequence cc registered_widget_type list --json`
    - identify the target `widget_id`
    - `mainsequence cc registered_widget_type detail <WIDGET_ID> --json`
 2. The SDK client models in `mainsequence/client/command_center/`:
    - `workspace.py`
+   - `connections.py` when source widgets depend on backend-owned connections
    - `data_models.py`
    - `app_component.py` when the workspace contains AppComponent widgets or editable form payloads
 3. `docs/knowledge/command_center/workspaces.md`
@@ -106,6 +117,7 @@ Before writing or mutating a workspace, collect or infer:
 - verified `widget_id` values from the CLI registry
 - widget detail payloads for those widget ids
 - relevant SDK model sources in `mainsequence/client/command_center/`
+- connection instance, connection type, query model, and output contract for each connection-backed source widget
 - widget instance ids
 - external resource ids required by those widgets
 - whether any mounted widget depends on a project API that already exists as a FastAPI project resource with a FastAPI `ResourceRelease`
@@ -142,9 +154,12 @@ For every non-trivial workspace task, decide:
 5. Which fields are shared workspace state versus current-user state?
 6. Is the widget a runtime `execution-owner`, `consumer`, or `local-ui` widget?
 7. Are bindings and external resource ids fully resolved?
-8. If a mounted widget depends on a project API, does that API already exist as a FastAPI project resource with a FastAPI `ResourceRelease`?
-9. Does the workspace require a non-standard or more complex visualization that should be authored through `echarts-spec` instead of improvised chart props?
-10. If the workspace uses echarts-spec, prefer theme-aware colors and chart palettes over hardcoded hex values: use semantic theme tokens like "$theme.primary", "$theme.secondary", "$theme.warning", "$theme.success", "$theme.positive", "$theme.negative" for emphasis, use text tokens like "$theme.foreground" and "$theme.muted-foreground" for labels and annotations, and when a chart needs multiple series or scales, use the theme chart palettes for categorical, sequential, and diverging color assignment instead of improvising custom color arrays.
+8. Does every connection-backed source widget have a resolved connection instance, query model, typed query payload, and output contract?
+9. Do generic table, chart, statistic, curve, or agent-facing consumers receive `core.tabular_frame@v1` from a source or transform widget?
+10. If a mounted widget depends on a project API, does that API already exist as a FastAPI project resource with a FastAPI `ResourceRelease`?
+11. Does the workspace require a non-standard or more complex visualization that should be authored through `echarts-spec` instead of improvised chart props?
+12. If the workspace uses echarts-spec, prefer theme-aware colors and chart palettes over hardcoded hex values: use semantic theme tokens like "$theme.primary", "$theme.secondary", "$theme.warning", "$theme.success", "$theme.positive", "$theme.negative" for emphasis, use text tokens like "$theme.foreground" and "$theme.muted-foreground" for labels and annotations, and when a chart needs multiple series or scales, use the theme chart palettes for categorical, sequential, and diverging color assignment instead of improvising custom color arrays.
+
 ## Build Rules
 
 ### 1. Verify the widget type in the CLI registry first
@@ -198,7 +213,9 @@ After registry verification, inspect the relevant `mainsequence.client.command_c
 Use:
 
 - `workspace.py` for shared workspace shape and widget-scoped mutation methods
-- `data_models.py` for Data Node-family tabular contracts, field provenance, and date/range payload rules
+- `connections.py` for connection type and connection instance discovery
+- `data_models.py` for `TabularFrameResponse`, the SDK canonical `core.tabular_frame@v1` model,
+  plus field schema, frame metadata, and source context rules
 - `app_component.py` for editable form structures relevant to workspace-mounted AppComponent workflows
 
 Treat these SDK models as the first concrete client interaction surface.
@@ -266,6 +283,30 @@ Resolve widget instance payloads from:
 - local schemas
 
 If the payload shape is not defined by those sources and cannot be verified, stop.
+
+### 3.1 Resolve connection-backed data before mounting consumers
+
+Before mounting table, chart, statistic, curve, or similar data consumers:
+
+1. identify the source Connection Query widget
+2. verify the selected connection instance exists and is usable
+3. verify the connection type and `queryModelId`
+4. verify the typed query payload
+5. verify the published output contract
+6. add a Tabular Transform widget if analytical reshaping is required
+7. bind consumers to the source or transform `dataset` output
+
+Do not store endpoint URLs, credentials, backend route fragments, provider ids, or mutable
+connection display labels as authoritative widget props.
+
+Generic tabular consumers must receive `core.tabular_frame@v1`. If the upstream API or connection
+returns raw arrays, paginated JSON, nested provider payloads, or other ad hoc records, normalize
+through an Adapter from API connection first, then use an explicit transform when analytical
+reshaping is still required.
+
+When a project API or AppComponent legitimately returns a full canonical frame, ground the contract
+against `mainsequence.client.command_center.data_models.TabularFrameResponse`. Source-specific
+runtime details belong in `source.context`, not top-level widget payload fields.
 
 ### 4. Shared workspace state and current-user state are different
 
@@ -343,6 +384,110 @@ Prefer:
 2. create or update through the CLI using that file
 3. verify through CLI after creation or mutation
 
+## Bindings
+
+Bindings are canonical instance-level graph edges. They live on the target widget instance in
+`bindings`, not in `props`, and not in widget-type metadata.
+
+One binding is always defined as:
+
+- target widget instance + target input id
+- source widget instance + source output id
+- optional ordered transform steps
+
+Persisted shape:
+
+- `bindings[inputId] = WidgetPortBinding`
+- `bindings[inputId] = WidgetPortBinding[]` when the target input declares `cardinality: "many"`
+
+A `WidgetPortBinding` minimally contains:
+
+- `sourceWidgetId`
+- `sourceOutputId`
+- optional `transformSteps`
+
+Treat `transformSteps` as canonical. Legacy `transformId`, `transformPath`, and
+`transformContractId` may still appear only as backward-compatible mirrors for older persisted
+workspaces.
+
+Do not describe bindings loosely as “widget A uses widget B”. In this platform, bindings are always
+port-to-port:
+
+- source widget output port -> target widget input port
+
+Resolve bindings from the target widget outward:
+
+1. Resolve the target widget IO surface first.
+   - use static `io` when present
+   - use instance-level `resolveIo(...)` when the widget exposes dynamic ports
+   - if the widget has no resolved inputs yet, stop; the widget is not ready for binding authoring
+2. For each target input, record:
+   - `inputId`
+   - accepted contracts
+   - `required`
+   - `cardinality`
+   - `effects`
+3. Choose a source widget instance that actually publishes the required output id.
+4. If the source output is structured JSON or an array, resolve binding transforms before contract
+   validation.
+   - supported transform steps:
+     - `select-array-item`
+     - `extract-path`
+5. Validate the transformed contract against the target input `accepts`.
+6. Treat the binding as usable only when the resolved status is `valid`.
+
+A binding can exist in workspace JSON and still be unusable at runtime. The runtime may resolve a
+binding as:
+
+- `unbound`
+- `missing-source`
+- `missing-output`
+- `contract-mismatch`
+- `self-reference-blocked`
+- `transform-invalid`
+- `valid`
+
+Input `effects` explain what the binding actually changes:
+
+- `drives-value`: upstream value becomes an effective widget or generated-field value
+- `drives-default`: upstream value changes a default
+- `drives-options`: upstream value changes available options
+- `drives-validation`: upstream value changes validation rules
+- `drives-render`: upstream value changes rendered output
+
+Runtime and persistence rules:
+
+- store graph edges in `widget.bindings`, never in ad hoc raw props
+- binding changes clear that target widget's `runtimeState`
+- the widget settings `Bindings` tab and the workspace graph editor edit the same canonical binding model
+- for `cardinality: "many"` inputs, preserve order and store an array of bindings for that input id
+
+Dynamic-IO rule:
+
+- some widgets cannot be bound safely until instance configuration has materialized their ports
+- `AppComponent` is the clearest example: request inputs and response outputs are generated from the
+  saved operation or binding spec, so do not guess ports before `resolveIo(...)` exposes them
+
+Concrete examples:
+
+- a Connection Query widget publishes `dataset`; a Tabular Transform widget can consume and republish `dataset`
+- `main-sequence-ai-agent-terminal` accepts one input with `cardinality: "many"`, so several
+  upstream widget contexts can feed one terminal
+- widgets that implement `buildAgentSnapshot(...)` may also publish a synthetic `agent-context`
+  output; that output is platform-generated and still counts as a normal bindable source
+
+Review rule:
+
+- for every binding in a proposed workspace, verify the full tuple:
+  - target widget instance id
+  - target input id
+  - source widget instance id
+  - source output id
+  - transform steps, if any
+  - final resolved contract
+  - final resolved status
+
+
 ## Review Rules
 
 When reviewing a workspace task, look for:
@@ -358,6 +503,9 @@ When reviewing a workspace task, look for:
 - shared state mixed incorrectly with current-user runtime state
 - runtime ownership violations such as consumer widgets inventing canonical fetch paths
 - unresolved external resource ids
+- connection-backed consumers missing a source or transform `dataset` binding
+- generic tabular consumers bound to raw JSON instead of `core.tabular_frame@v1`
+- full canonical tabular payloads that drift from `TabularFrameResponse`
 - widget trees using structures not supported by the Main Sequence repository source models
 
 ## Validation Checklist
@@ -375,6 +523,9 @@ Do not claim success until you have checked:
 - versioned workspace/widget JSON files were preserved pending user acceptance
 - widget detail was reviewed for `widgetVersion`, configuration, runtime, IO, capabilities, agent hints, and examples
 - the relevant SDK client model was reviewed when one exists
+- connection-backed source widgets have verified connection instance, connection type, query model, typed query payload, and output contract
+- generic tabular consumers receive `core.tabular_frame@v1`
+- full canonical tabular frames match `TabularFrameResponse`
 - widget ids and widget instance ids are correct
 - any mounted widget that depends on a project API points to a FastAPI project resource that already exists
 - any mounted widget that depends on a project API points to a FastAPI `ResourceRelease` that already exists

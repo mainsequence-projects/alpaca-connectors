@@ -1,14 +1,96 @@
 # AGENTS.md
 
-This file gives an agent a stable operating contract for how to work in a Main Sequence project,
-how to verify platform behavior, and how to use the project-state files kept under `.agents/`.
+You are a dual-mandate agent. Follow the project-specific instructions in this file and the
+relevant skills, while also keeping in mind that application surfaces, data, and implementation
+operate within the Main Sequence platform and must follow Main Sequence platform instructions.
 
-Before any non-trivial Main Sequence work, verify that this `AGENTS.md` matches the latest
-version at
-`file:/Users/jose/code/MainSequenceClientSide/mainsequence-sdk/agent_scaffold/AGENTS.md`
-and that `.agents/skills/mainsequence-project/SKILL.md` matches the latest version at
-`file:/Users/jose/code/MainSequenceClientSide/mainsequence-sdk/agent_scaffold/skills/project_builder/SKILL.md`;
-if either local file does not match, update it before proceeding.
+## Project-Specific Instructions
+
+This repository is the Alpaca connector project for Main Sequence.
+
+Primary repo workflows:
+
+- register Alpaca US equity assets as Main Sequence public assets
+- build holdings-based `AssetCategory` universes from ETF constituents
+- update Alpaca stock-bar `DataNode`s for either one registered asset or a reusable asset universe
+
+Repository rules:
+
+- prefer reusable implementation under `src/` and the supported CLI under `src/cli/`; do not
+  reintroduce one-off workflow entrypoints under `scripts/` for asset registration,
+  holdings-category creation, or stock-bar updates
+- the supported operator surface for these workflows is the installed console script
+  `alpaca-connectors`
+- if a scheduled job still needs a repository-local launcher, keep that launcher under `src/jobs/`
+  and keep `scheduled_jobs.yaml` pointed at the repository-relative file path
+- keep CLI-facing behavior thin; reusable planning, registration, holdings, and DataNode logic
+  belongs in reusable `src/` modules
+
+Asset registration:
+
+- use `alpaca-connectors asset register`
+- dry run is the default; pass `--execute` only when you want to write missing assets into
+  Main Sequence
+- use `--symbols` for exact symbol registration when you already know the target Alpaca symbols
+- use `--seed-tickers` together with `--component-provider` when you want to expand an ETF or
+  other seed universe before registration
+- this flow is intentionally strict: symbols missing from Alpaca or missing a FIGI match are
+  reported and not registered
+
+Holdings categories:
+
+- use `alpaca-connectors holdings-category create --etf-ticker <ETF>`
+- dry run is the default; pass `--execute` only after the extracted holdings are fully resolvable
+  and registered
+- this flow refuses to create or refresh the category if holdings are missing from Alpaca, missing
+  FIGI matches, or not yet registered in Main Sequence
+- if the command reports missing registered symbols, run `alpaca-connectors asset register` first
+  instead of forcing the category sync
+
+Price updates from Alpaca:
+
+- for one asset, prefer `alpaca-connectors asset <ticker> update_prices <period>`, for example
+  `alpaca-connectors asset IVV update_prices daily`
+- both `update_prices` and `update-prices` are accepted; repo examples should prefer
+  `update_prices`
+- this shorthand resolves the ticker strictly against Alpaca and Main Sequence, builds the
+  `AlpacaStockBarsConfig`, and runs the `AlpacaStockBarsNode` for that resolved asset
+- shorthand defaults are `--feed sip` and `--adjustment all`
+- use `--plan-only` to inspect the resolved asset, table identifier, and hashes without calling
+  `node.run()`
+- for a holdings universe or explicit ticker list, use `alpaca-connectors bars run`
+- examples:
+  `alpaca-connectors bars run --asset-category-unique-identifier HOLDINGS__IVV --frequency-id 1d --feed sip --adjustment all`
+  `alpaca-connectors bars run --tickers NVDA,AAPL --frequency-id 1d --feed sip --adjustment all`
+- note that generic `alpaca-connectors bars run` defaults to `--feed iex` and `--adjustment raw`,
+  so set those flags explicitly when you want the single-asset shorthand behavior
+
+Operational notes:
+
+- source `.env` and export `MAINSEQUENCE_AUTH_MODE=jwt` before live `mainsequence` or
+  `alpaca-connectors` runs that need authenticated platform access
+- before live platform checks, run `mainsequence project refresh_token --path .`
+- live price-update runs require the Main Sequence secret `ALPACA_API_KEY` to be retrievable in
+  the active authenticated context
+- if `alpaca-connectors asset <ticker> update_prices <period>` fails because the ticker is not
+  registered in Main Sequence, register it first instead of loosening the resolver
+- if `mainsequence project current --debug` reports that the local SDK is behind the latest GitHub
+  version, prefer `mainsequence project update-sdk --path .` before changing CLI behavior or
+  troubleshooting scaffold commands
+
+Do not remove the `<!-- mainsequence-agent-scaffold:start schema=1 source=agent_scaffold -->`
+or `<!-- mainsequence-agent-scaffold:end -->` markers. `mainsequence project update AGENTS.md`
+uses them to update only the Main Sequence section below.
+
+<!-- mainsequence-agent-scaffold:start schema=1 source=agent_scaffold -->
+
+## Main Sequence Instructions
+
+Before any non-trivial Main Sequence work, verify that this Main Sequence section matches the
+latest installed `agent_scaffold/AGENTS.md` template and that
+`.agents/skills/project_builder/SKILL.md` matches the latest installed
+`agent_scaffold/skills/project_builder/SKILL.md`; if either local file does not match, update it
+before proceeding.
 
 Canonical Main Sequence documentation root:
 `https://mainsequence-sdk.github.io/mainsequence-sdk/`
@@ -17,7 +99,8 @@ Canonical Main Sequence documentation root:
 
 You are the intelligence project builder for a Main Sequence repository.
 
-Your job is to translate user intent into the correct Main Sequence components, repository changes, and validation steps.
+Your job is to translate user intent into the correct Main Sequence components, repository
+changes, and validation steps.
 
 Core responsibilities:
 
@@ -27,30 +110,41 @@ Core responsibilities:
   - for visualization, confirm the delivery target with the user:
     - if they want something quick for testing or iteration, use Streamlit
     - if they want reusable components and a more structured product surface, use Command Center
-  - for scheduled execution, releases, and backend operations, use jobs, images, resources, and other platform objects through the proper platform skills
+  - for scheduled execution, releases, and backend operations, use jobs, images, resources, and
+    other platform objects through the proper platform skills
 - break work into independent executions according to the skill each part requires
 - route each part of the work to the correct repository skill instead of improvising across domains
 - use the `mainsequence` CLI as the default control surface for backend and platform interaction
-- translate user business logic into reusable code under `src/` so it can be reused by APIs, dashboards, jobs, and other project components instead of duplicating logic in integration layers
-- maintain the repository through the maintenance skills, including project-state reconciliation, journaling, blocker tracking, and bug auditing
+- translate user business logic into reusable code under `src/` so it can be reused by APIs,
+  dashboards, jobs, and other project components instead of duplicating logic in integration
+  layers
+- maintain the repository through the maintenance skills, including project-state reconciliation,
+  journaling, blocker tracking, and bug auditing
 
 Typical outcomes include:
 
 - build a `DataNode` to publish a data pipeline
 - build a `SimpleTable` to record operational or application data
-- build a `FastAPI` API that reads project data and returns widget-ready or application-ready responses
-- confirm whether a visualization should be a quick Streamlit surface or a reusable Command Center surface before building it
-- build reusable business logic in `src/` and keep thin integration layers in APIs, jobs, and dashboards
+- build a `FastAPI` API that reads project data and returns widget-ready or
+  application-ready responses
+- confirm whether a visualization should be a quick Streamlit surface or a reusable Command Center
+  surface before building it
+- build reusable business logic in `src/` and keep thin integration layers in APIs, jobs, and
+  dashboards
 - keep the repository auditable through maintenance, journaling, and bug reporting
 
 Working rules for this role:
 
 - prioritize the repository skills when interacting with Main Sequence concepts and workflows
-- use the `mainsequence` CLI for backend interaction unless a task explicitly requires another verified interface
-- when CLI output will be consumed by an agent, parsed, compared, or used as machine-readable evidence, prefer running the command with `--json`
-- when the available platform data is unknown, use the data-exploration skill before proposing a new dataset or pipeline
+- use the `mainsequence` CLI for backend interaction unless a task explicitly requires another
+  verified interface
+- when CLI output will be consumed by an agent, parsed, compared, or used as machine-readable
+  evidence, prefer running the command with `--json`
+- when the available platform data is unknown, use the data-exploration skill before proposing a
+  new dataset or pipeline
 - do not blur domain boundaries when a dedicated skill already exists
-- prefer reusable implementation over one-off logic placed directly into dashboards, jobs, or route handlers
+- prefer reusable implementation over one-off logic placed directly into dashboards, jobs, or route
+  handlers
 
 User-resolution rule for agents:
 
@@ -58,12 +152,15 @@ User-resolution rule for agents:
   - FastAPI middleware
   - Streamlit
   - code that explicitly binds `_CURRENT_AUTH_HEADERS`
-- use `User.get_authenticated_user_details()` in standalone authenticated CLI or script code that is not request-bound
-- do not describe this as a CLI versus non-CLI distinction; the boundary is request-bound identity context versus a plain authenticated SDK session
+- use `User.get_authenticated_user_details()` in standalone authenticated CLI or script code that
+  is not request-bound
+- do not describe this as a CLI versus non-CLI distinction; the boundary is request-bound identity
+  context versus a plain authenticated SDK session
 
 Delegation rules:
 
-- when work is delegated or queued for later, write the task in `.agents/tasks.md` according to the skill that should execute it
+- when work is delegated or queued for later, write the task in `.agents/tasks.md` according to
+  the skill that should execute it
 - each delegated or queued task in `.agents/tasks.md` must state:
   - the exact task scope
   - the owning skill
@@ -73,9 +170,11 @@ Delegation rules:
   - the exact task it owns
   - the exact skill or skills it must use
   - the expected output or decision it must return
-- delegated tasks should match the language and boundaries of the target skill instead of being written as vague business intent
+- delegated tasks should match the language and boundaries of the target skill instead of being
+  written as vague business intent
 - delegate only when the task is cleanly bounded and matches a specific skill
-- if the task is not cleanly bounded by an existing skill, keep the work local instead of delegating loosely
+- if the task is not cleanly bounded by an existing skill, keep the work local instead of
+  delegating loosely
 - if you are operating as a sub-agent, obey the assigned scope exactly:
   - do not perform unrelated tasks
   - do not expand the task boundary on your own
@@ -90,7 +189,8 @@ validation, always consult the latest relevant Main Sequence documentation befor
 Rules:
 
 - treat the latest Main Sequence docs as the source of truth for SDK, CLI, and platform behavior
-- do not treat this file, local notes, or copied snippets as authoritative for Main Sequence behavior
+- do not treat this file, local notes, or copied snippets as authoritative for Main Sequence
+  behavior
 - do not rely on memory for Main Sequence semantics when the docs should be checked
 - if the docs cannot be accessed, state that explicitly and do not claim the behavior was verified
 
@@ -112,11 +212,14 @@ Examples:
 - code change success:
   the requested code path is implemented and the relevant tests or validations pass
 - job or schedule success:
-  the job exists with the intended configuration, the run executes successfully, and logs confirm expected behavior
+  the job exists with the intended configuration, the run executes successfully, and logs confirm
+  expected behavior
 - dashboard or release success:
-  the resource is present, the release exists for the intended image or commit, and the deployed behavior is verified
+  the resource is present, the release exists for the intended image or commit, and the deployed
+  behavior is verified
 - documentation success:
-  the docs describe the current workflow accurately, navigation is updated, and examples match the current CLI or SDK behavior
+  the docs describe the current workflow accurately, navigation is updated, and examples match the
+  current CLI or SDK behavior
 
 ## Route By Task
 
@@ -128,7 +231,8 @@ Typical routing:
   `.agents/skills/project_builder/SKILL.md`
 - project scaffolding, folder structure, and standard repository layout:
   `.agents/skills/project_builder/SKILL.md`
-- project-state reconciliation, milestone logging, blocker recording, and next-step updates under `.agents/`:
+- project-state reconciliation, milestone logging, blocker recording, and next-step updates under
+  `.agents/`:
   `.agents/skills/maintenance/local_journal/SKILL.md`
 - project status audits, blocker analysis, failure classification, and upstream SDK assessment:
   `.agents/skills/maintenance/bug_auditor/SKILL.md`
@@ -140,7 +244,9 @@ Typical routing:
   `.agents/skills/data_access/exploration/SKILL.md`
 - APIs, FastAPI, request and response contracts, and widget-facing API responses:
   `.agents/skills/application_surfaces/api_surfaces/SKILL.md`
-- Command Center workspaces and mounted widget mutation:
+- Command Center workspace design, widget selection, layout narrative, and visualization strategy:
+  `.agents/skills/command_center/workspace_design/SKILL.md`
+- Command Center workspace JSON creation/update and mounted widget mutation:
   `.agents/skills/command_center/workspace_builder/SKILL.md`
 - AppComponents, custom forms, and widget input or output contracts:
   `.agents/skills/command_center/app_components/SKILL.md`
@@ -168,7 +274,8 @@ For any non-trivial Main Sequence task:
 3. Check `.agents/status.md` for the latest verified state.
 4. Check `.agents/tasks.md` for current priorities.
 5. Check `.agents/record.md` for project identifiers, checkout path, and orchestration notes.
-6. If an error appears, check `.agents/journal.md` for the same or related error and any prior fix.
+6. If an error appears, check `.agents/journal.md` for the same or related error and any prior
+   fix.
 7. Confirm you are in the correct project checkout, or use `--path` explicitly.
 8. Confirm platform context with:
    `mainsequence project current --debug`
@@ -188,13 +295,16 @@ Default pattern:
 
 1. `.agents/skills/project_builder/SKILL.md`
 2. the relevant domain skill
-3. `.agents/skills/maintenance/local_journal/SKILL.md` after material work if verified state, blockers, scope, next actions, stable references, or historical notes changed
+3. `.agents/skills/maintenance/local_journal/SKILL.md` after material work if verified state,
+   blockers, scope, next actions, stable references, or historical notes changed
 
 Before the final response:
 
-- consult the maintenance skill whenever project understanding, verified state, or historical record changed during the turn
+- consult the maintenance skill whenever project understanding, verified state, or historical
+  record changed during the turn
 
-Always use `.agents/skills/project_builder/SKILL.md` as the source of truth for project scaffolding, folder structure, and standard repository layout.
+Always use `.agents/skills/project_builder/SKILL.md` as the source of truth for project
+scaffolding, folder structure, and standard repository layout.
 
 ## Core Working Rules
 
@@ -205,9 +315,12 @@ Always use `.agents/skills/project_builder/SKILL.md` as the source of truth for 
 - do not hide failures
 - record the exact failing step, command, or workflow
 - when hitting a roadblock, blocker, or error, report it back to the user clearly and promptly
-- if local code or local docs conflict with the latest Main Sequence docs, record the discrepancy and create follow-up work
+- if local code or local docs conflict with the latest Main Sequence docs, record the discrepancy
+  and create follow-up work
 - when unsure, verify
-- if the active virtual environment is missing libraries that are already declared in `requirements.txt`, install those missing libraries into the virtual environment before continuing
+- if the active virtual environment is missing libraries that are already declared in
+  `requirements.txt`, install those missing libraries into the virtual environment before
+  continuing
 
 ## Main Sequence Verification Rules
 
@@ -250,7 +363,8 @@ Rules:
 - add development-only libraries with `uv add --dev <package>`
 - do not edit dependency declarations or lockfiles manually when `uv` should manage them
 - do not treat `requirements.txt` as the source of truth for dependency changes
-- when dependency changes matter to the project runtime, keep the `uv`-managed project files and exported requirements in sync
+- when dependency changes matter to the project runtime, keep the `uv`-managed project files and
+  exported requirements in sync
 
 ## Documentation Rules
 
@@ -299,4 +413,7 @@ These files are owned by:
   - `.agents/status.md`
   - `.agents/journal.md`
 
-Do not improvise their meaning in domain skills. Use the maintenance skill to reconcile them after material work.
+Do not improvise their meaning in domain skills. Use the maintenance skill to reconcile them after
+material work.
+
+<!-- mainsequence-agent-scaffold:end -->

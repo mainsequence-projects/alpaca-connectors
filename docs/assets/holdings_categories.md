@@ -10,7 +10,7 @@ Main module:
 
 Primary CLI:
 
-- `scripts/create_holdings_category.py`
+- `src/cli/`
 
 ## Naming Convention
 
@@ -54,11 +54,11 @@ The ETF-to-provider mapping is stored in:
 Dry run:
 
 ```bash
-.venv/bin/python scripts/create_holdings_category.py --etf-ticker IVV
+alpaca-connectors holdings-category create --etf-ticker IVV
 ```
 
 Execute:
 
 ```bash
-.venv/bin/python scripts/create_holdings_category.py --etf-ticker IVV --execute
+alpaca-connectors holdings-category create --etf-ticker IVV --execute
 ```

@@ -2,12 +2,6 @@ from __future__ import annotations
 
 import argparse
 import json
-from pathlib import Path
-import sys
-
-REPO_ROOT = Path(__file__).resolve().parents[1]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
 
 from src.holdings_categories import (
     build_holdings_asset_category_plan,
@@ -16,11 +10,9 @@ from src.holdings_categories import (
 from src.settings import SUPPORTED_COMPONENT_PROVIDERS
 
 
-def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        description=(
-            "Create or refresh a MainSequence AssetCategory from an ETF holdings extraction path."
-        ),
+def configure_create_parser(parser: argparse.ArgumentParser) -> None:
+    parser.description = (
+        "Create or refresh a MainSequence AssetCategory from an ETF holdings extraction path."
     )
     parser.add_argument(
         "--etf-ticker",
@@ -48,13 +40,10 @@ def build_parser() -> argparse.ArgumentParser:
         default=30.0,
         help="HTTP timeout in seconds for extraction, Alpaca, and MainSequence requests.",
     )
-    return parser
+    parser.set_defaults(handler=run_create_command)
 
 
-def main() -> None:
-    parser = build_parser()
-    args = parser.parse_args()
-
+def run_create_command(args: argparse.Namespace) -> int:
     plan = build_holdings_asset_category_plan(
         etf_ticker=args.etf_ticker,
         component_provider=args.component_provider,
@@ -71,13 +60,14 @@ def main() -> None:
             print(f"  - {symbol}")
 
     if plan.registration_plan.unresolved_symbols:
-        print("These extracted component symbols have no FIGI match and will block category creation:")
+        print("These extracted component symbols have no FIGI match and will be skipped:")
         for symbol in plan.registration_plan.unresolved_symbols:
             warning = plan.registration_plan.warnings_by_symbol.get(symbol)
             if warning:
                 print(f"  - {symbol}: {warning}")
             else:
                 print(f"  - {symbol}")
+        print("Warning: unresolved symbols do not block category sync.")
 
     if plan.missing_registered_symbols:
         print("These extracted component symbols are not yet registered as MainSequence assets:")
@@ -86,7 +76,7 @@ def main() -> None:
 
     if not args.execute:
         print("Dry run only. Pass --execute to create or refresh the category.")
-        return
+        return 0
 
     if plan.has_blockers():
         raise SystemExit(
@@ -115,7 +105,4 @@ def main() -> None:
             sort_keys=True,
         )
     )
-
-
-if __name__ == "__main__":
-    main()
+    return 0

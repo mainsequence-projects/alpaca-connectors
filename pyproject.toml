@@ -18,6 +18,9 @@ dependencies = [
     "httpx>=0.28.1",
 ]
 
+[project.scripts]
+alpaca-connectors = "src.cli:main"
+
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["src*", "agents*", "api*",]

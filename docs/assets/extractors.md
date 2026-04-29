@@ -52,10 +52,10 @@ bash scripts/install_browser_runtime.sh
 ## Examples
 
 ```bash
-.venv/bin/python scripts/register_asset.py --seed-tickers IVV --component-provider ishares
-.venv/bin/python scripts/register_asset.py --seed-tickers QQQ --component-provider invesco
-.venv/bin/python scripts/register_asset.py --seed-tickers VNQ --component-provider vanguard
-.venv/bin/python scripts/register_asset.py --seed-tickers SPY --component-provider state_street
+alpaca-connectors asset register --seed-tickers IVV --component-provider ishares
+alpaca-connectors asset register --seed-tickers QQQ --component-provider invesco
+alpaca-connectors asset register --seed-tickers VNQ --component-provider vanguard
+alpaca-connectors asset register --seed-tickers SPY --component-provider state_street
 ```
 
 ## Important Decision

@@ -54,7 +54,6 @@ class HoldingsAssetCategoryPlan:
     def has_blockers(self) -> bool:
         return bool(
             self.expansion.unsupported_seed_symbols
-            or self.registration_plan.unresolved_symbols
             or self.registration_plan.missing_symbols_from_alpaca
             or self.missing_registered_symbols
         )

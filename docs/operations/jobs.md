@@ -5,7 +5,23 @@
 The project includes:
 
 - `scheduled_jobs.yaml`
-- `scripts/run_daily_stock_bars_holdings_ivv.py`
+- `src/jobs/run_daily_stock_bars_holdings_ivv.py`
+- `src/jobs/run_etf_maintenance_routines.py`
+- `data/etf_maintenance_routines.yaml`
+
+Use the routine runner for looped ETF workflows (register, category sync, ETF prices, category prices):
+
+Example:
+
+```bash
+.venv/bin/python src/jobs/run_etf_maintenance_routines.py --dry-run
+```
+
+Run `--dry-run` first to verify generated command order, then execute:
+
+```bash
+.venv/bin/python src/jobs/run_etf_maintenance_routines.py
+```
 
 That launcher runs daily bars for:
 
@@ -29,7 +45,7 @@ This means midnight UTC.
 ```yaml
 jobs:
   - name: "Alpaca Daily Stock Bars HOLDINGS__IVV"
-    execution_path: "scripts/run_daily_stock_bars_holdings_ivv.py"
+    execution_path: "src/jobs/run_daily_stock_bars_holdings_ivv.py"
     task_schedule:
       type: "crontab"
       expression: "0 0 * * *"

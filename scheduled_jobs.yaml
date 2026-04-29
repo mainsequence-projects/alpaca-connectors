@@ -1,6 +1,6 @@
 jobs:
   - name: "Alpaca Daily Stock Bars HOLDINGS__IVV"
-    execution_path: "scripts/run_daily_stock_bars_holdings_ivv.py"
+    execution_path: "src/jobs/run_daily_stock_bars_holdings_ivv.py"
     task_schedule:
       type: "crontab"
       expression: "0 0 * * *" # midnight UTC

@@ -4,21 +4,32 @@
 
 - Repository path is `/Users/jose/mainsequence/main-sequence-workbench/projects/alpaca-connectors-153`.
 - Main Sequence project detection reports project ID `153`.
-- Local SDK version in `requirements.txt` is `3.18.8`, matching the latest GitHub version reported by the CLI.
+- `mainsequence project current --debug` completed successfully on 2026-04-28 and reported Python `3.11.5`, project ID `153`, local SDK `3.18.19`, and latest GitHub SDK `3.18.20`.
 - `mainsequence project refresh_token --path .` completed successfully on 2026-04-20.
-- `POST /v1/charts/lightweight/ohlc` now has one explicit FastAPI response model:
-  `LightweightOhlcResponse`.
-- The local OpenAPI route response schema references `LightweightOhlcResponse` directly and does not use a route-level `anyOf`.
-- `LightweightOhlcResponse` exposes the structured `spec` field only; the duplicate stringified spec field has been removed from API models, service output, docs, tests, and saved workspace response ports.
-- All schema-visible API routes under `/health` and `/v1/` declare response models.
-- `python -m unittest discover tests` passed 45 tests on 2026-04-20 after the duplicate stringified spec removal.
+- Asset registration now runs through the installed CLI entry point `alpaca-connectors asset register`.
+- Holdings category creation now runs through the installed CLI entry point `alpaca-connectors holdings-category create`.
+- Daily stock-bar updates now run through the installed CLI entry points `alpaca-connectors bars run` and `alpaca-connectors asset <ticker> update_prices <period>`.
+- `AGENTS.md` now contains project-specific instructions for the Alpaca registration,
+  holdings-category, and stock-bar CLI workflows.
+- Legacy scripts `scripts/register_asset.py` and `scripts/create_holdings_category.py` have been removed.
+- Legacy scripts `scripts/run_daily_stock_bars.py` and `scripts/run_daily_stock_bars_holdings_ivv.py` have been removed.
+- Scheduled job execution for the IVV daily bars preset now points to `src/jobs/run_daily_stock_bars_holdings_ivv.py`.
+- Project docs now reference the CLI entry points instead of the deleted scripts.
+- `uv sync` rebuilt and reinstalled the local package on 2026-04-28 after the CLI entry-point change.
+- `.venv/bin/alpaca-connectors asset register --help` completed successfully on 2026-04-28.
+- `.venv/bin/python -m src.cli asset IVV update_prices daily --help` completed successfully on 2026-04-28.
+- `.venv/bin/alpaca-connectors asset IVV update_prices daily --help` completed successfully on 2026-04-28.
+- `.venv/bin/python -m unittest tests.test_cli tests.test_run_daily_stock_bars tests.test_alpaca_bars_support` passed 12 tests on 2026-04-28.
 
 ## Pending
 
-- The updated API schema has not been released as a new FastAPI `ResourceRelease` in this turn.
-- Live Command Center behavior was not rechecked after the local API contract change.
+- The new CLI entry points were validated locally only; no live asset registration or holdings-category sync was executed in this turn.
+- A live `alpaca-connectors asset IVV update_prices daily --plan-only` check failed on 2026-04-28 because JWT refresh and MainSequence secret lookup for `ALPACA_API_KEY` failed in this shell.
+- The local SDK is one version behind the latest GitHub SDK reported by `mainsequence project current --debug`.
+- Native `mainsequence project update AGENTS.md --path .` currently needs a workaround in this environment because the installed `agent_scaffold/AGENTS.md` template triggers the CLI managed-block parser error.
 
 ## Notes
 
-- The route intentionally keeps the generated Command Center form query-only for the OHLC AppComponent flow.
-- The API does not use `LoggedUserContextMiddleware` because current route handlers do not read `request.state.user`.
+- Running `python -m src.cli` with no subcommand prints help and exits non-zero by design.
+- The AGENTS scaffold update succeeded on 2026-04-28 only after forcing the CLI to import a
+  temporary cleaned `agent_scaffold/AGENTS.md` through `PYTHONPATH`.

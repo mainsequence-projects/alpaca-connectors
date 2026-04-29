@@ -1,0 +1,17 @@
+defaults:
+  frequency_id: "1d"
+  feed: "sip"
+  adjustment: "all"
+  etf_update_period: "daily"
+  include_seed_registration: true
+  include_category_sync: true
+  include_etf_price_update: true
+  include_category_price_update: true
+
+routines:
+  - etf_ticker: "IVV"
+  - etf_ticker: "SIZE"
+  - etf_ticker: "QUAL"
+  - etf_ticker: "MTUM"
+  - etf_ticker: "USMV"
+  - etf_ticker: "VLUE"

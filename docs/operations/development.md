@@ -25,25 +25,25 @@ bash scripts/install_browser_runtime.sh
 ### Register assets
 
 ```bash
-.venv/bin/python scripts/register_asset.py --symbols NVDA,AAPL
+alpaca-connectors asset register --symbols NVDA,AAPL
 ```
 
 ### Register from ETF holdings
 
 ```bash
-.venv/bin/python scripts/register_asset.py --seed-tickers IVV --component-provider ishares --execute
+alpaca-connectors asset register --seed-tickers IVV --component-provider ishares --execute
 ```
 
 ### Create holdings category
 
 ```bash
-.venv/bin/python scripts/create_holdings_category.py --etf-ticker IVV --execute
+alpaca-connectors holdings-category create --etf-ticker IVV --execute
 ```
 
 ### Run daily bars for a category
 
 ```bash
-.venv/bin/python scripts/run_daily_stock_bars.py \
+alpaca-connectors bars run \
   --asset-category-unique-identifier HOLDINGS__IVV \
   --frequency-id 1d \
   --feed sip \
@@ -53,11 +53,17 @@ bash scripts/install_browser_runtime.sh
 ### Run daily bars for one ticker
 
 ```bash
-.venv/bin/python scripts/run_daily_stock_bars.py \
+alpaca-connectors bars run \
   --tickers NVDA \
   --frequency-id 1d \
   --feed sip \
   --adjustment all
+```
+
+### Shorthand asset price update
+
+```bash
+alpaca-connectors asset IVV update_prices daily
 ```
 
 ## VS Code Launch Configurations

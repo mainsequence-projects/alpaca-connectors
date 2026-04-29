@@ -45,6 +45,7 @@ etfs_main_tickers:
   - VTV   # Large-cap value; value exposure
   - VUG   # Large-cap growth; growth exposure
   - HDV   # High Dividend Yield; dividend and quality/profitability tilt
+  - SIZE  # ishares  size
 
 etf_provider_map_normalized:
   IVV: ishares
@@ -82,3 +83,4 @@ etf_provider_map_normalized:
   VTV: vanguard
   VUG: vanguard
   HDV: ishares
+  SIZE: ishares

@@ -7,6 +7,7 @@ from src.holdings_categories import (
     build_holdings_asset_category_plan,
     build_holdings_asset_category_unique_identifier,
     infer_holdings_component_provider,
+    HoldingsAssetCategoryPlan,
 )
 from src.assets.alpaca_us_equities import AlpacaUsEquity
 
@@ -100,6 +101,34 @@ class HoldingsCategoryTests(unittest.TestCase):
         self.assertEqual(plan.component_symbols, ["AAPL", "MSFT"])
         self.assertEqual(plan.existing_asset_ids_by_symbol, {"AAPL": 1, "MSFT": 2})
         self.assertEqual(plan.category_unique_identifier, "HOLDINGS__IVV")
+
+    def test_plan_has_blockers_ignores_unresolved_symbols(self) -> None:
+        plan = HoldingsAssetCategoryPlan(
+            etf_ticker="IVV",
+            provider="ishares",
+            category_unique_identifier="HOLDINGS__IVV",
+            expansion=ExpandedSymbolUniverse(
+                seed_symbols=["IVV"],
+                expanded_symbols=["AAPL", "IVV", "FWONK"],
+                component_symbols_by_seed={"IVV": ["AAPL", "IVV", "FWONK"]},
+                unsupported_seed_symbols=[],
+            ),
+            registration_plan=type(
+                "RegistrationPlan",
+                (),
+                {
+                    "unresolved_symbols": ["FWONK"],
+                    "missing_symbols_from_alpaca": [],
+                    "warnings_by_symbol": {"FWONK": "No FIGI match"},
+                },
+            )(),
+            registration_resolution=type("RegistrationResolution", (), {"missing_matches": []})(),
+            component_symbols=["AAPL", "IVV", "FWONK"],
+            existing_asset_ids_by_symbol={"AAPL": 1, "IVV": 2},
+            missing_registered_symbols=[],
+        )
+
+        self.assertFalse(plan.has_blockers())
 
 
 if __name__ == "__main__":
