@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from src.extractors.common import ExpandedSymbolUniverse
+from etf_extraction.extractors.common import ExpandedSymbolUniverse
 from src.holdings_categories import (
     build_holdings_asset_category_plan,
     build_holdings_asset_category_unique_identifier,

@@ -7,7 +7,7 @@ from src.holdings_categories import (
     build_holdings_asset_category_plan,
     sync_holdings_asset_category,
 )
-from src.settings import SUPPORTED_COMPONENT_PROVIDERS
+from etf_extraction.settings import SUPPORTED_COMPONENT_PROVIDERS
 
 
 def configure_create_parser(parser: argparse.ArgumentParser) -> None:

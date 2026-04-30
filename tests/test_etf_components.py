@@ -4,12 +4,15 @@ import io
 import unittest
 import zipfile
 
-from src.extractors import build_component_extractor
-from src.extractors.invesco import InvescoHoldingsExtractor
-from src.extractors.ishares import IsharesHoldingsExtractor, parse_ishares_holdings_tickers
-from src.extractors.state_street import StateStreetHoldingsExtractor
-from src.extractors.vanguard import VanguardHoldingsExtractor
-from src.settings import IsharesHoldingsSource
+from etf_extraction.extractors import build_component_extractor
+from etf_extraction.extractors.invesco import InvescoHoldingsExtractor
+from etf_extraction.extractors.ishares import (
+    IsharesHoldingsExtractor,
+    parse_ishares_holdings_tickers,
+)
+from etf_extraction.extractors.state_street import StateStreetHoldingsExtractor
+from etf_extraction.extractors.vanguard import VanguardHoldingsExtractor
+from etf_extraction.settings import IsharesHoldingsSource
 
 
 class EtfComponentResolutionTests(unittest.TestCase):

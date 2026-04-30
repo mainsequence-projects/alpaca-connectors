@@ -3,12 +3,13 @@ from __future__ import annotations
 import argparse
 import json
 
+from etf_extraction import EtfExpansionRequest, expand_etf_seed_symbols
+from etf_extraction.settings import SUPPORTED_COMPONENT_PROVIDERS
 from src.assets import (
     build_alpaca_us_equity_registration_plan,
     register_alpaca_us_equity_assets,
     resolve_alpaca_us_equity_registration_plan,
 )
-from src.settings import SUPPORTED_COMPONENT_PROVIDERS
 
 
 def configure_register_parser(parser: argparse.ArgumentParser) -> None:
@@ -56,16 +57,58 @@ def _parse_symbols(raw_symbols: str | None) -> list[str] | None:
     return symbols or None
 
 
-def run_register_command(args: argparse.Namespace) -> int:
+def _validate_registration_args(args: argparse.Namespace) -> None:
     if args.seed_tickers and not args.component_provider:
         raise SystemExit("--component-provider is required when --seed-tickers is used.")
     if args.component_provider and not args.seed_tickers:
         raise SystemExit("--seed-tickers is required when --component-provider is used.")
 
+
+def _resolve_registration_symbols(
+    args: argparse.Namespace,
+) -> tuple[list[str] | None, object | None]:
+    direct_symbols = _parse_symbols(args.symbols)
+    if direct_symbols is not None:
+        return direct_symbols, None
+
+    if not args.seed_tickers:
+        return None, None
+
+    expansion_result = expand_etf_seed_symbols(
+        EtfExpansionRequest(
+            seed_tickers=_parse_symbols(args.seed_tickers) or [],
+            component_provider=args.component_provider,
+            timeout=args.timeout,
+        )
+    )
+    return expansion_result.symbols_for_registration, expansion_result
+
+
+def _build_registration_summary(plan, resolution, expansion_result) -> dict[str, object]:
+    summary: dict[str, object] = {**plan.summary(), **resolution.summary()}
+    if expansion_result is None:
+        return summary
+
+    summary.update(
+        {
+            "seed_symbols": expansion_result.universe.seed_symbols,
+            "component_provider": expansion_result.component_provider,
+            "expanded_candidate_symbols": expansion_result.universe.expanded_symbols,
+            "expanded_component_symbols_by_seed": (
+                expansion_result.universe.component_symbols_by_seed
+            ),
+            "unsupported_seed_symbols": expansion_result.universe.unsupported_seed_symbols,
+        }
+    )
+    return summary
+
+
+def run_register_command(args: argparse.Namespace) -> int:
+    _validate_registration_args(args)
+    symbols, expansion_result = _resolve_registration_symbols(args)
+
     plan = build_alpaca_us_equity_registration_plan(
-        symbols=_parse_symbols(args.symbols),
-        seed_tickers=_parse_symbols(args.seed_tickers),
-        component_provider=args.component_provider,
+        symbols=symbols,
         include_non_tradable=args.include_non_tradable,
         timeout=args.timeout,
     )
@@ -75,7 +118,8 @@ def run_register_command(args: argparse.Namespace) -> int:
     )
 
     print("Planned Alpaca US equity registration")
-    print(json.dumps({**plan.summary(), **resolution.summary()}, indent=2, sort_keys=True))
+    summary = _build_registration_summary(plan, resolution, expansion_result)
+    print(json.dumps(summary, indent=2, sort_keys=True))
 
     if plan.unresolved_symbols:
         print(

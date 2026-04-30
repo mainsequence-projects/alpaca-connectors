@@ -9,8 +9,8 @@ from src.assets.alpaca_us_equities import (
     build_alpaca_us_equity_registration_plan,
     resolve_alpaca_us_equity_registration_plan,
 )
-from src.extractors import ExpandedSymbolUniverse, build_component_extractor
-from src.settings import ETF_PROVIDER_MAP_NORMALIZED
+from etf_extraction.extractors import ExpandedSymbolUniverse, build_component_extractor
+from etf_extraction.settings import ETF_PROVIDER_MAP_NORMALIZED
 
 HOLDINGS_ASSET_CATEGORY_PREFIX = "HOLDINGS__"
 

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable, Iterable, Sequence
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any
 
 import requests
 from alpaca.trading.client import TradingClient
@@ -10,14 +10,12 @@ from alpaca.trading.enums import AssetClass, AssetStatus
 from alpaca.trading.models import Asset as AlpacaTradingAsset
 from alpaca.trading.requests import GetAssetsRequest
 from pydantic import BaseModel, ConfigDict, Field
-from src.extractors import ExpandedSymbolUniverse, build_component_extractor
 from src.settings import (
     OPENFIGI_DEFAULT_EXCHANGE_CODE,
     OPENFIGI_DEFAULT_TIMEOUT,
     OPENFIGI_MAPPING_URL,
     OPENFIGI_MAX_JOBS_WITH_API_KEY,
     OPENFIGI_MAX_JOBS_WITHOUT_API_KEY,
-    SUPPORTED_COMPONENT_PROVIDERS,
     get_alpaca_api_key,
     get_alpaca_secret_key,
     get_figi_market_sector_equity,
@@ -196,8 +194,6 @@ class AlpacaEquityRegistrationPlan(BaseModel):
     classification_passes: list[AlpacaEquityClassificationPass]
     matches_by_symbol: dict[str, OpenFigiMatch]
     unresolved_symbols: list[str]
-    seed_symbol_universe: ExpandedSymbolUniverse | None = None
-    component_provider: str | None = None
     missing_symbols_from_alpaca: list[str] = Field(default_factory=list)
     requested_symbol_aliases: dict[str, str] = Field(default_factory=dict)
     warnings_by_symbol: dict[str, str] = Field(default_factory=dict)
@@ -215,18 +211,6 @@ class AlpacaEquityRegistrationPlan(BaseModel):
         return {
             "alpaca_asset_count": len(self.alpaca_assets),
             "requested_symbols": [asset.symbol for asset in self.alpaca_assets],
-            "seed_symbols": (
-                self.seed_symbol_universe.seed_symbols if self.seed_symbol_universe else []
-            ),
-            "component_provider": self.component_provider,
-            "expanded_candidate_symbols": (
-                self.seed_symbol_universe.expanded_symbols if self.seed_symbol_universe else []
-            ),
-            "expanded_component_symbols_by_seed": (
-                self.seed_symbol_universe.component_symbols_by_seed
-                if self.seed_symbol_universe
-                else {}
-            ),
             "missing_symbols_from_alpaca": self.missing_symbols_from_alpaca,
             "requested_symbol_aliases": self.requested_symbol_aliases,
             "matched_common_stock_symbols": self.symbols_for_security_type(
@@ -470,8 +454,6 @@ def classify_alpaca_us_equities(
     openfigi_api_key: str | None = None,
     timeout: float = OPENFIGI_DEFAULT_TIMEOUT,
     requests_session: requests.Session | None = None,
-    seed_symbol_universe: ExpandedSymbolUniverse | None = None,
-    component_provider: str | None = None,
     missing_symbols_from_alpaca: Sequence[str] | None = None,
     requested_symbol_aliases: dict[str, str] | None = None,
     query_openfigi_fn: Callable[..., tuple[dict[str, OpenFigiMatch], dict[str, str]]] = (
@@ -514,8 +496,6 @@ def classify_alpaca_us_equities(
         classification_passes=list(classification_passes),
         matches_by_symbol=matches_by_symbol,
         unresolved_symbols=remaining_symbols,
-        seed_symbol_universe=seed_symbol_universe,
-        component_provider=component_provider,
         missing_symbols_from_alpaca=sorted(set(missing_symbols_from_alpaca or [])),
         requested_symbol_aliases=dict(sorted((requested_symbol_aliases or {}).items())),
         warnings_by_symbol=warnings_by_symbol,
@@ -526,38 +506,11 @@ def build_alpaca_us_equity_registration_plan(
     *,
     trading_client: TradingClient | None = None,
     symbols: Sequence[str] | None = None,
-    seed_tickers: Sequence[str] | None = None,
-    component_provider: Literal["ishares", "invesco", "vanguard", "state_street"] | None = None,
     include_non_tradable: bool = False,
     exchange_code: str = OPENFIGI_DEFAULT_EXCHANGE_CODE,
     timeout: float = OPENFIGI_DEFAULT_TIMEOUT,
     requests_session: requests.Session | None = None,
 ) -> AlpacaEquityRegistrationPlan:
-    if symbols and seed_tickers:
-        raise ValueError("Use either symbols or seed_tickers, not both.")
-    if seed_tickers and component_provider is None:
-        raise ValueError(
-            "component_provider is required when seed_tickers are provided."
-        )
-    if component_provider and not seed_tickers:
-        raise ValueError(
-            "seed_tickers are required when component_provider is provided."
-        )
-
-    seed_symbol_universe = None
-    requested_symbols = symbols
-    if seed_tickers:
-        if component_provider not in SUPPORTED_COMPONENT_PROVIDERS:
-            raise ValueError(
-                f"Unsupported component provider: {component_provider!r}. Supported providers: {', '.join(SUPPORTED_COMPONENT_PROVIDERS)}"
-            )
-        seed_symbol_universe = build_component_extractor(
-            component_provider,
-            timeout=timeout,
-            requests_session=requests_session,
-        ).expand_seed_symbols(seed_tickers)
-        requested_symbols = seed_symbol_universe.expanded_symbols
-
     available_alpaca_assets = fetch_alpaca_us_equities(
         trading_client=trading_client,
         include_non_tradable=include_non_tradable,
@@ -565,14 +518,14 @@ def build_alpaca_us_equity_registration_plan(
     requested_symbol_aliases: dict[str, str] = {}
     alpaca_assets = available_alpaca_assets
     missing_symbols_from_alpaca: list[str] = []
-    if requested_symbols:
+    if symbols:
         (
             alpaca_assets,
             missing_symbols_from_alpaca,
             requested_symbol_aliases,
         ) = _resolve_requested_symbols_to_alpaca_assets(
             alpaca_assets=available_alpaca_assets,
-            requested_symbols=requested_symbols,
+            requested_symbols=symbols,
         )
     return classify_alpaca_us_equities(
         alpaca_assets,
@@ -580,8 +533,6 @@ def build_alpaca_us_equity_registration_plan(
         openfigi_api_key=get_openfigi_api_key(),
         timeout=timeout,
         requests_session=requests_session,
-        seed_symbol_universe=seed_symbol_universe,
-        component_provider=component_provider,
         missing_symbols_from_alpaca=missing_symbols_from_alpaca,
         requested_symbol_aliases=requested_symbol_aliases,
     )

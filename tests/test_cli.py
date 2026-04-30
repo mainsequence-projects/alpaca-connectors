@@ -29,8 +29,6 @@ class CliTests(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         build_plan.assert_called_once_with(
             symbols=["AAPL", "MSFT"],
-            seed_tickers=None,
-            component_provider=None,
             include_non_tradable=False,
             timeout=30.0,
         )
@@ -38,6 +36,57 @@ class CliTests(unittest.TestCase):
         output = stdout.getvalue()
         self.assertIn("Planned Alpaca US equity registration", output)
         self.assertIn("Dry run only. Pass --execute to register the missing assets.", output)
+
+    def test_asset_register_seed_tickers_expands_before_alpaca_plan(self) -> None:
+        plan = SimpleNamespace(
+            summary=lambda: {"requested_symbols": ["AAPL", "IVV", "MSFT"]},
+            unresolved_symbols=[],
+            warnings_by_symbol={},
+        )
+        resolution = SimpleNamespace(summary=lambda: {"existing_assets": ["AAPL"]})
+        expansion_result = SimpleNamespace(
+            component_provider="ishares",
+            symbols_for_registration=["AAPL", "IVV", "MSFT"],
+            universe=SimpleNamespace(
+                seed_symbols=["IVV"],
+                expanded_symbols=["AAPL", "IVV", "MSFT"],
+                component_symbols_by_seed={"IVV": ["AAPL", "MSFT"]},
+                unsupported_seed_symbols=[],
+            ),
+        )
+        stdout = io.StringIO()
+
+        with (
+            patch("src.cli.asset.expand_etf_seed_symbols", return_value=expansion_result)
+            as expand_seeds,
+            patch("src.cli.asset.build_alpaca_us_equity_registration_plan", return_value=plan)
+            as build_plan,
+            patch(
+                "src.cli.asset.resolve_alpaca_us_equity_registration_plan",
+                return_value=resolution,
+            ),
+            contextlib.redirect_stdout(stdout),
+        ):
+            exit_code = main(
+                [
+                    "asset",
+                    "register",
+                    "--seed-tickers",
+                    "ivv",
+                    "--component-provider",
+                    "ishares",
+                ]
+            )
+
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(expand_seeds.call_args.args[0].seed_tickers, ["IVV"])
+        self.assertEqual(expand_seeds.call_args.args[0].component_provider, "ishares")
+        build_plan.assert_called_once_with(
+            symbols=["AAPL", "IVV", "MSFT"],
+            include_non_tradable=False,
+            timeout=30.0,
+        )
+        self.assertIn('"component_provider": "ishares"', stdout.getvalue())
 
     def test_holdings_category_create_dry_run(self) -> None:
         registration_plan = SimpleNamespace(

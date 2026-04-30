@@ -7,7 +7,6 @@ from src.assets.alpaca_us_equities import (
     AlpacaUsEquity,
     OpenFigiMatch,
     _resolve_requested_symbols_to_alpaca_assets,
-    build_alpaca_us_equity_registration_plan,
     classify_alpaca_us_equities,
     resolve_alpaca_us_equity_registration_plan,
 )
@@ -53,12 +52,6 @@ class AlpacaAssetRegistrationTests(unittest.TestCase):
             requested_symbol_aliases,
             {"BFB": "BF.B", "BRKB": "BRK.B"},
         )
-
-    def test_component_provider_is_required_for_seed_tickers(self) -> None:
-        with self.assertRaisesRegex(ValueError, "component_provider is required"):
-            build_alpaca_us_equity_registration_plan(
-                seed_tickers=["IVV"],
-            )
 
     def test_classification_uses_stock_then_etp_then_reit_passes(self) -> None:
         alpaca_assets = [

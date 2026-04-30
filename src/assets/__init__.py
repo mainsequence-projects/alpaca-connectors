@@ -1,6 +1,6 @@
 """Asset registration helpers for Alpaca connectors."""
 
-from src.extractors import (
+from etf_extraction.extractors import (
     ExpandedSymbolUniverse,
     InvescoHoldingsExtractor,
     IsharesHoldingsExtractor,
