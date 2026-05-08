@@ -2,6 +2,17 @@
 
 ## Open
 
+### Confirm Live Project-To-Agent Platform Wiring After Auth Is Restored
+
+- Owning skill: `.agents/skills/mainsequence/project_to_agent/SKILL.md`
+- Scope: once `mainsequence login` works again, determine the actual live platform path for the
+  local project-to-agent artifacts without assuming unverified release semantics from local SDK
+  internals.
+- Expected output: a verified description of how this repository's local agent card and project
+  skills should map to the live Main Sequence platform, if at all.
+- Validation evidence: authenticated CLI or platform evidence rather than inference from local SDK
+  source only.
+
 ### Upgrade SDK And Recheck Native AGENTS Scaffold Update
 
 - Owning skill: `.agents/skills/maintenance/bug_auditor/SKILL.md`

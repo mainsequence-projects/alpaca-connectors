@@ -18,6 +18,13 @@
 - Project docs now include a standalone ETF extraction architecture page at `docs/etf_extraction.md`.
 - `README.md` now summarizes the implemented project capabilities, operator surfaces, runtime
   prerequisites, and repo boundaries instead of acting mainly as a docs pointer page.
+- `AGENTS.md` now contains real project-specific instructions for the Alpaca connector workflows
+  and an explicit local project-to-agent boundary.
+- `.agents/agent_card.json` now exists and reflects the current custom non-Main Sequence skills.
+- Project-specific custom skills now cover asset registration, holdings-category sync, stock-bar
+  workflows, and the thin API surface.
+- `docs/agent.md` now documents the local agent-ready project artifacts and boundaries.
+- Local validation coverage now includes agent-artifact checks in `tests/test_agent_artifacts.py`.
 - `uv sync` rebuilt and reinstalled the local package on 2026-04-28 after the CLI entry-point change.
 - `.venv/bin/alpaca-connectors asset register --help` completed successfully on 2026-04-28.
 - `.venv/bin/python -m src.cli asset IVV update_prices daily --help` completed successfully on 2026-04-28.
@@ -30,6 +37,8 @@
 - A live `alpaca-connectors asset IVV update_prices daily --plan-only` check failed on 2026-04-28 because JWT refresh and MainSequence secret lookup for `ALPACA_API_KEY` failed in this shell.
 - The local SDK is one version behind the latest GitHub SDK reported by `mainsequence project current --debug`.
 - Native `mainsequence project update AGENTS.md --path .` currently needs a workaround in this environment because the installed `agent_scaffold/AGENTS.md` template triggers the CLI managed-block parser error.
+- The local project-to-agent artifacts were added without claiming a live platform release path.
+- The new agent-artifact validation file was added but not executed in this turn.
 
 ## Notes
 
@@ -37,5 +46,7 @@
 - The standalone ETF extraction docs page is documentation-only; no new live platform verification was required for that change.
 - The README capability-summary rewrite is documentation-only; no live platform verification was
   required for that change.
+- The project-to-agent work in this turn is local-repository metadata and documentation work only;
+  it does not introduce a standalone local `agent.py` runtime.
 - The AGENTS scaffold update succeeded on 2026-04-28 only after forcing the CLI to import a
   temporary cleaned `agent_scaffold/AGENTS.md` through `PYTHONPATH`.

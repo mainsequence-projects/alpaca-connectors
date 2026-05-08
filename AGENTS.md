@@ -6,8 +6,102 @@ operate within the Main Sequence platform and must follow Main Sequence platform
 
 ## Project-Specific Instructions
 
-[ HERE SHOULD BE THE PROJECT-SPECIFIC ACTIONS, RULES, CONTEXT, AND LOCAL NOTES. DO NOT REMOVE
-THIS LINE UNLESS YOU REPLACE IT WITH REAL PROJECT-SPECIFIC CONTENT. ]
+This repository is the Alpaca connector project for Main Sequence.
+
+Primary project workflows:
+
+- register Alpaca US equity assets as Main Sequence public assets
+- build holdings-backed `AssetCategory` universes from ETF constituents
+- update Alpaca stock-bar `DataNode`s for one registered asset or a reusable asset universe
+- expose thin FastAPI endpoints that wrap the existing registration, holdings, discovery, and chart
+  logic
+
+Supported operator surfaces:
+
+- installed CLI: `alpaca-connectors`
+- reusable implementation modules under `src/`
+- thin FastAPI surface under `api/`
+- repository-local scheduled-job entrypoints under `src/jobs/`
+
+Repository rules:
+
+- keep reusable planning, registration, holdings, and stock-bar logic under `src/` or
+  `etf_extraction/`; do not reintroduce one-off workflow scripts for the main operations
+- keep CLI-facing behavior thin; CLI commands should orchestrate reusable modules, not duplicate
+  business logic
+- if a scheduled job still needs a repository-local launcher, keep that launcher under `src/jobs/`
+  and keep `scheduled_jobs.yaml` pointed at the repository-relative path
+
+Asset registration:
+
+- use `alpaca-connectors asset register`
+- dry run is the default; pass `--execute` only when you want to write missing assets into Main
+  Sequence
+- use `--symbols` for exact symbol registration when you already know the target Alpaca symbols
+- use `--seed-tickers` together with `--component-provider` when you want to expand an ETF or
+  other seed universe before registration
+- this flow is intentionally strict: symbols missing from Alpaca or missing a FIGI match are
+  reported and not registered
+
+Holdings categories:
+
+- use `alpaca-connectors holdings-category create --etf-ticker <ETF>`
+- dry run is the default; pass `--execute` only after the extracted holdings are fully resolvable
+  and registered
+- this flow refuses to create or refresh the category if holdings are missing from Main Sequence
+  or resolve ambiguously in Main Sequence
+- if the command reports missing registered symbols, run `alpaca-connectors asset register` first
+  instead of forcing the category sync
+
+Price updates from Alpaca:
+
+- for one asset, prefer `alpaca-connectors asset <ticker> update_prices <period>`, for example
+  `alpaca-connectors asset IVV update_prices daily`
+- both `update_prices` and `update-prices` are accepted; repo examples should prefer
+  `update_prices`
+- this shorthand resolves the ticker strictly against Alpaca and Main Sequence, builds the
+  `AlpacaStockBarsConfig`, and runs the `AlpacaStockBarsNode` for that resolved asset
+- shorthand defaults are `--feed sip` and `--adjustment all`
+- use `--plan-only` to inspect the resolved asset, table identifier, and hashes without calling
+  `node.run()`
+- for a holdings universe or explicit ticker list, use `alpaca-connectors bars run`
+- generic `alpaca-connectors bars run` defaults to `--feed iex` and `--adjustment raw`, so set
+  those flags explicitly when you want single-asset shorthand behavior
+
+FastAPI surface:
+
+- the API is intentionally thin and should call the reusable logic already implemented under `src/`
+  and `etf_extraction/`
+- keep route handlers contract-driven and avoid rebuilding the producer logic inside route bodies
+- the current API surface supports discovery config, asset registration, single-ticker
+  AppComponent registration, holdings-category execution, and lightweight OHLC chart payloads
+
+Project-to-agent boundary:
+
+- this repository is being prepared for agentic capabilities through project metadata and skills,
+  not by introducing a separate local runtime under `agents/`
+- do not assume an `agent.py` entrypoint exists or is required for this project unless the user
+  explicitly asks for one
+- agent-facing descriptions must stay within the supported local project behavior: asset
+  registration, holdings-category sync, stock-bar planning and updates, and the existing API
+  support surface
+- do not invent trading, portfolio-management, or platform-release capabilities that are not
+  represented in the local repo
+- when documenting agent capabilities, treat the existing CLI and reusable modules as the action
+  surface
+
+Operational notes:
+
+- source `.env` and export `MAINSEQUENCE_AUTH_MODE=jwt` before live `mainsequence` or
+  `alpaca-connectors` runs that need authenticated platform access
+- before live platform checks, run `mainsequence project refresh_token --path .`
+- live price-update runs require the Main Sequence secret `ALPACA_API_KEY` to be retrievable in
+  the active authenticated context
+- if `alpaca-connectors asset <ticker> update_prices <period>` fails because the ticker is not
+  registered in Main Sequence, register it first instead of loosening the resolver
+- if `mainsequence project current --debug` reports that the local SDK is behind the latest GitHub
+  version, prefer `mainsequence project update-sdk --path .` before changing CLI behavior or
+  troubleshooting scaffold commands
 
 Do not remove the `<!-- mainsequence-agent-scaffold:start schema=1 source=agent_scaffold -->`
 or `<!-- mainsequence-agent-scaffold:end -->` markers. `mainsequence project update AGENTS.md`

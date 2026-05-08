@@ -2,6 +2,18 @@
 
 ## 2026-05-08
 
+- Context: prepare the repository for local project-to-agent use without introducing a standalone
+  local `agent.py` runtime.
+- Work completed: replaced the `AGENTS.md` placeholder with real project-specific instructions,
+  added project-specific custom skills under `.agents/skills/`, created `.agents/agent_card.json`,
+  added `docs/agent.md`, updated `README.md` and `mkdocs.yml`, added local validation coverage in
+  `tests/test_agent_artifacts.py`, and removed the mistaken `google-adk` dependency that had been
+  introduced during an earlier mis-scoped attempt.
+- Verification: the work was validated by repository inspection and local artifact consistency
+  design only; no live platform validation or test execution was performed in this turn.
+
+## 2026-05-08
+
 - Context: make the repository README useful as the project entrypoint instead of mostly referring
   readers to deeper docs pages.
 - Work completed: rewrote `README.md` into a capability summary covering the supported CLI, API,

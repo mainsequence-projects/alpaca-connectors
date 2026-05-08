@@ -10,6 +10,9 @@
 - API schemas: `api/app/schemas.py`
 - API services: `api/app/services.py`
 - API docs: `docs/api.md`
+- Agent docs: `docs/agent.md`
+- Agent card: `.agents/agent_card.json`
+- Project-specific custom skills root: `.agents/skills/`
 - ETF extraction docs: `docs/etf_extraction.md`
 - Workspace payload: `command_center/workspaces/alpaca_assets_registry.workspace.yaml`
 
@@ -45,3 +48,5 @@
 - The shorthand asset price-update parser accepts both `update_prices` and `update-prices`; use
   `update_prices` in repo docs and examples.
 - The legacy script entry points for those workflows were removed on 2026-04-28.
+- The local project-to-agent surface is metadata-and-skill based; no standalone local `agent.py`
+  runtime is assumed by default.

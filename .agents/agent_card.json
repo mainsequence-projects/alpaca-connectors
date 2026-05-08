@@ -1,0 +1,87 @@
+{
+  "name": "alpaca-connectors-153",
+  "description": "Agent-ready project card for the Alpaca Connectors repository. This project supports strict Alpaca asset registration, ETF holdings-category orchestration, Alpaca stock-bar planning and updates, and a thin FastAPI support surface over those existing workflows.",
+  "version": "0.1.17",
+  "supportedInterfaces": [
+    {
+      "protocolBinding": "HTTP+JSON",
+      "protocolVersion": "1.0"
+    }
+  ],
+
+  "capabilities": {
+    "streaming": false,
+    "pushNotifications": false,
+    "extendedAgentCard": false
+  },
+  "securitySchemes": {},
+  "securityRequirements": [],
+  "defaultInputModes": [
+    "application/json"
+  ],
+  "defaultOutputModes": [
+    "application/json"
+  ],
+  "skills": [
+    {
+      "id": "application_surfaces.api_surfaces",
+      "name": "API Surfaces",
+      "description": "Support the repository's existing FastAPI surface for discovery, registration, holdings-category execution, and lightweight OHLC chart responses.",
+      "tags": [],
+      "examples": [
+        "Update the single-ticker registration API response without changing the underlying registration logic."
+      ],
+      "inputModes": [
+        "application/json"
+      ],
+      "outputModes": [
+        "application/json"
+      ]
+    },
+    {
+      "id": "asset_registration",
+      "name": "Asset Registration",
+      "description": "Use the supported CLI and reusable modules to plan or execute strict Alpaca plus OpenFIGI-backed Main Sequence asset registration.",
+      "tags": [],
+      "examples": [
+        "Register NVDA and AAPL through the supported asset registration flow."
+      ],
+      "inputModes": [
+        "application/json"
+      ],
+      "outputModes": [
+        "application/json"
+      ]
+    },
+    {
+      "id": "holdings_category",
+      "name": "Holdings Category",
+      "description": "Plan or execute holdings-backed Main Sequence asset-category sync from ETF constituents using the supported project workflow.",
+      "tags": [],
+      "examples": [
+        "Create or refresh HOLDINGS__IVV after confirming all extracted holdings are registered."
+      ],
+      "inputModes": [
+        "application/json"
+      ],
+      "outputModes": [
+        "application/json"
+      ]
+    },
+    {
+      "id": "stock_bars",
+      "name": "Stock Bars",
+      "description": "Plan or execute Alpaca stock-bar updates for one asset, a ticker list, or a holdings category through the supported CLI and DataNode modules.",
+      "tags": [],
+      "examples": [
+        "Plan a daily IVV stock-bar update without running the node."
+      ],
+      "inputModes": [
+        "application/json"
+      ],
+      "outputModes": [
+        "application/json"
+      ]
+    }
+  ]
+}

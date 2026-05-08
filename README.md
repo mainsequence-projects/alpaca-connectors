@@ -19,6 +19,22 @@ platform datasets and UI surfaces.
 - Run recurring ETF maintenance and scheduled daily bar updates from repository-managed job
   entrypoints.
 
+## Agentic Capabilities
+
+This repository is now prepared for project-to-agent use through local project metadata and skills.
+
+- `AGENTS.md` documents the real project-specific workflows and the supported agent capability
+  boundary.
+- `.agents/skills/` contains project-specific workflow skills for asset registration,
+  holdings-category sync, stock-bar operations, and the thin FastAPI surface.
+- `.agents/agent_card.json` describes the local agent-ready capability surface for this project.
+
+Important boundary:
+
+- this repo does not currently claim a standalone local `agent.py` runtime
+- the agent-facing action surface is the existing CLI, reusable modules, and API contracts already
+  present in the project
+
 ## Supported Operator Surfaces
 
 - `alpaca-connectors asset register`: plan or execute strict Alpaca + FIGI-backed asset
@@ -112,6 +128,7 @@ alpaca-connectors asset IVV update_prices daily --plan-only
 
 Use the pages under `docs/` for workflow depth after this summary:
 
+- `docs/agent.md`
 - `docs/etf_extraction.md`
 - `docs/assets/registration.md`
 - `docs/assets/holdings_categories.md`

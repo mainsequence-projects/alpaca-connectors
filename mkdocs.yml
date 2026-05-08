@@ -20,6 +20,7 @@ markdown_extensions:
 
 nav:
   - Overview: index.md
+  - Agentic Capabilities: agent.md
   - API: api.md
   - Command Center:
       - Asset Registry AppComponent: command_center/app_component.md
