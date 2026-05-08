@@ -72,7 +72,7 @@ jinja2==3.1.6
     # via
     #   mkdocs
     #   mkdocs-material
-mainsequence==3.19.5
+mainsequence==3.19.6
     # via alpaca-connectors
 markdown==3.10.2
     # via
@@ -204,7 +204,7 @@ six==1.17.0
     # via python-dateutil
 sseclient-py==1.9.0
     # via alpaca-py
-starlette==1.0.0
+starlette==0.52.1
     # via fastapi
 structlog==25.5.0
     # via mainsequence
@@ -241,7 +241,7 @@ uvicorn==0.44.0
     # via alpaca-connectors
 watchdog==6.0.0
     # via mkdocs
-websockets==16.0
+websockets==15.0.1
     # via alpaca-py
 zipp==3.23.1
     # via importlib-metadata

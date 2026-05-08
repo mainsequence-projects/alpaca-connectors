@@ -1,5 +1,16 @@
 # Journal
 
+## 2026-05-08
+
+- Context: make the repository README useful as the project entrypoint instead of mostly referring
+  readers to deeper docs pages.
+- Work completed: rewrote `README.md` into a capability summary covering the supported CLI, API,
+  Command Center, ETF extraction, DataNode, and job surfaces, plus the repo ownership boundary
+  between `src/` and `etf_extraction/`.
+- Verification: documentation content was verified by inspection against the current code,
+  docs, and project-state files; no live platform validation was required because the change was
+  documentation-only.
+
 ## 2026-04-30
 
 - Context: make ETF extraction documented independently from Alpaca-specific pages.

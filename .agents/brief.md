@@ -2,31 +2,30 @@
 
 ## Current Goal
 
-Keep the Alpaca connector split cleanly between Alpaca-owned logic under `src/` and ETF-owned
-logic under `etf_extraction/`, with the ETF extraction package documented as an independent
-workflow and dependency boundary.
+Make `README.md` the actual project entrypoint by summarizing the repository's current
+capabilities, operator surfaces, and workflow boundaries instead of mostly redirecting readers to
+the deeper docs.
 
 ## Success Condition
 
-- `src/` remains the owner of Alpaca registration, Alpaca bars execution, and shared runtime
-  entrypoints.
-- `etf_extraction/` remains the owner of ETF provider extraction, ETF settings, and ETF-owned
-  holdings category sync.
-- The repository documentation contains a standalone ETF extraction page that explains the package
-  independently from Alpaca flows.
-- Repo docs still describe the supported CLI entry points accurately.
+- `README.md` explains the project's supported capabilities in plain terms before linking to
+  detailed docs.
+- `README.md` summarizes the supported CLI, API, job, and Command Center surfaces accurately.
+- `README.md` preserves the repo boundary between Alpaca-owned logic under `src/` and ETF-owned
+  logic under `etf_extraction/`.
+- The deeper docs remain secondary references rather than the only useful entrypoint.
 
 ## Scope
 
 In scope:
 
-- Documentation of the ETF extraction package boundary and ownership.
-- Documentation of the supported CLI entry points and their expected usage.
-- Documentation of the repository-specific workflow boundaries for Alpaca registration,
-  ETF extraction, holdings-category sync, and stock-bar updates.
+- Rewriting `README.md` to summarize the implemented project surface.
+- Keeping the capability summary aligned with the current CLI/API/job/UI behavior already present
+  in the repo.
+- Recording the documentation milestone in the local project-state files when needed.
 
 Out of scope unless requested:
 
-- Changing Alpaca or ETF runtime behavior.
+- Changing Alpaca, ETF extraction, API, or DataNode runtime behavior.
+- Rewriting the detailed workflow pages under `docs/`.
 - Live platform execution of registration, holdings-category sync, or daily stock-bar updates.
-- SDK upgrades beyond documenting the currently detected version gap.

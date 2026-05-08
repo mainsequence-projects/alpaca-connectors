@@ -6,90 +6,21 @@ operate within the Main Sequence platform and must follow Main Sequence platform
 
 ## Project-Specific Instructions
 
-This repository is the Alpaca connector project for Main Sequence.
-
-Primary repo workflows:
-
-- register Alpaca US equity assets as Main Sequence public assets
-- build holdings-based `AssetCategory` universes from ETF constituents
-- update Alpaca stock-bar `DataNode`s for either one registered asset or a reusable asset universe
-
-Repository rules:
-
-- prefer reusable implementation under `src/` and the supported CLI under `src/cli/`; do not
-  reintroduce one-off workflow entrypoints under `scripts/` for asset registration,
-  holdings-category creation, or stock-bar updates
-- the supported operator surface for these workflows is the installed console script
-  `alpaca-connectors`
-- if a scheduled job still needs a repository-local launcher, keep that launcher under `src/jobs/`
-  and keep `scheduled_jobs.yaml` pointed at the repository-relative file path
-- keep CLI-facing behavior thin; reusable planning, registration, holdings, and DataNode logic
-  belongs in reusable `src/` modules
-
-Asset registration:
-
-- use `alpaca-connectors asset register`
-- dry run is the default; pass `--execute` only when you want to write missing assets into
-  Main Sequence
-- use `--symbols` for exact symbol registration when you already know the target Alpaca symbols
-- use `--seed-tickers` together with `--component-provider` when you want to expand an ETF or
-  other seed universe before registration
-- this flow is intentionally strict: symbols missing from Alpaca or missing a FIGI match are
-  reported and not registered
-
-Holdings categories:
-
-- use `alpaca-connectors holdings-category create --etf-ticker <ETF>`
-- dry run is the default; pass `--execute` only after the extracted holdings are fully resolvable
-  and registered
-- this flow refuses to create or refresh the category if holdings are missing from Alpaca, missing
-  FIGI matches, or not yet registered in Main Sequence
-- if the command reports missing registered symbols, run `alpaca-connectors asset register` first
-  instead of forcing the category sync
-
-Price updates from Alpaca:
-
-- for one asset, prefer `alpaca-connectors asset <ticker> update_prices <period>`, for example
-  `alpaca-connectors asset IVV update_prices daily`
-- both `update_prices` and `update-prices` are accepted; repo examples should prefer
-  `update_prices`
-- this shorthand resolves the ticker strictly against Alpaca and Main Sequence, builds the
-  `AlpacaStockBarsConfig`, and runs the `AlpacaStockBarsNode` for that resolved asset
-- shorthand defaults are `--feed sip` and `--adjustment all`
-- use `--plan-only` to inspect the resolved asset, table identifier, and hashes without calling
-  `node.run()`
-- for a holdings universe or explicit ticker list, use `alpaca-connectors bars run`
-- examples:
-  `alpaca-connectors bars run --asset-category-unique-identifier HOLDINGS__IVV --frequency-id 1d --feed sip --adjustment all`
-  `alpaca-connectors bars run --tickers NVDA,AAPL --frequency-id 1d --feed sip --adjustment all`
-- note that generic `alpaca-connectors bars run` defaults to `--feed iex` and `--adjustment raw`,
-  so set those flags explicitly when you want the single-asset shorthand behavior
-
-Operational notes:
-
-- source `.env` and export `MAINSEQUENCE_AUTH_MODE=jwt` before live `mainsequence` or
-  `alpaca-connectors` runs that need authenticated platform access
-- before live platform checks, run `mainsequence project refresh_token --path .`
-- live price-update runs require the Main Sequence secret `ALPACA_API_KEY` to be retrievable in
-  the active authenticated context
-- if `alpaca-connectors asset <ticker> update_prices <period>` fails because the ticker is not
-  registered in Main Sequence, register it first instead of loosening the resolver
-- if `mainsequence project current --debug` reports that the local SDK is behind the latest GitHub
-  version, prefer `mainsequence project update-sdk --path .` before changing CLI behavior or
-  troubleshooting scaffold commands
+[ HERE SHOULD BE THE PROJECT-SPECIFIC ACTIONS, RULES, CONTEXT, AND LOCAL NOTES. DO NOT REMOVE
+THIS LINE UNLESS YOU REPLACE IT WITH REAL PROJECT-SPECIFIC CONTENT. ]
 
 Do not remove the `<!-- mainsequence-agent-scaffold:start schema=1 source=agent_scaffold -->`
 or `<!-- mainsequence-agent-scaffold:end -->` markers. `mainsequence project update AGENTS.md`
 uses them to update only the Main Sequence section below.
 
-<!-- mainsequence-agent-scaffold:start schema=1 source=agent_scaffold -->
 
+<!-- mainsequence-agent-scaffold:start schema=1 source=agent_scaffold -->
 ## Main Sequence Instructions
 
 Before any non-trivial Main Sequence work, verify that this Main Sequence section matches the
-latest installed `agent_scaffold/AGENTS.md` template and that
-`.agents/skills/project_builder/SKILL.md` matches the latest installed
-`agent_scaffold/skills/project_builder/SKILL.md`; if either local file does not match, update it
+latest installed `AGENTS.md` template and that
+`.agents/skills/mainsequence/project_builder/SKILL.md` matches the latest installed
+`.agents/skills/project_builder/SKILL.md`; if either local file does not match, update it
 before proceeding.
 
 Canonical Main Sequence documentation root:
@@ -228,42 +159,42 @@ Use the latest relevant documentation or specialized skill for the task at hand.
 Typical routing:
 
 - project setup, local checkout, and CLI environment:
-  `.agents/skills/project_builder/SKILL.md`
+  `.agents/skills/mainsequence/project_builder/SKILL.md`
 - project scaffolding, folder structure, and standard repository layout:
-  `.agents/skills/project_builder/SKILL.md`
+  `.agents/skills/mainsequence/project_builder/SKILL.md`
 - project-state reconciliation, milestone logging, blocker recording, and next-step updates under
   `.agents/`:
-  `.agents/skills/maintenance/local_journal/SKILL.md`
+  `.agents/skills/mainsequence/maintenance/local_journal/SKILL.md`
 - project status audits, blocker analysis, failure classification, and upstream SDK assessment:
-  `.agents/skills/maintenance/bug_auditor/SKILL.md`
+  `.agents/skills/mainsequence/maintenance/bug_auditor/SKILL.md`
 - DataNodes, updates, identifiers, schema, metadata:
-  `.agents/skills/data_publishing/data_nodes/SKILL.md`
+  `.agents/skills/mainsequence/data_publishing/data_nodes/SKILL.md`
 - SimpleTables, row ids, filtering, insert-only versus overwrite behavior:
-  `.agents/skills/data_publishing/simple_tables/SKILL.md`
+  `.agents/skills/mainsequence/data_publishing/simple_tables/SKILL.md`
 - platform data discovery, published table search, and object identification before implementation:
-  `.agents/skills/data_access/exploration/SKILL.md`
+  `.agents/skills/mainsequence/data_access/exploration/SKILL.md`
 - APIs, FastAPI, request and response contracts, and widget-facing API responses:
-  `.agents/skills/application_surfaces/api_surfaces/SKILL.md`
+  `.agents/skills/mainsequence/application_surfaces/api_surfaces/SKILL.md`
 - Command Center workspace design, widget selection, layout narrative, and visualization strategy:
-  `.agents/skills/command_center/workspace_design/SKILL.md`
+  `.agents/skills/mainsequence/command_center/workspace_design/SKILL.md`
 - Command Center workspace JSON creation/update and mounted widget mutation:
-  `.agents/skills/command_center/workspace_builder/SKILL.md`
+  `.agents/skills/mainsequence/command_center/workspace_builder/SKILL.md`
 - AppComponents, custom forms, and widget input or output contracts:
-  `.agents/skills/command_center/app_components/SKILL.md`
+  `.agents/skills/mainsequence/command_center/app_components/SKILL.md`
 - predeployment AppComponent/API contract testing through `apiTargetMode: "mock-json"`:
-  `.agents/skills/command_center/api_mock_prototyping/SKILL.md`
+  `.agents/skills/mainsequence/command_center/api_mock_prototyping/SKILL.md`
 - jobs, schedules, images, project resources, releases, and Artifacts:
-  `.agents/skills/platform_operations/orchestration_and_releases/SKILL.md`
+  `.agents/skills/mainsequence/platform_operations/orchestration_and_releases/SKILL.md`
 - RBAC, sharing, constants, secrets, and access verification:
-  `.agents/skills/platform_operations/access_control_and_sharing/SKILL.md`
+  `.agents/skills/mainsequence/platform_operations/access_control_and_sharing/SKILL.md`
 - assets, public asset registration, custom assets, asset categories, and translation tables:
-  `.agents/skills/markets_platform/assets_and_translation/SKILL.md`
+  `.agents/skills/mainsequence/markets_platform/assets_and_translation/SKILL.md`
 - dashboards:
-  `.agents/skills/dashboards/streamlit/SKILL.md`
+  `.agents/skills/mainsequence/dashboards/streamlit/SKILL.md`
 - portfolios and Virtual Fund Builder:
-  `.agents/skills/markets_platform/virtualfundbuilder/SKILL.md`
+  `.agents/skills/mainsequence/markets_platform/virtualfundbuilder/SKILL.md`
 - instruments and pricing:
-  `.agents/skills/markets_platform/instruments_and_pricing/SKILL.md`
+  `.agents/skills/mainsequence/markets_platform/instruments_and_pricing/SKILL.md`
 
 ## Mandatory Startup Sequence
 
@@ -293,9 +224,9 @@ Use the skills as an orchestrated sequence, not as isolated documents.
 
 Default pattern:
 
-1. `.agents/skills/project_builder/SKILL.md`
+1. `.agents/skills/mainsequence/project_builder/SKILL.md`
 2. the relevant domain skill
-3. `.agents/skills/maintenance/local_journal/SKILL.md` after material work if verified state,
+3. `.agents/skills/mainsequence/maintenance/local_journal/SKILL.md` after material work if verified state,
    blockers, scope, next actions, stable references, or historical notes changed
 
 Before the final response:
@@ -303,7 +234,7 @@ Before the final response:
 - consult the maintenance skill whenever project understanding, verified state, or historical
   record changed during the turn
 
-Always use `.agents/skills/project_builder/SKILL.md` as the source of truth for project
+Always use `.agents/skills/mainsequence/project_builder/SKILL.md` as the source of truth for project
 scaffolding, folder structure, and standard repository layout.
 
 ## Core Working Rules
@@ -406,7 +337,7 @@ The repository keeps project-state files under `.agents/`:
 
 These files are owned by:
 
-- `.agents/skills/maintenance/local_journal/SKILL.md` for:
+- `.agents/skills/mainsequence/maintenance/local_journal/SKILL.md` for:
   - `.agents/brief.md`
   - `.agents/tasks.md`
   - `.agents/record.md`
@@ -415,5 +346,4 @@ These files are owned by:
 
 Do not improvise their meaning in domain skills. Use the maintenance skill to reconcile them after
 material work.
-
 <!-- mainsequence-agent-scaffold:end -->
