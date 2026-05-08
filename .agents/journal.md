@@ -1,5 +1,11 @@
 # Journal
 
+## 2026-04-30
+
+- Context: make ETF extraction documented independently from Alpaca-specific pages.
+- Work completed: added the standalone architecture page `docs/etf_extraction.md`, linked it from `mkdocs.yml`, `docs/index.md`, `README.md`, and added cross-references from the ETF extractor and holdings-category docs.
+- Verification: documentation wiring was verified locally by inspecting the MkDocs navigation config and the updated repository doc entry points; no live platform validation was required because the change was documentation-only.
+
 ## 2026-04-28
 
 - Context: replace the scaffold placeholder in `AGENTS.md` with project-specific Alpaca workflow

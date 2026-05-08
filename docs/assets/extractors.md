@@ -1,5 +1,9 @@
 # ETF Holdings Extractors
 
+See also:
+
+- `docs/etf_extraction.md` for the standalone ETF extraction architecture and package boundary
+
 ## Scope Boundary
 
 The extractor layer is independent of MainSequence.
@@ -14,11 +18,11 @@ They do not register assets, create categories, or publish DataNodes.
 
 Modules:
 
-- `src/extractors/ishares.py`
-- `src/extractors/invesco.py`
-- `src/extractors/vanguard.py`
-- `src/extractors/state_street.py`
-- `src/extractors/registry.py`
+- `etf_extraction/extractors/ishares.py`
+- `etf_extraction/extractors/invesco.py`
+- `etf_extraction/extractors/vanguard.py`
+- `etf_extraction/extractors/state_street.py`
+- `etf_extraction/extractors/registry.py`
 
 ## Supported Providers
 

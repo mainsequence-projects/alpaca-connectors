@@ -65,6 +65,9 @@ alpaca-connectors bars run \
   --adjustment all
 ```
 
+In category mode, the category is assumed to already exist. The Alpaca bars flow
+loads and consumes the category; it does not create or refresh it.
+
 ### Ticker mode
 
 ```bash

@@ -40,6 +40,9 @@ alpaca-connectors asset register --seed-tickers IVV --component-provider ishares
 alpaca-connectors holdings-category create --etf-ticker IVV --execute
 ```
 
+This creates or refreshes the ETF-owned holdings category. The fixed Alpaca bars job that
+targets `HOLDINGS__IVV` assumes that category already exists before it runs.
+
 ### Run daily bars for a category
 
 ```bash

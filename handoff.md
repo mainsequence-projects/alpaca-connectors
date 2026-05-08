@@ -315,7 +315,7 @@ But `uscf` is not included in `SUPPORTED_COMPONENT_PROVIDERS`. This is an ETF ex
 
 Absolute path:
 
-`/Users/jose/mainsequence/main-sequence-workbench/projects/alpaca-connectors-153/src/holdings_categories.py`
+`/Users/jose/mainsequence/main-sequence-workbench/projects/alpaca-connectors-153/etf_extraction/holdings_categories.py`
 
 What it does:
 
@@ -329,13 +329,13 @@ It also:
 
 1. Infers ETF provider.
 2. Expands ETF holdings.
-3. Validates components through Alpaca registration planning.
-4. Checks whether components are already registered as Main Sequence assets.
+3. Checks whether components are already registered as Main Sequence assets.
+4. Detects ambiguous registered ticker mappings in Main Sequence.
 5. Writes/refeshes the `AssetCategory`.
 
 Current overlap:
 
-This file is not purely Alpaca. It is a bridge between ETF extraction, Alpaca validation, and Main Sequence `AssetCategory` sync.
+This file is ETF-owned. Alpaca validation belongs later, when Alpaca consumers read from the category.
 
 Separation recommendation:
 
@@ -471,7 +471,7 @@ Mixed candidates that need careful splitting:
 
 `/Users/jose/mainsequence/main-sequence-workbench/projects/alpaca-connectors-153/src/settings.py`
 
-`/Users/jose/mainsequence/main-sequence-workbench/projects/alpaca-connectors-153/src/holdings_categories.py`
+`/Users/jose/mainsequence/main-sequence-workbench/projects/alpaca-connectors-153/src/holdings_categories.py` compatibility shim
 
 `/Users/jose/mainsequence/main-sequence-workbench/projects/alpaca-connectors-153/src/cli/asset.py`
 
@@ -489,7 +489,7 @@ Likely Alpaca-only files to preserve:
 
 Use this checklist to separate ETF extraction/registration logic from Alpaca interaction logic without deleting functionality. The target is independent concerns with explicit interfaces, not feature removal.
 
-### [ ] Task 1: Define the Final Boundary
+### [x] Task 1: Define the Final Boundary
 
 Scope:
 
@@ -506,7 +506,7 @@ Acceptance criteria:
 - ETF provider selection happens outside the Alpaca registration service.
 - The CLI orchestration is allowed to call both ETF expansion and Alpaca registration.
 
-### [ ] Task 2: Split ETF Expansion Out of Alpaca Registration
+### [x] Task 2: Split ETF Expansion Out of Alpaca Registration
 
 Primary file:
 
@@ -541,7 +541,7 @@ Acceptance criteria:
 - Missing symbols from Alpaca are reported by the Alpaca registration service.
 - ETF unsupported seed/provider issues are reported by the ETF expansion service.
 
-### [ ] Task 3: Simplify Asset Registration CLI
+### [x] Task 3: Simplify Asset Registration CLI
 
 Primary file:
 
@@ -569,7 +569,7 @@ Acceptance criteria:
 - CLI help makes clear that seed tickers use an ETF expansion step before Alpaca registration.
 - Tests cover both direct-symbol registration and ETF-seed orchestration.
 
-### [ ] Task 4: Isolate Extractor Package Behind a Stable Interface
+### [x] Task 4: Isolate Extractor Package Behind a Stable Interface
 
 Current primary directory:
 
@@ -626,7 +626,7 @@ Acceptance criteria:
 - Direct Alpaca-only workflows do not require Playwright.
 - ETF-seed workflows may require provider/browser dependencies.
 
-### [ ] Task 5: Split Settings
+### [x] Task 5: Split Settings
 
 Primary file:
 
@@ -680,11 +680,11 @@ Acceptance criteria:
 - Provider URL templates are absent from Alpaca-only settings.
 - `USO: uscf` mismatch is handled as an ETF provider configuration issue.
 
-### [ ] Task 6: Split Holdings Category Creation Into Three Services
+### [x] Task 6: Split Holdings Category Creation Into Three Services
 
 Primary files:
 
-`/Users/jose/mainsequence/main-sequence-workbench/projects/alpaca-connectors-153/src/holdings_categories.py`
+`/Users/jose/mainsequence/main-sequence-workbench/projects/alpaca-connectors-153/etf_extraction/holdings_categories.py`
 
 `/Users/jose/mainsequence/main-sequence-workbench/projects/alpaca-connectors-153/src/cli/holdings_category.py`
 
@@ -696,7 +696,7 @@ Target ETF orchestration files:
 
 Scope:
 
-Separate ETF holdings extraction from Alpaca validation and Main Sequence `AssetCategory` sync.
+Separate ETF holdings extraction from Main Sequence `AssetCategory` sync and from later Alpaca consumer validation.
 
 Expected outcome:
 
@@ -709,7 +709,7 @@ Acceptance criteria:
 - Category sync service accepts asset ids and writes the `AssetCategory`.
 - Provider inference is not embedded in category sync.
 
-### [ ] Task 7: Refactor ETF Maintenance Routine Job Into Orchestration
+### [x] Task 7: Refactor ETF Maintenance Routine Job Into Orchestration
 
 Primary files:
 
@@ -743,7 +743,7 @@ Acceptance criteria:
 - Each step can be tested independently.
 - Price update jobs remain available for explicit categories/assets.
 
-### [ ] Task 8: Decide How to Treat `HOLDINGS__IVV`
+### [x] Task 8: Decide How to Treat `HOLDINGS__IVV`
 
 Primary files:
 
@@ -757,15 +757,16 @@ Make clear whether `HOLDINGS__IVV` is produced by ETF orchestration or supplied 
 
 Expected outcome:
 
-The bars job can remain if the category is managed outside this repo.
+The fixed Alpaca bars job treats `HOLDINGS__IVV` as a pre-existing category input. It assumes the category already exists before the bars job runs.
 
 Acceptance criteria:
 
 - The bars job treats `HOLDINGS__IVV` as an input category.
-- Documentation states which workflow creates or refreshes the category.
+- Documentation states that the fixed bars job assumes the category already exists.
+- Documentation may separately describe ETF orchestration that can create or refresh the category, but the bars job itself does not do that.
 - Bars update remains independent from category construction.
 
-### [ ] Task 9: Update Tests
+### [x] Task 9: Update Tests
 
 Primary test files:
 
@@ -773,11 +774,11 @@ Primary test files:
 
 `/Users/jose/mainsequence/main-sequence-workbench/projects/alpaca-connectors-153/tests/test_cli.py`
 
-`/Users/jose/mainsequence/main-sequence-workbench/projects/alpaca-connectors-153/tests/test_etf_components.py`
+`/Users/jose/mainsequence/main-sequence-workbench/projects/alpaca-connectors-153/etf_extraction/tests/test_etf_components.py`
 
-`/Users/jose/mainsequence/main-sequence-workbench/projects/alpaca-connectors-153/tests/test_holdings_categories.py`
+`/Users/jose/mainsequence/main-sequence-workbench/projects/alpaca-connectors-153/etf_extraction/tests/test_holdings_categories.py`
 
-`/Users/jose/mainsequence/main-sequence-workbench/projects/alpaca-connectors-153/tests/test_etf_routines.py`
+`/Users/jose/mainsequence/main-sequence-workbench/projects/alpaca-connectors-153/etf_extraction/tests/test_etf_routines.py`
 
 Target ETF test location:
 
@@ -798,7 +799,7 @@ Acceptance criteria:
 - Holdings category tests target category sync separately from extraction.
 - Routine tests verify orchestration and command sequencing.
 
-### [ ] Task 10: Update Documentation
+### [x] Task 10: Update Documentation
 
 Primary docs:
 
@@ -828,10 +829,10 @@ Acceptance criteria:
 - [x] Move ETF extraction modules into `etf_extraction/extractors/`.
 - [x] Extract ETF expansion out of `src/assets/alpaca_us_equities.py`.
 - [x] Update `src/cli/asset.py` to orchestrate direct symbols and ETF seeds through separate services.
-- [ ] Split `src/settings.py` into Alpaca/OpenFIGI settings and `etf_extraction/settings.py`.
-- [ ] Split holdings category creation into ETF expansion, Alpaca lookup, and category sync services.
-- [ ] Refactor ETF maintenance routines to call the separated services.
-- [ ] Document whether `HOLDINGS__IVV` is created by orchestration or supplied externally.
-- [ ] Update tests by concern, with ETF tests under `etf_extraction/tests/`.
-- [ ] Update documentation.
-- [ ] Run focused validation for direct Alpaca registration, ETF-seed registration orchestration, category sync, and bars updates.
+- [x] Split `src/settings.py` into Alpaca/OpenFIGI settings and `etf_extraction/settings.py`.
+- [x] Split holdings category creation into ETF expansion, Alpaca lookup, and category sync services.
+- [x] Refactor ETF maintenance routines to call the separated services.
+- [x] Document whether `HOLDINGS__IVV` is created by orchestration or supplied externally.
+- [x] Update tests by concern, with ETF tests under `etf_extraction/tests/`.
+- [x] Update documentation.
+- [x] Run focused validation for direct Alpaca registration, ETF-seed registration orchestration, category sync, and bars updates.

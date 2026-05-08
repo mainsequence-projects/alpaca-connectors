@@ -23,6 +23,8 @@ nav:
   - API: api.md
   - Command Center:
       - Asset Registry AppComponent: command_center/app_component.md
+  - ETF Extraction:
+      - Architecture: etf_extraction.md
   - Assets:
       - Registration Flow: assets/registration.md
       - Holdings Categories: assets/holdings_categories.md

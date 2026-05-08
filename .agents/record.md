@@ -10,6 +10,7 @@
 - API schemas: `api/app/schemas.py`
 - API services: `api/app/services.py`
 - API docs: `docs/api.md`
+- ETF extraction docs: `docs/etf_extraction.md`
 - Workspace payload: `command_center/workspaces/alpaca_assets_registry.workspace.yaml`
 
 ## Stable Project Context

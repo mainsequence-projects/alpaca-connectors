@@ -15,6 +15,7 @@
 - Legacy scripts `scripts/run_daily_stock_bars.py` and `scripts/run_daily_stock_bars_holdings_ivv.py` have been removed.
 - Scheduled job execution for the IVV daily bars preset now points to `src/jobs/run_daily_stock_bars_holdings_ivv.py`.
 - Project docs now reference the CLI entry points instead of the deleted scripts.
+- Project docs now include a standalone ETF extraction architecture page at `docs/etf_extraction.md`.
 - `uv sync` rebuilt and reinstalled the local package on 2026-04-28 after the CLI entry-point change.
 - `.venv/bin/alpaca-connectors asset register --help` completed successfully on 2026-04-28.
 - `.venv/bin/python -m src.cli asset IVV update_prices daily --help` completed successfully on 2026-04-28.
@@ -31,5 +32,6 @@
 ## Notes
 
 - Running `python -m src.cli` with no subcommand prints help and exits non-zero by design.
+- The standalone ETF extraction docs page is documentation-only; no new live platform verification was required for that change.
 - The AGENTS scaffold update succeeded on 2026-04-28 only after forcing the CLI to import a
   temporary cleaned `agent_scaffold/AGENTS.md` through `PYTHONPATH`.

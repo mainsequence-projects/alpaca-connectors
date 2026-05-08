@@ -107,7 +107,7 @@ payload contains selector results or chart data.
 POST /v1/holdings-categories/execute
 ```
 
-This creates or refreshes the holdings `AssetCategory` after strict validation passes.
+This creates or refreshes the holdings `AssetCategory` from ETF extraction after MainSequence asset lookup passes.
 
 ## Local Run
 
@@ -117,7 +117,7 @@ uv run uvicorn api.app.main:app --reload
 
 ## Important Boundary
 
-The extractor logic, registration logic, and holdings-category logic remain owned by `src/`.
+The ETF extractor logic and holdings-category logic are owned by `etf_extraction/`. Alpaca registration and Alpaca bars logic remain owned by `src/`.
 The API is only the HTTP contract over those services.
 
 This API does not add `LoggedUserContextMiddleware` because the current routes do not consume request-local MainSequence user context.

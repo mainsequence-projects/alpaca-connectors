@@ -2,30 +2,31 @@
 
 ## Current Goal
 
-Keep `AGENTS.md` aligned with the current Alpaca connector workflows so future agents use the
-project CLI and the existing reusable `src/` implementation instead of reviving legacy scripts.
+Keep the Alpaca connector split cleanly between Alpaca-owned logic under `src/` and ETF-owned
+logic under `etf_extraction/`, with the ETF extraction package documented as an independent
+workflow and dependency boundary.
 
 ## Success Condition
 
-- `AGENTS.md` project-specific instructions describe the supported Alpaca CLI workflows.
-- Asset registration is documented as `alpaca-connectors asset register`.
-- Holdings category creation is documented as `alpaca-connectors holdings-category create`.
-- Daily stock-bar updates are documented as `alpaca-connectors bars run` or
-  `alpaca-connectors asset <ticker> update_prices <period>`.
-- The instructions tell future agents to reuse the existing `src/` modules and not recreate the
-  removed legacy scripts.
+- `src/` remains the owner of Alpaca registration, Alpaca bars execution, and shared runtime
+  entrypoints.
+- `etf_extraction/` remains the owner of ETF provider extraction, ETF settings, and ETF-owned
+  holdings category sync.
+- The repository documentation contains a standalone ETF extraction page that explains the package
+  independently from Alpaca flows.
+- Repo docs still describe the supported CLI entry points accurately.
 
 ## Scope
 
 In scope:
 
-- `AGENTS.md` project-specific instructions.
+- Documentation of the ETF extraction package boundary and ownership.
 - Documentation of the supported CLI entry points and their expected usage.
 - Documentation of the repository-specific workflow boundaries for Alpaca registration,
-  holdings-category sync, and stock-bar updates.
+  ETF extraction, holdings-category sync, and stock-bar updates.
 
 Out of scope unless requested:
 
-- Changing CLI behavior.
+- Changing Alpaca or ETF runtime behavior.
 - Live platform execution of registration, holdings-category sync, or daily stock-bar updates.
 - SDK upgrades beyond documenting the currently detected version gap.

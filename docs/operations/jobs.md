@@ -30,6 +30,10 @@ That launcher runs daily bars for:
 - `sip`
 - `all`
 
+The fixed `src/jobs/run_daily_stock_bars_holdings_ivv.py` launcher assumes that
+`HOLDINGS__IVV` already exists as a MainSequence `AssetCategory`. It consumes the
+category; it does not create or refresh it.
+
 ## Schedule
 
 The current crontab expression is:

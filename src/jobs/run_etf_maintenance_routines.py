@@ -4,7 +4,7 @@ import argparse
 from dataclasses import dataclass
 from pathlib import Path
 import sys
-from typing import Any
+from typing import Any, Callable
 
 import yaml
 
@@ -12,10 +12,24 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from src.cli import main as run_cli
-from src.holdings_categories import (
+from etf_extraction.holdings_categories import (
+    build_holdings_asset_category_plan,
     build_holdings_asset_category_unique_identifier,
     infer_holdings_component_provider,
+    sync_holdings_asset_category,
+)
+from etf_extraction.service import EtfExpansionRequest, expand_etf_seed_symbols
+from src.assets.alpaca_us_equities import (
+    build_alpaca_us_equity_registration_plan,
+    register_alpaca_us_equity_assets,
+    resolve_alpaca_us_equity_registration_plan,
+)
+from src.cli.bars import (
+    DEFAULT_PRICE_UPDATE_ADJUSTMENT,
+    DEFAULT_PRICE_UPDATE_FEED,
+    _run_stock_bars_node,
+    build_stock_bars_node,
+    normalize_price_update_period,
 )
 
 
@@ -31,6 +45,13 @@ class RoutineSpec:
     include_category_sync: bool
     include_etf_price_update: bool
     include_category_price_update: bool
+
+
+@dataclass(frozen=True)
+class RoutineStep:
+    label: str
+    preview_text: str
+    runner: Callable[[], None]
 
 
 def _default_routine_path() -> Path:
@@ -144,75 +165,127 @@ def _load_routines(path: Path) -> list[RoutineSpec]:
     return specs
 
 
-def _run_cli(argv: list[str]) -> int:
-    try:
-        return run_cli(list(argv))
-    except SystemExit as exc:
-        return 1 if exc.code is None else int(exc.code)
+def _execute_seed_registration(routine: RoutineSpec) -> None:
+    expansion_result = expand_etf_seed_symbols(
+        EtfExpansionRequest(
+            seed_tickers=[routine.etf_ticker],
+            component_provider=routine.component_provider,
+        )
+    )
+    plan = build_alpaca_us_equity_registration_plan(
+        symbols=expansion_result.symbols_for_registration,
+    )
+    resolution = resolve_alpaca_us_equity_registration_plan(plan)
+    register_alpaca_us_equity_assets(registration_resolution=resolution)
 
 
-def _run_command(label: str, argv: list[str]) -> tuple[str, int, list[str]]:
-    return (label, _run_cli(argv), argv)
+def _execute_holdings_category_sync(routine: RoutineSpec) -> None:
+    plan = build_holdings_asset_category_plan(
+        etf_ticker=routine.etf_ticker,
+        component_provider=routine.component_provider,
+    )
+    if plan.has_blockers():
+        raise RuntimeError(
+            "Refusing to create the holdings category because extracted holdings are incomplete "
+            "or not fully registered uniquely in MainSequence."
+        )
+    sync_holdings_asset_category(
+        etf_ticker=plan.etf_ticker,
+        asset_ids=[
+            plan.existing_asset_ids_by_symbol[symbol]
+            for symbol in plan.component_symbols
+            if symbol in plan.existing_asset_ids_by_symbol
+        ],
+    )
 
 
-def _build_routine_commands(
+def _execute_etf_price_update(routine: RoutineSpec) -> None:
+    node, _summary = build_stock_bars_node(
+        asset_category_unique_identifier=None,
+        tickers=[routine.etf_ticker],
+        frequency_id=normalize_price_update_period(routine.etf_update_period),
+        feed=DEFAULT_PRICE_UPDATE_FEED,
+        adjustment=DEFAULT_PRICE_UPDATE_ADJUSTMENT,
+        hash_namespace=None,
+    )
+    _run_stock_bars_node(node=node, force_update=True)
+
+
+def _execute_category_price_update(routine: RoutineSpec) -> None:
+    node, _summary = build_stock_bars_node(
+        asset_category_unique_identifier=build_holdings_asset_category_unique_identifier(
+            routine.etf_ticker
+        ),
+        tickers=None,
+        frequency_id=routine.frequency_id,
+        feed=routine.feed,
+        adjustment=routine.adjustment,
+        hash_namespace=None,
+    )
+    _run_stock_bars_node(node=node, force_update=True)
+
+
+def _build_routine_steps(
     routine: RoutineSpec,
     *,
     dry_run: bool,
-) -> list[tuple[str, list[str]]]:
+) -> list[RoutineStep]:
+    del dry_run
     category_identifier = build_holdings_asset_category_unique_identifier(
         routine.etf_ticker
     )
 
-    commands: list[tuple[str, list[str]]] = []
+    steps: list[RoutineStep] = []
     if routine.include_seed_registration:
-        register_argv = [
-            "asset",
-            "register",
-            "--seed-tickers",
-            routine.etf_ticker,
-            "--component-provider",
-            routine.component_provider,
-        ]
-        if not dry_run:
-            register_argv.append("--execute")
-        commands.append(("register_holdings_assets", register_argv))
+        steps.append(
+            RoutineStep(
+                label="register_holdings_assets",
+                preview_text=(
+                    "service: expand_etf_seed_symbols -> "
+                    "build_alpaca_us_equity_registration_plan -> "
+                    "resolve_alpaca_us_equity_registration_plan -> "
+                    "register_alpaca_us_equity_assets"
+                ),
+                runner=lambda routine=routine: _execute_seed_registration(routine),
+            )
+        )
 
     if routine.include_category_sync:
-        category_argv = ["holdings-category", "create", "--etf-ticker", routine.etf_ticker]
-        if not dry_run:
-            category_argv.append("--execute")
-        commands.append(("sync_holdings_category", category_argv))
+        steps.append(
+            RoutineStep(
+                label="sync_holdings_category",
+                preview_text=(
+                    "service: build_holdings_asset_category_plan -> "
+                    "sync_holdings_asset_category"
+                ),
+                runner=lambda routine=routine: _execute_holdings_category_sync(routine),
+            )
+        )
 
     if routine.include_etf_price_update:
-        etf_price_argv = [
-            "asset",
-            routine.etf_ticker,
-            "update_prices",
-            routine.etf_update_period,
-        ]
-        if dry_run:
-            etf_price_argv.append("--plan-only")
-        commands.append(("update_etf_prices", etf_price_argv))
+        steps.append(
+            RoutineStep(
+                label="update_etf_prices",
+                preview_text=(
+                    "service: build_stock_bars_node(ticker-scoped) -> _run_stock_bars_node"
+                ),
+                runner=lambda routine=routine: _execute_etf_price_update(routine),
+            )
+        )
 
     if routine.include_category_price_update:
-        category_price_argv = [
-            "bars",
-            "run",
-            "--asset-category-unique-identifier",
-            category_identifier,
-            "--frequency-id",
-            routine.frequency_id,
-            "--feed",
-            routine.feed,
-            "--adjustment",
-            routine.adjustment,
-        ]
-        if dry_run:
-            category_price_argv.append("--plan-only")
-        commands.append(("update_category_prices", category_price_argv))
+        steps.append(
+            RoutineStep(
+                label="update_category_prices",
+                preview_text=(
+                    "service: build_stock_bars_node(category="
+                    f"{category_identifier}) -> _run_stock_bars_node"
+                ),
+                runner=lambda routine=routine: _execute_category_price_update(routine),
+            )
+        )
 
-    return commands
+    return steps
 
 
 def run_routines(
@@ -221,36 +294,36 @@ def run_routines(
     dry_run: bool,
     continue_on_error: bool,
 ) -> int:
-    failures: list[tuple[str, int, list[str]]] = []
+    failures: list[tuple[str, Exception]] = []
     total_steps = 0
 
     if dry_run:
         print("[dry-run] planned routine commands:")
 
     for routine in routines:
-        commands = _build_routine_commands(routine, dry_run=dry_run)
+        steps = _build_routine_steps(routine, dry_run=dry_run)
 
-        for command_label, argv in commands:
-            command_text = " ".join(argv)
+        for step in steps:
             total_steps += 1
             if dry_run:
-                print(f"  {routine.etf_ticker}: {command_label} -> {command_text}")
+                print(f"  {routine.etf_ticker}: {step.label} -> {step.preview_text}")
                 continue
 
-            status = _run_command(command_label, argv)
-            if status[1] != 0:
-                failures.append(status)
+            try:
+                step.runner()
+            except Exception as exc:
+                failures.append((step.label, exc))
                 if not continue_on_error:
                     print(
                         f"Failed after {total_steps} steps in routine {routine.etf_ticker}: "
-                        f"{status[2]}"
+                        f"{step.label}: {exc}"
                     )
                     return 1
 
     if failures:
         print("Completed with failures.")
-        for status in failures:
-            print(f"  - {' '.join(status[2])}: status={status[1]}")
+        for label, exc in failures:
+            print(f"  - {label}: {exc}")
         return 1
 
     print(

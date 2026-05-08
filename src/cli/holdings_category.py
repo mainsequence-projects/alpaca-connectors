@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 
-from src.holdings_categories import (
+from etf_extraction.holdings_categories import (
     build_holdings_asset_category_plan,
     sync_holdings_asset_category,
 )
@@ -27,7 +27,7 @@ def configure_create_parser(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--include-non-tradable",
         action="store_true",
-        help="Include active Alpaca assets that are not tradable when checking holdings membership.",
+        help="Accepted for CLI compatibility; ETF category sync no longer depends on Alpaca validation.",
     )
     parser.add_argument(
         "--execute",
@@ -54,24 +54,14 @@ def run_create_command(args: argparse.Namespace) -> int:
     print("Planned holdings AssetCategory sync")
     print(json.dumps(plan.summary(), indent=2, sort_keys=True))
 
-    if plan.registration_plan.missing_symbols_from_alpaca:
-        print("These extracted component symbols do not exist in Alpaca and will block category creation:")
-        for symbol in plan.registration_plan.missing_symbols_from_alpaca:
-            print(f"  - {symbol}")
-
-    if plan.registration_plan.unresolved_symbols:
-        print("These extracted component symbols have no FIGI match and will be skipped:")
-        for symbol in plan.registration_plan.unresolved_symbols:
-            warning = plan.registration_plan.warnings_by_symbol.get(symbol)
-            if warning:
-                print(f"  - {symbol}: {warning}")
-            else:
-                print(f"  - {symbol}")
-        print("Warning: unresolved symbols do not block category sync.")
-
     if plan.missing_registered_symbols:
         print("These extracted component symbols are not yet registered as MainSequence assets:")
         for symbol in plan.missing_registered_symbols:
+            print(f"  - {symbol}")
+
+    if plan.ambiguous_registered_symbols:
+        print("These extracted component symbols resolved ambiguously in MainSequence:")
+        for symbol in plan.ambiguous_registered_symbols:
             print(f"  - {symbol}")
 
     if not args.execute:
@@ -81,7 +71,7 @@ def run_create_command(args: argparse.Namespace) -> int:
     if plan.has_blockers():
         raise SystemExit(
             "Refusing to create the holdings category because extracted holdings are incomplete "
-            "or not fully registered in MainSequence."
+            "or not fully registered uniquely in MainSequence."
         )
 
     result = sync_holdings_asset_category(

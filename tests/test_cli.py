@@ -89,15 +89,10 @@ class CliTests(unittest.TestCase):
         self.assertIn('"component_provider": "ishares"', stdout.getvalue())
 
     def test_holdings_category_create_dry_run(self) -> None:
-        registration_plan = SimpleNamespace(
-            missing_symbols_from_alpaca=[],
-            unresolved_symbols=[],
-            warnings_by_symbol={},
-        )
         plan = SimpleNamespace(
             summary=lambda: {"etf_ticker": "IVV"},
-            registration_plan=registration_plan,
             missing_registered_symbols=[],
+            ambiguous_registered_symbols=[],
         )
         stdout = io.StringIO()
 
@@ -118,19 +113,14 @@ class CliTests(unittest.TestCase):
         self.assertIn("Planned holdings AssetCategory sync", output)
         self.assertIn("Dry run only. Pass --execute to create or refresh the category.", output)
 
-    def test_holdings_category_create_with_unresolved_symbols_is_warning_only(self) -> None:
-        registration_plan = SimpleNamespace(
-            missing_symbols_from_alpaca=[],
-            unresolved_symbols=["FWONK"],
-            warnings_by_symbol={"FWONK": "No FIGI match"},
-        )
+    def test_holdings_category_create_reports_ambiguous_symbols(self) -> None:
         plan = SimpleNamespace(
             summary=lambda: {"etf_ticker": "IVV"},
             etf_ticker="IVV",
-            registration_plan=registration_plan,
             missing_registered_symbols=[],
+            ambiguous_registered_symbols=["FWONK"],
             existing_asset_ids_by_symbol={"AAPL": 101},
-            component_symbols=["AAPL", "FWONK"],
+            component_symbols=["AAPL"],
             has_blockers=lambda: False,
         )
 
@@ -152,8 +142,7 @@ class CliTests(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         sync_category.assert_called_once_with(etf_ticker="IVV", asset_ids=[101])
         output = stdout.getvalue()
-        self.assertIn("These extracted component symbols have no FIGI match and will be skipped:", output)
-        self.assertIn("Warning: unresolved symbols do not block category sync.", output)
+        self.assertIn("These extracted component symbols resolved ambiguously in MainSequence:", output)
 
     def test_bars_run_plan_only(self) -> None:
         node = SimpleNamespace(

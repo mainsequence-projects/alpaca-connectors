@@ -3,27 +3,6 @@ from __future__ import annotations
 import os
 from functools import lru_cache
 
-from etf_extraction.settings import (
-    ETF_PROVIDER_MAP_NORMALIZED,
-    ETFS_MAIN_TICKERS,
-    ISHARES_PRODUCT_LISTING_URL,
-    INVESCO_HOLDINGS_LANDING_URL_TEMPLATE,
-    MAG_7_CATEGORY_SYMBOLS,
-    SEED_UNIVERSES_PATH,
-    STATE_STREET_QUICK_INFO_URL_TEMPLATE,
-    SUPPORTED_COMPONENT_PROVIDERS,
-    VANGUARD_PROFILE_URL_TEMPLATE,
-    InvescoHoldingsSource,
-    IsharesHoldingsSource,
-    StateStreetHoldingsSource,
-    VanguardHoldingsSource,
-    get_invesco_holdings_source,
-    get_ishares_holdings_source,
-    get_seed_universes,
-    get_state_street_holdings_source,
-    get_vanguard_holdings_source,
-)
-
 OPENFIGI_MAPPING_URL = "https://api.openfigi.com/v3/mapping"
 OPENFIGI_MAX_JOBS_WITHOUT_API_KEY = 10
 OPENFIGI_MAX_JOBS_WITH_API_KEY = 100
@@ -108,4 +87,3 @@ def get_figi_security_type_etp() -> str:
 
 def get_figi_security_type_reit() -> str:
     return get_markets_constants().FIGI_SECURITY_TYPE_REIT
-

@@ -1,12 +1,16 @@
 # Holdings Categories
 
+See also:
+
+- `docs/etf_extraction.md` for the ETF-owned architecture, provider flow, and separation from Alpaca logic
+
 ## Goal
 
 Create a MainSequence `AssetCategory` from an ETF's published holdings.
 
 Main module:
 
-- `src/holdings_categories.py`
+- `etf_extraction/holdings_categories.py`
 
 Primary CLI:
 
@@ -30,24 +34,22 @@ HOLDINGS__IVV
 
 1. infer or receive the ETF holdings provider
 2. extract the ETF component tickers
-3. check that extracted components exist in Alpaca
-4. check that extracted components resolve to FIGI
-5. check that those FIGI-resolved assets are already registered in MainSequence
-6. create or refresh the `AssetCategory`
+3. check that extracted components are already registered as MainSequence assets
+4. detect ambiguous ticker-to-asset matches in MainSequence
+5. create or refresh the `AssetCategory`
 
 ## Blockers
 
 Category creation is refused when any extracted holding:
 
-- is not available in Alpaca
-- does not resolve to FIGI
 - is not already registered in MainSequence
+- resolves ambiguously to more than one MainSequence asset
 
 ## Provider Inference
 
 The ETF-to-provider mapping is stored in:
 
-- `data/seed_universes.yaml`
+- `etf_extraction/data/seed_universes.yaml`
 
 ## Example
 
