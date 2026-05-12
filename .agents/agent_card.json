@@ -1,6 +1,6 @@
 {
-  "name": "alpaca-connectors-153",
-  "description": "Agent-ready project card for the Alpaca Connectors repository. This project supports strict Alpaca asset registration, ETF holdings-category orchestration, Alpaca stock-bar planning and updates, and a thin FastAPI support surface over those existing workflows.",
+  "name": "Alpaca Connection Manager",
+  "description": "Agent-ready project card for the Alpaca Connectors repository. This project supports the repository's strict Alpaca asset-registration workflow, holdings-category orchestration from ETF constituents, and Alpaca stock-bar planning and update workflows through the documented CLI and reusable modules.",
   "version": "0.1.17",
   "supportedInterfaces": [
     {
@@ -24,24 +24,9 @@
   ],
   "skills": [
     {
-      "id": "application_surfaces.api_surfaces",
-      "name": "API Surfaces",
-      "description": "Support the repository's existing FastAPI surface for discovery, registration, holdings-category execution, and lightweight OHLC chart responses.",
-      "tags": [],
-      "examples": [
-        "Update the single-ticker registration API response without changing the underlying registration logic."
-      ],
-      "inputModes": [
-        "application/json"
-      ],
-      "outputModes": [
-        "application/json"
-      ]
-    },
-    {
       "id": "asset_registration",
       "name": "Asset Registration",
-      "description": "Use the supported CLI and reusable modules to plan or execute strict Alpaca plus OpenFIGI-backed Main Sequence asset registration.",
+      "description": "Plan or execute the repository's strict asset-registration workflow through `alpaca-connectors asset register`, including exact Alpaca symbol registration and ETF-seed expansion through a supported component provider, with OpenFIGI resolution required before assets are written.",
       "tags": [],
       "examples": [
         "Register NVDA and AAPL through the supported asset registration flow."
@@ -56,7 +41,7 @@
     {
       "id": "holdings_category",
       "name": "Holdings Category",
-      "description": "Plan or execute holdings-backed Main Sequence asset-category sync from ETF constituents using the supported project workflow.",
+      "description": "Plan or execute holdings-backed asset-category sync through `alpaca-connectors holdings-category create`, building categories such as `HOLDINGS__IVV` from ETF constituents only when the extracted holdings resolve cleanly and are already registered.",
       "tags": [],
       "examples": [
         "Create or refresh HOLDINGS__IVV after confirming all extracted holdings are registered."
@@ -71,7 +56,7 @@
     {
       "id": "stock_bars",
       "name": "Stock Bars",
-      "description": "Plan or execute Alpaca stock-bar updates for one asset, a ticker list, or a holdings category through the supported CLI and DataNode modules.",
+      "description": "Plan or execute Alpaca stock-bar workflows through `alpaca-connectors asset <ticker> update_prices <period>` or `alpaca-connectors bars run`, covering one registered asset, an explicit ticker list, or a holdings category while reusing the project's `AlpacaStockBarsNode` modules and plan-only flow.",
       "tags": [],
       "examples": [
         "Plan a daily IVV stock-bar update without running the node."
