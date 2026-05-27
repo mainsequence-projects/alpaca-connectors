@@ -31,12 +31,12 @@ This skill owns:
 This skill must not claim ownership of:
 
 - DataNode semantics
-- SimpleTable semantics
+- MetaTable semantics
 - API design
 - Command Center payload design
 - job and release configuration semantics
 - RBAC semantics
-- market, VFB, dashboard, or pricing semantics
+- dashboard, pricing, or other domain-specific semantics
 
 This skill maintains project-state files. It does not own domain implementation rules.
 
@@ -48,8 +48,8 @@ This skill maintains project-state files. It does not own domain implementation 
   `.agents/skills/mainsequence/maintenance/bug_auditor/SKILL.md`
 - DataNodes:
   `.agents/skills/mainsequence/data_publishing/data_nodes/SKILL.md`
-- SimpleTables:
-  `.agents/skills/mainsequence/data_publishing/simple_tables/SKILL.md`
+- MetaTables:
+  `.agents/skills/mainsequence/data_publishing/meta_tables/SKILL.md`
 - FastAPI and application-facing APIs:
   `.agents/skills/mainsequence/application_surfaces/api_surfaces/SKILL.md`
 - Command Center workspaces:
@@ -60,12 +60,6 @@ This skill maintains project-state files. It does not own domain implementation 
   `.agents/skills/mainsequence/platform_operations/orchestration_and_releases/SKILL.md`
 - RBAC and sharing:
   `.agents/skills/mainsequence/platform_operations/access_control_and_sharing/SKILL.md`
-- assets and translation tables:
-  `.agents/skills/mainsequence/markets_platform/assets_and_translation/SKILL.md`
-- Virtual Fund Builder:
-  `.agents/skills/mainsequence/markets_platform/virtualfundbuilder/SKILL.md`
-- instruments and pricing:
-  `.agents/skills/mainsequence/markets_platform/instruments_and_pricing/SKILL.md`
 - Streamlit dashboards:
   `.agents/skills/mainsequence/dashboards/streamlit/SKILL.md`
 
