@@ -11,10 +11,10 @@
       
       
       
-        <link rel="prev" href="../agent/">
+        <link rel="prev" href="../command_center/app_component/">
       
       
-        <link rel="next" href="../command_center/app_component/">
+        <link rel="next" href="../adr_ms_markets_asset_currency_pair_model/">
       
       
         
@@ -25,7 +25,7 @@
     
     
       
-        <title>API - Alpaca Connectors</title>
+        <title>Architecture - Alpaca Connectors</title>
       
     
     
@@ -66,7 +66,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#api" class="md-skip">
+        <a href="#etf-extraction-architecture" class="md-skip">
           Skip to content
         </a>
       
@@ -102,7 +102,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              API
+              Architecture
             
           </span>
         </div>
@@ -249,37 +249,10 @@
       
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    API
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../api/" class="md-nav__link">
         
   
   
@@ -295,153 +268,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#goal" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Goal
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#design" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Design
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#endpoints" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Endpoints
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Endpoints">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#health" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Health
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#discovery-configuration" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Discovery configuration
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#execute-asset-registration" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Execute asset registration
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#appcomponent-single-ticker-registration" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        AppComponent single-ticker registration
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#lightweight-charts-ohlc-payload" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Lightweight Charts OHLC payload
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#execute-holdings-category-sync" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Execute holdings category sync
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#local-run" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Local Run
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#important-boundary" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Important Boundary
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -539,8 +365,10 @@
       
   
   
+    
   
   
+  
     
     
     
@@ -551,13 +379,11 @@
       
     
     
-    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
       
         
         
-          
-        
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" checked>
         
           
           <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
@@ -578,7 +404,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="true">
           <label class="md-nav__title" for="__nav_5">
             <span class="md-nav__icon md-icon"></span>
             
@@ -593,10 +419,37 @@
                 
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../etf_extraction/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -612,6 +465,181 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#purpose" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Purpose
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#root-package" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Root Package
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#public-interfaces" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Public Interfaces
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Public Interfaces">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#etf-expansion-service" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        ETF expansion service
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#holdings-category-service" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Holdings category service
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#provider-extraction-layer" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Provider Extraction Layer
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#configuration-and-seed-data" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Configuration And Seed Data
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#execution-flows" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Execution Flows
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Execution Flows">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#seed-expansion-only" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Seed expansion only
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#holdings-category-creation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Holdings category creation
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#overlap-with-alpaca" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Overlap With Alpaca
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cli-surfaces-that-use-etf-extraction" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CLI Surfaces That Use ETF Extraction
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#tests" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tests
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -1119,10 +1147,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#goal" class="md-nav__link">
+  <a href="#purpose" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Goal
+        Purpose
       
     </span>
   </a>
@@ -1130,10 +1158,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#design" class="md-nav__link">
+  <a href="#root-package" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Design
+        Root Package
       
     </span>
   </a>
@@ -1141,22 +1169,22 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#endpoints" class="md-nav__link">
+  <a href="#public-interfaces" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Endpoints
+        Public Interfaces
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Endpoints">
+    <nav class="md-nav" aria-label="Public Interfaces">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#health" class="md-nav__link">
+  <a href="#etf-expansion-service" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Health
+        ETF expansion service
       
     </span>
   </a>
@@ -1164,54 +1192,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#discovery-configuration" class="md-nav__link">
+  <a href="#holdings-category-service" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Discovery configuration
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#execute-asset-registration" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Execute asset registration
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#appcomponent-single-ticker-registration" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        AppComponent single-ticker registration
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#lightweight-charts-ohlc-payload" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Lightweight Charts OHLC payload
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#execute-holdings-category-sync" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Execute holdings category sync
+        Holdings category service
       
     </span>
   </a>
@@ -1224,10 +1208,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#local-run" class="md-nav__link">
+  <a href="#provider-extraction-layer" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Local Run
+        Provider Extraction Layer
       
     </span>
   </a>
@@ -1235,10 +1219,82 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#important-boundary" class="md-nav__link">
+  <a href="#configuration-and-seed-data" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Important Boundary
+        Configuration And Seed Data
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#execution-flows" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Execution Flows
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Execution Flows">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#seed-expansion-only" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Seed expansion only
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#holdings-category-creation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Holdings category creation
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#overlap-with-alpaca" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Overlap With Alpaca
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cli-surfaces-that-use-etf-extraction" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CLI Surfaces That Use ETF Extraction
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#tests" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tests
       
     </span>
   </a>
@@ -1262,92 +1318,207 @@
 
 
 
-<h1 id="api">API<a class="headerlink" href="#api" title="Permanent link">&para;</a></h1>
-<h2 id="goal">Goal<a class="headerlink" href="#goal" title="Permanent link">&para;</a></h2>
-<p>The project includes a FastAPI surface for automating:</p>
+<h1 id="etf-extraction-architecture">ETF Extraction Architecture<a class="headerlink" href="#etf-extraction-architecture" title="Permanent link">&para;</a></h1>
+<h2 id="purpose">Purpose<a class="headerlink" href="#purpose" title="Permanent link">&para;</a></h2>
+<p><code>etf_extraction/</code> is a standalone package for ETF holdings workflows.</p>
+<p>It owns:</p>
 <ul>
-<li>asset discovery</li>
-<li>asset registration</li>
-<li>single-ticker registration for Command Center AppComponents</li>
-<li>lightweight charts OHLC spec generation for Command Center rendering</li>
-<li>holdings-category synchronization</li>
+<li>provider-specific holdings extraction</li>
+<li>ETF seed expansion into component symbols</li>
+<li>ETF provider configuration and seed-universe data</li>
+<li>ETF-owned holdings <code>AssetCategory</code> planning and sync</li>
+<li>ETF-oriented tests</li>
 </ul>
-<p>Main files:</p>
+<p>It does not own:</p>
 <ul>
-<li><code>api/app/main.py</code></li>
-<li><code>api/app/schemas.py</code></li>
-<li><code>api/app/services.py</code></li>
+<li>Alpaca symbol validation</li>
+<li>Alpaca asset registration</li>
+<li>Alpaca bars <code>DataNode</code> execution</li>
+<li>generic CLI/runtime settings for the rest of the project</li>
 </ul>
-<h2 id="design">Design<a class="headerlink" href="#design" title="Permanent link">&para;</a></h2>
-<p>The API is intentionally thin.</p>
+<p>That separation is intentional. ETF holdings are a source dataset. Alpaca is one downstream consumer.</p>
+<h2 id="root-package">Root Package<a class="headerlink" href="#root-package" title="Permanent link">&para;</a></h2>
+<p>Repository path:</p>
+<div class="highlight"><pre><span></span><code>etf_extraction/
+</code></pre></div>
+<p>Main modules:</p>
 <ul>
-<li>route handlers validate input and return typed responses</li>
-<li>service functions call the existing logic under <code>src/</code></li>
-<li>the API does not rebuild the Alpaca, FIGI, extractor, or category workflows</li>
+<li><code>etf_extraction/service.py</code></li>
+<li><code>etf_extraction/settings.py</code></li>
+<li><code>etf_extraction/holdings_categories.py</code></li>
+<li><code>etf_extraction/extractors/</code></li>
+<li><code>etf_extraction/data/seed_universes.yaml</code></li>
+<li><code>etf_extraction/tests/</code></li>
 </ul>
-<h2 id="endpoints">Endpoints<a class="headerlink" href="#endpoints" title="Permanent link">&para;</a></h2>
-<h3 id="health">Health<a class="headerlink" href="#health" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code>GET /health
-</code></pre></div>
-<h3 id="discovery-configuration">Discovery configuration<a class="headerlink" href="#discovery-configuration" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code>GET /v1/discovery/config
-</code></pre></div>
-<p>Returns:</p>
+<h2 id="public-interfaces">Public Interfaces<a class="headerlink" href="#public-interfaces" title="Permanent link">&para;</a></h2>
+<h3 id="etf-expansion-service">ETF expansion service<a class="headerlink" href="#etf-expansion-service" title="Permanent link">&para;</a></h3>
+<p>Defined in <code>etf_extraction/service.py</code>.</p>
+<p>Primary API:</p>
 <ul>
-<li>supported component providers</li>
-<li>ETF provider map</li>
-<li>configured seed universes</li>
+<li><code>EtfExpansionRequest</code></li>
+<li><code>EtfExpansionResult</code></li>
+<li><code>expand_etf_seed_symbols(...)</code></li>
 </ul>
-<h3 id="execute-asset-registration">Execute asset registration<a class="headerlink" href="#execute-asset-registration" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code>POST /v1/assets/registration/execute
-</code></pre></div>
-<p>This runs the FIGI-based registration flow and creates missing MainSequence public assets.</p>
-<h3 id="appcomponent-single-ticker-registration">AppComponent single-ticker registration<a class="headerlink" href="#appcomponent-single-ticker-registration" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code>POST /v1/app-components/assets/register-ticker
-</code></pre></div>
-<p>This is the AppComponent-facing operation for registering exactly one asset by ticker.</p>
-<p>It intentionally uses the default generated AppComponent form instead of a custom editable form.</p>
-<h3 id="lightweight-charts-ohlc-payload">Lightweight Charts OHLC payload<a class="headerlink" href="#lightweight-charts-ohlc-payload" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code>POST /v1/charts/lightweight/ohlc
-</code></pre></div>
-<p>This endpoint has two modes.</p>
-<p>Command Center selector mode:</p>
+<p>Responsibility:</p>
 <ul>
-<li><code>ticker</code> query parameter only</li>
+<li>receive one or more seed tickers plus an explicit provider</li>
+<li>build the correct extractor</li>
+<li>return the expanded symbol universe</li>
 </ul>
-<p>Selector mode returns <code>items</code> and <code>pagination</code> for the AppComponent <code>select2</code> async ticker search.
-Each item exposes a user-facing ticker <code>label</code>, a platform <code>unique_identifier</code>, and display text.</p>
-<p>Chart mode accepts Command Center query parameters only.</p>
-<p>Command Center query fields:</p>
+<p>Output shape:</p>
 <ul>
-<li><code>ticker</code>, containing the selected ticker, FIGI, or asset unique identifier</li>
-<li><code>start_date</code></li>
-<li><code>end_date</code></li>
+<li><code>EtfExpansionResult.component_provider</code></li>
+<li><code>EtfExpansionResult.universe</code></li>
+<li><code>EtfExpansionResult.symbols_for_registration</code></li>
 </ul>
-<p>The generated workspace form defaults to <code>NVDA</code>, an end date equal to the workspace
-generation date, and a start date one year before that end date.</p>
-<p>In Command Center query mode, the selected <code>ticker</code> value is resolved strictly inside the
-configured <code>AssetCategory</code> before bars are queried. The API uses the fixed OHLC DataNode
-identifier <code>alpaca_stock_bars_1d_sip_all</code>; the form does not expose DataNode or unique
-identifier inputs.</p>
-<p>Returns:</p>
+<p>This service is independent of Alpaca. It only expands ETF seeds into symbols.</p>
+<h3 id="holdings-category-service">Holdings category service<a class="headerlink" href="#holdings-category-service" title="Permanent link">&para;</a></h3>
+<p>Defined in <code>etf_extraction/holdings_categories.py</code>.</p>
+<p>Primary API:</p>
 <ul>
-<li>structured <code>spec</code> object matching the <code>lightweight-charts-spec</code> widget format</li>
+<li><code>build_holdings_asset_category_unique_identifier(...)</code></li>
+<li><code>infer_holdings_component_provider(...)</code></li>
+<li><code>build_holdings_asset_category_plan(...)</code></li>
+<li><code>resolve_existing_assets_by_ticker(...)</code></li>
+<li><code>sync_holdings_asset_category(...)</code></li>
 </ul>
-<p>Both selector mode and chart mode use the same explicit FastAPI response-body
-schema: <code>LightweightOhlcResponse</code>. The <code>mode</code> field identifies whether the
-payload contains selector results or chart data.</p>
-<h3 id="execute-holdings-category-sync">Execute holdings category sync<a class="headerlink" href="#execute-holdings-category-sync" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code>POST /v1/holdings-categories/execute
+<p>Plan object:</p>
+<ul>
+<li><code>HoldingsAssetCategoryPlan</code></li>
+</ul>
+<p>Sync result:</p>
+<ul>
+<li><code>AssetCategorySyncResult</code></li>
+</ul>
+<p>Responsibility:</p>
+<ul>
+<li>infer or receive the ETF provider</li>
+<li>extract component symbols for one ETF</li>
+<li>check which symbols already map to existing MainSequence assets</li>
+<li>detect missing or ambiguous MainSequence ticker matches</li>
+<li>create or refresh the ETF-owned <code>AssetCategory</code></li>
+</ul>
+<p>Important boundary:</p>
+<ul>
+<li>this service does not call Alpaca</li>
+<li>this service does not require Alpaca tradability checks</li>
+<li>this service only depends on ETF extraction plus MainSequence asset/category state</li>
+</ul>
+<h2 id="provider-extraction-layer">Provider Extraction Layer<a class="headerlink" href="#provider-extraction-layer" title="Permanent link">&para;</a></h2>
+<p>Extractor implementations live under <code>etf_extraction/extractors/</code>.</p>
+<p>Modules:</p>
+<ul>
+<li><code>etf_extraction/extractors/common.py</code></li>
+<li><code>etf_extraction/extractors/registry.py</code></li>
+<li><code>etf_extraction/extractors/browser.py</code></li>
+<li><code>etf_extraction/extractors/ishares.py</code></li>
+<li><code>etf_extraction/extractors/invesco.py</code></li>
+<li><code>etf_extraction/extractors/vanguard.py</code></li>
+<li><code>etf_extraction/extractors/state_street.py</code></li>
+</ul>
+<p>The extractor layer owns:</p>
+<ul>
+<li>provider URL resolution</li>
+<li>provider response fetching</li>
+<li>provider-specific parsing</li>
+<li>normalization into <code>ExpandedSymbolUniverse</code></li>
+</ul>
+<p>The extractor layer does not own:</p>
+<ul>
+<li>MainSequence asset registration</li>
+<li>Alpaca API interaction</li>
+<li><code>AssetCategory</code> sync</li>
+</ul>
+<h2 id="configuration-and-seed-data">Configuration And Seed Data<a class="headerlink" href="#configuration-and-seed-data" title="Permanent link">&para;</a></h2>
+<p>ETF-specific settings live in <code>etf_extraction/settings.py</code>.</p>
+<p>This module owns:</p>
+<ul>
+<li><code>SUPPORTED_COMPONENT_PROVIDERS</code></li>
+<li><code>ETF_EXTRACTION_DIR</code></li>
+<li><code>ETF_DATA_DIR</code></li>
+<li><code>SEED_UNIVERSES_PATH</code></li>
+<li><code>get_seed_universes()</code></li>
+<li><code>get_etf_provider_map()</code></li>
+<li><code>ETF_PROVIDER_MAP_NORMALIZED</code></li>
+<li>provider source builders such as <code>get_ishares_holdings_source(...)</code></li>
+</ul>
+<p>Seed-universe data lives in:</p>
+<div class="highlight"><pre><span></span><code>etf_extraction/data/seed_universes.yaml
 </code></pre></div>
-<p>This creates or refreshes the holdings <code>AssetCategory</code> from ETF extraction after MainSequence asset lookup passes.</p>
-<h2 id="local-run">Local Run<a class="headerlink" href="#local-run" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code>uv<span class="w"> </span>run<span class="w"> </span>uvicorn<span class="w"> </span>api.app.main:app<span class="w"> </span>--reload
+<p>That file is the source for:</p>
+<ul>
+<li><code>etf_provider_map_normalized</code></li>
+<li>ETF ticker groups such as <code>etfs_main_tickers</code></li>
+<li>other ETF-owned symbol lists used by the extraction side</li>
+</ul>
+<h2 id="execution-flows">Execution Flows<a class="headerlink" href="#execution-flows" title="Permanent link">&para;</a></h2>
+<h3 id="seed-expansion-only">Seed expansion only<a class="headerlink" href="#seed-expansion-only" title="Permanent link">&para;</a></h3>
+<p>Used when a caller needs component symbols but does not need category sync yet.</p>
+<p>Flow:</p>
+<ol>
+<li>caller creates <code>EtfExpansionRequest</code></li>
+<li><code>expand_etf_seed_symbols(...)</code> validates the provider</li>
+<li>the provider extractor expands the seed tickers</li>
+<li>the caller receives explicit component symbols</li>
+</ol>
+<p>Typical downstream consumer:</p>
+<ul>
+<li><code>src/cli/asset.py</code>, which expands ETF seeds first and then passes explicit symbols into the Alpaca registration flow</li>
+</ul>
+<h3 id="holdings-category-creation">Holdings category creation<a class="headerlink" href="#holdings-category-creation" title="Permanent link">&para;</a></h3>
+<p>Used when a caller needs an ETF-owned <code>AssetCategory</code> such as <code>HOLDINGS__IVV</code>.</p>
+<p>Flow:</p>
+<ol>
+<li>ETF ticker is normalized</li>
+<li>provider is inferred from <code>ETF_PROVIDER_MAP_NORMALIZED</code> or supplied explicitly</li>
+<li>extractor expands the ETF into component symbols</li>
+<li>MainSequence asset lookup checks whether those symbols already exist uniquely</li>
+<li><code>sync_holdings_asset_category(...)</code> creates or refreshes <code>HOLDINGS__&lt;ETF&gt;</code></li>
+</ol>
+<p>Important detail:</p>
+<ul>
+<li>this flow is about ETF membership</li>
+<li>it is not an Alpaca availability filter</li>
+</ul>
+<p>If Alpaca later cannot use some members of the category, that is handled by Alpaca consumers, not by <code>etf_extraction/</code></p>
+<h2 id="overlap-with-alpaca">Overlap With Alpaca<a class="headerlink" href="#overlap-with-alpaca" title="Permanent link">&para;</a></h2>
+<p>The overlap is intentionally narrow.</p>
+<p><code>etf_extraction/</code> produces:</p>
+<ul>
+<li>explicit component tickers</li>
+<li>ETF-owned holdings categories</li>
+</ul>
+<p><code>src/</code> consumes those outputs for Alpaca-specific work:</p>
+<ul>
+<li><code>src/cli/asset.py</code> uses ETF expansion output before Alpaca registration planning</li>
+<li><code>src/assets/alpaca_us_equities.py</code> handles Alpaca plus FIGI registration from explicit symbols only</li>
+<li><code>src/data_nodes/alpaca_bars.py</code> consumes existing assets or categories and decides what Alpaca bars can publish</li>
+</ul>
+<p>Dependency direction:</p>
+<div class="highlight"><pre><span></span><code>etf_extraction -&gt; explicit symbols or HOLDINGS__&lt;ETF&gt; category
+src/ Alpaca code -&gt; validates or consumes those outputs later
 </code></pre></div>
-<h2 id="important-boundary">Important Boundary<a class="headerlink" href="#important-boundary" title="Permanent link">&para;</a></h2>
-<p>The ETF extractor logic and holdings-category logic are owned by <code>etf_extraction/</code>. Alpaca registration and Alpaca bars logic remain owned by <code>src/</code>.
-The API is only the HTTP contract over those services.</p>
-<p>This API does not add <code>LoggedUserContextMiddleware</code> because the current routes do not consume request-local MainSequence user context.</p>
+<p>That means ETF extraction can be reasoned about independently from Alpaca runtime constraints.</p>
+<h2 id="cli-surfaces-that-use-etf-extraction">CLI Surfaces That Use ETF Extraction<a class="headerlink" href="#cli-surfaces-that-use-etf-extraction" title="Permanent link">&para;</a></h2>
+<p>ETF expansion for registration:</p>
+<div class="highlight"><pre><span></span><code>alpaca-connectors<span class="w"> </span>asset<span class="w"> </span>register<span class="w"> </span>--seed-tickers<span class="w"> </span>IVV<span class="w"> </span>--component-provider<span class="w"> </span>ishares
+</code></pre></div>
+<p>ETF category planning and sync:</p>
+<div class="highlight"><pre><span></span><code>alpaca-connectors<span class="w"> </span>holdings-category<span class="w"> </span>create<span class="w"> </span>--etf-ticker<span class="w"> </span>IVV
+alpaca-connectors<span class="w"> </span>holdings-category<span class="w"> </span>create<span class="w"> </span>--etf-ticker<span class="w"> </span>IVV<span class="w"> </span>--execute
+</code></pre></div>
+<p>These commands are orchestration layers. The ETF logic itself lives under <code>etf_extraction/</code>.</p>
+<h2 id="tests">Tests<a class="headerlink" href="#tests" title="Permanent link">&para;</a></h2>
+<p>ETF-specific tests live under:</p>
+<div class="highlight"><pre><span></span><code>etf_extraction/tests/
+</code></pre></div>
+<p>Current coverage areas:</p>
+<ul>
+<li>extractor behavior</li>
+<li>ETF holdings category planning</li>
+<li>ETF routine orchestration</li>
+</ul>
+<p>This keeps ETF regression coverage close to the ETF-owned package instead of mixing it into Alpaca-only test modules.</p>
 
 
 

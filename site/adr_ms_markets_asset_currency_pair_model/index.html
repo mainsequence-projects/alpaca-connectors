@@ -11,10 +11,10 @@
       
       
       
-        <link rel="prev" href="../agent/">
+        <link rel="prev" href="../etf_extraction/">
       
       
-        <link rel="next" href="../command_center/app_component/">
+        <link rel="next" href="../adr_etf_holdings_asset_category_ownership/">
       
       
         
@@ -25,7 +25,7 @@
     
     
       
-        <title>API - Alpaca Connectors</title>
+        <title>ms-markets Currency Pair Asset Model - Alpaca Connectors</title>
       
     
     
@@ -66,7 +66,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#api" class="md-skip">
+        <a href="#adr-ms-markets-currency-pair-asset-model" class="md-skip">
           Skip to content
         </a>
       
@@ -102,7 +102,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              API
+              ms-markets Currency Pair Asset Model
             
           </span>
         </div>
@@ -249,37 +249,10 @@
       
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    API
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../api/" class="md-nav__link">
         
   
   
@@ -295,153 +268,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#goal" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Goal
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#design" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Design
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#endpoints" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Endpoints
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Endpoints">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#health" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Health
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#discovery-configuration" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Discovery configuration
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#execute-asset-registration" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Execute asset registration
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#appcomponent-single-ticker-registration" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        AppComponent single-ticker registration
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#lightweight-charts-ohlc-payload" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Lightweight Charts OHLC payload
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#execute-holdings-category-sync" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Execute holdings category sync
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#local-run" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Local Run
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#important-boundary" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Important Boundary
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -628,8 +454,10 @@
       
   
   
+    
   
   
+  
     
     
     
@@ -640,13 +468,11 @@
       
     
     
-    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
       
         
         
-          
-        
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_6" >
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" checked>
         
           
           <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
@@ -667,7 +493,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="true">
           <label class="md-nav__title" for="__nav_6">
             <span class="md-nav__icon md-icon"></span>
             
@@ -682,10 +508,37 @@
                 
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../adr_ms_markets_asset_currency_pair_model/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ms-markets Currency Pair Asset Model
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -701,6 +554,136 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#status" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Status
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#context" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Context
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#decision" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Decision
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#relational-shape" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Relational Shape
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#invariants" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Invariants
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#asset-type-rule" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Asset Type Rule
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#consequences" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Consequences
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#migration-boundary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Migration Boundary
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#follow-on-implementation-shape" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Follow-On Implementation Shape
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#notes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Notes
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -1119,10 +1102,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#goal" class="md-nav__link">
+  <a href="#status" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Goal
+        Status
       
     </span>
   </a>
@@ -1130,10 +1113,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#design" class="md-nav__link">
+  <a href="#context" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Design
+        Context
       
     </span>
   </a>
@@ -1141,93 +1124,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#endpoints" class="md-nav__link">
+  <a href="#decision" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Endpoints
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Endpoints">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#health" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Health
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#discovery-configuration" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Discovery configuration
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#execute-asset-registration" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Execute asset registration
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#appcomponent-single-ticker-registration" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        AppComponent single-ticker registration
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#lightweight-charts-ohlc-payload" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Lightweight Charts OHLC payload
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#execute-holdings-category-sync" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Execute holdings category sync
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#local-run" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Local Run
+        Decision
       
     </span>
   </a>
@@ -1235,10 +1135,76 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#important-boundary" class="md-nav__link">
+  <a href="#relational-shape" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Important Boundary
+        Relational Shape
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#invariants" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Invariants
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#asset-type-rule" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Asset Type Rule
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#consequences" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Consequences
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#migration-boundary" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Migration Boundary
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#follow-on-implementation-shape" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Follow-On Implementation Shape
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#notes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Notes
       
     </span>
   </a>
@@ -1262,92 +1228,165 @@
 
 
 
-<h1 id="api">API<a class="headerlink" href="#api" title="Permanent link">&para;</a></h1>
-<h2 id="goal">Goal<a class="headerlink" href="#goal" title="Permanent link">&para;</a></h2>
-<p>The project includes a FastAPI surface for automating:</p>
+<h1 id="adr-ms-markets-currency-pair-asset-model">ADR: ms-markets Currency Pair Asset Model<a class="headerlink" href="#adr-ms-markets-currency-pair-asset-model" title="Permanent link">&para;</a></h1>
+<h2 id="status">Status<a class="headerlink" href="#status" title="Permanent link">&para;</a></h2>
+<p>Proposed</p>
+<h2 id="context">Context<a class="headerlink" href="#context" title="Permanent link">&para;</a></h2>
+<p>This repository is starting a migration from the legacy Main Sequence asset usage toward the newer
+<code>ms-markets</code> asset model.</p>
+<p>The current <code>ms-markets</code> asset design is intentionally narrow:</p>
 <ul>
-<li>asset discovery</li>
-<li>asset registration</li>
-<li>single-ticker registration for Command Center AppComponents</li>
-<li>lightweight charts OHLC spec generation for Command Center rendering</li>
-<li>holdings-category synchronization</li>
+<li><code>AssetTable</code> stores canonical asset identity</li>
+<li><code>AssetTypeTable</code> stores the asset-type registry</li>
+<li>instrument-specific fields should live in relational detail tables keyed to the asset row</li>
 </ul>
-<p>Main files:</p>
+<p>That design is documented in the current <code>ms-markets</code> asset docs and matches the current source:</p>
 <ul>
-<li><code>api/app/main.py</code></li>
-<li><code>api/app/schemas.py</code></li>
-<li><code>api/app/services.py</code></li>
+<li><code>AssetTable</code> keeps <code>uid</code>, <code>unique_identifier</code>, and <code>asset_type</code></li>
+<li><code>AssetTypeTable</code> registers discoverable type strings such as <code>crypto</code> or <code>equity</code></li>
+<li>extension data should be modeled through one-to-one detail tables rather than by widening
+  <code>AssetTable</code></li>
 </ul>
-<h2 id="design">Design<a class="headerlink" href="#design" title="Permanent link">&para;</a></h2>
-<p>The API is intentionally thin.</p>
+<p>The migration needs a first-class way to represent currency pairs such as <code>BTC/USDT</code>.</p>
+<p>That representation must satisfy these requirements:</p>
 <ul>
-<li>route handlers validate input and return typed responses</li>
-<li>service functions call the existing logic under <code>src/</code></li>
-<li>the API does not rebuild the Alpaca, FIGI, extractor, or category workflows</li>
+<li>the tradable pair itself must have a canonical asset identity</li>
+<li>the pair must reference the canonical asset rows for its base and quote legs</li>
+<li>the leg references must point back to the main asset list, not to free-form strings</li>
+<li>the design must fit the <code>ms-markets</code> extension pattern instead of adding pair-specific columns to
+  <code>AssetTable</code></li>
 </ul>
-<h2 id="endpoints">Endpoints<a class="headerlink" href="#endpoints" title="Permanent link">&para;</a></h2>
-<h3 id="health">Health<a class="headerlink" href="#health" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code>GET /health
-</code></pre></div>
-<h3 id="discovery-configuration">Discovery configuration<a class="headerlink" href="#discovery-configuration" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code>GET /v1/discovery/config
-</code></pre></div>
-<p>Returns:</p>
+<h2 id="decision">Decision<a class="headerlink" href="#decision" title="Permanent link">&para;</a></h2>
+<p>Currency-pair assets will be modeled as canonical <code>Asset</code> rows plus a one-to-one relational detail
+table.</p>
+<p>The first migration decision is:</p>
+<ol>
+<li>Register an asset type with key <code>currency</code> and display name <code>Currency</code>.</li>
+<li>Represent a tradable pair such as <code>BTC/USDT</code> as an <code>Asset</code> row whose canonical
+   <code>unique_identifier</code> is the ordered pair string.</li>
+<li>Add a <code>CurrencyPairDetailsTable</code> keyed by that pair asset.</li>
+<li>Store <code>base_asset_uid</code> and <code>quote_asset_uid</code> on the detail table as foreign keys to
+   <code>AssetTable.uid</code>.</li>
+<li>Treat the pair asset row as the canonical identity of the tradable pair, while the referenced
+   base and quote assets remain the canonical identity rows for the underlying legs.</li>
+</ol>
+<p>Example:</p>
 <ul>
-<li>supported component providers</li>
-<li>ETF provider map</li>
-<li>configured seed universes</li>
+<li>asset <code>BTC</code></li>
+<li>asset <code>USDT</code></li>
+<li>asset <code>BTC/USDT</code></li>
+<li><code>BTC/USDT</code> has <code>asset_type="currency"</code></li>
+<li><code>CurrencyPairDetailsTable(asset_uid=&lt;BTC/USDT&gt;, base_asset_uid=&lt;BTC&gt;, quote_asset_uid=&lt;USDT&gt;)</code></li>
 </ul>
-<h3 id="execute-asset-registration">Execute asset registration<a class="headerlink" href="#execute-asset-registration" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code>POST /v1/assets/registration/execute
+<h2 id="relational-shape">Relational Shape<a class="headerlink" href="#relational-shape" title="Permanent link">&para;</a></h2>
+<p>The intended schema shape is:</p>
+<div class="highlight"><pre><span></span><code>+-----------------------------+        one-to-one pair detail     +-------------------------------+
+| AssetTable                  |----------------------------------&gt;| CurrencyPairDetailsTable      |
+|-----------------------------|        asset_uid PK/FK            |-------------------------------|
+| uid                  PK     |                                   | asset_uid              PK/FK  |
+| unique_identifier    unique |                                   | base_asset_uid           FK   |
+| asset_type                 |                                   | quote_asset_uid          FK   |
++-----------------------------+                                   +-------------------------------+
+          ^                                                                  |
+          |                                                                  |
+          +--------------------------- foreign keys --------------------------+
+                         to canonical leg assets in AssetTable
 </code></pre></div>
-<p>This runs the FIGI-based registration flow and creates missing MainSequence public assets.</p>
-<h3 id="appcomponent-single-ticker-registration">AppComponent single-ticker registration<a class="headerlink" href="#appcomponent-single-ticker-registration" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code>POST /v1/app-components/assets/register-ticker
-</code></pre></div>
-<p>This is the AppComponent-facing operation for registering exactly one asset by ticker.</p>
-<p>It intentionally uses the default generated AppComponent form instead of a custom editable form.</p>
-<h3 id="lightweight-charts-ohlc-payload">Lightweight Charts OHLC payload<a class="headerlink" href="#lightweight-charts-ohlc-payload" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code>POST /v1/charts/lightweight/ohlc
-</code></pre></div>
-<p>This endpoint has two modes.</p>
-<p>Command Center selector mode:</p>
+<p>Expected identifiers:</p>
 <ul>
-<li><code>ticker</code> query parameter only</li>
+<li>leg asset <code>BTC</code></li>
+<li>leg asset <code>USDT</code></li>
+<li>pair asset <code>BTC/USDT</code></li>
 </ul>
-<p>Selector mode returns <code>items</code> and <code>pagination</code> for the AppComponent <code>select2</code> async ticker search.
-Each item exposes a user-facing ticker <code>label</code>, a platform <code>unique_identifier</code>, and display text.</p>
-<p>Chart mode accepts Command Center query parameters only.</p>
-<p>Command Center query fields:</p>
+<p>Expected foreign-key meaning:</p>
 <ul>
-<li><code>ticker</code>, containing the selected ticker, FIGI, or asset unique identifier</li>
-<li><code>start_date</code></li>
-<li><code>end_date</code></li>
+<li><code>asset_uid</code>: the pair asset row</li>
+<li><code>base_asset_uid</code>: the base leg asset row</li>
+<li><code>quote_asset_uid</code>: the quote leg asset row</li>
 </ul>
-<p>The generated workspace form defaults to <code>NVDA</code>, an end date equal to the workspace
-generation date, and a start date one year before that end date.</p>
-<p>In Command Center query mode, the selected <code>ticker</code> value is resolved strictly inside the
-configured <code>AssetCategory</code> before bars are queried. The API uses the fixed OHLC DataNode
-identifier <code>alpaca_stock_bars_1d_sip_all</code>; the form does not expose DataNode or unique
-identifier inputs.</p>
-<p>Returns:</p>
+<h2 id="invariants">Invariants<a class="headerlink" href="#invariants" title="Permanent link">&para;</a></h2>
+<p>The migration should preserve these invariants:</p>
+<ol>
+<li><code>AssetTable</code> remains small.
+   Pair semantics do not add <code>base_asset</code> or <code>quote_asset</code> columns directly to <code>AssetTable</code>.</li>
+<li>Currency-pair identity is explicit.
+   The tradable pair has its own canonical <code>Asset</code> row.</li>
+<li>Pair legs are relational, not textual.
+   Base and quote legs reference canonical asset rows through foreign keys.</li>
+<li>Pair direction matters.
+   <code>BTC/USDT</code> and <code>USDT/BTC</code> are different ordered pairs and must not collapse into one record.</li>
+<li>Duplicate pair definitions are not allowed.
+   The detail table should enforce uniqueness for the ordered <code>(base_asset_uid, quote_asset_uid)</code>
+   combination.</li>
+<li>A pair cannot reference the same asset on both sides.
+   The implementation should reject <code>base_asset_uid == quote_asset_uid</code>.</li>
+</ol>
+<h2 id="asset-type-rule">Asset Type Rule<a class="headerlink" href="#asset-type-rule" title="Permanent link">&para;</a></h2>
+<p>This ADR introduces <code>currency</code> as the registered asset-type key for the first currency-pair slice.</p>
+<p>Use:</p>
 <ul>
-<li>structured <code>spec</code> object matching the <code>lightweight-charts-spec</code> widget format</li>
+<li><code>asset_type = "currency"</code></li>
+<li><code>AssetType.display_name = "Currency"</code></li>
 </ul>
-<p>Both selector mode and chart mode use the same explicit FastAPI response-body
-schema: <code>LightweightOhlcResponse</code>. The <code>mode</code> field identifies whether the
-payload contains selector results or chart data.</p>
-<h3 id="execute-holdings-category-sync">Execute holdings category sync<a class="headerlink" href="#execute-holdings-category-sync" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code>POST /v1/holdings-categories/execute
-</code></pre></div>
-<p>This creates or refreshes the holdings <code>AssetCategory</code> from ETF extraction after MainSequence asset lookup passes.</p>
-<h2 id="local-run">Local Run<a class="headerlink" href="#local-run" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code>uv<span class="w"> </span>run<span class="w"> </span>uvicorn<span class="w"> </span>api.app.main:app<span class="w"> </span>--reload
-</code></pre></div>
-<h2 id="important-boundary">Important Boundary<a class="headerlink" href="#important-boundary" title="Permanent link">&para;</a></h2>
-<p>The ETF extractor logic and holdings-category logic are owned by <code>etf_extraction/</code>. Alpaca registration and Alpaca bars logic remain owned by <code>src/</code>.
-The API is only the HTTP contract over those services.</p>
-<p>This API does not add <code>LoggedUserContextMiddleware</code> because the current routes do not consume request-local MainSequence user context.</p>
+<p>Important current <code>ms-markets</code> detail:</p>
+<ul>
+<li>in the current release, <code>Asset.asset_type</code> is a string classification field</li>
+<li>it is logically aligned to <code>AssetType</code></li>
+<li>it is not a database foreign key yet</li>
+</ul>
+<p>This ADR does not require the leg assets themselves to settle all future type questions today.
+What is decided now is the pair contract:</p>
+<ul>
+<li>the pair row is classified as <code>currency</code></li>
+<li>the pair row owns the canonical tradable-pair identity</li>
+<li>the pair row references two canonical leg assets</li>
+</ul>
+<p>Whether a leg asset such as <code>BTC</code> or <code>USDT</code> is also classified as <code>currency</code>, <code>crypto</code>, or some
+other future subtype can be decided in a later ADR if needed.</p>
+<h2 id="consequences">Consequences<a class="headerlink" href="#consequences" title="Permanent link">&para;</a></h2>
+<p>Positive:</p>
+<ul>
+<li>The design matches the documented <code>ms-markets</code> extension model.</li>
+<li>Pair identity is explicit and queryable as a normal asset.</li>
+<li>Base and quote legs remain normalized against the canonical asset registry.</li>
+<li>The same leg assets can be reused across many pairs.</li>
+<li>Future pair-specific metadata can be added to the detail table without widening <code>AssetTable</code>.</li>
+</ul>
+<p>Tradeoffs:</p>
+<ul>
+<li>Creating one tradable pair now requires at least three coordinated asset records:
+  base asset, quote asset, and pair asset.</li>
+<li>Pair lookup logic must decide whether callers are asking for a leg asset or a pair asset.</li>
+<li>A later API/repository layer will need explicit helpers for pair creation and validation; generic
+  <code>Asset.upsert(...)</code> alone is not sufficient to enforce pair invariants.</li>
+</ul>
+<h2 id="migration-boundary">Migration Boundary<a class="headerlink" href="#migration-boundary" title="Permanent link">&para;</a></h2>
+<p>This ADR decides only the relational asset-model shape for currency pairs.</p>
+<p>It does not yet decide:</p>
+<ul>
+<li>the exact repository helper names</li>
+<li>the exact <code>msm.api</code> row model names</li>
+<li>provider-specific symbol normalization rules</li>
+<li>price routing or translation-table behavior</li>
+<li>venue-specific details for FX, crypto, or derivatives exchanges</li>
+<li>whether existing Alpaca-specific asset registration flows should be retained, wrapped, or replaced</li>
+</ul>
+<p>Those decisions should follow after this schema direction is accepted.</p>
+<h2 id="follow-on-implementation-shape">Follow-On Implementation Shape<a class="headerlink" href="#follow-on-implementation-shape" title="Permanent link">&para;</a></h2>
+<p>When this ADR is implemented, the expected <code>ms-markets</code> layering should be:</p>
+<ul>
+<li><code>msm.models.assets.currency_pairs</code>
+  defines <code>CurrencyPairDetailsTable</code></li>
+<li><code>msm.api.assets</code>
+  exposes a typed row model such as <code>CurrencyPairDetails</code></li>
+<li><code>msm.repositories</code>
+  owns compiled create/update/search operations</li>
+<li>project code under <code>src/</code>
+  uses those <code>ms-markets</code> assets instead of introducing a parallel local asset schema</li>
+</ul>
+<h2 id="notes">Notes<a class="headerlink" href="#notes" title="Permanent link">&para;</a></h2>
+<p><code>BTC/USDT</code> is the motivating example for this ADR, but the same pattern is intended for any quoted
+currency pair whose identity is defined by ordered base and quote assets.</p>
 
 
 

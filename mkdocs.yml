@@ -26,6 +26,9 @@ nav:
       - Asset Registry AppComponent: command_center/app_component.md
   - ETF Extraction:
       - Architecture: etf_extraction.md
+  - Architecture:
+      - ms-markets Currency Pair Asset Model: adr_ms_markets_asset_currency_pair_model.md
+      - ETF Holdings AssetCategory Ownership: adr_etf_holdings_asset_category_ownership.md
   - Assets:
       - Registration Flow: assets/registration.md
       - Holdings Categories: assets/holdings_categories.md
