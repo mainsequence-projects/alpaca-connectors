@@ -358,6 +358,14 @@ def main(argv: list[str] | None = None) -> int:
 
     args = parser.parse_args(argv)
     specs = _load_routines(Path(args.routines_path))
+
+    # Live routines register assets and write categories/bars through ms-markets MetaTables, so
+    # attach the markets runtime once up front. Dry-run only prints previews and needs no backend.
+    if not args.dry_run:
+        from src.runtime import start_markets_engine
+
+        start_markets_engine()
+
     return run_routines(
         specs,
         dry_run=args.dry_run,

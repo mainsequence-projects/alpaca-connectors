@@ -5,7 +5,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from src.settings import SUPPORTED_COMPONENT_PROVIDERS
+from etf_extraction.settings import SUPPORTED_COMPONENT_PROVIDERS
 
 
 def _normalize_symbol_list(values: list[str] | None) -> list[str] | None:

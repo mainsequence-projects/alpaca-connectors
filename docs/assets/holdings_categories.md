@@ -6,7 +6,7 @@ See also:
 
 ## Goal
 
-Create a MainSequence `AssetCategory` from an ETF's published holdings.
+Create an **ms-markets** `AssetCategory` (`msm.api.assets`) from an ETF's published holdings.
 
 Main module:
 
@@ -15,6 +15,16 @@ Main module:
 Primary CLI:
 
 - `src/cli/`
+
+## ms-markets specifics
+
+- Category get-or-create uses `AssetCategory.upsert(unique_identifier=, display_name=, description=)`.
+- Membership is replaced atomically with `AssetCategory.replace_memberships(category_uid=,
+  asset_uids=[...])` (delete-all-then-insert) — replacing the old `remove_assets` + `append_assets`.
+- Members are ms-markets asset **uids** (UUIDs), not integer ids.
+- A component ticker resolves to an asset via `OpenFigiDetails.ticker` (`src/assets/resolution.py`),
+  since the asset row no longer carries a ticker/`current_snapshot`.
+- The runtime must be attached first via `src.runtime.start_markets_engine()` (the CLI does this).
 
 ## Naming Convention
 

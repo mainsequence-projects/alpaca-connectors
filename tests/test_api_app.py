@@ -201,24 +201,20 @@ class ApiAppTests(unittest.TestCase):
         self.assertEqual(response.json()["items"][0]["unique_identifier"], "BBG000BBJQV0")
 
     def test_lightweight_ohlc_resolver_uses_backend_asset_unique_identifier(self) -> None:
+        # Provider facts (ticker/figi/name) now come from OpenFigiDetails, flattened by
+        # _find_backend_assets_by_identifier into one search-friendly view (no current_snapshot).
         asset = SimpleNamespace(
             unique_identifier="BBG000BJKPG0",
+            uid="11111111-1111-1111-1111-111111111111",
             figi="BBG000BJKPG0",
-            current_snapshot=SimpleNamespace(ticker="IVV", name="iShares Core S&P 500 ETF"),
+            ticker="IVV",
+            name="iShares Core S&P 500 ETF",
+            exchange_code="US",
         )
 
-        class FakeAsset:
-            @staticmethod
-            def filter(**kwargs):
-                return [asset] if kwargs == {"ticker": "IVV"} else []
-
-        fake_client = SimpleNamespace(Asset=FakeAsset)
-        with patch.dict(
-            sys.modules,
-            {
-                "mainsequence": SimpleNamespace(client=fake_client),
-                "mainsequence.client": fake_client,
-            },
+        with patch(
+            "api.app.services._find_backend_assets_by_identifier",
+            return_value=[asset],
         ):
             unique_identifier = resolve_lightweight_ohlc_asset_unique_identifier(
                 identifier="IVV",
@@ -229,22 +225,16 @@ class ApiAppTests(unittest.TestCase):
     def test_lightweight_ohlc_select_searches_backend_assets(self) -> None:
         asset = SimpleNamespace(
             unique_identifier="BBG000BBJQV0",
+            uid="22222222-2222-2222-2222-222222222222",
             figi="BBG000BBJQV0",
-            current_snapshot=SimpleNamespace(ticker="NVDA", name="NVIDIA Corporation"),
+            ticker="NVDA",
+            name="NVIDIA Corporation",
+            exchange_code="US",
         )
 
-        class FakeAsset:
-            @staticmethod
-            def filter(**kwargs):
-                return [asset] if kwargs == {"ticker": "NVDA"} else []
-
-        fake_client = SimpleNamespace(Asset=FakeAsset)
-        with patch.dict(
-            sys.modules,
-            {
-                "mainsequence": SimpleNamespace(client=fake_client),
-                "mainsequence.client": fake_client,
-            },
+        with patch(
+            "api.app.services._find_backend_assets_by_identifier",
+            return_value=[asset],
         ):
             response = search_assets_for_lightweight_ohlc_select(query="NVDA")
 
@@ -252,18 +242,9 @@ class ApiAppTests(unittest.TestCase):
         self.assertEqual(response.items[0].unique_identifier, "BBG000BBJQV0")
 
     def test_lightweight_ohlc_resolver_suggests_registering_missing_ticker(self) -> None:
-        class FakeAsset:
-            @staticmethod
-            def filter(**kwargs):
-                return []
-
-        fake_client = SimpleNamespace(Asset=FakeAsset)
-        with patch.dict(
-            sys.modules,
-            {
-                "mainsequence": SimpleNamespace(client=fake_client),
-                "mainsequence.client": fake_client,
-            },
+        with patch(
+            "api.app.services._find_backend_assets_by_identifier",
+            return_value=[],
         ):
             with self.assertRaisesRegex(ValueError, "Register the ticker first"):
                 resolve_lightweight_ohlc_asset_unique_identifier(identifier="sadfasdf")

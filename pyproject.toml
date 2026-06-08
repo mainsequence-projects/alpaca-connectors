@@ -8,7 +8,10 @@ version = "0.1.19"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "mainsequence",
+    # Market-domain behavior comes from ms-markets first, which itself depends on the
+    # mainsequence SDK. Both are pinned to the verified-working versions to avoid silent drift.
+    "ms-markets>=0.0.44",
+    "mainsequence>=4.3.14",
     "alpaca-py",
     "playwright",
     "mkdocs>=1.6.1",
@@ -23,7 +26,7 @@ alpaca-connectors = "src.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["src*", "agents*", "api*",]
+include = ["src*", "agents*", "api*", "markets_migrations*",]
 
 [tool.ruff]
 line-length = 100                 # Max line length for Ruff/Black.

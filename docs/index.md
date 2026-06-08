@@ -7,8 +7,11 @@ Current scope:
 - register MainSequence public assets from Alpaca symbols through FIGI
 - extract ETF holdings from published provider sources
 - create holdings-based `AssetCategory` objects such as `HOLDINGS__IVV`
-- publish Alpaca stock bars through a MainSequence `DataNode`
+- publish Alpaca stock bars through an ms-markets `AssetIndexedDataNode` (storage-first)
 - schedule recurring bar updates through `scheduled_jobs.yaml`
+
+Market-domain behavior runs on **ms-markets** (`msm`) over `mainsequence`. See the migration
+record at `docs/implementation_tasks/0001_ms_markets_storage_first_migration.md`.
 
 ## Repository Areas
 
@@ -41,7 +44,13 @@ Use that page first when the question is about:
 - ETF holdings extraction is provider-driven and explicit.
 - Component extraction only happens when both a seed ticker and provider are supplied.
 - Holdings categories are ETF-owned: ETF extraction defines category membership, and only MainSequence asset registration ambiguity/missing assets block category sync.
-- Alpaca daily bars share one table per `frequency_id`, `feed`, and `adjustment`.
+- Alpaca daily bars share one storage table per `frequency_id`, `feed`, and `adjustment`
+  (`src/markets_storage/`); the table identifier preserves the legacy
+  `alpaca_stock_bars_<freq>_<feed>_<adjustment>` string. Physical table names include the triple
+  concept, for example `bars_1d_iex_raw`; cadence carries the frequency and extra storage-hash
+  components carry only the non-cadence variant fields (`feed` and `adjustment`).
+- Storage-first: schema lives on the storage class, not the DataNode config; tables must be
+  migrated and the runtime attached (`start_markets_engine()`) before writes.
 - Daily bar `time_index` is normalized to `16:00 America/New_York` on the session date as a project convention.
 
 ## Build The Docs

@@ -9,37 +9,13 @@ from etf_extraction.settings import ETF_PROVIDER_MAP_NORMALIZED
 HOLDINGS_ASSET_CATEGORY_PREFIX = "HOLDINGS__"
 
 
-def _load_mainsequence_client() -> Any:
-    import mainsequence.client as msc
-
-    return msc
-
-
-def _coerce_asset_id(asset_or_id: int | object) -> int:
-    if isinstance(asset_or_id, int):
-        return asset_or_id
-
-    asset_id = getattr(asset_or_id, "id", None)
-    if isinstance(asset_id, int):
-        return asset_id
-
-    raise ValueError(f"Could not coerce asset id from {asset_or_id!r}")
-
-
-def _coerce_asset_ticker(asset: Any) -> str | None:
-    ticker = getattr(asset, "ticker", None)
-    if ticker is None and getattr(asset, "current_snapshot", None) is not None:
-        ticker = asset.current_snapshot.ticker
-    if not ticker:
-        return None
-    return str(ticker).strip().upper()
-
-
 @dataclass(frozen=True)
 class AssetCategorySyncResult:
     unique_identifier: str
     display_name: str
-    asset_ids: list[int]
+    # ms-markets asset identity is a UUID (Asset.uid) serialized as a string. The field name is
+    # kept for compatibility with existing CLI/consumers; values are now uid strings (D5).
+    asset_ids: list[str]
 
 
 @dataclass(frozen=True)
@@ -49,7 +25,8 @@ class HoldingsAssetCategoryPlan:
     category_unique_identifier: str
     expansion: ExpandedSymbolUniverse
     component_symbols: list[str]
-    existing_asset_ids_by_symbol: dict[str, int]
+    # Maps component ticker -> asset uid string (was integer Asset.id under the old SDK).
+    existing_asset_ids_by_symbol: dict[str, str]
     missing_registered_symbols: list[str]
     ambiguous_registered_symbols: list[str]
 
@@ -99,66 +76,63 @@ def infer_holdings_component_provider(etf_ticker: str) -> str:
 def sync_holdings_asset_category(
     *,
     etf_ticker: str,
-    asset_ids: list[int],
+    asset_ids: list[str],
 ) -> AssetCategorySyncResult:
-    msc = _load_mainsequence_client()
+    """Create/refresh an ``HOLDINGS__<ETF>`` category and atomically replace its members.
+
+    ``asset_ids`` are ms-markets asset uid strings. ``AssetCategory.upsert`` is the get-or-create,
+    and ``replace_memberships`` is the atomic delete-all-then-insert that the old
+    ``remove_assets`` + ``append_assets`` pair performed.
+    """
+    from msm.api.assets import AssetCategory
 
     unique_identifier = build_holdings_asset_category_unique_identifier(etf_ticker)
-    ordered_asset_ids = list(dict.fromkeys(_coerce_asset_id(asset_id) for asset_id in asset_ids))
+    ordered_asset_uids = list(dict.fromkeys(asset_ids))
     description = f"Published holdings assets for ETF {etf_ticker.strip().upper()}."
 
-    category = msc.AssetCategory.get_or_create(
-        display_name=unique_identifier,
+    category = AssetCategory.upsert(
         unique_identifier=unique_identifier,
+        display_name=unique_identifier,
         description=description,
     )
 
-    current_asset_ids = [_coerce_asset_id(asset_or_id) for asset_or_id in category.assets]
-    if current_asset_ids:
-        category = category.remove_assets(current_asset_ids)
-    if ordered_asset_ids:
-        category.append_assets(asset_ids=ordered_asset_ids)
+    memberships = AssetCategory.replace_memberships(
+        category_uid=category.uid,
+        asset_uids=ordered_asset_uids,
+    )
 
-    category = msc.AssetCategory.get(unique_identifier=unique_identifier)
     return AssetCategorySyncResult(
         unique_identifier=category.unique_identifier,
         display_name=category.display_name,
-        asset_ids=[_coerce_asset_id(asset_or_id) for asset_or_id in category.assets],
+        asset_ids=[str(membership.asset_uid) for membership in memberships],
     )
 
 
 def resolve_existing_assets_by_ticker(
     *,
     component_symbols: list[str],
-) -> tuple[dict[str, int], list[str], list[str]]:
+) -> tuple[dict[str, str], list[str], list[str]]:
     if not component_symbols:
         return {}, [], []
 
-    msc = _load_mainsequence_client()
-    matching_assets = msc.Asset.filter(current_snapshot__ticker__in=component_symbols)
-    assets_by_ticker: dict[str, list[Any]] = {}
-    for asset in matching_assets:
-        ticker = _coerce_asset_ticker(asset)
-        if ticker is None:
-            continue
-        assets_by_ticker.setdefault(ticker, []).append(asset)
+    from src.assets.resolution import assets_for_ticker
 
-    existing_asset_ids_by_symbol: dict[str, int] = {}
+    existing_asset_uids_by_symbol: dict[str, str] = {}
     ambiguous_registered_symbols: list[str] = []
     missing_registered_symbols: list[str] = []
 
     for symbol in component_symbols:
-        assets = assets_by_ticker.get(symbol, [])
+        assets = assets_for_ticker(symbol)
         if not assets:
             missing_registered_symbols.append(symbol)
             continue
         if len(assets) != 1:
             ambiguous_registered_symbols.append(symbol)
             continue
-        existing_asset_ids_by_symbol[symbol] = assets[0].id
+        existing_asset_uids_by_symbol[symbol] = str(assets[0].uid)
 
     return (
-        dict(sorted(existing_asset_ids_by_symbol.items())),
+        dict(sorted(existing_asset_uids_by_symbol.items())),
         sorted(missing_registered_symbols),
         sorted(ambiguous_registered_symbols),
     )

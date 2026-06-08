@@ -15,21 +15,6 @@ DEFAULT_PRICE_UPDATE_ADJUSTMENT = "all"
 PRICE_UPDATE_ACTION_ALIASES = ("update-prices", "update_prices")
 
 
-def _load_mainsequence_client() -> Any:
-    import mainsequence.client as msc
-
-    return msc
-
-
-def _coerce_asset_ticker(asset: Any) -> str | None:
-    ticker = getattr(asset, "ticker", None)
-    if ticker is None and getattr(asset, "current_snapshot", None) is not None:
-        ticker = asset.current_snapshot.ticker
-    if not ticker:
-        return None
-    return str(ticker).strip().upper()
-
-
 def parse_tickers(raw_value: str) -> list[str]:
     tickers = [value.strip().upper() for value in raw_value.split(",") if value.strip()]
     if not tickers:
@@ -53,7 +38,15 @@ def normalize_price_update_period(period: str) -> str:
 def resolve_registered_assets_from_tickers(
     *,
     tickers: list[str],
-) -> tuple[list[Any], dict[str, str]]:
+) -> tuple[list[str], dict[str, str]]:
+    """Resolve tickers to registered ms-markets asset unique identifiers (strings).
+
+    Preserves the three distinct strict errors: not available in Alpaca, available in Alpaca but
+    not registered in ms-markets, and ambiguous in ms-markets. Asset lookup goes through
+    ``OpenFigiDetails.ticker`` (provider symbols no longer live on the asset row).
+    """
+    from src.assets.resolution import assets_for_ticker
+
     requested_tickers = parse_tickers(",".join(tickers))
     alpaca_assets = fetch_alpaca_us_equities(include_non_tradable=False)
     resolved_alpaca_assets, missing_alpaca_tickers, requested_symbol_aliases = (
@@ -69,17 +62,12 @@ def resolve_registered_assets_from_tickers(
         )
 
     resolved_alpaca_symbols = [asset.symbol for asset in resolved_alpaca_assets]
-    msc = _load_mainsequence_client()
-    matching_assets = msc.Asset.filter(current_snapshot__ticker__in=resolved_alpaca_symbols)
-    assets_by_ticker: dict[str, list[Any]] = {}
-    for asset in matching_assets:
-        ticker = _coerce_asset_ticker(asset)
-        if ticker is None:
-            continue
-        assets_by_ticker.setdefault(ticker, []).append(asset)
+    assets_by_ticker: dict[str, list[Any]] = {
+        ticker: assets_for_ticker(ticker) for ticker in resolved_alpaca_symbols
+    }
 
     missing_platform_tickers = sorted(
-        ticker for ticker in resolved_alpaca_symbols if ticker not in assets_by_ticker
+        ticker for ticker in resolved_alpaca_symbols if not assets_by_ticker[ticker]
     )
     if missing_platform_tickers:
         raise RuntimeError(
@@ -96,8 +84,10 @@ def resolve_registered_assets_from_tickers(
             f"{ambiguous_platform_tickers!r}"
         )
 
-    resolved_assets = [assets_by_ticker[ticker][0] for ticker in resolved_alpaca_symbols]
-    return resolved_assets, requested_symbol_aliases
+    resolved_unique_identifiers = [
+        assets_by_ticker[ticker][0].unique_identifier for ticker in resolved_alpaca_symbols
+    ]
+    return resolved_unique_identifiers, requested_symbol_aliases
 
 
 def build_stock_bars_node(
@@ -109,12 +99,18 @@ def build_stock_bars_node(
     adjustment: str,
     hash_namespace: str | None,
 ) -> tuple[Any, dict[str, Any]]:
+    # Storage-first: building/running the node attaches to the migrated+registered storage table,
+    # so the markets runtime must be initialized first (idempotent/cached).
+    from src.runtime import start_markets_engine
+
+    start_markets_engine()
+
     requested_tickers = list(tickers) if tickers is not None else None
-    resolved_assets = None
+    resolved_unique_identifiers = None
     requested_symbol_aliases: dict[str, str] = {}
     if requested_tickers is not None:
-        resolved_assets, requested_symbol_aliases = resolve_registered_assets_from_tickers(
-            tickers=requested_tickers,
+        resolved_unique_identifiers, requested_symbol_aliases = (
+            resolve_registered_assets_from_tickers(tickers=requested_tickers)
         )
 
     config_kwargs: dict[str, Any] = {
@@ -125,7 +121,7 @@ def build_stock_bars_node(
     if asset_category_unique_identifier:
         config_kwargs["asset_category_unique_identifier"] = asset_category_unique_identifier
     else:
-        config_kwargs["asset_list"] = resolved_assets
+        config_kwargs["asset_list"] = resolved_unique_identifiers
 
     from src.data_nodes import AlpacaStockBarsConfig, AlpacaStockBarsNode
 
@@ -135,6 +131,7 @@ def build_stock_bars_node(
         hash_namespace=hash_namespace,
     )
 
+    # get_asset_list() now returns asset unique-identifier strings (not asset objects).
     node_assets = node.get_asset_list()
     summary = {
         "asset_category_unique_identifier": asset_category_unique_identifier,
@@ -145,14 +142,10 @@ def build_stock_bars_node(
         "feed": node.feed,
         "adjustment": node.adjustment,
         "hash_namespace": node.hash_namespace or None,
-        "table_identifier": (
-            node.get_table_metadata().identifier if node.get_table_metadata() else None
-        ),
+        "table_identifier": node.storage_table.__metatable_identifier__,
         "storage_hash": node.storage_hash,
         "update_hash": node.update_hash,
-        "resolved_asset_unique_identifiers_sample": [
-            asset.unique_identifier for asset in node_assets
-        ][:20],
+        "resolved_asset_unique_identifiers_sample": list(node_assets)[:20],
     }
     return node, summary
 

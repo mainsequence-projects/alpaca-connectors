@@ -99,9 +99,24 @@ Important boundary:
 - `tests/` and `etf_extraction/tests/`: regression coverage for CLI, API, ETF extraction, and bar
   support logic.
 
+## Architecture (ms-markets, storage-first)
+
+Market-domain behavior depends on **ms-markets** (`msm`) first, then `mainsequence`. Assets,
+categories, and the OHLCV DataNode use the storage-first ms-markets layer:
+
+- `AlpacaStockBarsNode` is an `msm.data_nodes.assets.AssetIndexedDataNode`; its schema lives on a
+  storage class in `src/markets_storage/`, indexed by `(time_index, asset_identifier)`.
+- Assets are `msm.api.assets.Asset` rows (UUID identity; FIGI as `unique_identifier`); provider
+  ticker/figi live on `OpenFigiDetails`.
+- Every process attaches the runtime once via `src.runtime.start_markets_engine()`.
+
+Full migration record: `docs/implementation_tasks/0001_ms_markets_storage_first_migration.md`.
+
 ## Runtime Prerequisites
 
 - Live platform actions need an authenticated Main Sequence session.
+- The project market tables must be migrated/registered before live writes:
+  `mainsequence migrations upgrade --provider markets_migrations:migration head`.
 - Alpaca credentials are resolved from environment variables first, then from Main Sequence
   secrets.
 - Browser-backed ETF extraction flows require the Playwright browser runtime.
@@ -136,3 +151,4 @@ Use the pages under `docs/` for workflow depth after this summary:
 - `docs/api.md`
 - `docs/command_center/app_component.md`
 - `docs/operations/jobs.md`
+- `docs/implementation_tasks/0001_ms_markets_storage_first_migration.md` (ms-markets migration record)

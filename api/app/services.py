@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
+from types import SimpleNamespace
 from typing import Any
 
 import pandas as pd
@@ -14,7 +15,7 @@ from src.holdings_categories import (
     build_holdings_asset_category_plan,
     sync_holdings_asset_category,
 )
-from src.settings import (
+from etf_extraction.settings import (
     ETF_PROVIDER_MAP_NORMALIZED,
     ETFS_MAIN_TICKERS,
     MAG_7_CATEGORY_SYMBOLS,
@@ -276,19 +277,24 @@ def execute_asset_registration_by_ticker(
 def execute_lightweight_ohlc_chart(
     request: LightweightOhlcChartRequest,
 ) -> LightweightOhlcChartResponse:
-    from mainsequence.client.models_tdag import DataNodeStorage
+    # Storage-first read: the time-indexed MetaTable is queried by the DataNode identifier. This
+    # replaces the removed `mainsequence.client.models_tdag.DataNodeStorage`. The per-asset scope
+    # is now expressed as a dimension filter on `asset_identifier` (the value is the asset's
+    # unique_identifier), not the old `unique_identifier_list` kwarg. The SDK helper returns
+    # `pd.DataFrame(all_results)`, so `time_index` arrives as a column in the returned rows.
+    from mainsequence.client import TimeIndexMetaTable
 
     start_dt = dt.datetime.combine(request.start_date, dt.time.min, tzinfo=dt.UTC)
     end_dt = dt.datetime.combine(request.end_date, dt.time.max, tzinfo=dt.UTC)
-    bars_frame, _ = DataNodeStorage.get_data_between_dates_from_node_identifier(
+    bars_frame, _ = TimeIndexMetaTable.get_data_between_dates_from_node_identifier(
         node_identifier=request.node_identifier,
         start_date=start_dt,
         end_date=end_dt,
-        unique_identifier_list=[request.unique_identifier],
+        dimension_filters={"asset_identifier": [request.unique_identifier]},
         columns=["open", "high", "low", "close", "volume"],
     )
 
-    if bars_frame.empty:
+    if bars_frame is None or bars_frame.empty:
         raise ValueError(
             "No OHLC bars found for "
             f"{request.unique_identifier!r} in {request.node_identifier!r} "
@@ -456,22 +462,55 @@ def _dedupe_assets(assets: list[Any]) -> list[Any]:
     return list(deduped.values())
 
 
+def _combine_asset_with_details(asset: Any, details: Any) -> SimpleNamespace:
+    """Flatten an ``Asset`` row + its ``OpenFigiDetails`` into one search-friendly view.
+
+    The downstream search helpers read ``ticker``/``name``/``figi`` directly off the object (with
+    no ``current_snapshot``), so provider facts that now live on ``OpenFigiDetails`` are surfaced
+    as plain attributes here.
+    """
+    return SimpleNamespace(
+        unique_identifier=asset.unique_identifier,
+        uid=str(asset.uid),
+        ticker=getattr(details, "ticker", None) if details is not None else None,
+        name=getattr(details, "name", None) if details is not None else None,
+        figi=getattr(details, "figi", None) if details is not None else None,
+        exchange_code=getattr(details, "exchange_code", None) if details is not None else None,
+    )
+
+
 def _find_backend_assets_by_identifier(identifier: str) -> list[Any]:
     normalized_identifier = identifier.strip().upper()
     if not normalized_identifier:
         return []
 
-    import mainsequence.client as msc
+    from msm.api.assets import Asset, OpenFigiDetails
+
+    from src.assets.resolution import openfigi_details_for_asset_uid
 
     candidates: list[Any] = []
-    for filters in (
-        {"ticker": normalized_identifier},
-        {"figi": normalized_identifier},
-        {"unique_identifier": normalized_identifier},
-        {"unique_identifier__contains": normalized_identifier},
-        {"name__contains": identifier.strip()},
-    ):
-        candidates.extend(msc.Asset.filter(**filters))
+
+    # Asset-side identity lookups (no bulk __in; equality + _contains only).
+    for asset in Asset.filter(unique_identifier=normalized_identifier):
+        candidates.append(_combine_asset_with_details(asset, openfigi_details_for_asset_uid(asset.uid)))
+    for asset in Asset.filter(unique_identifier_contains=normalized_identifier):
+        candidates.append(_combine_asset_with_details(asset, openfigi_details_for_asset_uid(asset.uid)))
+
+    # Provider-symbol lookups now live on OpenFigiDetails (ticker / figi / name), joined to the
+    # asset by asset_uid.
+    for details in OpenFigiDetails.filter(ticker=normalized_identifier):
+        asset = Asset.get_by_uid(details.asset_uid)
+        if asset is not None:
+            candidates.append(_combine_asset_with_details(asset, details))
+    for details in OpenFigiDetails.filter(figi=normalized_identifier):
+        asset = Asset.get_by_uid(details.asset_uid)
+        if asset is not None:
+            candidates.append(_combine_asset_with_details(asset, details))
+    for details in OpenFigiDetails.filter(name_contains=identifier.strip()):
+        asset = Asset.get_by_uid(details.asset_uid)
+        if asset is not None:
+            candidates.append(_combine_asset_with_details(asset, details))
+
     return _dedupe_assets(candidates)
 
 

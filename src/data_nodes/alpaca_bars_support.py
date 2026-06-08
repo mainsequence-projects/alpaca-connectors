@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import datetime as dt
 from collections import defaultdict
-from collections.abc import Iterable, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -39,15 +39,25 @@ DEFAULT_BAR_SYMBOL_BATCH_SIZE = 200
 
 
 @dataclass(frozen=True)
+class AssetTickerFigi:
+    """Lightweight asset-resolution record fed to the symbol binder.
+
+    Replaces the old SDK ``Asset`` object. In storage-first ms-markets provider facts such as
+    ticker and FIGI live on ``OpenFigiDetails``; the bars DataNode resolves them via
+    ``src.assets.resolution`` and passes records here. The canonical ``unique_identifier`` is the
+    FIGI-backed asset identity used as ``asset_identifier`` in storage.
+    """
+
+    unique_identifier: str
+    ticker: str | None = None
+    figi: str | None = None
+
+
+@dataclass(frozen=True)
 class AlpacaBarAssetBinding:
     asset: Any
     unique_identifier: str
     alpaca_symbol: str
-
-
-def _chunked(values: Sequence[str], chunk_size: int) -> Iterable[list[str]]:
-    for start in range(0, len(values), chunk_size):
-        yield list(values[start : start + chunk_size])
 
 
 def _build_symbol_alias_candidates(symbol: str) -> list[str]:
@@ -235,8 +245,6 @@ def resolve_asset_bindings_from_category_assets(
 
     for asset in assets:
         ticker = getattr(asset, "ticker", None)
-        if ticker is None and getattr(asset, "current_snapshot", None) is not None:
-            ticker = asset.current_snapshot.ticker
         if not ticker:
             unresolved_assets.append(asset)
             continue
@@ -261,11 +269,14 @@ def resolve_asset_bindings_from_category_assets(
 
     if unresolved_assets:
         figi_fallback_tickers = query_openfigi_ticker_by_figi(
-            [asset.figi or asset.unique_identifier for asset in unresolved_assets]
+            [
+                getattr(asset, "figi", None) or asset.unique_identifier
+                for asset in unresolved_assets
+            ]
         )
         remaining_unresolved_assets: list[Any] = []
         for asset in unresolved_assets:
-            figi = asset.figi or asset.unique_identifier
+            figi = getattr(asset, "figi", None) or asset.unique_identifier
             figi_ticker = figi_fallback_tickers.get(figi)
             if not figi_ticker:
                 remaining_unresolved_assets.append(asset)
@@ -347,8 +358,8 @@ def normalize_stock_bars_frame(
     *,
     frame: pd.DataFrame,
     frequency_id: str,
-    unique_identifier_by_symbol: dict[str, str],
-    last_update_by_unique_identifier: dict[str, dt.datetime],
+    asset_identifier_by_symbol: dict[str, str],
+    last_update_by_asset_identifier: dict[str, dt.datetime],
     period_cutoff: dt.datetime,
 ) -> pd.DataFrame:
     if frame.empty:
@@ -378,13 +389,13 @@ def normalize_stock_bars_frame(
         normalized["time_index"] = (
             normalized["bar_start_time"] + pd.Timedelta(bar_interval)
         ).astype("datetime64[ns, UTC]")
-    normalized["unique_identifier"] = normalized["symbol"].map(unique_identifier_by_symbol)
-    normalized = normalized[normalized["unique_identifier"].notna()].copy()
+    normalized["asset_identifier"] = normalized["symbol"].map(asset_identifier_by_symbol)
+    normalized = normalized[normalized["asset_identifier"].notna()].copy()
     normalized = normalized[normalized["bar_start_time"] < period_cutoff].copy()
     if normalized.empty:
         return pd.DataFrame()
 
-    normalized["last_update"] = normalized["unique_identifier"].map(last_update_by_unique_identifier)
+    normalized["last_update"] = normalized["asset_identifier"].map(last_update_by_asset_identifier)
     normalized = normalized[normalized["time_index"] > normalized["last_update"]].copy()
     if normalized.empty:
         return pd.DataFrame()
@@ -396,7 +407,7 @@ def normalize_stock_bars_frame(
     normalized = normalized[
         [
             "time_index",
-            "unique_identifier",
+            "asset_identifier",
             "open",
             "high",
             "low",
@@ -410,18 +421,18 @@ def normalize_stock_bars_frame(
         normalized[column_name] = pd.to_numeric(normalized[column_name], errors="coerce")
 
     normalized = normalized.drop_duplicates(
-        subset=["time_index", "unique_identifier"],
+        subset=["time_index", "asset_identifier"],
         keep="last",
     )
-    normalized = normalized.sort_values(["time_index", "unique_identifier"])
-    normalized = normalized.set_index(["time_index", "unique_identifier"])
-    normalized.index = normalized.index.set_names(["time_index", "unique_identifier"])
+    normalized = normalized.sort_values(["time_index", "asset_identifier"])
+    normalized = normalized.set_index(["time_index", "asset_identifier"])
+    normalized.index = normalized.index.set_names(["time_index", "asset_identifier"])
     normalized.index = pd.MultiIndex.from_arrays(
         [
             normalized.index.get_level_values("time_index").astype("datetime64[ns, UTC]"),
-            normalized.index.get_level_values("unique_identifier"),
+            normalized.index.get_level_values("asset_identifier"),
         ],
-        names=["time_index", "unique_identifier"],
+        names=["time_index", "asset_identifier"],
     )
     return normalized
 
@@ -429,27 +440,24 @@ def normalize_stock_bars_frame(
 def group_bindings_by_last_update(
     *,
     bindings: Sequence[AlpacaBarAssetBinding],
-    last_update_by_unique_identifier: dict[str, dt.datetime],
+    last_update_by_asset_identifier: dict[str, dt.datetime],
 ) -> dict[dt.datetime, list[AlpacaBarAssetBinding]]:
+    """Bucket bindings by their shared per-asset last-update timestamp.
+
+    Each bucket is fetched with a single Alpaca ``request_start``, preserving the legacy
+    batching. The ``last_update_by_asset_identifier`` map is now derived from
+    ``AssetIndexedDataNode.get_asset_update_range_map_great_or_equal()`` instead of the removed
+    ``UpdateStatistics.get_last_update_index_2d``.
+    """
     grouped_bindings: dict[dt.datetime, list[AlpacaBarAssetBinding]] = defaultdict(list)
     for binding in bindings:
-        grouped_bindings[last_update_by_unique_identifier[binding.unique_identifier]].append(binding)
+        grouped_bindings[last_update_by_asset_identifier[binding.unique_identifier]].append(binding)
     return dict(sorted(grouped_bindings.items(), key=lambda item: item[0]))
-
-
-def update_statistics_to_last_update_map(
-    *,
-    bindings: Sequence[AlpacaBarAssetBinding],
-    update_statistics: Any,
-) -> dict[str, dt.datetime]:
-    return {
-        binding.unique_identifier: update_statistics.get_last_update_index_2d(binding.unique_identifier)
-        for binding in bindings
-    }
 
 
 __all__ = [
     "AlpacaBarAssetBinding",
+    "AssetTickerFigi",
     "DEFAULT_BAR_SYMBOL_BATCH_SIZE",
     "SUPPORTED_ALPACA_ADJUSTMENTS",
     "SUPPORTED_ALPACA_BAR_FREQUENCIES",
@@ -464,5 +472,4 @@ __all__ = [
     "normalize_frequency_id",
     "normalize_stock_bars_frame",
     "resolve_asset_bindings_from_category_assets",
-    "update_statistics_to_last_update_map",
 ]

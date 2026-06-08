@@ -24,6 +24,20 @@ The API is intentionally thin.
 - service functions call the existing logic under `src/`
 - the API does not rebuild the Alpaca, FIGI, extractor, or category workflows
 
+### ms-markets runtime
+
+A FastAPI `startup` event attaches the markets runtime once
+(`src.runtime.start_markets_engine()`), so the chart read and asset search can query the
+already-migrated ms-markets MetaTables. Concretely:
+
+- OHLC bars are read with `mainsequence.client.TimeIndexMetaTable.get_data_between_dates_from_node_identifier(...)`
+  (the removed `mainsequence.client.models_tdag.DataNodeStorage`), scoped by
+  `dimension_filters={"asset_identifier": [unique_identifier]}`.
+- Asset search/resolution joins `msm.api.assets.Asset` with `OpenFigiDetails` (ticker / figi /
+  name live on the detail table, not the asset row).
+- The OHLC DataNode identifier `alpaca_stock_bars_1d_sip_all` is preserved by the storage class,
+  so the chart contract is unchanged.
+
 ## Endpoints
 
 ### Health

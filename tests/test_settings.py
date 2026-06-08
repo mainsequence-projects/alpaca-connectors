@@ -51,10 +51,17 @@ class SettingsTests(unittest.TestCase):
         fake_secret = SimpleNamespace(
             value=SimpleNamespace(get_secret_value=lambda: "platform-api-key")
         )
-        fake_client = SimpleNamespace(
-            Secret=SimpleNamespace(get_or_none=lambda **kwargs: fake_secret)
-        )
-        with patch.dict("sys.modules", {"mainsequence.client": fake_client}):
+        # Patch the Secret attribute on the real (already-imported) module rather than swapping
+        # the whole sys.modules entry: `import mainsequence.client as msc` resolves the cached
+        # submodule attribute, so a sys.modules patch alone does not take effect once the module
+        # has been imported elsewhere in the test session.
+        import mainsequence.client as real_msc
+
+        with patch.object(
+            real_msc,
+            "Secret",
+            SimpleNamespace(get_or_none=lambda **kwargs: fake_secret),
+        ):
             self.assertEqual(
                 settings.get_platform_secret_value("ALPACA_API_KEY"),
                 "platform-api-key",

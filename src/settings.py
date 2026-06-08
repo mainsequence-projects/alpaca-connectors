@@ -66,24 +66,34 @@ def get_openfigi_api_key() -> str | None:
     return os.getenv("OPENFIGI_API_KEY") or os.getenv("FIGI_API_KEY")
 
 
-@lru_cache(maxsize=1)
-def get_markets_constants():
-    import mainsequence.client as msc
-
-    return msc.MARKETS_CONSTANTS
+# OpenFIGI classification literals.
+#
+# These previously came from `mainsequence.client.MARKETS_CONSTANTS`, which was removed in
+# SDK 4.x (markets concepts moved to ms-markets). They are intentionally not treated as legacy
+# SDK constants anymore. They are local string literals matching the canonical OpenFIGI
+# `/v3/mapping` response values (Bloomberg taxonomy):
+#   - marketSector  -> "Equity"
+#   - securityType  -> "Common Stock"
+#   - securityType2 -> "ETP" / "REIT"
+# FIGI remains the asset identity; these values only classify/filter OpenFIGI candidates and help
+# derive AssetType from `security_market_sector`.
+FIGI_MARKET_SECTOR_EQUITY = "Equity"
+FIGI_SECURITY_TYPE_COMMON_STOCK = "Common Stock"
+FIGI_SECURITY_TYPE_ETP = "ETP"
+FIGI_SECURITY_TYPE_REIT = "REIT"
 
 
 def get_figi_market_sector_equity() -> str:
-    return get_markets_constants().FIGI_MARKET_SECTOR_EQUITY
+    return FIGI_MARKET_SECTOR_EQUITY
 
 
 def get_figi_security_type_common_stock() -> str:
-    return get_markets_constants().FIGI_SECURITY_TYPE_COMMON_STOCK
+    return FIGI_SECURITY_TYPE_COMMON_STOCK
 
 
 def get_figi_security_type_etp() -> str:
-    return get_markets_constants().FIGI_SECURITY_TYPE_ETP
+    return FIGI_SECURITY_TYPE_ETP
 
 
 def get_figi_security_type_reit() -> str:
-    return get_markets_constants().FIGI_SECURITY_TYPE_REIT
+    return FIGI_SECURITY_TYPE_REIT

@@ -22,6 +22,7 @@ class CliTests(unittest.TestCase):
         with (
             patch("src.cli.asset.build_alpaca_us_equity_registration_plan", return_value=plan) as build_plan,
             patch("src.cli.asset.resolve_alpaca_us_equity_registration_plan", return_value=resolution) as resolve_plan,
+            patch("src.runtime.start_markets_engine"),
             contextlib.redirect_stdout(stdout),
         ):
             exit_code = main(["asset", "register", "--symbols", "aapl, msft"])
@@ -65,6 +66,7 @@ class CliTests(unittest.TestCase):
                 "src.cli.asset.resolve_alpaca_us_equity_registration_plan",
                 return_value=resolution,
             ),
+            patch("src.runtime.start_markets_engine"),
             contextlib.redirect_stdout(stdout),
         ):
             exit_code = main(
@@ -98,6 +100,7 @@ class CliTests(unittest.TestCase):
 
         with (
             patch("src.cli.holdings_category.build_holdings_asset_category_plan", return_value=plan) as build_plan,
+            patch("src.runtime.start_markets_engine"),
             contextlib.redirect_stdout(stdout),
         ):
             exit_code = main(["holdings-category", "create", "--etf-ticker", "IVV"])
@@ -135,6 +138,7 @@ class CliTests(unittest.TestCase):
             patch("src.cli.holdings_category.build_holdings_asset_category_plan", return_value=plan),
             patch("src.cli.holdings_category.sync_holdings_asset_category", return_value=sync_result)
             as sync_category,
+            patch("src.runtime.start_markets_engine"),
             contextlib.redirect_stdout(stdout),
         ):
             exit_code = main(["holdings-category", "create", "--execute", "--etf-ticker", "IVV"])

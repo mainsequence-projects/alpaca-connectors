@@ -44,6 +44,11 @@ def configure_create_parser(parser: argparse.ArgumentParser) -> None:
 
 
 def run_create_command(args: argparse.Namespace) -> int:
+    # Resolving registered assets + writing the category go through ms-markets MetaTables.
+    from src.runtime import start_markets_engine
+
+    start_markets_engine()
+
     plan = build_holdings_asset_category_plan(
         etf_ticker=args.etf_ticker,
         component_provider=args.component_provider,

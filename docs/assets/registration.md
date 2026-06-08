@@ -2,7 +2,7 @@
 
 ## Goal
 
-Register Alpaca US equity assets in MainSequence strictly through FIGI resolution.
+Register Alpaca US equity assets as **ms-markets** assets strictly through FIGI resolution.
 
 Main module:
 
@@ -11,6 +11,19 @@ Main module:
 Primary CLI:
 
 - `src/cli/`
+
+## Asset model (ms-markets)
+
+Assets are written through the typed ms-markets API (`msm.api.assets`), not the old
+`mainsequence.client`:
+
+- the canonical `Asset.unique_identifier` for an equity is its **FIGI**; identity is a UUID
+  (`Asset.uid`), not the old integer `id`
+- provider facts (ticker, name, exchange, security type) are stored on `OpenFigiDetails` keyed by
+  `asset_uid` — they are **not** columns on the asset row
+- registration upserts the `Asset` row + its `OpenFigiDetails` (built directly from the OpenFIGI
+  classification, no re-query); it replaces the old `Asset.register_asset_from_figi(...)`
+- the runtime must be attached first via `src.runtime.start_markets_engine()` (the CLI does this)
 
 ## Registration Contract
 
@@ -30,7 +43,9 @@ The registration plan classifies Alpaca symbols through ordered FIGI passes:
 2. `ETP`
 3. `REIT`
 
-The FIGI market-sector and security-type constants are loaded from MainSequence constants through `src/settings.py`.
+The FIGI market-sector and security-type constants are local string literals in `src/settings.py`
+(`"Equity"`, `"Common Stock"`, `"ETP"`, `"REIT"`). They previously came from
+`mainsequence.client.MARKETS_CONSTANTS`, which was removed in SDK 4.x.
 
 ## Environment And Secrets
 

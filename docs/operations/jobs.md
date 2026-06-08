@@ -31,8 +31,18 @@ That launcher runs daily bars for:
 - `all`
 
 The fixed `src/jobs/run_daily_stock_bars_holdings_ivv.py` launcher assumes that
-`HOLDINGS__IVV` already exists as a MainSequence `AssetCategory`. It consumes the
+`HOLDINGS__IVV` already exists as an ms-markets `AssetCategory`. It consumes the
 category; it does not create or refresh it.
+
+## Storage-first prerequisites
+
+The migration to ms-markets storage-first adds two requirements before any **live** (non
+`--dry-run`) job writes bars or categories:
+
+1. The project market tables must be migrated/registered once:
+   `mainsequence migrations upgrade --provider markets_migrations:migration head`.
+2. The job process attaches the markets runtime via `src.runtime.start_markets_engine()` — the
+   job `main()` entrypoints already do this (skipped for `--dry-run`, which needs no backend).
 
 ## Schedule
 

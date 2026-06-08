@@ -107,6 +107,11 @@ def run_register_command(args: argparse.Namespace) -> int:
     _validate_registration_args(args)
     symbols, expansion_result = _resolve_registration_symbols(args)
 
+    # Resolving existing assets + executing registration go through ms-markets MetaTables.
+    from src.runtime import start_markets_engine
+
+    start_markets_engine()
+
     plan = build_alpaca_us_equity_registration_plan(
         symbols=symbols,
         include_non_tradable=args.include_non_tradable,
@@ -144,14 +149,10 @@ def run_register_command(args: argparse.Namespace) -> int:
     print(
         json.dumps(
             {
-                "resolved_assets": {
-                    symbol: getattr(asset, "id", asset)
-                    for symbol, asset in results["assets"].items()
-                },
+                # Values are ms-markets asset uid strings (JSON-safe).
+                "resolved_assets": results["assets"],
                 "existing_assets": results["existing_assets"],
-                "created_assets": {
-                    symbol: asset.id for symbol, asset in results["created_assets"].items()
-                },
+                "created_assets": results["created_assets"],
                 "unresolved_symbols": results["unresolved_symbols"],
                 "not_registered_missing_figi_symbols": results["not_registered_missing_figi_symbols"],
                 "not_registered_missing_alpaca_symbols": results[

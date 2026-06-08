@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import unittest
+from unittest.mock import Mock, patch
 
 from src.assets.alpaca_us_equities import (
     AlpacaEquityClassificationPass,
     AlpacaUsEquity,
     OpenFigiMatch,
+    _register_asset_from_match,
     _resolve_requested_symbols_to_alpaca_assets,
+    asset_type_from_openfigi_market_sector,
     classify_alpaca_us_equities,
     resolve_alpaca_us_equity_registration_plan,
 )
@@ -240,18 +243,80 @@ class AlpacaAssetRegistrationTests(unittest.TestCase):
         )
 
         class ExistingAsset:
-            def __init__(self, asset_id: int):
-                self.id = asset_id
+            def __init__(self, asset_uid: str):
+                self.uid = asset_uid
 
         resolution = resolve_alpaca_us_equity_registration_plan(
             plan,
             query_existing_assets_fn=lambda figis, timeout=None: {
-                "FIGI_AAPL": ExistingAsset(101),
+                "FIGI_AAPL": ExistingAsset("11111111-1111-1111-1111-111111111111"),
             },
         )
 
-        self.assertEqual(resolution.existing_assets_by_symbol, {"AAPL": 101})
+        self.assertEqual(
+            resolution.existing_assets_by_symbol,
+            {"AAPL": "11111111-1111-1111-1111-111111111111"},
+        )
         self.assertEqual([match.symbol for match in resolution.missing_matches], ["SPY"])
+
+    def test_register_match_keeps_figi_as_asset_identity_and_ticker_as_provider_fact(
+        self,
+    ) -> None:
+        match = OpenFigiMatch(
+            symbol="AAPL",
+            figi="BBG000B9XRY4",
+            name="Apple Inc.",
+            ticker="AAPL",
+            exchange_code="US",
+            security_type="Common Stock",
+            security_type_2="Common Stock",
+            security_market_sector="Equity",
+            composite_figi="BBG000B9XRY4",
+            share_class_figi="BBG001S5N8V8",
+            security_description="Apple Inc.",
+            classification_pass_name="common_stock",
+        )
+
+        class RegisteredAsset:
+            uid = "11111111-1111-1111-1111-111111111111"
+
+        snapshot = Mock()
+        snapshot.set_snapshots.return_value = snapshot
+        snapshot.run.return_value = (False, None)
+
+        with (
+            patch("msm.api.assets.AssetType.upsert") as asset_type_upsert,
+            patch("msm.api.assets.Asset.upsert", return_value=RegisteredAsset()) as asset_upsert,
+            patch("msm.api.assets.OpenFigiDetails.upsert") as details_upsert,
+            patch("msm.data_nodes.assets.AssetSnapshot", return_value=snapshot),
+        ):
+            asset_uid = _register_asset_from_match(match)
+
+        self.assertEqual(asset_uid, RegisteredAsset.uid)
+        self.assertEqual(asset_type_upsert.call_args.kwargs["asset_type"], "equity")
+        self.assertEqual(asset_type_upsert.call_args.kwargs["display_name"], "Equity")
+        self.assertIn(
+            "security_market_sector='Equity'",
+            asset_type_upsert.call_args.kwargs["description"],
+        )
+        self.assertEqual(
+            asset_upsert.call_args.kwargs["unique_identifier"],
+            "BBG000B9XRY4",
+        )
+        self.assertEqual(asset_upsert.call_args.kwargs["asset_type"], "equity")
+        self.assertNotEqual(asset_upsert.call_args.kwargs["unique_identifier"], "AAPL")
+        self.assertEqual(details_upsert.call_args.kwargs["asset_uid"], RegisteredAsset.uid)
+        self.assertEqual(details_upsert.call_args.kwargs["figi"], "BBG000B9XRY4")
+        self.assertEqual(details_upsert.call_args.kwargs["ticker"], "AAPL")
+        snapshot_payload = snapshot.set_snapshots.call_args.args[0]
+        self.assertEqual(snapshot_payload["asset_identifier"], "BBG000B9XRY4")
+        self.assertEqual(snapshot_payload["ticker"], "AAPL")
+        snapshot.run.assert_called_once_with(debug_mode=True, force_update=True)
+
+    def test_asset_type_is_explicitly_mapped_from_openfigi_market_sector(self) -> None:
+        self.assertEqual(asset_type_from_openfigi_market_sector("Equity"), "equity")
+        with self.assertRaisesRegex(ValueError, "Unsupported OpenFIGI security_market_sector"):
+            asset_type_from_openfigi_market_sector("Govt")
 
 
 if __name__ == "__main__":

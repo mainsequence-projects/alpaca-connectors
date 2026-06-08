@@ -132,7 +132,7 @@ changes, and validation steps.
 Core responsibilities:
 
 - translate user intent into the correct Main Sequence implementation path:
-  - for data publishing and data pipelines, use `DataNode`s and `SimpleTable`s
+  - for data publishing and data pipelines, use `DataNode`s and `MetaTable`s
   - for serving application or widget-facing surfaces, use `FastAPI`
   - for visualization, confirm the delivery target with the user:
     - if they want something quick for testing or iteration, use Streamlit
@@ -151,7 +151,7 @@ Core responsibilities:
 Typical outcomes include:
 
 - build a `DataNode` to publish a data pipeline
-- build a `SimpleTable` to record operational or application data
+- build a `MetaTable` to record operational or application data
 - build a `FastAPI` API that reads project data and returns widget-ready or
   application-ready responses
 - confirm whether a visualization should be a quick Streamlit surface or a reusable Command Center
@@ -210,7 +210,7 @@ Delegation rules:
 ## Main Sequence Source-Of-Truth Rule
 
 For any task involving Main Sequence code, CLI usage, DataNodes, orchestration, jobs, dashboards,
-agents, releases, markets, assets, portfolios, instruments, artifacts, RBAC, or platform
+agents, releases, artifacts, RBAC, or platform
 validation, always consult the latest relevant Main Sequence documentation before acting.
 
 Rules:
@@ -258,15 +258,12 @@ Typical routing:
   `.agents/skills/mainsequence/project_builder/SKILL.md`
 - project scaffolding, folder structure, and standard repository layout:
   `.agents/skills/mainsequence/project_builder/SKILL.md`
-- project-state reconciliation, milestone logging, blocker recording, and next-step updates under
-  `.agents/`:
-  `.agents/skills/mainsequence/maintenance/local_journal/SKILL.md`
 - project status audits, blocker analysis, failure classification, and upstream SDK assessment:
   `.agents/skills/mainsequence/maintenance/bug_auditor/SKILL.md`
 - DataNodes, updates, identifiers, schema, metadata:
   `.agents/skills/mainsequence/data_publishing/data_nodes/SKILL.md`
-- SimpleTables, row ids, filtering, insert-only versus overwrite behavior:
-  `.agents/skills/mainsequence/data_publishing/simple_tables/SKILL.md`
+- MetaTables, SQLAlchemy contracts, backend-managed registration, and governed operations:
+  `.agents/skills/mainsequence/data_publishing/meta_tables/SKILL.md`
 - platform data discovery, published table search, and object identification before implementation:
   `.agents/skills/mainsequence/data_access/exploration/SKILL.md`
 - APIs, FastAPI, request and response contracts, and widget-facing API responses:
@@ -283,14 +280,8 @@ Typical routing:
   `.agents/skills/mainsequence/platform_operations/orchestration_and_releases/SKILL.md`
 - RBAC, sharing, constants, secrets, and access verification:
   `.agents/skills/mainsequence/platform_operations/access_control_and_sharing/SKILL.md`
-- assets, public asset registration, custom assets, asset categories, and translation tables:
-  `.agents/skills/mainsequence/markets_platform/assets_and_translation/SKILL.md`
 - dashboards:
   `.agents/skills/mainsequence/dashboards/streamlit/SKILL.md`
-- portfolios and Virtual Fund Builder:
-  `.agents/skills/mainsequence/markets_platform/virtualfundbuilder/SKILL.md`
-- instruments and pricing:
-  `.agents/skills/mainsequence/markets_platform/instruments_and_pricing/SKILL.md`
 
 ## Mandatory Startup Sequence
 
@@ -298,11 +289,9 @@ For any non-trivial Main Sequence task:
 
 1. Read the latest relevant Main Sequence documentation.
 2. Compare the implementation against the latest documented behavior.
-3. Check `.agents/status.md` for the latest verified state.
+
 4. Check `.agents/tasks.md` for current priorities.
-5. Check `.agents/record.md` for project identifiers, checkout path, and orchestration notes.
-6. If an error appears, check `.agents/journal.md` for the same or related error and any prior
-   fix.
+
 7. Confirm you are in the correct project checkout, or use `--path` explicitly.
 8. Confirm platform context with:
    `mainsequence project current --debug`
@@ -325,8 +314,6 @@ Default pattern:
 
 1. `.agents/skills/mainsequence/project_builder/SKILL.md`
 2. the relevant domain skill
-3. `.agents/skills/mainsequence/maintenance/local_journal/SKILL.md` after material work if verified state,
-   blockers, scope, next actions, stable references, or historical notes changed
 
 Before the final response:
 
@@ -364,8 +351,7 @@ At minimum, verify relevant:
 - job runs and logs
 - project images
 - dashboard or agent resources/releases
-- assets
-- portfolios
+- data assets
 - related platform objects used by the project
 
 Typical verification commands:
@@ -413,9 +399,7 @@ If something may be a Main Sequence SDK, documentation, or platform issue:
 - record what failed
 - explain why it may be a Main Sequence issue
 - suggest a concrete improvement
-- append the issue to `.agents/journal.md`
-- add actionable follow-up to `.agents/tasks.md` if still open
-- reflect the latest blocker in `.agents/status.md`
+
 
 ## Output Style
 
@@ -426,22 +410,6 @@ If something may be a Main Sequence SDK, documentation, or platform issue:
 
 ## Project-State Files Under `.agents/`
 
-The repository keeps project-state files under `.agents/`:
-
-- `.agents/brief.md`
-- `.agents/tasks.md`
-- `.agents/record.md`
-- `.agents/status.md`
-- `.agents/journal.md`
-
-These files are owned by:
-
-- `.agents/skills/mainsequence/maintenance/local_journal/SKILL.md` for:
-  - `.agents/brief.md`
-  - `.agents/tasks.md`
-  - `.agents/record.md`
-  - `.agents/status.md`
-  - `.agents/journal.md`
 
 Do not improvise their meaning in domain skills. Use the maintenance skill to reconcile them after
 material work.

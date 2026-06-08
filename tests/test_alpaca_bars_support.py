@@ -71,14 +71,14 @@ class AlpacaBarsSupportTests(unittest.TestCase):
         normalized = normalize_stock_bars_frame(
             frame=frame,
             frequency_id="1d",
-            unique_identifier_by_symbol={"AAPL": "FIGI_AAPL"},
-            last_update_by_unique_identifier={
+            asset_identifier_by_symbol={"AAPL": "FIGI_AAPL"},
+            last_update_by_asset_identifier={
                 "FIGI_AAPL": dt.datetime(2026, 4, 11, 12, 0, tzinfo=UTC),
             },
             period_cutoff=dt.datetime(2026, 4, 12, tzinfo=UTC),
         )
 
-        self.assertEqual(list(normalized.index.names), ["time_index", "unique_identifier"])
+        self.assertEqual(list(normalized.index.names), ["time_index", "asset_identifier"])
         self.assertEqual(str(normalized.index.get_level_values("time_index").dtype), "datetime64[ns, UTC]")
         self.assertEqual(len(normalized), 1)
         self.assertEqual(

@@ -38,6 +38,19 @@ app = FastAPI(
 )
 
 
+@app.on_event("startup")
+def _attach_markets_runtime() -> None:
+    """Attach the ms-markets runtime once when the API process starts.
+
+    The OHLC chart read and asset search query already-migrated/registered ms-markets MetaTables,
+    which requires ``msm.start_engine(...)`` first. Runs under uvicorn/lifespan; the unit tests
+    construct ``TestClient(app)`` without entering its context manager, so this does not fire there.
+    """
+    from src.runtime import start_markets_engine
+
+    start_markets_engine()
+
+
 def _cors_allow_origins() -> list[str]:
     raw_origins = os.getenv("API_CORS_ALLOW_ORIGINS", "http://localhost:5173")
     origins = [

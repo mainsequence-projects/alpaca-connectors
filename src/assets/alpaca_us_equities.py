@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import datetime as dt
 import time
 from collections.abc import Callable, Iterable, Sequence
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import requests
 from alpaca.trading.client import TradingClient
@@ -24,14 +25,6 @@ from src.settings import (
     get_figi_security_type_reit,
     get_openfigi_api_key,
 )
-
-if TYPE_CHECKING:
-    import mainsequence.client as msc
-
-def _load_mainsequence_client() -> Any:
-    import mainsequence.client as msc
-
-    return msc
 
 
 def _chunked(values: Sequence[str], chunk_size: int) -> Iterable[list[str]]:
@@ -226,8 +219,10 @@ class AlpacaEquityRegistrationPlan(BaseModel):
 
 class AlpacaEquityRegistrationResolution(BaseModel):
     plan: AlpacaEquityRegistrationPlan
-    existing_assets_by_symbol: dict[str, int | None]
-    existing_assets_by_figi: dict[str, int | None]
+    # ms-markets asset identity is a UUID (Asset.uid), serialized as a string. (Was integer
+    # Asset.id under the old SDK — see migration doc D5.)
+    existing_assets_by_symbol: dict[str, str | None]
+    existing_assets_by_figi: dict[str, str | None]
     missing_matches: list[OpenFigiMatch]
 
     def summary(self) -> dict[str, Any]:
@@ -237,6 +232,25 @@ class AlpacaEquityRegistrationResolution(BaseModel):
             "missing_symbols_to_register": [match.symbol for match in self.missing_matches],
             "missing_figis_to_register": [match.figi for match in self.missing_matches],
         }
+
+
+ASSET_TYPE_BY_OPENFIGI_MARKET_SECTOR = {
+    "Equity": "equity",
+}
+
+
+def asset_type_from_openfigi_market_sector(security_market_sector: str | None) -> str:
+    if security_market_sector is None:
+        raise ValueError("OpenFIGI match is missing security_market_sector.")
+
+    asset_type = ASSET_TYPE_BY_OPENFIGI_MARKET_SECTOR.get(security_market_sector)
+    if asset_type is None:
+        supported_values = ", ".join(sorted(ASSET_TYPE_BY_OPENFIGI_MARKET_SECTOR))
+        raise ValueError(
+            "Unsupported OpenFIGI security_market_sector for Alpaca asset registration: "
+            f"{security_market_sector!r}. Supported values: {supported_values}."
+        )
+    return asset_type
 
 
 def build_default_classification_passes() -> tuple[AlpacaEquityClassificationPass, ...]:
@@ -543,16 +557,23 @@ def _query_existing_assets_by_figi(
     *,
     timeout: float | None = None,
 ) -> dict[str, Any]:
+    """Return ``{figi: Asset}`` for already-registered equities.
+
+    For public equities the canonical ``Asset.unique_identifier`` is the FIGI, so each FIGI is
+    looked up directly. ms-markets has no bulk ``__in`` filter (migration doc R-2), so this is one
+    round-trip per FIGI. ``timeout`` is accepted for signature compatibility and ignored.
+    """
     if not figis:
         return {}
 
-    msc = _load_mainsequence_client()
-    existing_assets = msc.Asset.query(
-        figi__in=sorted(set(figis)),
-        per_page=min(500, len(set(figis))),
-        timeout=timeout,
-    )
-    return {asset.figi: asset for asset in existing_assets if asset.figi}
+    from msm.api.assets import Asset
+
+    existing_assets: dict[str, Any] = {}
+    for figi in sorted(set(figis)):
+        asset = Asset.get_by_unique_identifier(figi)
+        if asset is not None:
+            existing_assets[figi] = asset
+    return existing_assets
 
 
 def resolve_alpaca_us_equity_registration_plan(
@@ -566,7 +587,7 @@ def resolve_alpaca_us_equity_registration_plan(
         timeout=timeout,
     )
 
-    existing_assets_by_symbol: dict[str, int | None] = {}
+    existing_assets_by_symbol: dict[str, str | None] = {}
     missing_matches: list[OpenFigiMatch] = []
 
     for symbol, match in sorted(plan.matches_by_symbol.items()):
@@ -574,16 +595,64 @@ def resolve_alpaca_us_equity_registration_plan(
         if existing_asset is None:
             missing_matches.append(match)
             continue
-        existing_assets_by_symbol[symbol] = existing_asset.id
+        existing_assets_by_symbol[symbol] = str(existing_asset.uid)
 
     return AlpacaEquityRegistrationResolution(
         plan=plan,
         existing_assets_by_symbol=existing_assets_by_symbol,
         existing_assets_by_figi={
-            figi: asset.id for figi, asset in existing_assets_by_figi.items()
+            figi: str(asset.uid) for figi, asset in existing_assets_by_figi.items()
         },
         missing_matches=missing_matches,
     )
+
+
+def _register_asset_from_match(match: OpenFigiMatch) -> str:
+    """Upsert the canonical ``Asset`` row + its ``OpenFigiDetails`` from a classified match.
+
+    Replaces the old ``Asset.register_asset_from_figi(figi=...)``. The classification passes
+    already resolved the full OpenFIGI record, so the typed rows are built directly without
+    re-querying OpenFIGI. Provider facts (ticker, name, exchange, security type) live on
+    ``OpenFigiDetails`` — never widening ``AssetTable``. Returns the new asset uid as a string.
+    """
+    from msm.api.assets import Asset, AssetType, OpenFigiDetails
+    from msm.data_nodes.assets import AssetSnapshot
+
+    asset_type = asset_type_from_openfigi_market_sector(match.security_market_sector)
+    AssetType.upsert(
+        asset_type=asset_type,
+        display_name=match.security_market_sector,
+        description=(
+            "Canonical ms-markets asset family derived from OpenFIGI "
+            f"security_market_sector={match.security_market_sector!r}. "
+            "OpenFIGI security_type and security_type_2 are stored as provider details."
+        ),
+    )
+    asset = Asset.upsert(unique_identifier=match.figi, asset_type=asset_type)
+    OpenFigiDetails.upsert(
+        asset_uid=asset.uid,
+        figi=match.figi,
+        ticker=match.ticker,
+        name=match.name,
+        exchange_code=match.exchange_code,
+        security_type=match.security_type,
+        security_type_2=match.security_type_2,
+        security_market_sector=match.security_market_sector,
+        composite=match.composite_figi,
+        share_class=match.share_class_figi,
+        security_description=match.security_description,
+    )
+    AssetSnapshot().set_snapshots(
+        {
+            "time_index": dt.datetime.now(tz=dt.UTC),
+            "asset_identifier": match.figi,
+            "name": match.name or "",
+            "ticker": match.ticker or "",
+            "exchange_code": match.exchange_code or "",
+            "asset_ticker_group_id": match.share_class_figi or "",
+        }
+    ).run(debug_mode=True, force_update=True)
+    return str(asset.uid)
 
 
 def register_alpaca_us_equity_assets(
@@ -591,8 +660,8 @@ def register_alpaca_us_equity_assets(
     *,
     timeout: float | None = None,
     registration_resolution: AlpacaEquityRegistrationResolution | None = None,
+    register_asset_fn: Callable[[OpenFigiMatch], str] = _register_asset_from_match,
 ) -> dict[str, dict[str, Any] | list[str]]:
-    msc = _load_mainsequence_client()
     if registration_resolution is None:
         if plan is None:
             raise ValueError("Either plan or registration_resolution must be provided.")
@@ -602,27 +671,24 @@ def register_alpaca_us_equity_assets(
         )
 
     existing_assets = {
-        symbol: asset_id
-        for symbol, asset_id in registration_resolution.existing_assets_by_symbol.items()
+        symbol: asset_uid
+        for symbol, asset_uid in registration_resolution.existing_assets_by_symbol.items()
     }
-    created_assets: dict[str, Any] = {}
+    created_assets: dict[str, str] = {}
 
     for match in registration_resolution.missing_matches:
-        created_assets[match.symbol] = msc.Asset.register_asset_from_figi(
-            figi=match.figi,
-            timeout=timeout,
-        )
+        created_assets[match.symbol] = register_asset_fn(match)
 
-    assets_by_symbol: dict[str, Any] = {}
+    assets_by_symbol: dict[str, str] = {}
     for symbol, match in registration_resolution.plan.matches_by_symbol.items():
-        created_asset = created_assets.get(symbol)
-        if created_asset is not None:
-            assets_by_symbol[symbol] = created_asset
+        created_asset_uid = created_assets.get(symbol)
+        if created_asset_uid is not None:
+            assets_by_symbol[symbol] = created_asset_uid
             continue
 
-        asset_id = registration_resolution.existing_assets_by_symbol.get(symbol)
-        if asset_id is not None:
-            assets_by_symbol[symbol] = asset_id
+        existing_asset_uid = registration_resolution.existing_assets_by_symbol.get(symbol)
+        if existing_asset_uid is not None:
+            assets_by_symbol[symbol] = existing_asset_uid
 
     return {
         "assets": assets_by_symbol,
