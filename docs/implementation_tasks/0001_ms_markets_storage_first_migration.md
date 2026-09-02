@@ -103,12 +103,10 @@ and their three transitive core dependencies successfully.
 ## API migration
 
 - FastAPI attaches the markets runtime through its lifespan handler.
-- Asset search joins `msm.api.assets.Asset` with `OpenFigiDetails` because ticker, FIGI, and name no
-  longer live on the core asset row.
-- OHLC reads resolve the finalized output `TimeIndexMetaTable` and call
-  `get_data_between_dates_from_api(...)` on that instance.
-- The public chart request retains `node_identifier` only as a compatibility alias for Command
-  Center clients.
+- Route handlers remain thin and delegate asset registration and holdings-category execution to
+  the reusable services under `src/`.
+- The deprecated chart and presentation-specific API contracts were removed from this backend
+  migration.
 
 ## Portfolio migration
 

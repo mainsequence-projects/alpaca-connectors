@@ -162,8 +162,8 @@ Core responsibilities:
 
 - translate user intent into the correct Main Sequence implementation path:
   - for data publishing and data pipelines, use `TimeIndexTableUpdater`s and `MetaTable`s
-  - for visualization, confirm the supported delivery target with the user, such as a Command
-    Center frontend backed by FastAPI or a static site
+  - for visualization, confirm the supported delivery target with the user, such as a FastAPI-backed
+    application or a static site
   - for scheduled execution, releases, and backend operations, use jobs, images, resources, and
     other platform objects through the proper platform skills
 - break work into independent executions according to the skill each part requires
