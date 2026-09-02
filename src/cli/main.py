@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import argparse
-from collections.abc import Sequence
 import sys
+from collections.abc import Sequence
 
+from .account import configure_register_parser as configure_account_register_parser
 from .asset import configure_register_parser
 from .bars import configure_run_parser, run_asset_price_update_command
 from .holdings_category import configure_create_parser
@@ -32,6 +33,18 @@ def build_parser() -> argparse.ArgumentParser:
     bars_commands = bars_parser.add_subparsers(dest="bars_command")
     configure_run_parser(
         bars_commands.add_parser("run", help="Build and run the Alpaca stock bars DataNode.")
+    )
+
+    account_parser = top_level.add_parser(
+        "account",
+        help="Account commands: register an Alpaca trading account into ms-markets.",
+    )
+    account_commands = account_parser.add_subparsers(dest="account_command")
+    configure_account_register_parser(
+        account_commands.add_parser(
+            "register",
+            help="Register an Alpaca account and snapshot its balances + holdings.",
+        )
     )
 
     holdings_parser = top_level.add_parser(

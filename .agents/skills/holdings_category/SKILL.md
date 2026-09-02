@@ -14,13 +14,14 @@ The supported operator surface is:
 
 - `alpaca-connectors holdings-category create`
 
-This workflow builds or refreshes categories such as `HOLDINGS__IVV` from the ETF extraction
-package and existing Main Sequence asset registration state.
+This workflow builds or refreshes categories such as `HOLDINGS__IVV` from the external
+`etfhextractor` package and existing Main Sequence asset registration state.
 
 ## This Skill Can Do
 
 - explain or update the holdings-category CLI flow
-- change the reusable planning and sync logic under `etf_extraction/holdings_categories.py`
+- change the local Alpaca orchestration adapter in `src/etf_holdings.py`
+- rely on `etfhextractor` for provider extraction and ms-markets holdings-category primitives
 - keep ETF provider inference and category naming aligned with the current project rules
 - keep docs aligned with the strict category-sync behavior
 

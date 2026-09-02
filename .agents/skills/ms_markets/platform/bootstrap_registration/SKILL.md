@@ -1,6 +1,6 @@
 ---
 name: mainsequence-markets-bootstrap-registration
-description: Use this skill when changing, documenting, or reviewing ms-markets runtime attachment, model resolution, direct backend table binding, row API startup behavior, or DataNode startup prerequisites. This skill owns the rule that ms-markets runtime startup attaches to already-migrated MetaTables through `msm.start_engine(...)`; it does not own schema migration commands or row-class schema creation shortcuts.
+description: Use this skill when changing, documenting, or reviewing ms-markets runtime attachment, model resolution, direct backend table binding, row API startup behavior, or TimeIndexTableUpdater startup prerequisites. This skill owns the rule that ms-markets runtime startup attaches to already-migrated MetaTables through `msm.start_engine(...)`; it does not own schema migration commands or row-class schema creation shortcuts.
 ---
 
 # Main Sequence Markets Runtime Attachment
@@ -20,8 +20,9 @@ boundary:
 
 ```python
 import msm
+from msm.models import AssetTable, AssetTypeTable
 
-msm.start_engine(models=["AssetType", "Asset"])
+msm.start_engine(models=[AssetTypeTable, AssetTable])
 ```
 
 Do not recommend row-class schema shortcuts for schema creation.
@@ -57,11 +58,11 @@ create schemas, or repair schema drift.
   provider registration.
 - Generic Main Sequence MetaTable semantics; use
   `.agents/skills/mainsequence/data_publishing/meta_tables/SKILL.md`.
-- Generic DataNode update-process design; use
-  `.agents/skills/mainsequence/data_publishing/data_nodes/SKILL.md`.
+- Generic TimeIndexTableUpdater update-process design; use
+  `.agents/skills/mainsequence/data_publishing/time_index_table_updates/SKILL.md`.
 - Asset schema modeling details; use
   `.agents/skills/ms_markets/assets/asset_model_extension/SKILL.md`.
-- Asset-indexed DataNode frame semantics; use
+- Asset-indexed TimeIndexTableUpdater frame semantics; use
   `.agents/skills/ms_markets/assets/asset_indexed_data_nodes/SKILL.md`.
 - Fixed-income pricing semantics; use
   `.agents/skills/ms_markets/pricing/fixed_income_curve_building/SKILL.md`.
@@ -90,16 +91,30 @@ Examples and application code should then attach once, then use row APIs:
 ```python
 import msm
 from msm.api.assets import Asset, AssetType
+from msm.models import AssetTable, AssetTypeTable
 
-msm.start_engine(models=["AssetType", "Asset"])
+msm.start_engine(models=[AssetTypeTable, AssetTable])
 
 AssetType.upsert(asset_type="equity", display_name="Equity")
 Asset.upsert(unique_identifier="AAPL", asset_type="equity")
 ```
 
-Use a narrow `models=[...]` list for small workflows. Include parent tables
+Use a narrow `models=[...]` list for small workflows. Prefer SQLAlchemy table or storage classes in project code; they remove ambiguity between row APIs and backend models. Include parent tables
 before child behavior by selecting all required logical models; the startup
 resolver keeps library dependency order.
+
+For `models=[...]`, pass backend SQLAlchemy table/storage classes, not typed row API classes.
+
+```python
+from msm.api.assets import Asset, AssetType, OpenFigiDetails
+from msm.models import AssetTable, AssetTypeTable, OpenFigiAssetDetailsTable
+
+# Correct: backend table/storage classes.
+msm.start_engine(models=[AssetTypeTable, AssetTable, OpenFigiAssetDetailsTable])
+
+# Incorrect: typed row APIs. These are used after runtime attachment.
+msm.start_engine(models=[AssetType, Asset, OpenFigiDetails])
+```
 
 Do not bootstrap or migrate implicitly from first row use. Row operations should
 fail when the runtime has not been initialized for their required tables.
@@ -123,12 +138,23 @@ That call must use the same direct backend lookup path as built-ins. Do not
 create a project-local UID map, secondary registry, alternate table-name
 resolver, direct runtime registration flow, or row-class schema bootstrap.
 
-Project-local extension models may set `__markets_storage_app__` to use a
-project-owned SQLAlchemy table-name app segment instead of the library default
-`ms_markets`. This is only physical table naming. It does not replace the
-globally unique `__metatable_identifier__`, does not affect row API selection,
-and does not remove the need for SDK migration/provider registration before
-runtime startup.
+Project-local extension models should define an abstract project mixin with a
+project-owned `__metatable_namespace__` and, when needed, a project-owned
+`__markets_storage_app__`. Concrete extension models should declare
+`__markets_base_identifier__` as the bare concept name. ms-markets combines the
+mixin namespace and base identifier into the globally unique MetaTable
+identifier. This does not affect row API selection and does not remove the need
+for SDK migration/provider registration before runtime startup.
+
+`MSM_AUTO_REGISTER_NAMESPACE` still overrides the project mixin namespace when
+it is set before model import. Use that for isolated tests and examples. Do not
+use environment-only namespace setup as the primary extension contract for a
+real project.
+
+Built-in ms-markets tables and storage classes use their built-in definitions as-is.
+Downstream projects must not set or override `__markets_storage_app__` on built-in
+ms-markets models. Set it only on project-local models before migration and
+registration.
 
 ```python
 from msm.base import MarketsBase, MarketsMetaTableMixin
@@ -136,19 +162,25 @@ from msm.base import MarketsBase, MarketsMetaTableMixin
 
 class MyProjectMarketsMetaTableMixin(MarketsMetaTableMixin):
     __abstract__ = True
+    __metatable_namespace__ = "com.my_company.markets"
     __markets_storage_app__ = "my_project_markets"
 
 
 class MyAssetDetailsTable(MyProjectMarketsMetaTableMixin, MarketsBase):
-    __metatable_identifier__ = "com.my_company.markets.MyAssetDetails"
+    __markets_base_identifier__ = "MyAssetDetails"
     __metatable_description__ = (
         "Project-local asset details keyed one-to-one by AssetTable.uid."
     )
 ```
 
-Set `__markets_storage_app__` before SQLAlchemy maps the table. Changing it
-after migration finalization points the model at a different physical table name
-and requires the normal SDK migration and registration path.
+Already-qualified `__metatable_identifier__` values remain accepted for existing
+models. Prefer `__markets_base_identifier__` for new project-local models so the
+project namespace default and test namespace override are explicit.
+
+Set `__metatable_namespace__` and `__markets_storage_app__` before SQLAlchemy
+maps the table. Changing either after migration finalization points the model at
+a different logical or physical table and requires the normal SDK migration and
+registration path.
 
 When adding a new built-in markets MetaTable model:
 
@@ -163,9 +195,9 @@ When adding a new built-in markets MetaTable model:
 8. Update docs and tests so examples call `msm.start_engine(...)` only after
    migrations are already handled.
 
-When adding DataNode storage, add the `PlatformTimeIndexMetaTable` storage class
+When adding time-index-table output, add the `PlatformTimeIndexMetaTable` storage class
 to the model graph and ensure SDK migration provider coverage outside this
-skill. Do not rely on constructing a DataNode to register its storage.
+skill. Do not rely on constructing a TimeIndexTableUpdater to register its storage.
 
 ## Typed Row API Entries
 
@@ -245,6 +277,6 @@ When reviewing or implementing extension support, verify the ADR 0018 target:
 - SDK migration/provider work is handled outside this skill.
 - Runtime attachment remains explicit and startup-scoped.
 - Row APIs do not attach, register, or discover schemas on first use.
-- DataNode storage is migrated and registered before writes.
+- time-index-table output is migrated and registered before writes.
 - Runtime attachment does not apply migrations, register MetaTables, create
   schemas, or repair schema drift.

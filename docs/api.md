@@ -2,12 +2,10 @@
 
 ## Goal
 
-The project includes a FastAPI surface for automating:
+The project includes a thin FastAPI surface for automating:
 
-- asset discovery
+- discovery configuration
 - asset registration
-- single-ticker registration for Command Center AppComponents
-- lightweight charts OHLC spec generation for Command Center rendering
 - holdings-category synchronization
 
 Main files:
@@ -18,25 +16,13 @@ Main files:
 
 ## Design
 
-The API is intentionally thin.
+Route handlers validate input and return application-owned response models. Service functions call
+the reusable implementation under `src/`; the API does not duplicate Alpaca, OpenFIGI, ETF
+extraction, or category logic.
 
-- route handlers validate input and return typed responses
-- service functions call the existing logic under `src/`
-- the API does not rebuild the Alpaca, FIGI, extractor, or category workflows
-
-### ms-markets runtime
-
-A FastAPI `startup` event attaches the markets runtime once
-(`src.runtime.start_markets_engine()`), so the chart read and asset search can query the
-already-migrated ms-markets MetaTables. Concretely:
-
-- OHLC bars are read with `mainsequence.client.TimeIndexMetaTable.get_data_between_dates_from_node_identifier(...)`
-  (the removed `mainsequence.client.models_tdag.DataNodeStorage`), scoped by
-  `dimension_filters={"asset_identifier": [unique_identifier]}`.
-- Asset search/resolution joins `msm.api.assets.Asset` with `OpenFigiDetails` (ticker / figi /
-  name live on the detail table, not the asset row).
-- The OHLC DataNode identifier `alpaca_stock_bars_1d_sip_all` is preserved by the storage class,
-  so the chart contract is unchanged.
+The FastAPI lifespan attaches the ms-markets runtime once through
+`src.runtime.start_markets_engine()` so shared asset and category services resolve the migrated
+backend tables correctly.
 
 ## Endpoints
 
@@ -46,17 +32,16 @@ already-migrated ms-markets MetaTables. Concretely:
 GET /health
 ```
 
+Returns a minimal readiness payload.
+
 ### Discovery configuration
 
 ```text
 GET /v1/discovery/config
 ```
 
-Returns:
-
-- supported component providers
-- ETF provider map
-- configured seed universes
+Returns supported component providers, the normalized ETF provider map, and configured seed
+universes.
 
 ### Execute asset registration
 
@@ -64,64 +49,18 @@ Returns:
 POST /v1/assets/registration/execute
 ```
 
-This runs the FIGI-based registration flow and creates missing MainSequence public assets.
+Runs the strict Alpaca and OpenFIGI registration flow and creates missing Main Sequence public
+assets. Callers may provide exact symbols or expand ETF seed tickers through a supported holdings
+provider.
 
-### AppComponent single-ticker registration
-
-```text
-POST /v1/app-components/assets/register-ticker
-```
-
-This is the AppComponent-facing operation for registering exactly one asset by ticker.
-
-It intentionally uses the default generated AppComponent form instead of a custom editable form.
-
-### Lightweight Charts OHLC payload
-
-```text
-POST /v1/charts/lightweight/ohlc
-```
-
-This endpoint has two modes.
-
-Command Center selector mode:
-
-- `ticker` query parameter only
-
-Selector mode returns `items` and `pagination` for the AppComponent `select2` async ticker search.
-Each item exposes a user-facing ticker `label`, a platform `unique_identifier`, and display text.
-
-Chart mode accepts Command Center query parameters only.
-
-Command Center query fields:
-
-- `ticker`, containing the selected ticker, FIGI, or asset unique identifier
-- `start_date`
-- `end_date`
-
-The generated workspace form defaults to `NVDA`, an end date equal to the workspace
-generation date, and a start date one year before that end date.
-
-In Command Center query mode, the selected `ticker` value is resolved strictly inside the
-configured `AssetCategory` before bars are queried. The API uses the fixed OHLC DataNode
-identifier `alpaca_stock_bars_1d_sip_all`; the form does not expose DataNode or unique
-identifier inputs.
-
-Returns:
-
-- structured `spec` object matching the `lightweight-charts-spec` widget format
-
-Both selector mode and chart mode use the same explicit FastAPI response-body
-schema: `LightweightOhlcResponse`. The `mode` field identifies whether the
-payload contains selector results or chart data.
-
-### Execute holdings category sync
+### Execute holdings-category synchronization
 
 ```text
 POST /v1/holdings-categories/execute
 ```
 
-This creates or refreshes the holdings `AssetCategory` from ETF extraction after MainSequence asset lookup passes.
+Creates or refreshes the holdings-backed `AssetCategory` after every extracted constituent resolves
+unambiguously to a registered Main Sequence asset.
 
 ## Local Run
 
@@ -129,9 +68,8 @@ This creates or refreshes the holdings `AssetCategory` from ETF extraction after
 uv run uvicorn api.app.main:app --reload
 ```
 
-## Important Boundary
+## Ownership Boundary
 
-The ETF extractor logic and holdings-category logic are owned by `etf_extraction/`. Alpaca registration and Alpaca bars logic remain owned by `src/`.
-The API is only the HTTP contract over those services.
-
-This API does not add `LoggedUserContextMiddleware` because the current routes do not consume request-local MainSequence user context.
+ETF extraction is owned by the external `etfhextractor` package and consumed through
+`src/etf_holdings.py`. Alpaca registration, holdings orchestration, and Alpaca bars remain owned by
+the reusable modules under `src/`. The API is only an HTTP layer over those services.

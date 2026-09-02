@@ -1,10 +1,9 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 import tomllib
 import unittest
-
+from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 AGENTS_PATH = REPO_ROOT / "AGENTS.md"
@@ -17,7 +16,7 @@ def custom_skill_ids() -> list[str]:
     skill_ids: list[str] = []
     for skill_file in sorted(SKILLS_ROOT.rglob("SKILL.md")):
         relative_parent = skill_file.parent.relative_to(SKILLS_ROOT).as_posix()
-        if relative_parent.startswith("mainsequence/"):
+        if relative_parent.startswith(("mainsequence/", "ms_markets/")):
             continue
         skill_ids.append(relative_parent.replace("/", "."))
     return skill_ids
@@ -34,7 +33,7 @@ class AgentArtifactsTests(unittest.TestCase):
         card = json.loads(AGENT_CARD_PATH.read_text(encoding="utf-8"))
         pyproject = tomllib.loads(PYPROJECT_PATH.read_text(encoding="utf-8"))
 
-        self.assertEqual(card["name"], "alpaca-connectors-153")
+        self.assertEqual(card["name"], "Alpaca Connection Manager")
         self.assertEqual(card["version"], pyproject["project"]["version"])
 
     def test_agent_card_skills_match_custom_skill_files(self) -> None:

@@ -142,8 +142,7 @@ def build_stock_bars_node(
         "feed": node.feed,
         "adjustment": node.adjustment,
         "hash_namespace": node.hash_namespace or None,
-        "table_identifier": node.storage_table.__metatable_identifier__,
-        "storage_hash": node.storage_hash,
+        "table_identifier": node.output_table.__metatable_identifier__,
         "update_hash": node.update_hash,
         "resolved_asset_unique_identifiers_sample": list(node_assets)[:20],
     }

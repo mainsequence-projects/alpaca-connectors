@@ -1,0 +1,20 @@
+api_version: 2.1.0
+name: alpaca-connectors-workflows
+resources:
+- key: daily-stock-bars-holdings-ivv
+  kind: job
+  spec:
+    name: Alpaca Daily Stock Bars HOLDINGS__IVV
+    description: Update daily Alpaca bars for the registered HOLDINGS__IVV asset universe.
+    execution_path: src/jobs/run_daily_stock_bars_holdings_ivv.py
+    cpu_request: '0.25'
+    memory_request: '0.5'
+    max_runtime_seconds: 3600
+    spot: false
+    automatic_redeployment:
+      enabled: false
+      tag_regex: null
+    task_schedule:
+      schedule:
+        type: crontab
+        expression: '0 0 * * *'

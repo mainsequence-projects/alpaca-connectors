@@ -2,7 +2,7 @@
 
 See also:
 
-- `docs/etf_extraction.md` for the ETF-owned architecture, provider flow, and separation from Alpaca logic
+- `docs/etf_extraction.md` for the `etfhextractor` dependency boundary and separation from Alpaca logic
 
 ## Goal
 
@@ -10,7 +10,8 @@ Create an **ms-markets** `AssetCategory` (`msm.api.assets`) from an ETF's publis
 
 Main module:
 
-- `etf_extraction/holdings_categories.py`
+- `src/etf_holdings.py` (local adapter)
+- `etfhextractor` (provider extraction and ms-markets category primitives)
 
 Primary CLI:
 
@@ -57,9 +58,9 @@ Category creation is refused when any extracted holding:
 
 ## Provider Inference
 
-The ETF-to-provider mapping is stored in:
+The ETF-to-provider mapping used by this project is stored in:
 
-- `etf_extraction/data/seed_universes.yaml`
+- `src/etf_holdings.py`
 
 ## Example
 

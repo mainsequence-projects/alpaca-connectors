@@ -7,8 +7,8 @@ without needing a platform backend.
 from __future__ import annotations
 
 import pytest
-
 from msm.settings import ASSET_IDENTIFIER_DIMENSION
+
 from src.markets_storage.alpaca_bars import (
     AlpacaStockBars1dIexRawStorage,
     AlpacaStockBars1dSipAllStorage,
@@ -20,7 +20,7 @@ OHLCV_COLUMNS = ("open", "high", "low", "close", "volume", "trade_count", "vwap"
 
 
 def test_metatable_identifier_preserves_legacy_node_identifier():
-    # The FastAPI chart endpoint + Command Center workspace default to this exact identifier.
+    # These stable identifiers remain part of the public DataNode configuration contract.
     assert AlpacaStockBars1dSipAllStorage.__metatable_identifier__ == "alpaca_stock_bars_1d_sip_all"
     assert AlpacaStockBars1dIexRawStorage.__metatable_identifier__ == "alpaca_stock_bars_1d_iex_raw"
 
@@ -69,7 +69,7 @@ def test_project_storage_models_lists_registered_classes():
     assert AlpacaStockBars1dIexRawStorage in project_storage_models()
 
 
-def test_storage_hash_components_include_frequency_feed_adjustment():
+def test_storage_identity_components_include_feed_adjustment():
     assert AlpacaStockBars1dSipAllStorage.__metatable_extra_hash_components__ == {
         "feed": "sip",
         "adjustment": "all",

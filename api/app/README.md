@@ -2,8 +2,8 @@
 
 This FastAPI app exposes thin HTTP endpoints for:
 
+- discovery configuration
 - asset registration execution
-- lightweight-charts OHLC spec generation plus AppComponent ticker search
 - holdings-category synchronization
 
 The API does not rebuild the producer logic. It delegates to the existing services in `src/`.

@@ -20,13 +20,6 @@
         "problemMatcher": []
       },
       {
-        "label": "Run Streamlit (Dashboard)",
-        "type": "shell",
-        "command": "${workspaceFolder}/.venv/bin/streamlit run ${workspaceFolder}/dashboards/sample_app/app.py",
-        "group": "build",
-        "problemMatcher": []
-      },
-      {
         "label": "Run Example Script",
         "type": "shell",
         "command": "${workspaceFolder}/.venv/bin/python ${workspaceFolder}/scripts/test_script.py",

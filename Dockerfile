@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.4
-FROM ghcr.io/main-sequence-server-side/poddeploymentorchestrator-jupyterhub-py311:latest
+FROM ghcr.io/main-sequence-server-side/poddeploymentorchestrator-jupyterhub-py313:latest
 
 SHELL ["/bin/bash", "-lc"]
 

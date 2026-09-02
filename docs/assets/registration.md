@@ -79,8 +79,9 @@ alpaca-connectors asset register --symbols AAPL,MSFT,NVDA
 alpaca-connectors asset register --seed-tickers IVV --component-provider ishares
 ```
 
-This remains an orchestration flow. ETF expansion is owned by `etf_extraction/`, and the
-resulting explicit symbols are then passed into the Alpaca registration service in `src/assets/`.
+This remains an orchestration flow. ETF expansion is delegated to the external `etfhextractor`
+dependency through `src/etf_holdings.py`, and the resulting explicit symbols are then passed into
+the Alpaca registration service in `src/assets/`.
 
 ## Strict Extraction Rule
 

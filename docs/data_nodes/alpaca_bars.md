@@ -67,7 +67,7 @@ contract are preserved. Registered triples today:
 - `1d/iex/raw` -> `alpaca_stock_bars_1d_iex_raw`
 
 Each storage class declares an explicit physical table name with the triple in the concept segment
-(for example `bars_1d_iex_raw`) and `__cadence__ = "1d"`. Extra storage-hash components include
+(for example `bars_1d_iex_raw`) and `__cadence__ = "1d"`. Extra storage identity components include
 only the non-cadence variant fields (`feed` and `adjustment`); cadence owns the frequency.
 Together, these prevent identical OHLCV schemas from collapsing to the same storage identity and
 record the table cadence for downstream platform consumers. Add a storage class + migration for any
@@ -78,7 +78,7 @@ new triple before publishing it.
 Two steps that did not exist under the old implicit-registration model are now **required**:
 
 1. **Migration** — the storage table must be created/registered by the SDK migration provider
-   before any write: `mainsequence migrations upgrade --provider markets_migrations:migration head`.
+   before any write: `mainsequence migrations upgrade --provider src.migrations:migration head`.
 2. **Runtime attach** — every process calls `src.runtime.start_markets_engine()` (wrapping
    `msm.start_engine(models=[...])`) once before building/running the node. The CLI/jobs do this
    for you. Without it, row/node operations raise `RuntimeError`.

@@ -3,11 +3,11 @@ from __future__ import annotations
 import argparse
 import json
 
-from etf_extraction.holdings_categories import (
+from src.etf_holdings import (
+    SUPPORTED_COMPONENT_PROVIDERS,
     build_holdings_asset_category_plan,
     sync_holdings_asset_category,
 )
-from etf_extraction.settings import SUPPORTED_COMPONENT_PROVIDERS
 
 
 def configure_create_parser(parser: argparse.ArgumentParser) -> None:
@@ -57,7 +57,7 @@ def run_create_command(args: argparse.Namespace) -> int:
     )
 
     print("Planned holdings AssetCategory sync")
-    print(json.dumps(plan.summary(), indent=2, sort_keys=True))
+    print(json.dumps(plan.summary(), indent=2, sort_keys=True, default=str))
 
     if plan.missing_registered_symbols:
         print("These extracted component symbols are not yet registered as MainSequence assets:")
@@ -81,10 +81,10 @@ def run_create_command(args: argparse.Namespace) -> int:
 
     result = sync_holdings_asset_category(
         etf_ticker=plan.etf_ticker,
-        asset_ids=[
-            plan.existing_asset_ids_by_symbol[symbol]
+        asset_uids=[
+            plan.existing_asset_uids_by_symbol[symbol]
             for symbol in plan.component_symbols
-            if symbol in plan.existing_asset_ids_by_symbol
+            if symbol in plan.existing_asset_uids_by_symbol
         ],
     )
     print("Created or refreshed holdings AssetCategory")
@@ -93,11 +93,12 @@ def run_create_command(args: argparse.Namespace) -> int:
             {
                 "unique_identifier": result.unique_identifier,
                 "display_name": result.display_name,
-                "asset_ids": result.asset_ids,
-                "asset_count": len(result.asset_ids),
+                "asset_uids": result.asset_uids,
+                "asset_count": len(result.asset_uids),
             },
             indent=2,
             sort_keys=True,
+            default=str,
         )
     )
     return 0

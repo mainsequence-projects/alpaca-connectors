@@ -1,1 +1,1 @@
-from etf_extraction.holdings_categories import *  # noqa: F401,F403
+from src.etf_holdings import *  # noqa: F401,F403

@@ -3,13 +3,12 @@ from __future__ import annotations
 import datetime as dt
 
 import pandas as pd
-from pydantic import Field, field_validator
-
 from msm.data_nodes.assets import (
     ASSET_IDENTIFIER_DIMENSION,
     AssetIndexedDataNode,
     AssetIndexedDataNodeConfiguration,
 )
+from pydantic import Field, field_validator
 
 from src.assets.resolution import (
     asset_unique_identifiers_for_category,
@@ -41,8 +40,8 @@ class AlpacaStockBarsConfig(AssetIndexedDataNodeConfiguration):
     foreign key live on the storage class (``src.markets_storage.alpaca_bars``), NOT here. This
     config carries only the fields that select the table meaning (``frequency_id``/``feed``/
     ``adjustment``) and the updater universe (inherited ``asset_list`` plus
-    ``asset_category_unique_identifier``). Every field is hashed into ``update_hash`` /
-    ``storage_hash``; there is no ``update_only`` escape hatch.
+    ``asset_category_unique_identifier``). Every field is hashed into ``update_hash``; storage
+    identity lives on the selected storage class.
     """
 
     frequency_id: str = Field(
@@ -90,10 +89,10 @@ class AlpacaStockBarsNode(AssetIndexedDataNode):
     OFFSET_START = dt.datetime(2018, 1, 1, tzinfo=UTC)
 
     @classmethod
-    def _required_storage_table(cls):
-        """Default storage table for class-level identifier/description derivation.
+    def _required_output_table(cls):
+        """Default output table for class-level identifier/description derivation.
 
-        Instances bind the per-``(frequency_id, feed, adjustment)`` storage table resolved in
+        Instances bind the per-``(frequency_id, feed, adjustment)`` output table resolved in
         ``__init__``; this default only seeds ``_default_identifier()`` at the class level.
         """
         return AlpacaStockBars1dSipAllStorage
@@ -101,8 +100,8 @@ class AlpacaStockBarsNode(AssetIndexedDataNode):
     def __init__(self, config: AlpacaStockBarsConfig, **kwargs):
         self._asset_bindings = None
         self._historical_client = None
-        storage_table = storage_for(config.frequency_id, config.feed, config.adjustment)
-        super().__init__(config=config, storage_table=storage_table, **kwargs)
+        output_table = storage_for(config.frequency_id, config.feed, config.adjustment)
+        super().__init__(config=config, output_table=output_table, **kwargs)
 
     @property
     def frequency_id(self) -> str:

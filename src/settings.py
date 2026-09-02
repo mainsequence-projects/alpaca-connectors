@@ -11,6 +11,13 @@ OPENFIGI_DEFAULT_EXCHANGE_CODE = "US"
 ALPACA_API_KEY_SECRET_NAME = "ALPACA_API_KEY"
 ALPACA_SECRET_KEY_SECRET_NAME = "ALPACA_SECRET_KEY"
 
+# Project namespace slug used as the ms-markets physical-table app segment for project-owned
+# MetaTables (e.g. ``alpaca_connectors__<table>``). Matches src/markets_storage's storage app.
+PROJECT_NAMESPACE_SLUG = "alpaca_connectors"
+
+# Market venue suffix for Alpaca account/asset identities (``<token>__ALPACA`` convention).
+ALPACA_VENUE = "ALPACA"
+
 
 @lru_cache(maxsize=8)
 def get_platform_secret_value(secret_name: str) -> str | None:

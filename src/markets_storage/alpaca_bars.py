@@ -4,8 +4,7 @@ Table identity (one physical table per ``(frequency_id, feed, adjustment)`` trip
 old behavior, where the node minted a distinct table per triple via
 ``DataNodeMetaData(identifier="alpaca_stock_bars_{freq}_{feed}_{adj}")``. Here that identity is
 encoded by a dedicated storage class whose ``__metatable_identifier__`` is the *same* legacy
-string, so the registered DataNode identifier — and therefore the FastAPI chart endpoint
-contract (``alpaca_stock_bars_1d_sip_all``) — is preserved.
+string, so the registered DataNode identifier (``alpaca_stock_bars_1d_sip_all``) is preserved.
 
 To add another supported triple:
   1. add a storage class mirroring ``AlpacaStockBars1dSipAllStorage`` with its own
@@ -19,14 +18,14 @@ from __future__ import annotations
 import datetime
 from typing import ClassVar
 
+from msm.base import MarketsBase, MarketsTimeIndexMetaTableMixin
+from msm.models.assets.core import AssetTable
+from msm.settings import ASSET_IDENTIFIER_DIMENSION
 from sqlalchemy import DateTime, Float, ForeignKey, MetaData, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from mainsequence.meta_tables import schema_table_name
 from mainsequence.meta_tables.migrations import metadata_for_models
-from msm.base import MarketsBase, MarketsTimeIndexMetaTableMixin
-from msm.models.assets.core import AssetTable
-from msm.settings import ASSET_IDENTIFIER_DIMENSION
 
 # Project-owned SQLAlchemy table-name segment so physical tables are namespaced to this project
 # instead of the library default ``ms_markets``. This only affects physical table names; the
@@ -68,8 +67,7 @@ class AlpacaStockBars1dSipAllStorage(MarketsTimeIndexMetaTableMixin, MarketsBase
     }
     __metatable_description__ = (
         "Alpaca US equity OHLCV bars at 1d frequency from the sip feed with all adjustment, "
-        "keyed by (time_index, asset_identifier). Backs the lightweight OHLC chart surface and "
-        "holdings-universe price updates."
+        "keyed by (time_index, asset_identifier). Backs holdings-universe price updates."
     )
     __time_index_name__: ClassVar[str] = "time_index"
     __cadence__: ClassVar[str] = "1d"
@@ -102,13 +100,19 @@ class AlpacaStockBars1dSipAllStorage(MarketsTimeIndexMetaTableMixin, MarketsBase
         Float, nullable=True, info={"label": "Close", "description": "Bar close price."}
     )
     volume: Mapped[float | None] = mapped_column(
-        Float, nullable=True, info={"label": "Volume", "description": "Reported traded share volume."}
+        Float,
+        nullable=True,
+        info={"label": "Volume", "description": "Reported traded share volume."},
     )
     trade_count: Mapped[float | None] = mapped_column(
-        Float, nullable=True, info={"label": "Trade Count", "description": "Number of trades in the bar."}
+        Float,
+        nullable=True,
+        info={"label": "Trade Count", "description": "Number of trades in the bar."},
     )
     vwap: Mapped[float | None] = mapped_column(
-        Float, nullable=True, info={"label": "VWAP", "description": "Volume weighted average price in the bar."}
+        Float,
+        nullable=True,
+        info={"label": "VWAP", "description": "Volume weighted average price in the bar."},
     )
 
 
@@ -158,13 +162,19 @@ class AlpacaStockBars1dIexRawStorage(MarketsTimeIndexMetaTableMixin, MarketsBase
         Float, nullable=True, info={"label": "Close", "description": "Bar close price."}
     )
     volume: Mapped[float | None] = mapped_column(
-        Float, nullable=True, info={"label": "Volume", "description": "Reported traded share volume."}
+        Float,
+        nullable=True,
+        info={"label": "Volume", "description": "Reported traded share volume."},
     )
     trade_count: Mapped[float | None] = mapped_column(
-        Float, nullable=True, info={"label": "Trade Count", "description": "Number of trades in the bar."}
+        Float,
+        nullable=True,
+        info={"label": "Trade Count", "description": "Number of trades in the bar."},
     )
     vwap: Mapped[float | None] = mapped_column(
-        Float, nullable=True, info={"label": "VWAP", "description": "Volume weighted average price in the bar."}
+        Float,
+        nullable=True,
+        info={"label": "VWAP", "description": "Volume weighted average price in the bar."},
     )
 
 

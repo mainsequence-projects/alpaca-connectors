@@ -1,81 +1,81 @@
 # Jobs And Scheduling
 
-## Current Job Target
+## Repository-managed schedule
 
-The project includes:
+The recurring daily bar job is declared in:
 
-- `scheduled_jobs.yaml`
+- `.mainsequence/workflows/daily-stock-bars-holdings-ivv.yaml`
 - `src/jobs/run_daily_stock_bars_holdings_ivv.py`
-- `src/jobs/run_etf_maintenance_routines.py`
-- `data/etf_maintenance_routines.yaml`
 
-Use the routine runner for looped ETF workflows (register, category sync, ETF prices, category prices):
+The workflow uses the current CodeRepository workflow contract (`api_version: 2.1.0`) and runs at
+midnight UTC with `cpu_request: "0.25"`, `memory_request: "0.5"`, and `spot: false`.
 
-Example:
+The workflow was validated against the backend branch contract during the SDK 8 migration. The
+backend applies repository-managed workflows only after the reviewed file is committed and pushed
+through the normal CodeRepository sync. Git success is not deployment success; verify the resulting
+job and repository event separately.
+
+```bash
+mainsequence code-repository sync -m "Migrate Alpaca connector to SDK 8"
+mainsequence code-repository jobs list --path .
+```
+
+Do not restore `scheduled_jobs.yaml` or `schedule_batch_jobs`; both are removed compatibility
+surfaces in the current SDK.
+
+## Job behavior
+
+The daily launcher updates bars for:
+
+- category `HOLDINGS__IVV`
+- cadence `1d`
+- feed `sip`
+- adjustment `all`
+
+`HOLDINGS__IVV` must already exist as an ms-markets `AssetCategory`. The launcher consumes the
+category; it does not create or refresh it.
+
+The repository also contains `src/jobs/run_etf_maintenance_routines.py`, driven by
+`data/etf_maintenance_routines.yaml`, for ordered manual ETF maintenance workflows. It is not
+declared as a backend Job.
+
+Preview those operations before executing them:
 
 ```bash
 .venv/bin/python src/jobs/run_etf_maintenance_routines.py --dry-run
-```
-
-Run `--dry-run` first to verify generated command order, then execute:
-
-```bash
 .venv/bin/python src/jobs/run_etf_maintenance_routines.py
 ```
 
-That launcher runs daily bars for:
+## Backend prerequisites
 
-- `HOLDINGS__IVV`
-- `1d`
-- `sip`
-- `all`
+Before any live job writes bars or categories:
 
-The fixed `src/jobs/run_daily_stock_bars_holdings_ivv.py` launcher assumes that
-`HOLDINGS__IVV` already exists as an ms-markets `AssetCategory`. It consumes the
-category; it does not create or refresh it.
-
-## Storage-first prerequisites
-
-The migration to ms-markets storage-first adds two requirements before any **live** (non
-`--dry-run`) job writes bars or categories:
-
-1. The project market tables must be migrated/registered once:
-   `mainsequence migrations upgrade --provider markets_migrations:migration head`.
-2. The job process attaches the markets runtime via `src.runtime.start_markets_engine()` — the
-   job `main()` entrypoints already do this (skipped for `--dry-run`, which needs no backend).
-
-## Schedule
-
-The current crontab expression is:
-
-```text
-0 0 * * *
-```
-
-This means midnight UTC.
-
-## File Shape
-
-```yaml
-jobs:
-  - name: "Alpaca Daily Stock Bars HOLDINGS__IVV"
-    execution_path: "src/jobs/run_daily_stock_bars_holdings_ivv.py"
-    task_schedule:
-      type: "crontab"
-      expression: "0 0 * * *"
-    related_image_id: 0
-    cpu_request: "0.25"
-    memory_request: "0.5"
-```
-
-## Important Operational Note
-
-At the time this documentation was written, the project had no project images available from `mainsequence project images list`, so `related_image_id: 0` is only a placeholder.
-
-Before scheduling the batch for real, a valid project image must exist.
-
-## Submit The Batch
+1. Refresh the CodeRepository token and confirm the checkout mapping.
+2. Verify the project-owned migration is at Alembic head.
+3. Ensure the exact execution image contains Python 3.13, `mainsequence>=8.0.7`, and
+   `ms-markets>=1.0.2` as resolved by `uv.lock`/`requirements.txt`.
+4. Ensure the Main Sequence `ALPACA_API_KEY` secret is available to the job.
 
 ```bash
-/bin/zsh -lc "set -a; source .env; export MAINSEQUENCE_AUTH_MODE=jwt; set +a; .venv/bin/mainsequence project schedule_batch_jobs scheduled_jobs.yaml"
+mainsequence code-repository refresh-token --path .
+mainsequence code-repository current --debug --json
+mainsequence migrations current --provider src.migrations:migration
+mainsequence code-repository images list --path .
 ```
+
+The launchers attach the already-migrated markets runtime with
+`src.runtime.start_markets_engine()`; runtime startup never creates or repairs schema.
+
+## Operational verification
+
+After the workflow has been committed and processed:
+
+```bash
+mainsequence code-repository jobs list --path .
+mainsequence code-repository jobs run <JOB_UID>
+mainsequence code-repository jobs runs list <JOB_UID>
+mainsequence code-repository jobs runs logs <JOB_RUN_UID> --max-wait-seconds 900
+```
+
+At migration time the backend job list was empty, so the repository workflow is the authoritative
+declaration but still requires the normal commit/sync event before a scheduled Job exists.

@@ -1,0 +1,26 @@
+# Documentation Summary
+
+- [Overview](index.md)
+- [Agentic Capabilities](agent.md)
+- [API](api.md)
+- ETF Holdings
+  - [Architecture](etf_extraction.md)
+- Portfolios
+  - [ETF Holdings Portfolios](portfolios/etf_holdings_portfolios.md)
+- ADRs
+  - [0001 ETF Holdings AssetCategory Ownership](adrs/0001_etf_holdings_asset_category_ownership.md)
+  - [0002 ETF Holdings Alpaca Portfolio Construction](adrs/0002_etf_holdings_alpaca_portfolio_construction.md)
+- Assets
+  - [Registration Flow](assets/registration.md)
+  - [Holdings Categories](assets/holdings_categories.md)
+  - [Extractors](assets/extractors.md)
+- Accounts
+  - [Account Registration](account/registration.md)
+- Data Publishing
+  - [Alpaca Daily Bars](data_nodes/alpaca_bars.md)
+- Operations
+  - [Jobs And Scheduling](operations/jobs.md)
+  - [Development Workflow](operations/development.md)
+- Implementation Records
+  - [SDK 8 And ms-markets Migration](implementation_tasks/0001_ms_markets_storage_first_migration.md)
+  - [Alpaca Account Storage](implementation_tasks/0002_alpaca_account_module.md)

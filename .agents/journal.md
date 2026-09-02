@@ -1,5 +1,38 @@
 # Journal
 
+## 2026-09-02
+
+- Context: migrate the connector and its backend-owned project MetaTables from the old SDK stack
+  to Main Sequence SDK 8 and ms-markets 1 while keeping dependency declarations compatible rather
+  than exactly pinned.
+- Dependency work: moved the runtime to Python 3.13, set `mainsequence>=8.0.7` and
+  `ms-markets>=1.0.2`, rebuilt `uv.lock`, exported `requirements.txt`, and refreshed the installed
+  SDK and ms-markets scaffold bundles.
+- Code work: migrated the Alpaca bars node to `_required_output_table()`, changed API startup to a
+  lifespan handler, migrated `etfhextractor` itself and delegated the Alpaca portfolio graph back to its reusable
+  builder without changing the Alpaca portfolio identity, and replaced `scheduled_jobs.yaml` with
+  a backend-validated CodeRepository workflow document.
+- Backend work: restored CLI authentication, resolved the CodeRepository branch, generated and
+  reviewed Alembic revision `0001`, corrected the provider's foreign-key metadata closure, applied
+  the revision, and finalized the registry plus three project tables. Verification returned
+  `0001 (head)`, four active resources, and zero reserved/failed resources; ms-markets runtime
+  attachment then resolved all project models and transitive core dependencies.
+- Scheduling state: the new workflow validated against backend contract `2.1.0`, but the backend
+  job list is empty until a reviewed commit/sync triggers repository processing. The dirty checkout
+  was not committed or pushed automatically.
+- Dependency backend work: applied the `etfhextractor_migrations:migration` provider at `0001`,
+  finalized its registry and demo-bars output active, attached its runtime, and live-read 508 IVV
+  holdings from iShares. Its full suite passed 86 tests; this project passed 83 integration tests
+  against the migrated checkout. After explicit authorization, canonical CodeRepository sync
+  published commit `036c8ba` and tag `v0.4.1`; the Alpaca lock and environment now resolve that
+  remote release without a local override.
+- Presentation cleanup: removed the retired browser workspace integration, generated documentation
+  output, and legacy dashboard stub. The remaining FastAPI routes now return application-owned
+  response models for discovery, registration, and holdings synchronization. The reduced project
+  suite passes 69 tests.
+- Pending: controlled first bars backfill; live Alpaca account registration; and an exact-image job
+  release.
+
 ## 2026-05-08
 
 - Context: prepare the repository for local project-to-agent use without introducing a standalone
@@ -17,7 +50,7 @@
 - Context: make the repository README useful as the project entrypoint instead of mostly referring
   readers to deeper docs pages.
 - Work completed: rewrote `README.md` into a capability summary covering the supported CLI, API,
-  Command Center, ETF extraction, DataNode, and job surfaces, plus the repo ownership boundary
+  ETF extraction, DataNode, and job surfaces, plus the repo ownership boundary
   between `src/` and `etf_extraction/`.
 - Verification: documentation content was verified by inspection against the current code,
   docs, and project-state files; no live platform validation was required because the change was
@@ -55,11 +88,3 @@
 - Work completed: added `src/cli` with nested argparse commands for `asset register` and `holdings-category create`, added a console-script entry point in `pyproject.toml`, removed `scripts/register_asset.py` and `scripts/create_holdings_category.py`, updated repo docs to reference the CLI, and added CLI regression tests.
 - Verification: `uv sync` rebuilt and reinstalled the package; `.venv/bin/alpaca-connectors asset register --help` succeeded; `.venv/bin/python -m unittest tests.test_cli tests.test_holdings_categories` passed 5 tests.
 - Note: `python -m src.cli` without a subcommand prints help and exits non-zero because the CLI requires an explicit command path.
-
-## 2026-04-20
-
-- Context: align the FastAPI API surface with the Main Sequence standard that schema-visible endpoints should have explicit response bodies and response models.
-- Work completed: synced root `AGENTS.md` to the canonical scaffold, checked the Main Sequence FastAPI and Command Center contract docs, corrected `POST /v1/charts/lightweight/ohlc` to use the single `LightweightOhlcResponse` response model, updated API docs, and added regression tests for response-model coverage and the chart route OpenAPI response schema.
-- Correction: removed the duplicate stringified spec field from the OHLC chart API contract after confirming the workspace path consumes structured JSON.
-- Verification: `mainsequence project current --debug` detected project `153`; `mainsequence project refresh_token --path .` succeeded; `python -m unittest tests.test_api_app` passed 12 tests; `python -m unittest discover tests` passed 45 tests.
-- Follow-up: create a new FastAPI release and recheck the live Command Center AppComponent/OpenAPI discovery once the code is synced and released.

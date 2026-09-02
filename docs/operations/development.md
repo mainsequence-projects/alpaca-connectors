@@ -6,6 +6,24 @@
 uv sync
 ```
 
+The supported interpreter is Python 3.13. Dependency declarations use compatible lower bounds;
+`uv.lock` is the reproducible resolution.
+
+For authenticated platform work:
+
+```bash
+mainsequence login
+mainsequence code-repository refresh-token --path .
+mainsequence code-repository current --debug --json
+```
+
+Before executing a project DataNode or account write, verify the project migration is at head:
+
+```bash
+mainsequence migrations current --provider src.migrations:migration
+mainsequence migrations upgrade --provider src.migrations:migration head
+```
+
 ## Docs
 
 ```bash

@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-import datetime as dt
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from etf_extraction.settings import SUPPORTED_COMPONENT_PROVIDERS
+from src.etf_holdings import SUPPORTED_COMPONENT_PROVIDERS
 
 
 def _normalize_symbol_list(values: list[str] | None) -> list[str] | None:
@@ -75,34 +74,6 @@ class AssetRegistrationRequest(BaseModel):
         return self
 
 
-class AssetRegistrationByTickerRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    ticker: str = Field(
-        ...,
-        min_length=1,
-        description="Ticker to register as a MainSequence public asset through Alpaca and FIGI.",
-        examples=["NVDA"],
-    )
-    include_non_tradable: bool = Field(
-        default=False,
-        description="Include Alpaca assets that are active but not tradable.",
-    )
-    timeout: float = Field(
-        default=30.0,
-        gt=0,
-        le=300.0,
-        description="HTTP timeout in seconds for Alpaca and OpenFIGI requests.",
-    )
-
-    @model_validator(mode="after")
-    def normalize_values(self) -> "AssetRegistrationByTickerRequest":
-        self.ticker = self.ticker.strip().upper()
-        if not self.ticker:
-            raise ValueError("ticker must not be empty.")
-        return self
-
-
 class AssetRegistrationDiscoveryResponse(BaseModel):
     request: AssetRegistrationRequest
     plan_summary: dict[str, Any]
@@ -118,142 +89,13 @@ class AssetRegistrationExecuteResponse(BaseModel):
     request: AssetRegistrationRequest
     plan_summary: dict[str, Any]
     resolution_summary: dict[str, Any]
-    assets_by_symbol: dict[str, int]
-    existing_asset_ids_by_symbol: dict[str, int]
-    created_asset_ids_by_symbol: dict[str, int]
+    assets_by_symbol: dict[str, str]
+    existing_asset_uids_by_symbol: dict[str, str]
+    created_asset_uids_by_symbol: dict[str, str]
     unresolved_symbols: list[str]
     not_registered_missing_figi_symbols: list[str]
     not_registered_missing_alpaca_symbols: list[str]
     warnings_by_symbol: dict[str, str]
-
-
-class AssetRegistrationByTickerResponse(BaseModel):
-    requested_ticker: str
-    alpaca_symbol: str | None
-    alpaca_name: str | None
-    figi: str | None
-    classification_pass_name: str | None
-    security_type: str | None
-    security_type_2: str | None
-    exchange_code: str | None
-    status: Literal[
-        "created",
-        "existing",
-        "blocked_missing_alpaca",
-        "blocked_missing_figi",
-    ]
-    asset_id: int | None
-    created: bool
-    already_registered: bool
-    missing_from_alpaca: bool
-    missing_figi: bool
-    warnings: list[str] = Field(default_factory=list)
-
-
-class LightweightOhlcChartRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    unique_identifier: str = Field(
-        ...,
-        min_length=1,
-        description="Asset unique identifier used in the bars table index.",
-        examples=["BBG000BBJQV0"],
-    )
-    start_date: dt.date = Field(
-        ...,
-        description="Inclusive start date for the OHLC query window.",
-        examples=["2026-04-01"],
-    )
-    end_date: dt.date = Field(
-        ...,
-        description="Inclusive end date for the OHLC query window.",
-        examples=["2026-04-16"],
-    )
-    node_identifier: str = Field(
-        default="alpaca_stock_bars_1d_sip_all",
-        min_length=1,
-        description="DataNode identifier that backs the OHLC data source.",
-        examples=["alpaca_stock_bars_1d_sip_all"],
-    )
-
-    @model_validator(mode="after")
-    def normalize_values(self) -> "LightweightOhlcChartRequest":
-        self.unique_identifier = self.unique_identifier.strip().upper()
-        self.node_identifier = self.node_identifier.strip()
-        if not self.unique_identifier:
-            raise ValueError("unique_identifier must not be empty.")
-        if self.start_date > self.end_date:
-            raise ValueError("start_date must be less than or equal to end_date.")
-        return self
-
-
-class LightweightOhlcChartResponse(BaseModel):
-    unique_identifier: str
-    node_identifier: str
-    start_date: dt.date
-    end_date: dt.date
-    point_count: int
-    spec: dict[str, Any]
-
-
-class AssetSearchSelectOption(BaseModel):
-    unique_identifier: str
-    label: str
-    ticker: str | None = None
-    name: str | None = None
-    figi: str | None = None
-    display: str
-
-
-class AssetSearchSelectPagination(BaseModel):
-    page: int
-    limit: int
-    hasMore: bool
-
-
-class AssetSearchSelectResponse(BaseModel):
-    query: str
-    asset_category_unique_identifier: str
-    items: list[AssetSearchSelectOption]
-    pagination: AssetSearchSelectPagination
-
-
-class LightweightOhlcResponse(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    mode: Literal["selector", "chart"]
-    query: str | None = None
-    asset_category_unique_identifier: str | None = None
-    items: list[AssetSearchSelectOption] = Field(default_factory=list)
-    pagination: AssetSearchSelectPagination | None = None
-    unique_identifier: str | None = None
-    node_identifier: str | None = None
-    start_date: dt.date | None = None
-    end_date: dt.date | None = None
-    point_count: int | None = None
-    spec: dict[str, Any] | None = None
-
-    @classmethod
-    def from_selector(cls, response: AssetSearchSelectResponse) -> "LightweightOhlcResponse":
-        return cls(
-            mode="selector",
-            query=response.query,
-            asset_category_unique_identifier=response.asset_category_unique_identifier,
-            items=response.items,
-            pagination=response.pagination,
-        )
-
-    @classmethod
-    def from_chart(cls, response: LightweightOhlcChartResponse) -> "LightweightOhlcResponse":
-        return cls(
-            mode="chart",
-            unique_identifier=response.unique_identifier,
-            node_identifier=response.node_identifier,
-            start_date=response.start_date,
-            end_date=response.end_date,
-            point_count=response.point_count,
-            spec=response.spec,
-        )
 
 
 class HoldingsCategoryRequest(BaseModel):

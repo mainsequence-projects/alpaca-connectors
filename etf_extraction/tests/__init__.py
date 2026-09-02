@@ -1,1 +1,0 @@
-"""ETF extraction concern tests."""

@@ -2,27 +2,25 @@
 
 See also:
 
-- `docs/etf_extraction.md` for the standalone ETF extraction architecture and package boundary
+- `docs/etf_extraction.md` for the external `etfhextractor` dependency boundary
 
 ## Scope Boundary
 
-The extractor layer is independent of MainSequence.
+The extractor layer is not implemented in this repository anymore. Provider extraction is owned by
+the external [`mainsequence-projects/etfholdingextractor`](https://github.com/mainsequence-projects/etfholdingextractor)
+package and imported as `etfhextractor`.
 
 Provider extractors do only one job:
 
 - read published provider holdings sources
 - parse component tickers
-- return expanded symbol universes
+- return normalized ETF holdings models
 
 They do not register assets, create categories, or publish DataNodes.
 
-Modules:
+Local integration point:
 
-- `etf_extraction/extractors/ishares.py`
-- `etf_extraction/extractors/invesco.py`
-- `etf_extraction/extractors/vanguard.py`
-- `etf_extraction/extractors/state_street.py`
-- `etf_extraction/extractors/registry.py`
+- `src/etf_holdings.py`
 
 ## Supported Providers
 
@@ -33,7 +31,8 @@ Modules:
 
 ## URL Strategy
 
-Provider URLs are derived dynamically by ticker and provider pattern. The project does not hardcode a separate static holdings URL for every ETF.
+Provider URLs are derived by `etfhextractor` by ticker and provider pattern. This project does not
+carry provider parser code.
 
 ## Published-Source Rule
 
@@ -45,7 +44,7 @@ The extractors parse what the providers actually publish.
 
 ## Browser Support
 
-The repo includes `playwright` as a dependency because some provider flows need browser-backed fetching.
+The external extractor may require Playwright for browser-backed provider flows.
 
 Install the browser runtime with:
 

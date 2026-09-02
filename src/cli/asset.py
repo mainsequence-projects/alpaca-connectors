@@ -3,12 +3,15 @@ from __future__ import annotations
 import argparse
 import json
 
-from etf_extraction.service import EtfExpansionRequest, expand_etf_seed_symbols
-from etf_extraction.settings import SUPPORTED_COMPONENT_PROVIDERS
 from src.assets import (
     build_alpaca_us_equity_registration_plan,
     register_alpaca_us_equity_assets,
     resolve_alpaca_us_equity_registration_plan,
+)
+from src.etf_holdings import (
+    SUPPORTED_COMPONENT_PROVIDERS,
+    EtfExpansionRequest,
+    expand_etf_seed_symbols,
 )
 
 

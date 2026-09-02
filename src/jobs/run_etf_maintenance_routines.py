@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import argparse
+import sys
 from dataclasses import dataclass
 from pathlib import Path
-import sys
 from typing import Any, Callable
 
 import yaml
@@ -12,13 +12,6 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from etf_extraction.holdings_categories import (
-    build_holdings_asset_category_plan,
-    build_holdings_asset_category_unique_identifier,
-    infer_holdings_component_provider,
-    sync_holdings_asset_category,
-)
-from etf_extraction.service import EtfExpansionRequest, expand_etf_seed_symbols
 from src.assets.alpaca_us_equities import (
     build_alpaca_us_equity_registration_plan,
     register_alpaca_us_equity_assets,
@@ -30,6 +23,14 @@ from src.cli.bars import (
     _run_stock_bars_node,
     build_stock_bars_node,
     normalize_price_update_period,
+)
+from src.etf_holdings import (
+    EtfExpansionRequest,
+    build_holdings_asset_category_plan,
+    build_holdings_asset_category_unique_identifier,
+    expand_etf_seed_symbols,
+    infer_holdings_component_provider,
+    sync_holdings_asset_category,
 )
 
 
@@ -191,10 +192,10 @@ def _execute_holdings_category_sync(routine: RoutineSpec) -> None:
         )
     sync_holdings_asset_category(
         etf_ticker=plan.etf_ticker,
-        asset_ids=[
-            plan.existing_asset_ids_by_symbol[symbol]
+        asset_uids=[
+            plan.existing_asset_uids_by_symbol[symbol]
             for symbol in plan.component_symbols
-            if symbol in plan.existing_asset_ids_by_symbol
+            if symbol in plan.existing_asset_uids_by_symbol
         ],
     )
 

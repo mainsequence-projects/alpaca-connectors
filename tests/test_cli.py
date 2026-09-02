@@ -122,7 +122,7 @@ class CliTests(unittest.TestCase):
             etf_ticker="IVV",
             missing_registered_symbols=[],
             ambiguous_registered_symbols=["FWONK"],
-            existing_asset_ids_by_symbol={"AAPL": 101},
+            existing_asset_uids_by_symbol={"AAPL": "asset-uid-101"},
             component_symbols=["AAPL"],
             has_blockers=lambda: False,
         )
@@ -130,7 +130,7 @@ class CliTests(unittest.TestCase):
         sync_result = SimpleNamespace(
             unique_identifier="HOLDINGS__IVV",
             display_name="HOLDINGS__IVV",
-            asset_ids=[101],
+            asset_uids=["asset-uid-101"],
         )
         stdout = io.StringIO()
 
@@ -144,7 +144,10 @@ class CliTests(unittest.TestCase):
             exit_code = main(["holdings-category", "create", "--execute", "--etf-ticker", "IVV"])
 
         self.assertEqual(exit_code, 0)
-        sync_category.assert_called_once_with(etf_ticker="IVV", asset_ids=[101])
+        sync_category.assert_called_once_with(
+            etf_ticker="IVV",
+            asset_uids=["asset-uid-101"],
+        )
         output = stdout.getvalue()
         self.assertIn("These extracted component symbols resolved ambiguously in MainSequence:", output)
 
@@ -154,7 +157,6 @@ class CliTests(unittest.TestCase):
             feed="iex",
             adjustment="raw",
             hash_namespace=None,
-            storage_hash="storage",
             update_hash="update",
             get_table_metadata=lambda: SimpleNamespace(identifier="alpaca_stock_bars_1d_iex_raw"),
         )
@@ -188,7 +190,6 @@ class CliTests(unittest.TestCase):
             feed="sip",
             adjustment="all",
             hash_namespace=None,
-            storage_hash="storage",
             update_hash="update",
             get_table_metadata=lambda: SimpleNamespace(identifier="alpaca_stock_bars_1d_sip_all"),
         )
@@ -230,7 +231,6 @@ class CliTests(unittest.TestCase):
             feed="sip",
             adjustment="all",
             hash_namespace=None,
-            storage_hash="storage",
             update_hash="update",
             get_table_metadata=lambda: SimpleNamespace(
                 identifier="alpaca_stock_bars_1d_sip_all"
@@ -286,7 +286,6 @@ class CliTests(unittest.TestCase):
             feed="sip",
             adjustment="all",
             hash_namespace=None,
-            storage_hash="storage",
             update_hash="update",
             get_table_metadata=lambda: SimpleNamespace(
                 identifier="alpaca_stock_bars_1d_sip_all"

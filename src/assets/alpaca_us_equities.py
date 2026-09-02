@@ -11,6 +11,7 @@ from alpaca.trading.enums import AssetClass, AssetStatus
 from alpaca.trading.models import Asset as AlpacaTradingAsset
 from alpaca.trading.requests import GetAssetsRequest
 from pydantic import BaseModel, ConfigDict, Field
+
 from src.settings import (
     OPENFIGI_DEFAULT_EXCHANGE_CODE,
     OPENFIGI_DEFAULT_TIMEOUT,

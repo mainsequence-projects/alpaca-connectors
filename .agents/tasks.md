@@ -2,74 +2,70 @@
 
 ## Open
 
-### Confirm Live Project-To-Agent Platform Wiring After Auth Is Restored
+### Apply And Verify The Repository-managed Daily Job
 
-- Owning skill: `.agents/skills/mainsequence/project_to_agent/SKILL.md`
-- Scope: once `mainsequence login` works again, determine the actual live platform path for the
-  local project-to-agent artifacts without assuming unverified release semantics from local SDK
-  internals.
-- Expected output: a verified description of how this repository's local agent card and project
-  skills should map to the live Main Sequence platform, if at all.
-- Validation evidence: authenticated CLI or platform evidence rather than inference from local SDK
-  source only.
+- Owning skill: `.agents/skills/mainsequence/platform_operations/orchestration_and_releases/SKILL.md`
+- Scope: after reviewing and committing the migration changes, synchronize the CodeRepository so
+  `.mainsequence/workflows/daily-stock-bars-holdings-ivv.yaml` is applied.
+- Expected output: one scheduled backend Job for
+  `src/jobs/run_daily_stock_bars_holdings_ivv.py` at `0 0 * * *` with an exact Python 3.13 image.
+- Validation evidence: successful repository event, `code-repository jobs list`, one test run, and
+  successful run logs. The backend job list was empty on 2026-09-02.
 
-### Upgrade SDK And Recheck Native AGENTS Scaffold Update
+### Backfill And Verify SDK 8 Alpaca Bar Storage
 
-- Owning skill: `.agents/skills/maintenance/bug_auditor/SKILL.md`
-- Scope: upgrade the local Main Sequence SDK to the latest available version, then rerun
-  `mainsequence project update AGENTS.md --path .` without the temporary `PYTHONPATH` workaround.
-- Expected output: confirmation that the native scaffold-update command works on the upgraded SDK,
-  or a preserved minimal reproducer showing the installed `agent_scaffold/AGENTS.md` parser issue
-  still exists.
-- Validation evidence: either a successful native `mainsequence project update AGENTS.md --path .`
-  run or the captured `Installed agent_scaffold AGENTS.md must contain exactly one Main Sequence
-  managed block.` failure on the upgraded SDK.
+- Owning skill: `.agents/skills/mainsequence/data_publishing/data_nodes/SKILL.md`
+- Scope: plan, then execute, the first production update of the new
+  `alpaca_connectors__bars_1d_sip_all` table for a controlled registered universe.
+- Expected output: rows in the migrated table using `(time_index, asset_identifier)` grain and no
+  dependency on legacy DataNode storage.
+- Validation evidence: plan hashes, successful update logs, table update status, and row/date
+  coverage.
 
-### Refresh Credentials And Live-Verify Asset Price Update CLI
+### Live-verify Alpaca Account Registration
 
-- Owning skill: `.agents/skills/data_publishing/data_nodes/SKILL.md`
-- Scope: refresh MainSequence credentials in the active shell, then run `alpaca-connectors asset IVV update_prices daily --plan-only` end to end.
-- Expected output: confirmation that the shorthand CLI resolves the registered IVV asset, builds the `AlpacaStockBarsConfig`, and prints the planned DataNode summary without auth or secret lookup failures.
-- Validation evidence: successful command output including the resolved asset sample and no `JWT refresh failed` or `Failed to retrieve MainSequence secret 'ALPACA_API_KEY'` error.
-
-### Publish Updated FastAPI Response Contract
-
-- Owning skill: `.agents/skills/platform_operations/orchestration_and_releases/SKILL.md`
-- Scope: create or update the FastAPI project resource release after the `/v1/charts/lightweight/ohlc` response-model change is committed and synced.
-- Expected output: a new FastAPI `ResourceRelease` for the current API code, with the relevant Command Center workspace/AppComponent targeting that release if needed.
-- Validation evidence: `mainsequence project project_resource list --filter resource_type=fastapi`, the created release id, and a successful `/openapi.json` check showing the chart route has a `200` response body schema referencing `LightweightOhlcResponse` with structured `spec` only.
-
-### Recheck Live Command Center AppComponent Contract
-
-- Owning skill: `.agents/skills/command_center/app_components/SKILL.md`
-- Scope: after the FastAPI release is updated, verify the live AppComponent sees response schemas for `POST /v1/charts/lightweight/ohlc`.
-- Expected output: confirmation that OpenAPI discovery exposes only `ticker`, `start_date`, `end_date` inputs and the single `LightweightOhlcResponse` response body with structured `spec` only.
-- Validation evidence: registry/workspace inspection plus live AppComponent behavior or a captured `/openapi.json` response from the released API.
+- Owning skill: `.agents/skills/ms_markets/accounts/account_workflow/SKILL.md`
+- Scope: with explicit Alpaca account authorization, execute the paper-account registration path
+  and validate current details plus canonical account holdings.
+- Expected output: one ms-markets Account, one `AlpacaAccountDetails` row, and one holdings set with
+  equity and cash holdings.
+- Validation evidence: redacted row identities/counts, idempotent rerun, and confirmation that raw
+  API credentials were not persisted.
 
 ## Completed
 
-### Add Project-Specific Alpaca Workflow Instructions To AGENTS.md
+### Migrate The Project To SDK 8 And ms-markets 1
 
-- Owning skill: `.agents/skills/project_builder/SKILL.md`
-- Scope: replace the scaffold placeholder in `AGENTS.md` with the repository-specific rules for
-  Alpaca asset registration, holdings-category creation, and stock-bar updates, including the
-  supported CLI entry points.
-- Expected output: future agents can read `AGENTS.md` and find the supported commands, dry-run
-  behavior, operational prerequisites, and repository boundary rules for these workflows.
-- Validation evidence: `AGENTS.md` contains project-specific instructions for
-  `alpaca-connectors asset register`, `alpaca-connectors holdings-category create`,
-  `alpaca-connectors bars run`, and `alpaca-connectors asset <ticker> update_prices <period>`.
+- Owning skills: project builder, DataNodes, API surfaces, ms-markets bootstrap, and orchestration.
+- Output: Python 3.13; compatible dependency lower bounds; updated lock/export; output-table
+  DataNode contract; FastAPI lifespan/runtime and registered-table reads; project calendar adapter;
+  current CodeRepository workflow YAML; updated scaffolds and documentation.
+- Validation evidence: SDK `8.0.7`, ms-markets `1.0.2`, backend workflow validation, focused tests,
+  lint, and full-suite results recorded in `.agents/status.md`.
 
-### Move Daily Stock Bars Into The Project CLI
+### Implement And Backend-verify The Full etfhextractor Migration
 
-- Owning skill: `.agents/skills/data_publishing/data_nodes/SKILL.md`
-- Scope: replace the standalone stock-bar runner scripts with project CLI commands and keep a repository-local scheduled-job launcher for the IVV preset.
-- Expected output: `alpaca-connectors bars run` and `alpaca-connectors asset <ticker> update_prices <period>` both exist, docs point at them, and scheduled jobs use a non-`scripts/` launcher path.
-- Validation evidence: `.venv/bin/python -m unittest tests.test_cli tests.test_run_daily_stock_bars tests.test_alpaca_bars_support` passed on 2026-04-28; both help commands for the shorthand path succeeded.
+- Owning skills: ETF extraction/category/signal skills, Main Sequence updater/migration skills,
+  and ms-markets portfolio/bootstrap skills.
+- Output: Python 3.13 dependency floor; SDK 8 output-table contract; `TimeIndexTableRef`; reusable
+  portfolio builder preserving custom identity; provider-scoped demo-bars migration; refreshed
+  skills/docs/agent state; Alpaca delegation to the external builder.
+- Validation evidence: external 86-test suite, Alpaca 83-test integration suite, backend revision
+  `0001 (head)`, active registry/demo table, runtime attachment, and live IVV extraction.
 
-### Add Response Body Model To Chart API Route
+### Publish And Lock etfhextractor 0.4.1
 
-- Owning skill: `.agents/skills/application_surfaces/api_surfaces/SKILL.md`
-- Scope: make the schema-visible chart route declare one typed response model and return that Pydantic model directly.
-- Expected output: local OpenAPI contains a single response body schema for selector and chart modes, with structured `spec` only.
-- Validation evidence: `python -m unittest tests.test_api_app` and `python -m unittest discover tests` passed on 2026-04-20.
+- Output: canonical upstream CodeRepository sync committed `036c8ba`, pushed remote `main`, and
+  created tag `v0.4.1`; Alpaca's unpinned pyproject git source now resolves that exact commit in
+  `uv.lock` and `requirements.txt`.
+- Validation evidence: clean upstream checkout, tag at HEAD, installed package version `0.4.1`,
+  and both full suites passing without a local dependency override.
+
+### Apply Project-owned MetaTable Revision 0001
+
+- Owning skills: Main Sequence MetaTable migrations and ms-markets MetaTable extensions.
+- Output: Alembic revision `0001` and active project tables for SIP/all bars, IEX/raw bars, and
+  Alpaca account details.
+- Validation evidence: `mainsequence migrations current` returned `0001 (head)`; finalization
+  returned four active resources and zero reserved/failed; runtime attachment resolved all project
+  models and foreign-key dependencies.

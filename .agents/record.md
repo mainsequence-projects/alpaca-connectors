@@ -1,52 +1,72 @@
 # Project Record
 
-## Stable Paths
+## Stable paths
 
-- Repository: `/Users/jose/mainsequence/main-sequence-workbench/projects/alpaca-connectors-153`
+- Repository:
+  `/Users/jose/mainsequence-dev/main-sequence-workbench/projects/alpacaconnectors-945bfddd-5f1f-4541-a87a-faea3af6271f`
 - Project instructions: `AGENTS.md`
-- Project CLI package: `src/cli/`
-- Scheduled-job launcher path: `src/jobs/run_daily_stock_bars_holdings_ivv.py`
-- FastAPI app: `api/app/main.py`
-- API schemas: `api/app/schemas.py`
-- API services: `api/app/services.py`
-- API docs: `docs/api.md`
-- Agent docs: `docs/agent.md`
-- Agent card: `.agents/agent_card.json`
-- Project-specific custom skills root: `.agents/skills/`
-- ETF extraction docs: `docs/etf_extraction.md`
-- Workspace payload: `command_center/workspaces/alpaca_assets_registry.workspace.yaml`
+- Project CLI: `src/cli/`
+- Reusable implementation: `src/`
+- FastAPI application: `api/app/main.py`
+- Project migration provider: `src.migrations:migration`
+- Migration revisions: `src/migrations/versions/alpaca_connectors/`
+- Repository workflows: `.mainsequence/workflows/`
+- Scheduled launcher: `src/jobs/run_daily_stock_bars_holdings_ivv.py`
+- Documentation map: `docs/SUMMARY.md`
+- Project state: `.agents/status.md`, `.agents/tasks.md`, `.agents/journal.md`
 
-## Stable Project Context
+## Platform context
 
-- Main Sequence project ID: `153`
-- Python: `3.11.5` as reported by `mainsequence project current --debug`
-- Local SDK: `3.18.19` as reported by `mainsequence project current --debug`
-- Latest GitHub SDK reported by `mainsequence project current --debug` on 2026-04-28: `3.18.20`
+- CodeRepository UID: `c4980dd0-db33-420c-9a3f-050815a03512`
+- CodeRepositoryBranch UID: `945bfddd-5f1f-4541-a87a-faea3af6271f`
+- Branch: `main`
+- Python: `3.13.11`
+- Main Sequence SDK: `8.0.7`
+- ms-markets: `1.0.2`
+- Migration namespace: `alpaca-connectors`
+- Alembic registry table: `alpaca_connectors__alembic_version`
+- Alembic head: `0001`
 
-## Useful Commands
+## Project-owned backend tables
+
+- SIP/all daily bars: `alpaca_connectors__bars_1d_sip_all`
+- IEX/raw daily bars: `alpaca_connectors__bars_1d_iex_raw`
+- Alpaca account details/current financials: `alpaca_connectors__acct_alpaca`
+
+Core assets, accounts, holdings, calendars, and portfolio models remain owned by ms-markets.
+
+## Useful commands
 
 ```bash
-/bin/zsh -lc 'set -a; source .env; export MAINSEQUENCE_AUTH_MODE=jwt; set +a; .venv/bin/mainsequence project current --debug'
-/bin/zsh -lc 'set -a; source .env; export MAINSEQUENCE_AUTH_MODE=jwt; set +a; .venv/bin/mainsequence project refresh_token --path .'
-.venv/bin/mainsequence project update AGENTS.md --path .
-.venv/bin/alpaca-connectors asset register --help
-.venv/bin/alpaca-connectors holdings-category create --help
-.venv/bin/alpaca-connectors bars run --help
-.venv/bin/alpaca-connectors asset IVV update_prices daily --help
-.venv/bin/python -m unittest tests.test_api_app
-.venv/bin/python -m unittest tests.test_cli tests.test_run_daily_stock_bars tests.test_alpaca_bars_support
-.venv/bin/python -m unittest discover tests
+mainsequence login
+mainsequence code-repository refresh-token --path .
+mainsequence code-repository current --debug
+mainsequence code-repository update-sdk --path .
+mainsequence code-repository update AGENTS.md --path .
+mainsequence code-repository update-agent-skills --path .
+mainsequence migrations current --provider src.migrations:migration
+mainsequence migrations revision --provider src.migrations:migration -m "describe change"
+mainsequence migrations upgrade --provider src.migrations:migration head
+mainsequence code-repository jobs list --path .
+alpaca-connectors asset register --help
+alpaca-connectors holdings-category create --help
+alpaca-connectors bars run --help
+alpaca-connectors asset IVV update_prices daily --plan-only
+alpaca-connectors account register --help
+uv run pytest
+uv run ruff check src api tests
+uv run mkdocs build --strict
 ```
 
-## CLI Notes
+## Contracts
 
-- The installed console script name is `alpaca-connectors`.
-- Asset registration is exposed as `alpaca-connectors asset register`.
-- Holdings category creation is exposed as `alpaca-connectors holdings-category create`.
-- Generic stock-bar execution is exposed as `alpaca-connectors bars run`.
-- Single-asset shorthand stock-bar execution is exposed as `alpaca-connectors asset <ticker> update_prices <period>`.
-- The shorthand asset price-update parser accepts both `update_prices` and `update-prices`; use
-  `update_prices` in repo docs and examples.
-- The legacy script entry points for those workflows were removed on 2026-04-28.
-- The local project-to-agent surface is metadata-and-skill based; no standalone local `agent.py`
-  runtime is assumed by default.
+- Asset registration requires an Alpaca match and OpenFIGI match before public-asset creation.
+- Holdings category sync fails when a constituent is unresolved or ambiguous.
+- DataNode schema lives on `_required_output_table()` storage classes.
+- Runtime attachment expects migrations to be complete and never creates schema.
+- Alpaca owns its bars/interpolation price source and configuration-derived Portfolio identity;
+  `etfhextractor.build_etf_tracking_portfolio` owns calendar, signal, Portfolio row, configuration,
+  and `PortfoliosDataNode` assembly.
+- Long-lived schedules live under `.mainsequence/workflows/`; `scheduled_jobs.yaml` is removed.
+- Dependency lower bounds live in `pyproject.toml`; reproducibility lives in `uv.lock` and exported
+  `requirements.txt`.

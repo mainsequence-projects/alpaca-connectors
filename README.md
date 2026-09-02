@@ -2,7 +2,7 @@
 
 `alpaca-connectors` is a Main Sequence project for onboarding Alpaca US equities, turning ETF
 holdings into reusable Main Sequence asset universes, and publishing Alpaca stock bars into
-platform datasets and UI surfaces.
+platform datasets.
 
 ## Capability Summary
 
@@ -10,14 +10,12 @@ platform datasets and UI surfaces.
   resolution.
 - Expand ETF seed tickers into component symbols from official provider sources.
 - Build holdings-backed `AssetCategory` universes such as `HOLDINGS__IVV`.
+- Build ETF-tracking ms-markets portfolios from ETF holdings signals and interpolated Alpaca bars.
 - Publish Alpaca OHLCV bars through a reusable `DataNode` for either one registered asset or a
   category universe.
-- Expose thin FastAPI endpoints for registration, holdings sync, discovery, and lightweight OHLC
-  chart payloads.
-- Generate Command Center workspace/AppComponent payloads for asset registration and chart
-  loading.
-- Run recurring ETF maintenance and scheduled daily bar updates from repository-managed job
-  entrypoints.
+- Expose thin FastAPI endpoints for registration, holdings sync, and discovery.
+- Run ETF maintenance manually and publish the one existing repository-managed scheduled daily
+  bar Job.
 
 ## Agentic Capabilities
 
@@ -41,45 +39,50 @@ Important boundary:
   registration.
 - `alpaca-connectors holdings-category create`: plan or execute holdings `AssetCategory` creation
   from ETF constituents.
+- `alpaca-connectors account register`: register an Alpaca trading account into ms-markets and
+  snapshot its balances + holdings (`--paper`/`--no-paper`, `--plan-only`). See
+  `docs/account/registration.md`.
 - `alpaca-connectors bars run`: run the stock-bars `DataNode` for a holdings category or explicit
   ticker list.
 - `alpaca-connectors asset <ticker> update_prices <period>`: shorthand single-asset stock-bar
   update with project defaults `feed=sip` and `adjustment=all`.
 - `uv run uvicorn api.app.main:app --reload`: run the FastAPI surface locally.
-- `src/jobs/run_daily_stock_bars_holdings_ivv.py` and
-  `src/jobs/run_etf_maintenance_routines.py`: repository-local job entrypoints used by scheduled
-  execution.
+- `src/jobs/run_daily_stock_bars_holdings_ivv.py`: launcher for the one repository-managed
+  scheduled Job.
+- `src/jobs/run_etf_maintenance_routines.py`: manual routine runner; it is not declared as a
+  backend Job.
+- `.mainsequence/workflows/daily-stock-bars-holdings-ivv.yaml`: the backend-validated,
+  repository-managed daily schedule declaration.
+- `src/portfolios/`: reusable Python module for ETF holdings portfolios backed by interpolated
+  Alpaca bars.
 
 ## Workflow Highlights
 
 - Asset registration is strict. A symbol must exist in Alpaca, resolve to a FIGI, and not already
   exist in Main Sequence by FIGI before it is created.
-- ETF extraction is provider-owned. `etf_extraction/` expands holdings and plans category
-  membership; Alpaca code in `src/` consumes those outputs later.
+- ETF extraction is dependency-owned. The external `etfhextractor` package expands holdings and
+  plans category membership; Alpaca code in `src/` consumes those outputs through
+  `src/etf_holdings.py`.
 - Holdings categories are strict. Category sync refuses to run when extracted symbols are missing
   or ambiguous in Main Sequence.
 - Bars publishing is reusable. The `AlpacaStockBarsNode` publishes asset-indexed OHLCV tables
   keyed by `frequency_id`, `feed`, and `adjustment`.
+- Portfolio construction is reusable. `src/portfolios/` wires `ETFHoldingsSignal` from
+  `etfhextractor` into `msm_portfolios.InterpolatedPrices` sourced from Alpaca bars, then into
+  `PortfoliosDataNode`.
 - The single-asset shorthand and the generic bars runner intentionally differ in defaults. The
   shorthand uses `sip/all`; generic `bars run` defaults to `iex/raw` unless you set flags
   explicitly.
 
-## API And UI Surfaces
+## API Surface
 
 - `GET /health`: basic API health.
 - `GET /v1/discovery/config`: supported component providers plus configured ETF seed/provider
   metadata.
 - `POST /v1/assets/registration/execute`: execute multi-symbol or ETF-seed-backed asset
   registration.
-- `POST /v1/app-components/assets/register-ticker`: single-ticker registration for Command Center
-  AppComponents.
 - `POST /v1/holdings-categories/execute`: execute holdings-category sync after strict validation
   passes.
-- `POST /v1/charts/lightweight/ohlc`: async asset selector and lightweight-charts OHLC payload
-  builder.
-- `src/command_center/workspaces.py` and
-  `command_center/workspaces/alpaca_assets_registry.workspace.yaml`: Command Center workspace
-  builders/artifacts for register-by-ticker and chart widgets.
 
 ## Supported ETF Providers
 
@@ -90,14 +93,13 @@ Important boundary:
 
 ## Repository Boundaries
 
-- `src/`: Alpaca-owned registration, bar execution, CLI, jobs, and Command Center workspace
-  builders.
-- `etf_extraction/`: ETF provider extraction, ETF settings, seed expansion, and holdings-category
-  planning/sync.
+- `src/`: Alpaca-owned registration, bar execution, CLI, jobs, and reusable backend modules.
+- `src/etf_holdings.py`: local adapter over `etfhextractor` for ETF seed expansion, provider
+  defaults, and holdings-category orchestration.
+- `src/portfolios/`: ETF holdings portfolio construction using `msm_portfolios` and Alpaca bars.
 - `api/`: thin FastAPI contracts over reusable project services.
 - `docs/`: detailed workflow docs and operational notes.
-- `tests/` and `etf_extraction/tests/`: regression coverage for CLI, API, ETF extraction, and bar
-  support logic.
+- `tests/`: regression coverage for CLI, API, adapter, and bar support logic.
 
 ## Architecture (ms-markets, storage-first)
 
@@ -114,12 +116,17 @@ Full migration record: `docs/implementation_tasks/0001_ms_markets_storage_first_
 
 ## Runtime Prerequisites
 
+- Python 3.13 is required. `pyproject.toml` carries compatible lower bounds while `uv.lock` and
+  exported `requirements.txt` capture the resolved environment.
 - Live platform actions need an authenticated Main Sequence session.
 - The project market tables must be migrated/registered before live writes:
-  `mainsequence migrations upgrade --provider markets_migrations:migration head`.
+  `mainsequence migrations upgrade --provider src.migrations:migration head`.
+- Portfolio runs also require the built-in ms-markets portfolio tables and the dynamic
+  `InterpolatedPrices` table for the selected Alpaca bars table UID to be migrated/registered.
 - Alpaca credentials are resolved from environment variables first, then from Main Sequence
   secrets.
-- Browser-backed ETF extraction flows require the Playwright browser runtime.
+- Browser-backed ETF extraction flows are handled by `etfhextractor` and may require the
+  Playwright browser runtime.
 
 ## Quickstart
 
@@ -148,7 +155,9 @@ Use the pages under `docs/` for workflow depth after this summary:
 - `docs/assets/registration.md`
 - `docs/assets/holdings_categories.md`
 - `docs/data_nodes/alpaca_bars.md`
+- `docs/portfolios/etf_holdings_portfolios.md`
+- `docs/adrs/0002_etf_holdings_alpaca_portfolio_construction.md`
 - `docs/api.md`
-- `docs/command_center/app_component.md`
 - `docs/operations/jobs.md`
 - `docs/implementation_tasks/0001_ms_markets_storage_first_migration.md` (ms-markets migration record)
+- `docs/implementation_tasks/0002_alpaca_account_module.md` (account storage record)
