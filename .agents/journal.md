@@ -30,8 +30,15 @@
   output, and legacy dashboard stub. The remaining FastAPI routes now return application-owned
   response models for discovery, registration, and holdings synchronization. The reduced project
   suite passes 69 tests.
-- Pending: controlled first bars backfill; live Alpaca account registration; and an exact-image job
-  release.
+- Pending: controlled first bars backfill and live Alpaca account registration.
+- Phase 0 release: restored CLI authentication through the browser callback after the MCP
+  authorization operation was unavailable in this Codex session; integrated two remote commits
+  whose old generated-site and pre-migration contents were superseded by the reviewed tree; then
+  synchronized commit `a40ac29b93f23c49315e207c7b851dbdf0fc1dc5` and tag `v0.1.20` to `main`.
+  The backend reconciled exactly one scheduled Job for the existing IVV daily-bars launcher and
+  verified its exact Python 3.13 image at digest
+  `sha256:96033c10577e3aa521b96dad5a3f72edb410e29b30d6ed627434c9626a6b0dc4`. No Job run or additional
+  Job declaration was performed.
 
 ## 2026-05-08
 

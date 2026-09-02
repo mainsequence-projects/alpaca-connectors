@@ -25,18 +25,26 @@
   `AssetTable`, `AccountGroupTable`, and `AccountTable` foreign-key dependencies.
 - The daily job workflow under `.mainsequence/workflows/` validated against backend workflow
   contract `2.1.0` with no errors or warnings.
-- The backend CodeRepository job list was empty on 2026-09-02.
-- The backend CodeRepository image list was empty on 2026-09-02.
+- Phase 0 was synchronized to `main` as commit
+  `a40ac29b93f23c49315e207c7b851dbdf0fc1dc5` with tag `v0.1.20`.
+- The backend reconciled exactly one CodeRepository Job from the existing workflow:
+  - Job UID: `45defea5-3ffe-473b-a6b8-22da1e4acb5f`
+  - execution path: `src/jobs/run_daily_stock_bars_holdings_ivv.py`
+  - schedule: `0 0 * * *`
+  - commit: `a40ac29b93f23c49315e207c7b851dbdf0fc1dc5`
+  - image status: `ready`
+- The Job's exact Python 3.13 image is ready and verified:
+  - image UID: `cc378d66-77df-4f8e-a66e-b4b678feabe7`
+  - output digest: `sha256:96033c10577e3aa521b96dad5a3f72edb410e29b30d6ed627434c9626a6b0dc4`
+  - source archive SHA-256:
+    `feabe099703948f6cb1cbc4837b52ba5dac385c09d7f2538f5f45f82c0f551dc`
+- No additional Jobs were declared, created, or run during Phase 0.
 
 ## Pending
 
-- The validated repository workflow has not been applied because this dirty checkout was not
-  committed or pushed automatically. A CodeRepository sync is required after review.
 - The new bars tables are empty until a controlled first update/backfill is executed.
 - Live Alpaca account registration and holdings publication require explicit real-account
   authorization and were not executed as part of the schema migration.
-- The Python 3.13 private GHCR base-image manifest could not be independently inspected with local
-  Docker credentials (`unauthorized`); the first platform image build must verify the tag.
 - `etfhextractor 0.4.1` is published at commit
   `036c8ba7f625f45dcb58e909ebf4eebbedbb5b97` with tag `v0.4.1`. This checkout's lock and installed
   environment resolve that release while `pyproject.toml` retains an unpinned git source.

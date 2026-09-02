@@ -2,19 +2,10 @@
 
 ## Open
 
-### Apply And Verify The Repository-managed Daily Job
-
-- Owning skill: `.agents/skills/mainsequence/platform_operations/orchestration_and_releases/SKILL.md`
-- Scope: after reviewing and committing the migration changes, synchronize the CodeRepository so
-  `.mainsequence/workflows/daily-stock-bars-holdings-ivv.yaml` is applied.
-- Expected output: one scheduled backend Job for
-  `src/jobs/run_daily_stock_bars_holdings_ivv.py` at `0 0 * * *` with an exact Python 3.13 image.
-- Validation evidence: successful repository event, `code-repository jobs list`, one test run, and
-  successful run logs. The backend job list was empty on 2026-09-02.
-
 ### Backfill And Verify SDK 8 Alpaca Bar Storage
 
-- Owning skill: `.agents/skills/mainsequence/data_publishing/data_nodes/SKILL.md`
+- Owning skill:
+  `.agents/skills/mainsequence/data_publishing/time_index_table_updates/SKILL.md`
 - Scope: plan, then execute, the first production update of the new
   `alpaca_connectors__bars_1d_sip_all` table for a controlled registered universe.
 - Expected output: rows in the migrated table using `(time_index, asset_identifier)` grain and no
@@ -34,9 +25,22 @@
 
 ## Completed
 
+### Apply And Verify The Repository-managed Daily Job
+
+- Owning skill:
+  `.agents/skills/mainsequence/platform_operations/orchestration_and_releases/SKILL.md`
+- Output: canonical CodeRepository sync published commit
+  `a40ac29b93f23c49315e207c7b851dbdf0fc1dc5` and tag `v0.1.20`; the backend reconciled exactly one
+  scheduled Job for `src/jobs/run_daily_stock_bars_holdings_ivv.py` at `0 0 * * *`.
+- Validation evidence: backend workflow validation returned no errors or warnings; Job UID
+  `45defea5-3ffe-473b-a6b8-22da1e4acb5f` reports `image_status=ready`; exact Python 3.13 image UID
+  `cc378d66-77df-4f8e-a66e-b4b678feabe7` is verified and digest-pinned. The Job was not manually
+  run during Phase 0.
+
 ### Migrate The Project To SDK 8 And ms-markets 1
 
-- Owning skills: project builder, DataNodes, API surfaces, ms-markets bootstrap, and orchestration.
+- Owning skills: CodeRepository maintenance, MetaTable migrations, TimeIndexTable updates,
+  ms-markets bootstrap, and orchestration.
 - Output: Python 3.13; compatible dependency lower bounds; updated lock/export; output-table
   DataNode contract; FastAPI lifespan/runtime and registered-table reads; project calendar adapter;
   current CodeRepository workflow YAML; updated scaffolds and documentation.

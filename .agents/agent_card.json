@@ -1,7 +1,7 @@
 {
   "name": "Alpaca Connection Manager",
   "description": "Agent-ready project card for the Alpaca Connectors repository. This project supports the repository's strict Alpaca asset-registration workflow, holdings-category orchestration from ETF constituents, and Alpaca stock-bar planning and update workflows through the documented CLI and reusable modules.",
-  "version": "0.1.20",
+  "version": "0.1.21",
   "supportedInterfaces": [
     {
       "protocolBinding": "HTTP+JSON",

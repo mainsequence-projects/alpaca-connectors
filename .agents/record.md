@@ -26,6 +26,9 @@
 - Migration namespace: `alpaca-connectors`
 - Alembic registry table: `alpaca_connectors__alembic_version`
 - Alembic head: `0001`
+- Phase 0 release commit: `a40ac29b93f23c49315e207c7b851dbdf0fc1dc5` (`v0.1.20`)
+- Scheduled Job UID: `45defea5-3ffe-473b-a6b8-22da1e4acb5f`
+- Ready exact image UID: `cc378d66-77df-4f8e-a66e-b4b678feabe7`
 
 ## Project-owned backend tables
 
