@@ -25,6 +25,20 @@ keeps automatic redeployment disabled. A recurring schedule needs a separate dur
 schedule-to-configuration design because the current schedule declaration does not bind per-run
 arguments.
 
+## Current platform blocker
+
+Live verification on 2026-09-03 proved that JobRun creation persists the requested
+`command_args`, but the deployed runtime wrapper does not forward them to the Python script. Run
+`d060f538-d63a-4328-bce9-979643876033` recorded the exact two arguments and then invoked the
+launcher without them, causing its required-argument validation to fail. A second run with an
+explicit separator produced the same result.
+
+This conflicts with the current SDK/CLI Job argument contract. Do not weaken the launcher, move the
+configuration into an environment variable, or retire the transitional Job to hide the platform
+failure. The runtime executor must forward `JobRun.command_args` to the saved Python entrypoint;
+after that correction, repeat the live smoke test with a real enabled configuration before the
+cutover.
+
 ## API Invocation And Observation
 
 The FastAPI update action performs a read-only resolution preflight and submits the canonical Job:
