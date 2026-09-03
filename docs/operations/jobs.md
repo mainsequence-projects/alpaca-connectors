@@ -76,10 +76,10 @@ its DeploymentRun separately.
 
 ```bash
 mainsequence code-repository current --debug --json
-mainsequence code-repository jobs list --json
+mainsequence code-repository jobs list
 mainsequence code-repository jobs run <JOB_UID> -- \
   --configuration-uid <CONFIGURATION_UID>
-mainsequence code-repository jobs runs list <JOB_UID> --json
+mainsequence code-repository jobs runs list <JOB_UID>
 mainsequence code-repository jobs runs logs <JOB_RUN_UID> --max-wait-seconds 900
 mainsequence code-repository images list
 mainsequence code-repository resources list
