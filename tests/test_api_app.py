@@ -1,10 +1,22 @@
 from __future__ import annotations
 
+import re
 import unittest
+from datetime import UTC, datetime
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from api.app.main import app
-from api.app.schemas import DiscoveryConfigResponse
+from api.app.schemas import (
+    AccountResponse,
+    AssetRegistrationOperationResponse,
+    AssetRegistrationRequest,
+    BarConfigurationUpdateAcceptedResponse,
+    JobRunStatusResponse,
+    MaterializedUniverseResponse,
+    ProjectConfigurationResponse,
+)
+from etfhextractor.exceptions import WorkbookParseError
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 
@@ -34,48 +46,518 @@ class ApiAppTests(unittest.TestCase):
 
         self.assertEqual(missing_response_models, [])
 
-    def test_api_exposes_only_backend_operations(self) -> None:
+    def test_api_is_organized_by_current_capabilities(self) -> None:
         visible_paths = {
             route.path
             for route in app.routes
             if isinstance(route, APIRoute) and route.include_in_schema
         }
 
+        expected_capability_roots = {
+            "/v1/accounts",
+            "/v1/accounts/actions/capture-holdings",
+            "/v1/accounts/{account_uid}/holdings",
+            "/v1/assets",
+            "/v1/assets/registration/operations",
+            "/v1/assets/registration/operations/{operation_uid}",
+            "/v1/universe-sources",
+            "/v1/universes",
+            "/v1/market-data/datasets",
+            "/v1/market-data/bar-configurations",
+            "/v1/operations/job-runs/{job_run_uid}",
+        }
+        self.assertTrue(expected_capability_roots.issubset(visible_paths))
+        self.assertNotIn("/v1/universes/holdings/plan", visible_paths)
+        self.assertNotIn("/v1/universes/holdings/execute", visible_paths)
+
+    def test_capability_catalog_contains_domain_capabilities_without_connections(self) -> None:
+        response = self.client.get("/v1/project-state/capabilities")
+
+        self.assertEqual(response.status_code, 200)
+        capability_keys = [item["key"] for item in response.json()["capabilities"]]
         self.assertEqual(
-            visible_paths,
-            {
-                "/health",
-                "/v1/assets/registration/execute",
-                "/v1/discovery/config",
-                "/v1/holdings-categories/execute",
-            },
+            capability_keys,
+            [
+                "project_state",
+                "assets",
+                "universes",
+                "market_data",
+                "accounts",
+                "holdings",
+                "portfolios",
+                "operations",
+            ],
         )
+        self.assertNotIn("connections", capability_keys)
+
+    def test_asset_registration_operation_start_returns_pollable_status(self) -> None:
+        now = datetime.now(UTC)
+        operation = AssetRegistrationOperationResponse(
+            operation_uid="11111111-1111-4111-8111-111111111111",
+            action="plan",
+            status="queued",
+            current_step=None,
+            steps=[
+                {
+                    "key": "prepare_scope",
+                    "label": "Prepare registration scope",
+                    "status": "pending",
+                }
+            ],
+            request=AssetRegistrationRequest(symbols=["AAPL"]),
+            result=None,
+            error=None,
+            created_at=now,
+            started_at=None,
+            updated_at=now,
+            completed_at=None,
+        )
+        with (
+            patch(
+                "api.app.routers.assets.start_asset_registration_operation",
+                return_value=operation,
+            ),
+            patch("api.app.routers.assets.run_asset_registration_operation") as run_operation,
+        ):
+            response = self.client.post(
+                "/v1/assets/registration/operations",
+                json={"action": "plan", "request": {"symbols": ["AAPL"]}},
+            )
+
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(response.json()["operation_uid"], operation.operation_uid)
+        self.assertEqual(response.json()["status"], "queued")
+        self.assertEqual(response.json()["poll_after_ms"], 500)
+        run_operation.assert_called_once()
+
+    def test_asset_registration_operation_poll_is_never_cached(self) -> None:
+        now = datetime.now(UTC)
+        operation = AssetRegistrationOperationResponse(
+            operation_uid="11111111-1111-4111-8111-111111111111",
+            action="plan",
+            status="running",
+            current_step="prepare_scope",
+            steps=[
+                {
+                    "key": "prepare_scope",
+                    "label": "Prepare registration scope",
+                    "status": "running",
+                    "started_at": now,
+                }
+            ],
+            request=AssetRegistrationRequest(symbols=["AAPL"]),
+            result=None,
+            error=None,
+            created_at=now,
+            started_at=now,
+            updated_at=now,
+            completed_at=None,
+        )
+        with patch(
+            "api.app.routers.assets.get_asset_registration_operation_status",
+            return_value=operation,
+        ) as get_status:
+            response = self.client.get(
+                f"/v1/assets/registration/operations/{operation.operation_uid}"
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers["cache-control"], "no-store")
+        self.assertEqual(response.json()["current_step"], "prepare_scope")
+        get_status.assert_called_once_with(operation.operation_uid, owner_uid=None)
 
     def test_discovery_config_returns_application_contract(self) -> None:
-        mocked_response = DiscoveryConfigResponse(
+        mocked_response = ProjectConfigurationResponse(
             supported_component_providers=["ishares"],
-            etf_provider_map_normalized={"IVV": "ishares"},
-            mag_7_category_symbols=["AAPL"],
-            etfs_main_tickers=["IVV"],
+            migrated_market_data_profiles=["1d/sip/all"],
         )
-        with patch("api.app.main.get_discovery_config", return_value=mocked_response):
-            response = self.client.get("/v1/discovery/config")
+        with patch(
+            "api.app.routers.project_state.get_project_configuration",
+            return_value=mocked_response,
+        ):
+            response = self.client.get("/v1/project-state/configuration")
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), mocked_response.model_dump(mode="json"))
 
-    def test_holdings_category_execute_route_returns_400_on_blocker(self) -> None:
+    def test_bar_configuration_update_submits_job_and_returns_poll_url(self) -> None:
+        configuration_uid = "11111111-1111-4111-8111-111111111111"
+        job_run_uid = "33333333-3333-4333-8333-333333333333"
+        accepted = BarConfigurationUpdateAcceptedResponse(
+            configuration_uid=configuration_uid,
+            job_uid="22222222-2222-4222-8222-222222222222",
+            job_run_uid=job_run_uid,
+            status="PENDING",
+            status_url=f"/v1/operations/job-runs/{job_run_uid}",
+        )
+        with (
+            patch(
+                "api.app.routers.bar_configurations.submit_configuration_update",
+                return_value=accepted,
+            ) as submit,
+            patch("src.market_data.execute_market_data_update") as execute,
+        ):
+            response = self.client.post(
+                f"/v1/market-data/bar-configurations/{configuration_uid}/actions/update",
+                json={},
+            )
+
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(response.json(), accepted.model_dump(mode="json"))
+        submit.assert_called_once_with(configuration_uid)
+        execute.assert_not_called()
+
+    def test_bar_configuration_update_rejects_runtime_overrides(self) -> None:
+        response = self.client.post(
+            "/v1/market-data/bar-configurations/"
+            "11111111-1111-4111-8111-111111111111/actions/update",
+            json={"force_update": False, "dataset_uid": "not-allowed"},
+        )
+
+        self.assertEqual(response.status_code, 422)
+
+    def test_job_run_status_is_pollable_and_never_cached(self) -> None:
+        job_run_uid = "33333333-3333-4333-8333-333333333333"
+        status = JobRunStatusResponse(
+            uid=job_run_uid,
+            job_uid="22222222-2222-4222-8222-222222222222",
+            job_name="Alpaca Bars Update",
+            configuration_uid="11111111-1111-4111-8111-111111111111",
+            status="RUNNING",
+            execution_start=datetime.now(UTC),
+            execution_end=None,
+            commit_hash="abc123",
+            runtime_image_uid="44444444-4444-4444-8444-444444444444",
+            runtime_image_digest="sha256:123",
+            command_args=[
+                "--configuration-uid",
+                "11111111-1111-4111-8111-111111111111",
+            ],
+            logs_url="https://logs.example/run",
+            error=None,
+        )
         with patch(
-            "api.app.main.execute_holdings_category_sync",
+            "api.app.routers.operations.get_job_run",
+            return_value=status,
+        ) as get_status:
+            response = self.client.get(f"/v1/operations/job-runs/{job_run_uid}")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers["cache-control"], "no-store")
+        self.assertEqual(response.json(), status.model_dump(mode="json"))
+        get_status.assert_called_once_with(job_run_uid)
+
+    def test_account_registration_rejects_raw_credentials(self) -> None:
+        response = self.client.post(
+            "/v1/accounts",
+            json={
+                "environment": "paper",
+                "api_key_secret_name": "ALPACA_API_KEY",
+                "secret_key_secret_name": "ALPACA_SECRET_KEY",
+                "api_key": "raw-value-must-not-be-accepted",
+            },
+        )
+
+        self.assertEqual(response.status_code, 422)
+
+    def test_account_secret_references_expose_names_only(self) -> None:
+        visible_secrets = [
+            SimpleNamespace(name="ALPACA_PAPER_SECRET_KEY", value="private-value"),
+            SimpleNamespace(name="ALPACA_PAPER_API_KEY", value="another-private-value"),
+        ]
+        with patch(
+            "api.app.services.accounts.msc.Secret.filter",
+            return_value=visible_secrets,
+        ):
+            response = self.client.get("/v1/accounts/secret-references")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json()["items"],
+            [
+                {"name": "ALPACA_PAPER_API_KEY"},
+                {"name": "ALPACA_PAPER_SECRET_KEY"},
+            ],
+        )
+        self.assertNotIn("private-value", response.text)
+        self.assertNotIn("another-private-value", response.text)
+
+    def test_account_response_drops_internal_payload_and_fingerprint(self) -> None:
+        response = AccountResponse.model_validate(
+            {
+                "uid": "account-uid",
+                "account_uid": "account-uid",
+                "unique_identifier": "123__ALPACA_PAPER",
+                "account_name": "Paper",
+                "is_paper": True,
+                "account_is_active": True,
+                "api_key_secret_name": "ALPACA_PAPER_API_KEY",
+                "secret_key_secret_name": "ALPACA_PAPER_SECRET_KEY",
+                "api_key_fingerprint": "fingerprint",
+                "raw_account_payload": {"account_number": "123"},
+            }
+        ).model_dump(mode="json")
+
+        self.assertNotIn("raw_account_payload", response)
+        self.assertNotIn("api_key_fingerprint", response)
+
+    def test_collection_pagination_requires_aligned_offset(self) -> None:
+        response = self.client.get("/v1/assets?limit=25&offset=1")
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["detail"]["code"], "invalid_request")
+
+    def test_collection_ordering_rejects_unknown_field(self) -> None:
+        response = self.client.get("/v1/assets?ordering=not_a_field")
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["detail"]["code"], "invalid_request")
+
+    def test_openapi_never_declares_raw_alpaca_credential_fields(self) -> None:
+        schemas = self.client.get("/openapi.json").json()["components"]["schemas"]
+        property_names = {
+            property_name
+            for schema in schemas.values()
+            for property_name in schema.get("properties", {})
+        }
+
+        self.assertNotIn("api_key", property_names)
+        self.assertNotIn("secret_key", property_names)
+        self.assertNotIn("secretValues", property_names)
+        self.assertIn("api_key_secret_name", property_names)
+        self.assertIn("secret_key_secret_name", property_names)
+
+    def test_universe_source_preview_route_returns_conflict_on_blocker(self) -> None:
+        with patch(
+            "api.app.routers.universe_sources.preview_source",
             side_effect=ValueError("blocked"),
         ):
             response = self.client.post(
-                "/v1/holdings-categories/execute",
-                json={"etf_ticker": "IVV"},
+                "/v1/universe-sources/source-uid/actions/preview",
+                json={"timeout": 30},
             )
 
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(
+            response.json()["detail"],
+            {
+                "code": "action_conflict",
+                "message": "blocked",
+                "retryable": False,
+            },
+        )
+
+    def test_universe_source_preview_hides_provider_exception_details(self) -> None:
+        provider_message = "provider workbook contains private diagnostic context"
+        with patch(
+            "api.app.routers.universe_sources.preview_source",
+            side_effect=WorkbookParseError(provider_message),
+        ):
+            response = self.client.post(
+                "/v1/universe-sources/source-uid/actions/preview",
+                json={"timeout": 30},
+            )
+
+        self.assertEqual(response.status_code, 502)
+        self.assertEqual(response.json()["detail"]["code"], "provider_failure")
+        self.assertNotIn(provider_message, response.text)
+
+    def test_bulk_boolean_options_are_not_coerced_from_strings(self) -> None:
+        response = self.client.post(
+            "/v1/accounts/actions/capture-holdings",
+            json={
+                "selection": {"mode": "explicit", "uids": ["account-uid"]},
+                "options": {"register_missing_assets": "false"},
+            },
+        )
+
         self.assertEqual(response.status_code, 400)
-        self.assertEqual(response.json()["detail"], "blocked")
+        self.assertEqual(response.json()["detail"]["code"], "invalid_request")
+
+    def test_unhandled_api_errors_use_sanitized_fallback(self) -> None:
+        private_message = "provider exception containing private context"
+        safe_client = TestClient(app, raise_server_exceptions=False)
+        with patch(
+            "api.app.routers.accounts.get_account",
+            side_effect=RuntimeError(private_message),
+        ):
+            response = safe_client.get("/v1/accounts/account-uid")
+
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.json()["detail"]["code"], "dependency_unavailable")
+        self.assertNotIn(private_message, response.text)
+
+    def test_discovery_uses_installed_command_center_contract_shape(self) -> None:
+        response = self.client.get("/v1/universe-sources/discovery")
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["contract"], "command-center.resource_discovery@v1")
+        self.assertEqual(payload["resource"]["identity"], {"fields": ["uid"]})
+        self.assertIn("controls", payload["list"])
+        self.assertIn("columns", payload["list"])
+        self.assertIsInstance(payload["bulk_actions"], list)
+        self.assertEqual(
+            response.headers["cache-control"],
+            "private, max-age=0, must-revalidate",
+        )
+        self.assertIn("authorization", response.headers["vary"].lower())
+        self.assertTrue(response.headers["etag"].startswith('"'))
+
+    def test_universe_discovery_advertises_run_lifecycle_and_delete_actions(self) -> None:
+        response = self.client.get("/v1/universes/discovery")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        columns = {column["id"]: column for column in payload["list"]["columns"]}
+        self.assertIn("uid", columns)
+        self.assertEqual(columns["uid"]["header"], "UID")
+        self.assertNotIn("unique-identifier", columns)
+        self.assertIn("is-active", [column["id"] for column in payload["list"]["columns"]])
+        self.assertEqual(
+            [action["id"] for action in payload["bulk_actions"]],
+            ["run", "activate", "deactivate", "remove"],
+        )
+        delete_action = payload["bulk_actions"][-1]
+        self.assertEqual(delete_action["confirmation"]["word"], "DELETE")
+
+    def test_universe_create_stores_an_empty_configured_universe(self) -> None:
+        universe = MaterializedUniverseResponse(
+            uid="universe-dia",
+            unique_identifier="HOLDINGS__DIA",
+            display_name="Dow Jones ETF holdings",
+            description="Configured holdings universe for ETF DIA.",
+            is_active=True,
+            source_uid="source-dia",
+            asset_uids=[],
+            asset_identifiers=[],
+            asset_count=0,
+        )
+        with patch(
+            "api.app.routers.universes.create_universe",
+            return_value=universe,
+        ) as create:
+            response = self.client.post(
+                "/v1/universes",
+                json={
+                    "name": "Dow Jones ETF holdings",
+                    "symbol": "DIA",
+                    "source_url": "https://example.com/dia",
+                },
+            )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.json()["uid"], "universe-dia")
+        self.assertEqual(response.json()["source_uid"], "source-dia")
+        self.assertEqual(response.json()["asset_count"], 0)
+        create.assert_called_once()
+
+    def test_universe_run_preflights_then_synchronizes_selected_universe(self) -> None:
+        universe = MaterializedUniverseResponse(
+            uid="universe-uid",
+            unique_identifier="HOLDINGS__IVV",
+            display_name="S&P 500 holdings",
+            is_active=True,
+            source_uid="source-uid",
+            asset_uids=[],
+            asset_identifiers=[],
+            asset_count=0,
+        )
+        preview = {
+            "universe": universe.model_dump(mode="json"),
+            "plan_summary": {"constituents": 3, "registered_assets": 3},
+            "has_blockers": False,
+        }
+        result = {
+            "category_uid": "universe-uid",
+            "source_uid": "source-uid",
+            "unique_identifier": "HOLDINGS__IVV",
+            "display_name": "S&P 500 holdings",
+            "asset_uids": ["asset-aapl", "asset-msft", "asset-nvda"],
+            "asset_count": 3,
+        }
+        with (
+            patch("api.app.routers.universes.get_universe", return_value=universe),
+            patch(
+                "api.app.routers.universes.preview_universe_run",
+                return_value=preview,
+            ) as preview_run,
+            patch(
+                "api.app.routers.universes.run_universe",
+                return_value=result,
+            ) as run,
+        ):
+            response = self.client.post(
+                "/v1/universes/actions/run",
+                json={
+                    "selection": {"mode": "explicit", "uids": ["universe-uid"]},
+                    "options": {},
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["results"][0]["asset_count"], 3)
+        preview_run.assert_called_once_with("universe-uid", timeout=30.0)
+        run.assert_called_once_with("universe-uid", timeout=30.0)
+
+    def test_universe_deactivate_action_updates_selected_universe(self) -> None:
+        universe = MaterializedUniverseResponse(
+            uid="universe-uid",
+            unique_identifier="HOLDINGS__IVV",
+            display_name="S&P 500 holdings",
+            is_active=True,
+            asset_uids=["asset-uid"],
+            asset_identifiers=["AAPL"],
+            asset_count=1,
+        )
+        inactive = universe.model_copy(update={"is_active": False})
+        with (
+            patch("api.app.routers.universes.get_universe", return_value=universe),
+            patch("api.app.routers.universes.update_universe", return_value=inactive) as update,
+        ):
+            response = self.client.post(
+                "/v1/universes/actions/deactivate",
+                json={
+                    "selection": {"mode": "explicit", "uids": ["universe-uid"]},
+                    "options": {},
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.json()["results"][0]["is_active"])
+        self.assertFalse(update.call_args.args[1].is_active)
+
+    def test_every_discovery_payload_obeys_manifest_column_and_action_constraints(self) -> None:
+        paths = [
+            "/v1/assets/discovery",
+            "/v1/accounts/discovery",
+            "/v1/accounts/account-uid/holdings/discovery",
+            "/v1/universe-sources/discovery",
+            "/v1/universes/discovery",
+            "/v1/market-data/bar-configurations/discovery",
+            "/v1/market-data/datasets/discovery",
+            "/v1/market-data/datasets/dataset-uid/observations/discovery",
+        ]
+        for path in paths:
+            with self.subTest(path=path):
+                response = self.client.get(path)
+                self.assertEqual(response.status_code, 200)
+                payload = response.json()
+                controls = payload["list"]["controls"]
+                filter_keys = {item["key"] for item in controls["filters"]}
+                for item in controls["filters"]:
+                    self.assertIn(item["type"], {"text", "boolean", "select"})
+                    if item["type"] == "select":
+                        self.assertTrue(item.get("options"))
+                ordering_keys = set(controls["ordering"])
+                for column in payload["list"]["columns"]:
+                    self.assertRegex(column["id"], re.compile(r"^[a-z][a-z0-9-]*$"))
+                    self.assertEqual("value_path" in column, "data_type" in column)
+                    if "sortable_key" in column:
+                        self.assertIn(column["sortable_key"], ordering_keys)
+                    if "filter_key" in column:
+                        self.assertIn(column["filter_key"], filter_keys)
+                for action in payload["bulk_actions"]:
+                    self.assertTrue(action["endpoint"].startswith("/"))
+                    if "preflight_endpoint" in action:
+                        self.assertTrue(action["preflight_endpoint"].startswith("/"))
 
 
 if __name__ == "__main__":

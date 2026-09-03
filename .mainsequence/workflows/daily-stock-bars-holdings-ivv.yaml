@@ -4,8 +4,8 @@ resources:
 - key: daily-stock-bars-holdings-ivv
   kind: job
   spec:
-    name: Alpaca Daily Stock Bars HOLDINGS__IVV
-    description: Update daily Alpaca bars for the registered HOLDINGS__IVV asset universe.
+    name: Alpaca Stored Bar Configuration
+    description: Execute the enabled bar configuration selected by ALPACA_BARS_CONFIGURATION_UID.
     execution_path: src/jobs/run_daily_stock_bars_holdings_ivv.py
     cpu_request: '0.25'
     memory_request: '0.5'

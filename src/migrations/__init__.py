@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from msm.models import AccountGroupTable, AccountTable
+from msm.models.assets.categories import AssetCategoryTable
 from msm.models.assets.core import AssetTable
 
 from mainsequence.meta_tables.migrations import (
@@ -9,12 +10,20 @@ from mainsequence.meta_tables.migrations import (
     metadata_for_models,
 )
 from src.account.alpaca_account_details import project_account_models
-from src.markets_storage.alpaca_bars import project_storage_models
+from src.market_data import project_configuration_models, project_storage_models
+from src.operations import project_operation_models
+from src.universes.sources import project_universe_models
 
 
 def all_project_metatable_models() -> list[type]:
-    """Every project-owned MetaTable the migration provider manages (bars + account)."""
-    return [*project_storage_models(), *project_account_models()]
+    """Every project-owned MetaTable managed by this migration provider."""
+    return [
+        *project_storage_models(),
+        *project_configuration_models(),
+        *project_account_models(),
+        *project_universe_models(),
+        *project_operation_models(),
+    ]
 
 
 PROJECT_TABLE_NAMES = frozenset(model.__table__.name for model in all_project_metatable_models())
@@ -37,6 +46,7 @@ def _include_project_tables(
 METADATA = metadata_for_models(
     [
         AssetTable,
+        AssetCategoryTable,
         AccountGroupTable,
         AccountTable,
         *all_project_metatable_models(),

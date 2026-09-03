@@ -1,110 +1,105 @@
-# 0002 - Alpaca Account Storage
+# Alpaca account storage and holdings
 
-> **Status:** implementation complete; the project-owned table was migrated and finalized on
-> 2026-09-02. A live account registration was not executed because that would read a real Alpaca
-> account and write holdings.
-> **Supported runtime:** Python 3.13, `mainsequence>=8.0.7`, `ms-markets>=1.0.2`.
+> **Status:** implemented locally. Revision `0002` adds Secret-name bindings and the user-managed
+> universe-source table. Applying and verifying that revision in the platform remains an explicit
+> deployment operation.
 
 ## Purpose
 
-The `src/account/` module registers one Alpaca trading account into the generic ms-markets account
-graph and snapshots its current positions and cash as canonical account holdings.
-
-The layers are deliberately separate:
+The `src/account/` capability registers an Alpaca trading account in the generic ms-markets
+account graph. Account metadata refresh and holdings capture are separate operations.
 
 | Layer | Responsibility |
-|---|---|
-| `src/account/__init__.py` | stable account identity and API-key fingerprint helpers |
-| `src/account/alpaca_account_details.py` | project-owned Alpaca detail/current-financials MetaTable |
-| `src/account/services.py` | authenticated Alpaca reads and ms-markets writes |
-| `src/cli/account.py` | thin `alpaca-connectors account register` command |
+| --- | --- |
+| `src/account/credentials.py` | resolve named Main Sequence Secrets at the provider boundary |
+| `src/account/alpaca_account_details.py` | project-owned account detail/current-state MetaTable |
+| `src/account/services.py` | register, read, update, remove, and refresh account registrations |
+| `src/holdings/services.py` | plan, capture, list, and read immutable holdings snapshots |
+| `src/cli/account.py` and `src/cli/holdings.py` | thin CLI adapters |
 
-## Identity
+## Identity and credentials
 
-Alpaca's stable account number survives API-key rotation:
+Alpaca's account number supplies stable identity across key rotation:
 
 ```text
 <ACCOUNT_NUMBER>__ALPACA
 <ACCOUNT_NUMBER>__ALPACA_PAPER
 ```
 
-The raw secret is never stored. `api_key_fingerprint` is `sha256(api_key)[:16]` and is used only
-for non-reversible audit correlation.
+`AlpacaAccountDetails` stores `api_key_secret_name` and `secret_key_secret_name`, not the Secret
+values. Values are resolved without caching immediately before creating an Alpaca client. A
+non-reversible `sha256(api_key)[:16]` fingerprint is retained for audit correlation.
 
-## Storage model
+Paper/live is immutable because it participates in account identity. The mutable application
+fields are display name, both Secret-name bindings, and active state.
 
-The project owns one table:
+## Storage
 
-`alpaca_connectors__acct_alpaca`
-
-`AlpacaAccountDetails` is keyed one-to-one by `AccountTable.uid` and contains:
-
-- Alpaca account metadata and status flags
-- configuration fields such as PDT/DTBP checks and margin/options settings
-- the latest current financial values (cash, equity, buying power, margin, fees, and transfers)
-- snapshot time and raw account payload
-
-Current financials intentionally live on this one current-state detail row. There is no bespoke
-`AlpacaAccountBalancesStorage` time series.
-
-Point-in-time portfolio data uses the ms-markets built-ins:
+The project-owned `alpaca_connectors__acct_alpaca` table is one-to-one with `AccountTable.uid` and
+stores Alpaca metadata, configuration, and the latest account financial state. Point-in-time
+positions use canonical ms-markets primitives:
 
 - `AccountTable`
 - `AccountHoldingsSetTable`
 - `AccountHoldingsStorage`
 - `AssetTable`
 
-Each position becomes a holding keyed by its registered asset unique identifier. Quantity is a
-positive magnitude and `direction` carries long/short sign. Provider-specific economics are kept
-in `extra_details`. Cash is represented as a holding in the registered cash asset.
+Snapshots are immutable. Removing the application registration deletes only the project detail
+row, deactivates the generic Account, and retains historical holdings.
 
-## Migration ownership
+## Migration
 
-`AlpacaAccountDetails` belongs to `src.migrations:migration`; core account and holdings tables
-remain owned by the ms-markets provider.
-
-The project migration metadata includes `AccountGroupTable` and `AccountTable` only to resolve the
-foreign-key graph. The include hook prevents this provider from emitting DDL or catalog
-registrations for those core models.
-
-Backend evidence after `mainsequence migrations upgrade --provider src.migrations:migration
-head`:
-
-- project table finalized active
-- physical table exists
-- Alembic revision `0001 (head)`
-- runtime attachment expanded and resolved `AccountGroupTable -> AccountTable ->
-  AlpacaAccountDetails`
-
-## Execution contract
+`src.migrations:migration` owns `AlpacaAccountDetails` and `UniverseSourceTable`. Apply revision
+`0002` with:
 
 ```bash
-alpaca-connectors account register --paper --plan-only
-alpaca-connectors account register --paper
+mainsequence migrations upgrade --provider src.migrations:migration head
 ```
 
-The account entrypoint attaches `account_runtime_models()` first. Live execution then:
+Runtime attachment consumes the migrated tables and does not create them.
 
-1. loads the Alpaca account, configuration, and positions;
-2. upserts the ms-markets `Account`;
-3. upserts the project detail/current-financials row;
-4. creates or reuses the `AccountHoldingsSet`; and
-5. publishes positions and cash to `AccountHoldingsStorage`.
+## Account operations
 
-Held equities must resolve strictly to registered ms-markets assets. The default flow can register
-missing equities through the connector's existing strict Alpaca plus OpenFIGI path; callers can
-disable that behavior.
+Plan and register using Secret names:
 
-## Remaining live verification
+```bash
+alpaca-connectors account register \
+  --api-key-secret-name ALPACA_PAPER_API_KEY \
+  --secret-key-secret-name ALPACA_PAPER_SECRET_KEY \
+  --paper \
+  --plan-only
 
-A safe production verification requires explicit Alpaca account authorization and should confirm:
+alpaca-connectors account register \
+  --api-key-secret-name ALPACA_PAPER_API_KEY \
+  --secret-key-secret-name ALPACA_PAPER_SECRET_KEY \
+  --paper
+```
 
-- expected account identity and paper/live environment
-- no raw API key or secret in stored payloads/logs
-- one active detail row for the account
-- one holdings set for the requested snapshot time
-- equity and cash holdings use registered asset unique identifiers
-- rerunning the same snapshot is idempotent
+Read and maintain registrations:
 
-This remaining check is data execution, not schema migration; the backend schema migration itself
-is complete.
+```bash
+alpaca-connectors account list
+alpaca-connectors account get <account-uid>
+alpaca-connectors account update <account-uid> --account-name "Paper account"
+alpaca-connectors account refresh <account-uid>
+alpaca-connectors account remove <account-uid>
+alpaca-connectors account remove <account-uid> --execute
+```
+
+## Holdings operations
+
+```bash
+alpaca-connectors holdings capture --account-uid <account-uid>
+alpaca-connectors holdings capture --account-uid <account-uid> --execute
+alpaca-connectors holdings list --account-uid <account-uid>
+```
+
+Held equities resolve strictly to registered ms-markets Assets. Execution may register missing
+FIGI-backed equities through the existing strict Alpaca/OpenFIGI path; unsupported asset classes
+and unresolved symbols are reported. Cash is emitted only when the canonical cash Asset exists.
+
+## Live verification still required
+
+A controlled paper-account run must verify account/detail identity, absence of credential values in
+stored and returned data, one canonical holdings set, expected equity/cash rows, and an idempotent
+rerun. This is execution evidence, separate from local implementation and schema review.

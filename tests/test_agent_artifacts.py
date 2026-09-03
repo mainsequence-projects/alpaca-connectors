@@ -33,7 +33,8 @@ class AgentArtifactsTests(unittest.TestCase):
         card = json.loads(AGENT_CARD_PATH.read_text(encoding="utf-8"))
         pyproject = tomllib.loads(PYPROJECT_PATH.read_text(encoding="utf-8"))
 
-        self.assertEqual(card["name"], "Alpaca Connection Manager")
+        self.assertEqual(card["name"], "Alpaca Connectors")
+        self.assertNotIn("Connection", card["name"])
         self.assertEqual(card["version"], pyproject["project"]["version"])
 
     def test_agent_card_skills_match_custom_skill_files(self) -> None:

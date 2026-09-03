@@ -8,7 +8,7 @@ from src.assets import (
     register_alpaca_us_equity_assets,
     resolve_alpaca_us_equity_registration_plan,
 )
-from src.etf_holdings import (
+from src.universes import (
     SUPPORTED_COMPONENT_PROVIDERS,
     EtfExpansionRequest,
     expand_etf_seed_symbols,
@@ -157,7 +157,9 @@ def run_register_command(args: argparse.Namespace) -> int:
                 "existing_assets": results["existing_assets"],
                 "created_assets": results["created_assets"],
                 "unresolved_symbols": results["unresolved_symbols"],
-                "not_registered_missing_figi_symbols": results["not_registered_missing_figi_symbols"],
+                "not_registered_missing_figi_symbols": results[
+                    "not_registered_missing_figi_symbols"
+                ],
                 "not_registered_missing_alpaca_symbols": results[
                     "not_registered_missing_alpaca_symbols"
                 ],

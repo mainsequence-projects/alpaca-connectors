@@ -25,9 +25,11 @@ The local agent-ready surface is intentionally limited to workflows already impl
 repository:
 
 - strict Alpaca asset registration
-- ETF holdings-category planning and sync
-- Alpaca stock-bar planning and update workflows
-- the existing thin FastAPI support surface
+- durable universe-source CRUD plus holdings-backed universe preview and sync
+- Secret-name-based account registration and immutable holdings capture
+- durable Alpaca bar-configuration CRUD, three-source resolution, execution, and read-only price
+  queries
+- the thin FastAPI resources matching those services
 
 The project does not claim unsupported local agent actions such as:
 

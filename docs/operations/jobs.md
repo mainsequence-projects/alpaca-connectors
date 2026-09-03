@@ -1,81 +1,76 @@
-# Jobs And Scheduling
+# Jobs And Deployment
 
-## Repository-managed schedule
+## Alpaca Bars Update Job
 
-The recurring daily bar job is declared in:
+The canonical market-data Job is declared by:
 
-- `.mainsequence/workflows/daily-stock-bars-holdings-ivv.yaml`
-- `src/jobs/run_daily_stock_bars_holdings_ivv.py`
+- `src/jobs/run_alpaca_bars_update.py`;
+- `.mainsequence/workflows/alpaca-bars-update.yaml`.
 
-The workflow uses the current CodeRepository workflow contract (`api_version: 2.1.0`) and runs at
-midnight UTC with `cpu_request: "0.25"`, `memory_request: "0.5"`, and `spot: false`.
-
-The workflow was validated against the backend branch contract during the SDK 8 migration. The
-backend applies repository-managed workflows only after the reviewed file is committed and pushed
-through the normal CodeRepository sync. Git success is not deployment success; verify the resulting
-job and repository event separately.
+The Job is named `Alpaca Bars Update`. It is generic and on-demand: each invocation supplies only
+the public UID of an enabled stored bars configuration.
 
 ```bash
-mainsequence code-repository sync -m "Migrate Alpaca connector to SDK 8"
-mainsequence code-repository jobs list --path .
+mainsequence code-repository jobs run <JOB_UID> -- \
+  --configuration-uid <CONFIGURATION_UID>
 ```
 
-Do not restore `scheduled_jobs.yaml` or `schedule_batch_jobs`; both are removed compatibility
-surfaces in the current SDK.
+The launcher resolves the stored configuration at run time and always executes the update. It does
+not accept a dataset UID, account override, asset-source override, bar-profile override, Secret
+name, credential value, hash namespace, or `force_update` option. Main Sequence records the two
+command arguments on the resulting JobRun.
 
-## Job behavior
+The workflow uses backend API `2.2.0`, has no schedule or configuration environment variable, and
+keeps automatic redeployment disabled. A recurring schedule needs a separate durable
+schedule-to-configuration design because the current schedule declaration does not bind per-run
+arguments.
 
-The daily launcher updates bars for:
+## API Invocation And Observation
 
-- category `HOLDINGS__IVV`
-- cadence `1d`
-- feed `sip`
-- adjustment `all`
+The FastAPI update action performs a read-only resolution preflight and submits the canonical Job:
 
-`HOLDINGS__IVV` must already exist as an ms-markets `AssetCategory`. The launcher consumes the
-category; it does not create or refresh it.
-
-The repository also contains `src/jobs/run_etf_maintenance_routines.py`, driven by
-`data/etf_maintenance_routines.yaml`, for ordered manual ETF maintenance workflows. It is not
-declared as a backend Job.
-
-Preview those operations before executing them:
-
-```bash
-.venv/bin/python src/jobs/run_etf_maintenance_routines.py --dry-run
-.venv/bin/python src/jobs/run_etf_maintenance_routines.py
+```text
+POST /v1/market-data/bar-configurations/{configuration_uid}/actions/update
+GET  /v1/operations/job-runs/{job_run_uid}
 ```
 
-## Backend prerequisites
+The POST returns `202 Accepted`; it does not perform Alpaca or MetaTable writes in the HTTP process.
+The GET returns normalized JobRun state, timestamps, frozen commit and image identity, command
+arguments, and the platform application-log URL. Poll responses use `Cache-Control: no-store`, and
+provider exception details are not exposed.
 
-Before any live job writes bars or categories:
+## Transitional Scheduled Job
 
-1. Refresh the CodeRepository token and confirm the checkout mapping.
-2. Verify the project-owned migration is at Alembic head.
-3. Ensure the exact execution image contains Python 3.13, `mainsequence>=8.0.7`, and
-   `ms-markets>=1.0.2` as resolved by `uv.lock`/`requirements.txt`.
-4. Ensure the Main Sequence `ALPACA_API_KEY` secret is available to the job.
+The previous scheduled declaration and environment-variable launcher remain in the checkout until
+the generic Job has a ready image and one successful live update:
+
+- `src/jobs/run_daily_stock_bars_holdings_ivv.py`;
+- `.mainsequence/workflows/daily-stock-bars-holdings-ivv.yaml`.
+
+After that proof, explicitly disable and delete the old remote Job, then remove those two local
+files. Deleting the workflow file alone does not delete the platform Job. Do not treat both Jobs as
+active production paths.
+
+## FastAPI Release
+
+`.mainsequence/workflows/alpaca-connectors-api.yaml` declares the registered FastAPI resource with
+automatic deployment, revision retention, and the platform-provided static-site origin policy.
+A valid workflow or successful Git push is not proof of deployment; verify the ResourceRelease and
+its DeploymentRun separately.
+
+## Operational Checks
 
 ```bash
-mainsequence code-repository refresh-token --path .
 mainsequence code-repository current --debug --json
-mainsequence migrations current --provider src.migrations:migration
-mainsequence code-repository images list --path .
-```
-
-The launchers attach the already-migrated markets runtime with
-`src.runtime.start_markets_engine()`; runtime startup never creates or repairs schema.
-
-## Operational verification
-
-After the workflow has been committed and processed:
-
-```bash
-mainsequence code-repository jobs list --path .
-mainsequence code-repository jobs run <JOB_UID>
-mainsequence code-repository jobs runs list <JOB_UID>
+mainsequence code-repository jobs list --json
+mainsequence code-repository jobs run <JOB_UID> -- \
+  --configuration-uid <CONFIGURATION_UID>
+mainsequence code-repository jobs runs list <JOB_UID> --json
 mainsequence code-repository jobs runs logs <JOB_RUN_UID> --max-wait-seconds 900
+mainsequence code-repository images list
+mainsequence code-repository resources list
 ```
 
-At migration time the backend job list was empty, so the repository workflow is the authoritative
-declaration but still requires the normal commit/sync event before a scheduled Job exists.
+Success requires a terminal successful JobRun, clean logs, and current output-table progress or
+newly persisted rows. A queued run alone is not proof. Runtime attachment only binds already
+migrated MetaTables; it never creates schema.

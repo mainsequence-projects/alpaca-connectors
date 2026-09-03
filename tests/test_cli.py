@@ -6,334 +6,200 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from src.cli.main import main
+from src.cli.main import build_parser, main
 
 
 class CliTests(unittest.TestCase):
-    def test_asset_register_dry_run(self) -> None:
-        plan = SimpleNamespace(
-            summary=lambda: {"requested_symbols": ["AAPL", "MSFT"]},
+    def test_account_help_accepts_only_secret_names(self) -> None:
+        parser = build_parser()
+        account_parser = next(
+            action.choices["account"]
+            for action in parser._actions
+            if hasattr(action, "choices") and action.choices and "account" in action.choices
+        )
+        register_parser = next(
+            action.choices["register"]
+            for action in account_parser._actions
+            if hasattr(action, "choices") and action.choices and "register" in action.choices
+        )
+        options = {
+            option for action in register_parser._actions for option in action.option_strings
+        }
+        self.assertIn("--api-key-secret-name", options)
+        self.assertIn("--secret-key-secret-name", options)
+        self.assertNotIn("--api-key", options)
+        self.assertNotIn("--secret-key", options)
+
+    def test_account_register_passes_secret_names_to_shared_service(self) -> None:
+        result = SimpleNamespace(
+            account_uid="account-uid",
+            account_unique_identifier="A__ALPACA_PAPER",
+            is_paper=True,
+            detail_table="AlpacaAccountDetails",
+            holdings_rows=0,
             unresolved_symbols=[],
-            warnings_by_symbol={},
-        )
-        resolution = SimpleNamespace(summary=lambda: {"existing_assets": ["AAPL"]})
-        stdout = io.StringIO()
-
-        with (
-            patch("src.cli.asset.build_alpaca_us_equity_registration_plan", return_value=plan) as build_plan,
-            patch("src.cli.asset.resolve_alpaca_us_equity_registration_plan", return_value=resolution) as resolve_plan,
-            patch("src.runtime.start_markets_engine"),
-            contextlib.redirect_stdout(stdout),
-        ):
-            exit_code = main(["asset", "register", "--symbols", "aapl, msft"])
-
-        self.assertEqual(exit_code, 0)
-        build_plan.assert_called_once_with(
-            symbols=["AAPL", "MSFT"],
-            include_non_tradable=False,
-            timeout=30.0,
-        )
-        resolve_plan.assert_called_once_with(plan, timeout=30.0)
-        output = stdout.getvalue()
-        self.assertIn("Planned Alpaca US equity registration", output)
-        self.assertIn("Dry run only. Pass --execute to register the missing assets.", output)
-
-    def test_asset_register_seed_tickers_expands_before_alpaca_plan(self) -> None:
-        plan = SimpleNamespace(
-            summary=lambda: {"requested_symbols": ["AAPL", "IVV", "MSFT"]},
-            unresolved_symbols=[],
-            warnings_by_symbol={},
-        )
-        resolution = SimpleNamespace(summary=lambda: {"existing_assets": ["AAPL"]})
-        expansion_result = SimpleNamespace(
-            component_provider="ishares",
-            symbols_for_registration=["AAPL", "IVV", "MSFT"],
-            universe=SimpleNamespace(
-                seed_symbols=["IVV"],
-                expanded_symbols=["AAPL", "IVV", "MSFT"],
-                component_symbols_by_seed={"IVV": ["AAPL", "MSFT"]},
-                unsupported_seed_symbols=[],
-            ),
+            skipped_non_equity_symbols=[],
         )
         stdout = io.StringIO()
-
         with (
-            patch("src.cli.asset.expand_etf_seed_symbols", return_value=expansion_result)
-            as expand_seeds,
-            patch("src.cli.asset.build_alpaca_us_equity_registration_plan", return_value=plan)
-            as build_plan,
-            patch(
-                "src.cli.asset.resolve_alpaca_us_equity_registration_plan",
-                return_value=resolution,
-            ),
-            patch("src.runtime.start_markets_engine"),
+            patch("src.account.services.register_alpaca_account", return_value=result) as register,
             contextlib.redirect_stdout(stdout),
         ):
             exit_code = main(
                 [
-                    "asset",
+                    "account",
                     "register",
-                    "--seed-tickers",
-                    "ivv",
-                    "--component-provider",
-                    "ishares",
+                    "--api-key-secret-name",
+                    "ALPACA_PAPER_API_KEY",
+                    "--secret-key-secret-name",
+                    "ALPACA_PAPER_SECRET_KEY",
                 ]
             )
-
         self.assertEqual(exit_code, 0)
-        self.assertEqual(expand_seeds.call_args.args[0].seed_tickers, ["IVV"])
-        self.assertEqual(expand_seeds.call_args.args[0].component_provider, "ishares")
-        build_plan.assert_called_once_with(
-            symbols=["AAPL", "IVV", "MSFT"],
-            include_non_tradable=False,
-            timeout=30.0,
+        register.assert_called_once_with(
+            api_key_secret_name="ALPACA_PAPER_API_KEY",
+            secret_key_secret_name="ALPACA_PAPER_SECRET_KEY",
+            paper=True,
+            account_name=None,
+            capture_initial_holdings=False,
+            register_missing_assets=True,
         )
-        self.assertIn('"component_provider": "ishares"', stdout.getvalue())
 
-    def test_holdings_category_create_dry_run(self) -> None:
-        plan = SimpleNamespace(
-            summary=lambda: {"etf_ticker": "IVV"},
-            missing_registered_symbols=[],
-            ambiguous_registered_symbols=[],
-        )
+    def test_universe_sync_uses_source_uid_not_ticker_provider_pair(self) -> None:
+        plan = SimpleNamespace(summary=lambda: {"etf_ticker": "IVV"}, has_blockers=lambda: False)
         stdout = io.StringIO()
-
         with (
-            patch("src.cli.holdings_category.build_holdings_asset_category_plan", return_value=plan) as build_plan,
-            patch("src.runtime.start_markets_engine"),
+            patch("src.universes.preview_universe_source", return_value=plan) as preview,
             contextlib.redirect_stdout(stdout),
         ):
-            exit_code = main(["holdings-category", "create", "--etf-ticker", "IVV"])
-
+            exit_code = main(["universe", "sync", "--source-uid", "source-uid"])
         self.assertEqual(exit_code, 0)
-        build_plan.assert_called_once_with(
-            etf_ticker="IVV",
-            component_provider=None,
-            include_non_tradable=False,
-            timeout=30.0,
+        preview.assert_called_once_with("source-uid", timeout=30.0)
+        self.assertIn("Dry run only", stdout.getvalue())
+
+    def test_universe_source_create_calls_shared_crud(self) -> None:
+        source = SimpleNamespace(
+            model_dump=lambda mode=None: {
+                "uid": "source-uid",
+                "name": "S&P 500",
+                "symbol": "IVV",
+                "source_url": "https://example.com/ivv",
+                "enabled": True,
+            }
         )
-        output = stdout.getvalue()
-        self.assertIn("Planned holdings AssetCategory sync", output)
-        self.assertIn("Dry run only. Pass --execute to create or refresh the category.", output)
-
-    def test_holdings_category_create_reports_ambiguous_symbols(self) -> None:
-        plan = SimpleNamespace(
-            summary=lambda: {"etf_ticker": "IVV"},
-            etf_ticker="IVV",
-            missing_registered_symbols=[],
-            ambiguous_registered_symbols=["FWONK"],
-            existing_asset_uids_by_symbol={"AAPL": "asset-uid-101"},
-            component_symbols=["AAPL"],
-            has_blockers=lambda: False,
-        )
-
-        sync_result = SimpleNamespace(
-            unique_identifier="HOLDINGS__IVV",
-            display_name="HOLDINGS__IVV",
-            asset_uids=["asset-uid-101"],
-        )
-        stdout = io.StringIO()
-
-        with (
-            patch("src.cli.holdings_category.build_holdings_asset_category_plan", return_value=plan),
-            patch("src.cli.holdings_category.sync_holdings_asset_category", return_value=sync_result)
-            as sync_category,
-            patch("src.runtime.start_markets_engine"),
-            contextlib.redirect_stdout(stdout),
-        ):
-            exit_code = main(["holdings-category", "create", "--execute", "--etf-ticker", "IVV"])
-
+        with patch("src.universes.create_universe_source", return_value=source) as create:
+            exit_code = main(
+                [
+                    "universe-source",
+                    "create",
+                    "--name",
+                    "S&P 500",
+                    "--symbol",
+                    "ivv",
+                    "--url",
+                    "https://example.com/ivv",
+                ]
+            )
         self.assertEqual(exit_code, 0)
-        sync_category.assert_called_once_with(
-            etf_ticker="IVV",
-            asset_uids=["asset-uid-101"],
+        create.assert_called_once_with(
+            name="S&P 500",
+            symbol="ivv",
+            source_url="https://example.com/ivv",
+            enabled=True,
         )
-        output = stdout.getvalue()
-        self.assertIn("These extracted component symbols resolved ambiguously in MainSequence:", output)
 
-    def test_bars_run_plan_only(self) -> None:
-        node = SimpleNamespace(
-            frequency_id="1d",
-            feed="iex",
-            adjustment="raw",
-            hash_namespace=None,
-            update_hash="update",
-            get_table_metadata=lambda: SimpleNamespace(identifier="alpaca_stock_bars_1d_iex_raw"),
-        )
+    def test_materialized_universe_delete_is_a_dry_run_by_default(self) -> None:
+        universe = {"uid": "universe-uid", "asset_count": 12}
         stdout = io.StringIO()
-
         with (
             patch(
-                "src.cli.bars.build_stock_bars_node",
-                return_value=(node, {"asset_count": 1, "requested_tickers": ["NVDA"]}),
-            ) as build_node,
-            contextlib.redirect_stdout(stdout),
-        ):
-            exit_code = main(["bars", "run", "--tickers", "NVDA", "--plan-only"])
-
-        self.assertEqual(exit_code, 0)
-        build_node.assert_called_once_with(
-            asset_category_unique_identifier=None,
-            tickers=["NVDA"],
-            frequency_id="1d",
-            feed="iex",
-            adjustment="raw",
-            hash_namespace=None,
-        )
-        output = stdout.getvalue()
-        self.assertIn("Planned Alpaca stock bars run", output)
-        self.assertIn("Plan only. Re-run without --plan-only to execute node.run().", output)
-
-    def test_asset_ticker_update_prices_daily_plan_only(self) -> None:
-        node = SimpleNamespace(
-            frequency_id="1d",
-            feed="sip",
-            adjustment="all",
-            hash_namespace=None,
-            update_hash="update",
-            get_table_metadata=lambda: SimpleNamespace(identifier="alpaca_stock_bars_1d_sip_all"),
-        )
-        stdout = io.StringIO()
-
-        with (
-            patch(
-                "src.cli.bars.build_stock_bars_node",
-                return_value=(
-                    node,
-                    {
-                        "asset_count": 1,
-                        "requested_tickers": ["IVV"],
-                        "table_identifier": "alpaca_stock_bars_1d_sip_all",
-                    },
-                ),
-            ) as build_node,
-            contextlib.redirect_stdout(stdout),
-        ):
-            exit_code = main(["asset", "IVV", "update_prices", "daily", "--plan-only"])
-        self.assertEqual(exit_code, 0)
-        build_node.assert_called_once_with(
-            asset_category_unique_identifier=None,
-            tickers=["IVV"],
-            frequency_id="1d",
-            feed="sip",
-            adjustment="all",
-            hash_namespace=None,
-        )
-        output = stdout.getvalue()
-        self.assertIn('"table_identifier": "alpaca_stock_bars_1d_sip_all"', output)
-        self.assertIn("Planned Alpaca stock bars run", output)
-        self.assertIn('"requested_period": "daily"', output)
-        self.assertIn("Plan only. Re-run without --plan-only to execute node.run().", output)
-
-    def test_bars_run_plan_only_shares_identifier_with_asset_scope(self) -> None:
-        node = SimpleNamespace(
-            frequency_id="1d",
-            feed="sip",
-            adjustment="all",
-            hash_namespace=None,
-            update_hash="update",
-            get_table_metadata=lambda: SimpleNamespace(
-                identifier="alpaca_stock_bars_1d_sip_all"
+                "src.universes.get_materialized_universe",
+                return_value=universe,
             ),
-        )
-        stdout = io.StringIO()
-
-        with (
-            patch(
-                "src.cli.bars.build_stock_bars_node",
-                return_value=(
-                    node,
-                    {
-                        "asset_count": 1,
-                        "requested_tickers": ["NVDA"],
-                        "table_identifier": "alpaca_stock_bars_1d_sip_all",
-                    },
-                ),
-            ) as build_node,
+            patch("src.universes.delete_materialized_universe") as delete,
             contextlib.redirect_stdout(stdout),
         ):
-            exit_code = main([
-                "bars",
-                "run",
-                "--tickers",
-                "NVDA",
-                "--frequency-id",
-                "1d",
-                "--feed",
-                "sip",
-                "--adjustment",
-                "all",
-                "--plan-only",
-            ])
-
+            exit_code = main(["universe", "delete", "universe-uid"])
         self.assertEqual(exit_code, 0)
-        build_node.assert_called_once_with(
-            asset_category_unique_identifier=None,
-            tickers=["NVDA"],
-            frequency_id="1d",
-            feed="sip",
-            adjustment="all",
+        delete.assert_not_called()
+        self.assertIn('"asset_count": 12', stdout.getvalue())
+
+    def test_market_data_update_requires_only_stored_configuration_uid(self) -> None:
+        node = SimpleNamespace()
+        summary = {"dataset": {"uid": "dataset-uid"}, "account_uid": "account-uid"}
+        with patch(
+            "src.market_data.build_market_data_update",
+            return_value=(node, summary),
+        ) as build:
+            exit_code = main(
+                [
+                    "market-data",
+                    "update",
+                    "--configuration-uid",
+                    "configuration-uid",
+                ]
+            )
+        self.assertEqual(exit_code, 0)
+        build.assert_called_once_with(
+            configuration_uid="configuration-uid",
             hash_namespace=None,
         )
-        output = stdout.getvalue()
-        self.assertIn("Planned Alpaca stock bars run", output)
-        self.assertIn('"table_identifier": "alpaca_stock_bars_1d_sip_all"', output)
-        self.assertIn("Plan only. Re-run without --plan-only to execute node.run().", output)
 
-    def test_bars_category_run_plan_only_uses_shared_identifier(self) -> None:
-        node = SimpleNamespace(
+    def test_bar_configuration_create_calls_shared_crud(self) -> None:
+        row = SimpleNamespace(
+            model_dump=lambda mode=None: {"uid": "configuration-uid", "asset_source": "assets"}
+        )
+        with patch("src.market_data.create_bar_configuration", return_value=row) as create:
+            exit_code = main(
+                [
+                    "market-data",
+                    "bar-configuration",
+                    "create",
+                    "--name",
+                    "Daily holdings",
+                    "--account-uid",
+                    "account-uid",
+                    "--asset-source",
+                    "assets",
+                    "--asset-uids",
+                    "asset-1,asset-2",
+                    "--frequency",
+                    "1d",
+                    "--feed",
+                    "sip",
+                    "--adjustment",
+                    "all",
+                ]
+            )
+        self.assertEqual(exit_code, 0)
+        create.assert_called_once_with(
+            name="Daily holdings",
+            description=None,
+            account_uid="account-uid",
+            asset_source="assets",
+            asset_uids=["asset-1", "asset-2"],
+            universe_uid=None,
             frequency_id="1d",
             feed="sip",
             adjustment="all",
-            hash_namespace=None,
-            update_hash="update",
-            get_table_metadata=lambda: SimpleNamespace(
-                identifier="alpaca_stock_bars_1d_sip_all"
+            enabled=True,
+        )
+
+    def test_unexpected_provider_error_is_sanitized(self) -> None:
+        stderr = io.StringIO()
+        sensitive = "raw-secret-value"
+        with (
+            patch(
+                "src.universes.preview_universe_source",
+                side_effect=RuntimeError(f"upstream headers contained {sensitive}"),
             ),
-        )
-        stdout = io.StringIO()
-
-        with (
-            patch(
-                "src.cli.bars.build_stock_bars_node",
-                return_value=(
-                    node,
-                    {
-                        "asset_count": 1,
-                        "requested_tickers": ["NVDA"],
-                        "table_identifier": "alpaca_stock_bars_1d_sip_all",
-                    },
-                ),
-            ) as build_node,
-            contextlib.redirect_stdout(stdout),
+            contextlib.redirect_stderr(stderr),
         ):
-            exit_code = main([
-                "bars",
-                "run",
-                "--asset-category-unique-identifier",
-                "HOLDINGS__IVV",
-                "--frequency-id",
-                "1d",
-                "--feed",
-                "sip",
-                "--adjustment",
-                "all",
-                "--plan-only",
-            ])
+            exit_code = main(["universe-source", "preview", "source-uid"])
 
-        self.assertEqual(exit_code, 0)
-        build_node.assert_called_once_with(
-            asset_category_unique_identifier="HOLDINGS__IVV",
-            tickers=None,
-            frequency_id="1d",
-            feed="sip",
-            adjustment="all",
-            hash_namespace=None,
-        )
-        output = stdout.getvalue()
-        self.assertIn("Planned Alpaca stock bars run", output)
-        self.assertIn('"table_identifier": "alpaca_stock_bars_1d_sip_all"', output)
-        self.assertIn("Plan only. Re-run without --plan-only to execute node.run().", output)
+        self.assertEqual(exit_code, 2)
+        self.assertNotIn(sensitive, stderr.getvalue())
+        self.assertIn("dependency_unavailable", stderr.getvalue())
 
 
 if __name__ == "__main__":

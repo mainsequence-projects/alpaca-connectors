@@ -2,61 +2,66 @@
 
 ## Verified
 
-- Repository checkout:
-  `/Users/jose/mainsequence-dev/main-sequence-workbench/projects/alpacaconnectors-945bfddd-5f1f-4541-a87a-faea3af6271f`.
-- CodeRepository UID: `c4980dd0-db33-420c-9a3f-050815a03512`.
-- Active branch: `main`; CodeRepositoryBranch UID:
-  `945bfddd-5f1f-4541-a87a-faea3af6271f`.
-- `mainsequence code-repository current --debug` resolves the checkout and reports matching
-  local/latest SDK requirement `8.0.7`.
-- Runtime interpreter: Python `3.13.11`.
-- Installed migrations/runtime packages: `mainsequence 8.0.7`, `ms-markets 1.0.2`.
-- `pyproject.toml` uses compatible lower bounds; it does not exactly pin either package.
-- `uv.lock` and exported `requirements.txt` are synchronized.
-- `AGENTS.md` was refreshed successfully from the installed SDK 8 scaffold.
-- The packaged ms-markets skill bundle was refreshed to `1.0.2`.
-- Alembic provider `src.migrations:migration` is at revision `0001 (head)`.
-- The project Alembic registry and all three provider tables finalized active with zero reserved or
-  failed resources:
+- The repository resolves to CodeRepository `c4980dd0-db33-420c-9a3f-050815a03512`, branch
+  `main`, CodeRepositoryBranch `945bfddd-5f1f-4541-a87a-faea3af6271f`.
+- Runtime versions are Python 3.13.11, Main Sequence SDK 8.0.7, and ms-markets 1.0.2.
+- `pyproject.toml` uses compatible lower bounds and does not exactly pin Main Sequence packages
+  or the `etfhextractor` Git dependency.
+- The project capability boundaries are Project State, Assets, Universes, Market Data, Accounts,
+  Holdings, Portfolios, and Operations.
+- Reusable application behavior lives under `src/`; the installed CLI and thin FastAPI routers
+  call those services.
+- Raw Alpaca key values are absent from CLI flags and API request/response schemas. Account
+  registration stores only Main Sequence Secret names plus a non-reversible key fingerprint.
+- Account metadata refresh and canonical ms-markets holdings capture are independent operations.
+- Historical prices are published by an ms-markets `AssetIndexedDataNode`. Update output is derived
+  from the stored frequency/feed/adjustment profile; MetaTable UIDs remain read-only query
+  identifiers, and credentials come from the configuration's registered account.
+- Alpaca bar configurations are durable MetaTable rows with UUID identity and one of three asset
+  sources: explicit Assets, an active materialized universe, or the configured account's newest
+  persisted non-cash holdings snapshot in the inclusive trailing 30-day window.
+- Universe targets are rows in `UniverseSourceTable`. Runtime extraction and synchronization do
+  not read a Python ticker list or ticker/provider map.
+- The optional IVV bootstrap record is package data reconciled only by the explicit, idempotent
+  `universe-source seed-defaults` command and uses the official US iShares product page.
+- FastAPI exposes resource collections, discovery contracts, CRUD/actions, stable errors,
+  caller-sensitive discovery cache headers, and the current static-site CORS policy.
+- The discovery, collection, bulk-preflight, and bulk-execution payloads validated against the
+  pinned Command Center 0.1.18 manifest schemas, including rejection of its invalid fixtures.
+- The API 2.1.0 workflow declaration validated with no backend errors or warnings. Its explicit
+  automatic-redeployment policy is enabled with a null tag regex, admitting every otherwise-valid
+  synchronized commit.
+- Backend migration revision `0004 (head)` is applied. Finalization reports all project
+  MetaTables active, zero reserved, and zero failed:
   - `alpaca_connectors__bars_1d_sip_all`
   - `alpaca_connectors__bars_1d_iex_raw`
+  - `alpaca_connectors__bars_configuration`
+  - `alpaca_connectors__bars_configuration_asset`
   - `alpaca_connectors__acct_alpaca`
-- `msm.start_engine(...)` successfully resolved and attached all three project models plus
-  `AssetTable`, `AccountGroupTable`, and `AccountTable` foreign-key dependencies.
-- The daily job workflow under `.mainsequence/workflows/` validated against backend workflow
-  contract `2.1.0` with no errors or warnings.
-- Phase 0 was synchronized to `main` as commit
-  `a40ac29b93f23c49315e207c7b851dbdf0fc1dc5` with tag `v0.1.20`.
-- The backend reconciled exactly one CodeRepository Job from the existing workflow:
-  - Job UID: `45defea5-3ffe-473b-a6b8-22da1e4acb5f`
-  - execution path: `src/jobs/run_daily_stock_bars_holdings_ivv.py`
-  - schedule: `0 0 * * *`
-  - commit: `a40ac29b93f23c49315e207c7b851dbdf0fc1dc5`
-  - image status: `ready`
-- The Job's exact Python 3.13 image is ready and verified:
-  - image UID: `cc378d66-77df-4f8e-a66e-b4b678feabe7`
-  - output digest: `sha256:96033c10577e3aa521b96dad5a3f72edb410e29b30d6ed627434c9626a6b0dc4`
-  - source archive SHA-256:
-    `feabe099703948f6cb1cbc4837b52ba5dac385c09d7f2538f5f45f82c0f551dc`
-- No additional Jobs were declared, created, or run during Phase 0.
+  - `alpaca_connectors__universe_source`
+  - `alpaca_connectors__asset_registration_operation`
+- Bar-configuration MetaTable UIDs:
+  - configuration: `b24c4b08-f8b1-44ce-9160-324834f0ae86`
+  - explicit membership: `933b62b8-1c5b-46b4-a248-db12ee56edc3`
+- UniverseSource MetaTable UID:
+  `630be5b8-5cb7-4bfc-99ea-8b84cd879c9d`.
+- The seeded IVV source exists as UID `28f98530-9380-4a3b-b70e-3da8b972c205` and its live row
+  points to `https://www.ishares.com/us/products/239726/ishares-core-sp-500-etf`.
+- A live read-only preview of that source returned 504 component symbols with an as-of date of
+  September 1, 2026. A second seed run preserved `updated_at`, proving the reconciliation is
+  idempotent after the URL correction.
+- Live CLI and FastAPI read checks return one source, zero registered Alpaca accounts, and two
+  migrated daily price datasets. Both price datasets currently contain zero rows.
+- Local verification: 115 tests pass; Ruff passes; strict MkDocs build passes.
+- Streamlit was not removed or refactored.
 
-## Pending
+## Open Evidence And Blockers
 
-- The new bars tables are empty until a controlled first update/backfill is executed.
-- Live Alpaca account registration and holdings publication require explicit real-account
-  authorization and were not executed as part of the schema migration.
-- `etfhextractor 0.4.1` is published at commit
-  `036c8ba7f625f45dcb58e909ebf4eebbedbb5b97` with tag `v0.4.1`. This checkout's lock and installed
-  environment resolve that release while `pyproject.toml` retains an unpinned git source.
-
-## Validation
-
-- External `etfhextractor` full suite: 86 passed.
-- This project's full integration suite against the installed, locked external release: 69 passed
-  with two third-party deprecation warnings.
-- Ruff import/lint selection: passed.
-- `uv lock --check`: passed.
-- `uv pip check`: all installed packages compatible.
-- `mkdocs build --strict`: passed.
-- Live iShares IVV extraction through the migrated dependency returned 508 holdings dated
-  2026-08-31.
+- No Alpaca account is currently registered in the target environment. Creating a valid bar
+  configuration, capturing holdings, and writing prices require the operator to select the intended
+  paper/live Secret names; this implementation does not guess them or inspect an unknown account.
+- The initial FastAPI ResourceRelease and its first deployment still require repository sync and
+  post-webhook verification; workflow validation alone is not deployment proof.
+- The platform injects authenticated request identity and gates the ResourceRelease. A concrete
+  application edit-policy for per-route mutation authorization has not been selected; the code does
+  not invent user/team RBAC rules.

@@ -1,7 +1,7 @@
 {
-  "name": "Alpaca Connection Manager",
-  "description": "Agent-ready project card for the Alpaca Connectors repository. This project supports the repository's strict Alpaca asset-registration workflow, holdings-category orchestration from ETF constituents, and Alpaca stock-bar planning and update workflows through the documented CLI and reusable modules.",
-  "version": "0.1.22",
+  "name": "Alpaca Connectors",
+  "description": "Agent-ready project card for the Alpaca Connectors repository. The repository is organized around Assets, Universes, Market Data, Accounts, Holdings, Portfolios, and Operations; its current agent skills expose the supported CLI workflows without treating providers as a separate Connection domain.",
+  "version": "0.1.24",
   "supportedInterfaces": [
     {
       "protocolBinding": "HTTP+JSON",
@@ -41,10 +41,10 @@
     {
       "id": "holdings_category",
       "name": "Holdings Category",
-      "description": "Plan or execute holdings-backed asset-category sync through `alpaca-connectors holdings-category create`, building categories such as `HOLDINGS__IVV` from ETF constituents only when the extracted holdings resolve cleanly and are already registered.",
+      "description": "Manage durable UniverseSource rows and plan or execute source-UID-backed synchronization, materializing an AssetCategory only when extracted constituents resolve cleanly to registered assets.",
       "tags": [],
       "examples": [
-        "Create or refresh HOLDINGS__IVV after confirming all extracted holdings are registered."
+        "Create or refresh a holdings-backed universe after confirming all extracted holdings are registered."
       ],
       "inputModes": [
         "application/json"
@@ -56,10 +56,10 @@
     {
       "id": "stock_bars",
       "name": "Stock Bars",
-      "description": "Plan or execute Alpaca stock-bar workflows through `alpaca-connectors asset <ticker> update_prices <period>` or `alpaca-connectors bars run`, covering one registered asset, an explicit ticker list, or a holdings category while reusing the project's `AlpacaStockBarsNode` modules and plan-only flow.",
+      "description": "Maintain reusable Alpaca bar configurations, resolve explicit Assets, active universes, or recent account holdings, query migrated price datasets, and execute updates through the reusable AlpacaStockBarsNode without accepting an output dataset UID.",
       "tags": [],
       "examples": [
-        "Plan a daily IVV stock-bar update without running the node."
+        "Resolve a stored daily bar configuration without running the node."
       ],
       "inputModes": [
         "application/json"

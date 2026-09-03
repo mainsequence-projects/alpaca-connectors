@@ -58,8 +58,7 @@ def asset_unique_identifiers_for_category(category_unique_identifier: str) -> li
     category = AssetCategory.get_by_unique_identifier(category_unique_identifier)
     if category is None:
         raise ValueError(
-            "Missing asset category for unique_identifier: "
-            f"{category_unique_identifier!r}"
+            f"Missing asset category for unique_identifier: {category_unique_identifier!r}"
         )
 
     memberships = AssetCategoryMembership.filter(
@@ -76,8 +75,7 @@ def asset_unique_identifiers_for_category(category_unique_identifier: str) -> li
 
     if missing_asset_uids:
         raise ValueError(
-            "Asset category contains asset uids that could not be loaded: "
-            f"{missing_asset_uids!r}"
+            f"Asset category contains asset uids that could not be loaded: {missing_asset_uids!r}"
         )
     return unique_identifiers
 

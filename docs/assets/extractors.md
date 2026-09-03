@@ -20,7 +20,7 @@ They do not register assets, create categories, or publish DataNodes.
 
 Local integration point:
 
-- `src/etf_holdings.py`
+- `src/universes/etf_holdings.py`
 
 ## Supported Providers
 
@@ -29,10 +29,14 @@ Local integration point:
 - `vanguard`
 - `state_street`
 
-## URL Strategy
+## Source strategy
 
-Provider URLs are derived by `etfhextractor` by ticker and provider pattern. This project does not
-carry provider parser code.
+For durable universe management, the exact provider URL is stored in a user-maintained
+`UniverseSource` MetaTable row and passed directly to `ETFHoldingsReader.read(url)`. The repository
+does not keep a ticker list, ticker-to-provider map, or inferred universe target.
+
+The asset-registration command also retains an explicit, one-off expansion mode that requires both
+`--seed-tickers` and `--component-provider`. That operation is not durable universe configuration.
 
 ## Published-Source Rule
 
@@ -55,12 +59,15 @@ bash scripts/install_browser_runtime.sh
 ## Examples
 
 ```bash
-alpaca-connectors asset register --seed-tickers IVV --component-provider ishares
-alpaca-connectors asset register --seed-tickers QQQ --component-provider invesco
-alpaca-connectors asset register --seed-tickers VNQ --component-provider vanguard
-alpaca-connectors asset register --seed-tickers SPY --component-provider state_street
+alpaca-connectors universe-source create \
+  --name "iShares Core S&P 500 ETF" \
+  --symbol IVV \
+  --url "https://www.ishares.com/us/products/239726/ishares-core-sp-500-etf"
+alpaca-connectors universe-source preview <source-uid>
+alpaca-connectors universe sync --source-uid <source-uid> --execute
 ```
 
 ## Important Decision
 
-`SPY` is not treated as an iShares product. If `SPY` components are needed, they come from the State Street extractor.
+Provider identity is determined from the stored source URL by `etfhextractor`; this repository does
+not infer one from the symbol.

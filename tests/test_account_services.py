@@ -4,12 +4,14 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+from src.account.credentials import ResolvedAlpacaCredentials
 from src.account.services import (
     build_account_balance_values,
     build_account_detail_values,
-    build_holdings_rows,
     register_alpaca_account,
+    update_account_registration,
 )
+from src.holdings import build_account_holdings_rows
 
 
 def _stub_account() -> SimpleNamespace:
@@ -100,7 +102,12 @@ class _FakeNode:
 
 class AccountServiceShapingTests(unittest.TestCase):
     def test_balance_values_prefer_raw_for_docs_only_fields(self) -> None:
-        raw = {"cash": "9.9", "effective_buying_power": "100", "bod_dtbp": "200", "daytrade_count": 3}
+        raw = {
+            "cash": "9.9",
+            "effective_buying_power": "100",
+            "bod_dtbp": "200",
+            "daytrade_count": 3,
+        }
         values = build_account_balance_values(account=_stub_account(), raw_account=raw)
         self.assertEqual(str(values["effective_buying_power"]), "100")
         self.assertEqual(str(values["bod_dtbp"]), "200")
@@ -124,6 +131,8 @@ class AccountServiceShapingTests(unittest.TestCase):
             ),
             unique_identifier="010203ABCD__ALPACA_PAPER",
             key_fingerprint="abc123",
+            api_key_secret_name="ALPACA_PAPER_API_KEY",
+            secret_key_secret_name="ALPACA_PAPER_SECRET_KEY",
             is_paper=True,
         )
         self.assertEqual(values["status"], "ACTIVE")
@@ -131,12 +140,14 @@ class AccountServiceShapingTests(unittest.TestCase):
         self.assertEqual(values["fractional_trading"], True)
         self.assertEqual(values["options_trading_level"], 2)
         self.assertEqual(values["api_key_fingerprint"], "abc123")
+        self.assertEqual(values["api_key_secret_name"], "ALPACA_PAPER_API_KEY")
+        self.assertEqual(values["secret_key_secret_name"], "ALPACA_PAPER_SECRET_KEY")
         # current financials are merged onto the same detail row
         self.assertEqual(str(values["cash"]), "1000.50")
         self.assertEqual(str(values["equity"]), "2500.00")
 
     def test_holdings_rows_equity_plus_cash_skip_non_equity(self) -> None:
-        rows, unresolved, skipped = build_holdings_rows(
+        rows, unresolved, skipped = build_account_holdings_rows(
             positions=_stub_positions(),
             cash="1000.50",
             resolve_symbol=lambda s: {"AAPL": "BBG000B9XRY4"}.get(s),
@@ -150,7 +161,7 @@ class AccountServiceShapingTests(unittest.TestCase):
         self.assertEqual(str(rows[0]["quantity"]), "10")
 
     def test_holdings_rows_skip_cash_when_no_currency_asset(self) -> None:
-        rows, _unresolved, _skipped = build_holdings_rows(
+        rows, _unresolved, _skipped = build_account_holdings_rows(
             positions=[],
             cash="1000.50",
             resolve_symbol=lambda s: None,
@@ -160,14 +171,14 @@ class AccountServiceShapingTests(unittest.TestCase):
 
     def test_symbol_resolver_plan_mode_does_not_register(self) -> None:
         # With register_missing=False (e.g. --plan-only) an unregistered symbol stays unresolved.
-        from src.account.services import _make_symbol_resolver
+        from src.account.services import make_symbol_resolver
 
         with patch("src.assets.resolution.assets_for_ticker", return_value=[]):
-            self.assertIsNone(_make_symbol_resolver(register_missing=False)("ZZZZ"))
+            self.assertIsNone(make_symbol_resolver(register_missing=False)("ZZZZ"))
 
     def test_symbol_resolver_registers_figi_backed_missing_equity(self) -> None:
         # register_missing=True: a held equity that resolves to a FIGI is registered then used.
-        from src.account.services import _make_symbol_resolver
+        from src.account.services import make_symbol_resolver
 
         calls = {"n": 0}
 
@@ -183,7 +194,7 @@ class AccountServiceShapingTests(unittest.TestCase):
             ),
             patch("src.assets.alpaca_us_equities.register_alpaca_us_equity_assets") as register,
         ):
-            result = _make_symbol_resolver(register_missing=True)("AAPL")
+            result = make_symbol_resolver(register_missing=True)("AAPL")
 
         self.assertEqual(result, "BBG000B9XRY4")
         register.assert_called_once()
@@ -193,14 +204,15 @@ class RegisterAlpacaAccountTests(unittest.TestCase):
     def test_register_flow_writes_account_detail_balances_and_holdings(self) -> None:
         _FakeNode.frames = []
         account_row = SimpleNamespace(uid="acc-uid-1")
-        holdings_set_row = SimpleNamespace(uid="hset-uid-1")
         fake_account = MagicMock()
         fake_account.upsert.return_value = account_row
-        fake_holdings_set = MagicMock()
-        fake_holdings_set.upsert.return_value = holdings_set_row
         upsert_model = MagicMock()
-        build_holdings_frame = MagicMock(return_value="HOLDINGS_FRAME")
         runtime = SimpleNamespace(context=SimpleNamespace())
+        capture_result = SimpleNamespace(
+            holdings_rows=2,
+            unresolved_symbols=[],
+            skipped_non_equity_symbols=["BTCUSD"],
+        )
 
         client = StubTradingClient(
             _stub_account(), _stub_positions(), raw={"cash": "1000.50", "equity": "2500.00"}
@@ -209,16 +221,24 @@ class RegisterAlpacaAccountTests(unittest.TestCase):
         with (
             patch("src.runtime.start_markets_engine", return_value=runtime),
             patch("msm.api.accounts.Account", fake_account),
-            patch("msm.api.accounts.AccountHoldingsSet", fake_holdings_set),
-            patch("msm.data_nodes.accounts.AccountHoldings", _FakeNode),
             patch("msm.repositories.crud.upsert_model", upsert_model),
-            patch("msm.services.build_account_holdings_frame", build_holdings_frame),
-            patch("src.account.services._cash_asset_exists", return_value=True),
+            patch(
+                "src.account.services.resolve_alpaca_credentials",
+                return_value=ResolvedAlpacaCredentials(
+                    api_key="PKTEST",
+                    secret_key="SKTEST",
+                ),
+            ),
+            patch(
+                "src.holdings.services.publish_account_holdings_snapshot",
+                return_value=capture_result,
+            ) as publish_holdings,
         ):
             result = register_alpaca_account(
-                api_key="PKTEST",
-                secret_key="SKTEST",
+                api_key_secret_name="ALPACA_PAPER_API_KEY",
+                secret_key_secret_name="ALPACA_PAPER_SECRET_KEY",
                 paper=True,
+                capture_initial_holdings=True,
                 client=client,
                 symbol_resolver=lambda s: {"AAPL": "BBG000B9XRY4"}.get(s),
             )
@@ -244,12 +264,47 @@ class RegisterAlpacaAccountTests(unittest.TestCase):
         self.assertEqual(detail_kwargs["conflict_columns"], ("account_uid",))
         self.assertEqual(str(detail_kwargs["values"]["cash"]), "1000.50")
         self.assertEqual(str(detail_kwargs["values"]["equity"]), "2500.00")
+        self.assertEqual(
+            detail_kwargs["values"]["api_key_secret_name"],
+            "ALPACA_PAPER_API_KEY",
+        )
+        self.assertNotIn("PKTEST", str(detail_kwargs["values"]))
 
-        # Holdings set + frame built with both rows.
-        fake_holdings_set.upsert.assert_called_once()
-        _, frame_kwargs = build_holdings_frame.call_args
-        self.assertEqual(len(frame_kwargs["positions"]), 2)
-        self.assertEqual(frame_kwargs["holdings_set_uid"], "hset-uid-1")
+        publish_holdings.assert_called_once()
+
+    def test_secret_name_rotation_rejects_a_different_alpaca_account(self) -> None:
+        current = {
+            "uid": "acc-uid-1",
+            "account_uid": "acc-uid-1",
+            "alpaca_account_id": "expected-alpaca-id",
+            "api_key_secret_name": "OLD_API_KEY",
+            "secret_key_secret_name": "OLD_SECRET_KEY",
+            "is_paper": True,
+        }
+        candidate_client = SimpleNamespace(
+            get_account=lambda: SimpleNamespace(id="different-alpaca-id")
+        )
+        with (
+            patch("src.account.services.get_account_registration", return_value=current),
+            patch("src.runtime.start_markets_engine", return_value=SimpleNamespace(context=None)),
+            patch(
+                "src.account.services.resolve_alpaca_credentials",
+                return_value=ResolvedAlpacaCredentials(api_key="rotated", secret_key="secret"),
+            ),
+            patch(
+                "src.account.services.build_alpaca_trading_client",
+                return_value=candidate_client,
+            ),
+            patch("msm.repositories.crud.update_model") as update_model,
+        ):
+            with self.assertRaisesRegex(ValueError, "different Alpaca account"):
+                update_account_registration(
+                    "acc-uid-1",
+                    api_key_secret_name="NEW_API_KEY",
+                    secret_key_secret_name="NEW_SECRET_KEY",
+                )
+
+        update_model.assert_not_called()
 
 
 if __name__ == "__main__":

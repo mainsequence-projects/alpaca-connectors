@@ -1,97 +1,60 @@
 # Development Workflow
 
-## Install
+## Setup
 
 ```bash
 uv sync
-```
-
-The supported interpreter is Python 3.13. Dependency declarations use compatible lower bounds;
-`uv.lock` is the reproducible resolution.
-
-For authenticated platform work:
-
-```bash
-mainsequence login
 mainsequence code-repository refresh-token --path .
 mainsequence code-repository current --debug --json
-```
-
-Before executing a project DataNode or account write, verify the project migration is at head:
-
-```bash
 mainsequence migrations current --provider src.migrations:migration
 mainsequence migrations upgrade --provider src.migrations:migration head
 ```
 
-## Docs
+Python 3.13 is required. `pyproject.toml` declares compatible ranges and intentionally does not pin
+exact dependency versions; `uv.lock` is the reproducible resolution.
 
-```bash
-uv run mkdocs serve
-```
-
-## Browser Runtime
-
-Some ETF provider extraction paths need browser support.
+Install Playwright support when a provider extraction path requires it:
 
 ```bash
 bash scripts/install_browser_runtime.sh
 ```
 
-## Common Commands
-
-### Register assets
+## Verify
 
 ```bash
-alpaca-connectors asset register --symbols NVDA,AAPL
+uv run pytest
+uv run ruff check api src tests
+uv run ruff format --check api src tests --exclude src/.agents
+uv run mkdocs build --strict
 ```
 
-### Register from ETF holdings
+## Exercise The Backend
 
 ```bash
-alpaca-connectors asset register --seed-tickers IVV --component-provider ishares --execute
+alpaca-connectors universe-source seed-defaults
+alpaca-connectors universe-source list
+alpaca-connectors account list
+alpaca-connectors market-data dataset list
+uv run uvicorn api.app.main:app --reload
 ```
 
-### Create holdings category
+Mutating account and market-data operations use a registered Account UID. Account registration
+accepts Main Sequence Secret names only. Universe sync uses a UniverseSource UID and does not infer
+extraction targets from source-code constants.
 
-```bash
-alpaca-connectors holdings-category create --etf-ticker IVV --execute
-```
+## Debug the API and Command Center site
 
-This creates or refreshes the ETF-owned holdings category. The fixed Alpaca bars job that
-targets `HOLDINGS__IVV` assumes that category already exists before it runs.
+Open this backend repository as the VS Code workspace, select **Run and Debug**, and launch
+**Debug Alpaca API + Command Center Site**. The compound configuration starts:
 
-### Run daily bars for a category
+- FastAPI under the Python debugger at `http://127.0.0.1:8321`;
+- the sibling Vite application at `http://127.0.0.1:5421`;
+- Chrome with the JavaScript debugger after Vite is ready.
 
-```bash
-alpaca-connectors bars run \
-  --asset-category-unique-identifier HOLDINGS__IVV \
-  --frequency-id 1d \
-  --feed sip \
-  --adjustment all
-```
+The API process loads the repository `.env`, uses JWT authentication mode, and permits CORS only
+from the selected Vite origin. Vite receives `VITE_API_BASE_URL=http://127.0.0.1:8321` through the
+launch environment. Both servers bind to exact ports; if another process takes either port, stop it
+or select another free pair in `.vscode/launch.json` rather than allowing an automatic port change.
 
-### Run daily bars for one ticker
-
-```bash
-alpaca-connectors bars run \
-  --tickers NVDA \
-  --frequency-id 1d \
-  --feed sip \
-  --adjustment all
-```
-
-### Shorthand asset price update
-
-```bash
-alpaca-connectors asset IVV update_prices daily
-```
-
-## VS Code Launch Configurations
-
-The repo includes launch configurations for:
-
-- asset registration from `IVV`
-- holdings-category creation for `IVV`
-- daily bars for `HOLDINGS__IVV`
-- daily bars for `NVDA`
+The sibling static-site repository and its `node_modules` installation must exist before launching
+the compound. Run `npm ci` from that repository if the Vite executable is missing.

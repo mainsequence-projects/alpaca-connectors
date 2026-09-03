@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 import pandas as pd
 
-from src.data_nodes.alpaca_bars_support import (
+from src.market_data.alpaca_bars_support import (
     current_period_start,
     normalize_frequency_id,
     normalize_stock_bars_frame,
@@ -79,7 +79,9 @@ class AlpacaBarsSupportTests(unittest.TestCase):
         )
 
         self.assertEqual(list(normalized.index.names), ["time_index", "asset_identifier"])
-        self.assertEqual(str(normalized.index.get_level_values("time_index").dtype), "datetime64[ns, UTC]")
+        self.assertEqual(
+            str(normalized.index.get_level_values("time_index").dtype), "datetime64[ns, UTC]"
+        )
         self.assertEqual(len(normalized), 1)
         self.assertEqual(
             normalized.index[0],
@@ -97,11 +99,11 @@ class AlpacaBarsSupportTests(unittest.TestCase):
 
         with (
             patch(
-                "src.data_nodes.alpaca_bars_support.build_alpaca_symbol_lookup",
+                "src.market_data.alpaca_bars_support.build_alpaca_symbol_lookup",
                 return_value={"FISV": "FISV"},
             ),
             patch(
-                "src.data_nodes.alpaca_bars_support.query_openfigi_ticker_by_figi",
+                "src.market_data.alpaca_bars_support.query_openfigi_ticker_by_figi",
                 return_value={"BBG000BJKPG0": "FISV"},
             ),
         ):

@@ -1,0 +1,17 @@
+api_version: 2.2.0
+name: alpaca-connectors-api
+resources:
+- key: alpaca-connectors-api
+  kind: resource_release
+  spec:
+    release_kind: fastapi
+    resource_uid: 6318ffdd-a0b4-40a4-818a-8e744df86148
+    automatic_redeployment:
+      enabled: true
+      tag_regex: null
+    revision_retention_count: 3
+    cors_allowed_origins:
+    - https://*.site-dev.main-sequence.app
+    env_vars:
+    - name: ALPACA_CONNECTORS_CORS_ORIGINS
+      value: https://*.site-dev.main-sequence.app

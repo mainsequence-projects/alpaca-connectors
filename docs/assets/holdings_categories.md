@@ -1,77 +1,44 @@
-# Holdings Categories
+# Materialized Universes
 
-See also:
+Provider-derived universes are stored as ms-markets `AssetCategory` rows and
+`AssetCategoryMembership` rows. This application manages categories whose identifiers use the
+`HOLDINGS__<SYMBOL>` convention.
 
-- `docs/etf_extraction.md` for the `etfhextractor` dependency boundary and separation from Alpaca logic
-
-## Goal
-
-Create an **ms-markets** `AssetCategory` (`msm.api.assets`) from an ETF's published holdings.
-
-Main module:
-
-- `src/etf_holdings.py` (local adapter)
-- `etfhextractor` (provider extraction and ms-markets category primitives)
-
-Primary CLI:
-
-- `src/cli/`
-
-## ms-markets specifics
-
-- Category get-or-create uses `AssetCategory.upsert(unique_identifier=, display_name=, description=)`.
-- Membership is replaced atomically with `AssetCategory.replace_memberships(category_uid=,
-  asset_uids=[...])` (delete-all-then-insert) — replacing the old `remove_assets` + `append_assets`.
-- Members are ms-markets asset **uids** (UUIDs), not integer ids.
-- A component ticker resolves to an asset via `OpenFigiDetails.ticker` (`src/assets/resolution.py`),
-  since the asset row no longer carries a ticker/`current_snapshot`.
-- The runtime must be attached first via `src.runtime.start_markets_engine()` (the CLI does this).
-
-## Naming Convention
-
-Holdings categories use:
-
-```text
-HOLDINGS__[ETF_TICKER]
-```
-
-Example:
-
-```text
-HOLDINGS__IVV
-```
+A durable `UniverseSource` supplies the symbol and extraction URL. The source and materialized
+category remain separate objects, but the category metadata records the source UID used by its Run
+action.
 
 ## Flow
 
-1. infer or receive the ETF holdings provider
-2. extract the ETF component tickers
-3. check that extracted components are already registered as MainSequence assets
-4. detect ambiguous ticker-to-asset matches in MainSequence
-5. create or refresh the `AssetCategory`
+1. Create the universe configuration with a name, ETF ticker, and explicit source URL.
+2. Persist the enabled source and an empty `AssetCategory`; creation performs no extraction.
+3. Run the registered universe separately.
+4. In Run preflight, extract current holdings through `etfhextractor` and resolve every component
+   to exactly one registered Main Sequence Asset.
+5. Refuse execution if any component is missing or ambiguous; otherwise replace the memberships.
 
-## Blockers
-
-Category creation is refused when any extracted holding:
-
-- is not already registered in MainSequence
-- resolves ambiguously to more than one MainSequence asset
-
-## Provider Inference
-
-The ETF-to-provider mapping used by this project is stored in:
-
-- `src/etf_holdings.py`
-
-## Example
-
-Dry run:
+The browser/API creation route is `POST /v1/universes`. The `/v1/universes/discovery` contract
+advertises Run as a separate action with its own preflight.
 
 ```bash
-alpaca-connectors holdings-category create --etf-ticker IVV
+alpaca-connectors universe-source preview <SOURCE_UID>
+alpaca-connectors universe sync --source-uid <SOURCE_UID>
+alpaca-connectors universe sync --source-uid <SOURCE_UID> --execute
+alpaca-connectors universe list
+alpaca-connectors universe get <CATEGORY_UID>
+alpaca-connectors universe delete <CATEGORY_UID>
 ```
 
-Execute:
+Deletion is explicit and removes the category plus its memberships. It does not delete Assets or the
+UniverseSource.
 
-```bash
-alpaca-connectors holdings-category create --etf-ticker IVV --execute
-```
+## Lifecycle status
+
+Materialized universes expose an application-owned `is_active` state. The state is stored under the
+`alpaca_connectors` namespace in `AssetCategory.metadata_json`, preserving unrelated metadata.
+Categories created before this field existed default to active.
+
+Deactivation keeps the category and every membership available for inspection, but prevents that
+category from being used as the scope of a new Alpaca market-data update. Activation makes it
+eligible again. The `/v1/universes/discovery` contract advertises run, activate, deactivate, and
+delete actions; clients must use the advertised preflight and confirmation lifecycle.

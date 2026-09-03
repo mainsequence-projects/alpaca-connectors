@@ -36,7 +36,7 @@ Alpaca validation happens later, when Alpaca-specific consumers read assets from
 This decision also implies two follow-on rules:
 
 1. ETF provider parsing belongs to `etfhextractor`; project provider defaults live in
-   `src/etf_holdings.py`.
+   `src/universes/etf_holdings.py`.
 2. ETF routine orchestration must call ETF and Alpaca services directly, rather than routing through CLI argument strings.
 
 ## Consequences
@@ -66,7 +66,7 @@ Tradeoffs:
 - holdings category sync
 - ETF maintenance orchestration
 
-`src/etf_holdings.py` owns:
+`src/universes/etf_holdings.py` owns:
 
 - project provider defaults
 - Alpaca-facing seed expansion summaries
@@ -79,7 +79,7 @@ Tradeoffs:
 - FIGI resolution
 - MainSequence asset registration from Alpaca symbols
 
-`src/data_nodes` owns:
+`src/market_data` owns:
 
 - consuming explicit assets or categories for Alpaca bars updates
 - resolving whether category members can be used with Alpaca
@@ -111,7 +111,7 @@ That pattern hides the true dependencies, makes dry-run output less meaningful, 
 
 `src/settings.py` is the Alpaca/OpenFIGI/MainSequence runtime settings module.
 
-`src/etf_holdings.py` is the local adapter/config module over `etfhextractor`.
+`src/universes/etf_holdings.py` is the local adapter/config module over `etfhextractor`.
 
 That split means:
 

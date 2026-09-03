@@ -12,7 +12,7 @@ ALPACA_API_KEY_SECRET_NAME = "ALPACA_API_KEY"
 ALPACA_SECRET_KEY_SECRET_NAME = "ALPACA_SECRET_KEY"
 
 # Project namespace slug used as the ms-markets physical-table app segment for project-owned
-# MetaTables (e.g. ``alpaca_connectors__<table>``). Matches src/markets_storage's storage app.
+# MetaTables (e.g. ``alpaca_connectors__<table>``). Matches src.market_data's storage app.
 PROJECT_NAMESPACE_SLUG = "alpaca_connectors"
 
 # Market venue suffix for Alpaca account/asset identities (``<token>__ALPACA`` convention).
@@ -31,9 +31,7 @@ def get_platform_secret_value(secret_name: str) -> str | None:
     try:
         secret = msc.Secret.get_or_none(name=secret_name)
     except Exception as exc:
-        raise RuntimeError(
-            f"Failed to retrieve MainSequence secret {secret_name!r}."
-        ) from exc
+        raise RuntimeError(f"Failed to retrieve MainSequence secret {secret_name!r}.") from exc
 
     if secret is None or secret.value is None:
         return None

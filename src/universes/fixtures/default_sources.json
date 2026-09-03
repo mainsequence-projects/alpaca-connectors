@@ -1,0 +1,9 @@
+[
+  {
+    "uid": "28f98530-9380-4a3b-b70e-3da8b972c205",
+    "name": "iShares Core S&P 500 ETF",
+    "symbol": "IVV",
+    "source_url": "https://www.ishares.com/us/products/239726/ishares-core-sp-500-etf",
+    "enabled": true
+  }
+]

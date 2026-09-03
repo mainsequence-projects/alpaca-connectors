@@ -32,7 +32,9 @@ def project_runtime_models() -> list[type[Any]]:
         OpenFigiAssetDetailsTable,
     )
 
-    from src.markets_storage.alpaca_bars import project_storage_models
+    from src.market_data import project_configuration_models, project_storage_models
+    from src.operations import project_operation_models
+    from src.universes.sources import project_universe_models
 
     return [
         AssetTypeTable,
@@ -42,6 +44,9 @@ def project_runtime_models() -> list[type[Any]]:
         AssetCategoryTable,
         AssetCategoryMembershipTable,
         *project_storage_models(),
+        *project_configuration_models(),
+        *project_universe_models(),
+        *project_operation_models(),
     ]
 
 
@@ -72,6 +77,11 @@ def account_runtime_models() -> list[type[Any]]:
     ]
 
 
+def application_runtime_models() -> list[type[Any]]:
+    """Complete model set used by long-lived API processes and shared services."""
+    return account_runtime_models()
+
+
 def portfolio_runtime_models(extra_models: list[type[Any]] | None = None) -> list[type[Any]]:
     """Runtime models for ETF-holdings portfolio construction.
 
@@ -89,7 +99,7 @@ def portfolio_runtime_models(extra_models: list[type[Any]] | None = None) -> lis
     )
     from msm_portfolios.bootstrap import resolve_portfolio_models
 
-    from src.markets_storage.alpaca_bars import project_storage_models
+    from src.market_data import project_storage_models
 
     return [
         *resolve_portfolio_models(None),
@@ -134,13 +144,14 @@ def start_markets_engine(
     import msm
 
     return msm.start_engine(
-        models=models if models is not None else project_runtime_models(),
+        models=models if models is not None else application_runtime_models(),
         timeout=timeout,
     )
 
 
 __all__ = [
     "account_runtime_models",
+    "application_runtime_models",
     "portfolio_runtime_models",
     "project_runtime_models",
     "start_markets_engine",

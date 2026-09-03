@@ -1,21 +1,19 @@
-# Alpaca Connectors API
+# Alpaca Connectors FastAPI Application
 
-This FastAPI app exposes thin HTTP endpoints for:
+This package is the HTTP integration layer over the reusable services under `src/`.
 
-- discovery configuration
-- asset registration execution
-- holdings-category synchronization
+Routers expose Project State, Assets, Accounts, Holdings, Universe Sources, materialized Universes,
+Market Data datasets, and stored Alpaca bar configurations. Pydantic transport contracts live in
+`schemas.py`; route-facing response shaping lives in `services/`. Provider extraction, MetaTable
+writes, account transformation, source resolution, and DataNode execution remain under `src/`.
 
-The API does not rebuild the producer logic. It delegates to the existing services in `src/`.
+Main Sequence injects `request.state.user` and `request.state.user_uid` in deployed requests. The
+application does not accept a browser-supplied user identity and does not install SDK middleware.
 
-Main entrypoint:
+Run locally:
 
-- `api/app/main.py`
+```bash
+uv run uvicorn api.app.main:app --reload
+```
 
-Main service layer:
-
-- `api/app/services.py`
-
-Request and response models:
-
-- `api/app/schemas.py`
+Deployment is declared in `.mainsequence/workflows/alpaca-connectors-api.yaml`.

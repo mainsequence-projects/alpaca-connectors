@@ -1,6 +1,58 @@
 {
-  "version": "0.0.1",
+  "version": "0.2.0",
   "configurations": [
+    {
+      "name": "Debug Alpaca Connectors API (8321)",
+      "type": "python",
+      "request": "launch",
+      "module": "uvicorn",
+      "args": [
+        "api.app.main:app",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "8321",
+        "--reload"
+      ],
+      "cwd": "${workspaceFolder}",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "console": "integratedTerminal",
+      "envFile": "${workspaceFolder}/.env",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}",
+        "MAINSEQUENCE_AUTH_MODE": "jwt",
+        "ALPACA_CONNECTORS_CORS_ORIGINS": "http://127.0.0.1:5421"
+      },
+      "justMyCode": true,
+      "subProcess": true
+    },
+    {
+      "name": "Debug Alpaca Command Center Site (5421)",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/../alpacaconnectorssite-ab9d29c9-2dcb-417f-8d88-ee9c9e9c8baf/node_modules/vite/bin/vite.js",
+      "args": [
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "5421",
+        "--strictPort"
+      ],
+      "cwd": "${workspaceFolder}/../alpacaconnectorssite-ab9d29c9-2dcb-417f-8d88-ee9c9e9c8baf",
+      "console": "integratedTerminal",
+      "env": {
+        "VITE_API_BASE_URL": "http://127.0.0.1:8321"
+      },
+      "skipFiles": [
+        "<node_internals>/**"
+      ],
+      "serverReadyAction": {
+        "pattern": "Local:\\s+(https?://\\S+)",
+        "uriFormat": "%s",
+        "action": "debugWithChrome",
+        "webRoot": "${workspaceFolder}/../alpacaconnectorssite-ab9d29c9-2dcb-417f-8d88-ee9c9e9c8baf"
+      }
+    },
     {
       "name": "Register Asset From iShares Ticker",
       "type": "python",
@@ -125,6 +177,16 @@
         "API_CORS_ALLOW_ORIGINS": "http://localhost:5173"
       },
       "justMyCode": true
+    }
+  ],
+  "compounds": [
+    {
+      "name": "Debug Alpaca API + Command Center Site",
+      "configurations": [
+        "Debug Alpaca Connectors API (8321)",
+        "Debug Alpaca Command Center Site (5421)"
+      ],
+      "stopAll": true
     }
   ]
 }

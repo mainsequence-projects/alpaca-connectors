@@ -23,7 +23,7 @@ wheels = [
 
 [[package]]
 name = "alpaca-connectors"
-version = "0.1.22"
+version = "0.1.25"
 source = { editable = "." }
 dependencies = [
     { name = "alpaca-py" },

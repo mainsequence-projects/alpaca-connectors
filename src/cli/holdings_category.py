@@ -1,104 +1,111 @@
+"""CLI for reading and materializing ms-markets AssetCategory universes."""
+
 from __future__ import annotations
 
 import argparse
 import json
 
-from src.etf_holdings import (
-    SUPPORTED_COMPONENT_PROVIDERS,
-    build_holdings_asset_category_plan,
-    sync_holdings_asset_category,
-)
+
+def _print(value) -> None:
+    print(json.dumps(value, indent=2, sort_keys=True, default=str))
 
 
-def configure_create_parser(parser: argparse.ArgumentParser) -> None:
-    parser.description = (
-        "Create or refresh a MainSequence AssetCategory from an ETF holdings extraction path."
-    )
-    parser.add_argument(
-        "--etf-ticker",
-        required=True,
-        help="ETF seed ticker, for example IVV, QQQ, VNQ, or SPY.",
-    )
-    parser.add_argument(
-        "--component-provider",
-        choices=list(SUPPORTED_COMPONENT_PROVIDERS),
-        help="Optional component provider override. When omitted, the provider is inferred from settings.",
-    )
-    parser.add_argument(
-        "--include-non-tradable",
-        action="store_true",
-        help="Accepted for CLI compatibility; ETF category sync no longer depends on Alpaca validation.",
-    )
-    parser.add_argument(
-        "--execute",
-        action="store_true",
-        help="Write the category to MainSequence after the strict validation passes.",
-    )
-    parser.add_argument(
-        "--timeout",
-        type=float,
-        default=30.0,
-        help="HTTP timeout in seconds for extraction, Alpaca, and MainSequence requests.",
-    )
-    parser.set_defaults(handler=run_create_command)
+def configure_list_parser(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--limit", type=int, default=25)
+    parser.add_argument("--offset", type=int, default=0)
+    parser.add_argument("--search")
+    parser.add_argument("--ordering", default="display_name")
+    parser.set_defaults(handler=run_list_command)
 
 
-def run_create_command(args: argparse.Namespace) -> int:
-    # Resolving registered assets + writing the category go through ms-markets MetaTables.
-    from src.runtime import start_markets_engine
+def configure_get_parser(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("category_uid")
+    parser.set_defaults(handler=run_get_command)
 
-    start_markets_engine()
 
-    plan = build_holdings_asset_category_plan(
-        etf_ticker=args.etf_ticker,
-        component_provider=args.component_provider,
-        include_non_tradable=args.include_non_tradable,
-        timeout=args.timeout,
-    )
+def configure_delete_parser(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("category_uid")
+    parser.add_argument("--execute", action="store_true")
+    parser.set_defaults(handler=run_delete_command)
 
-    print("Planned holdings AssetCategory sync")
-    print(json.dumps(plan.summary(), indent=2, sort_keys=True, default=str))
 
-    if plan.missing_registered_symbols:
-        print("These extracted component symbols are not yet registered as MainSequence assets:")
-        for symbol in plan.missing_registered_symbols:
-            print(f"  - {symbol}")
+def configure_sync_parser(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--source-uid", required=True)
+    parser.add_argument("--execute", action="store_true")
+    parser.add_argument("--timeout", type=float, default=30.0)
+    parser.set_defaults(handler=run_sync_command)
 
-    if plan.ambiguous_registered_symbols:
-        print("These extracted component symbols resolved ambiguously in MainSequence:")
-        for symbol in plan.ambiguous_registered_symbols:
-            print(f"  - {symbol}")
 
+def run_sync_command(args: argparse.Namespace) -> int:
+    from src.universes import preview_universe_source, sync_universe_source
+
+    plan = preview_universe_source(args.source_uid, timeout=args.timeout)
+    _print(plan.summary())
     if not args.execute:
-        print("Dry run only. Pass --execute to create or refresh the category.")
+        print("Dry run only. Pass --execute to create or refresh the AssetCategory.")
         return 0
-
     if plan.has_blockers():
         raise SystemExit(
-            "Refusing to create the holdings category because extracted holdings are incomplete "
-            "or not fully registered uniquely in MainSequence."
+            "Refusing to synchronize the universe because its assets are not fully resolved."
         )
-
-    result = sync_holdings_asset_category(
-        etf_ticker=plan.etf_ticker,
-        asset_uids=[
-            plan.existing_asset_uids_by_symbol[symbol]
-            for symbol in plan.component_symbols
-            if symbol in plan.existing_asset_uids_by_symbol
-        ],
-    )
-    print("Created or refreshed holdings AssetCategory")
-    print(
-        json.dumps(
-            {
-                "unique_identifier": result.unique_identifier,
-                "display_name": result.display_name,
-                "asset_uids": result.asset_uids,
-                "asset_count": len(result.asset_uids),
-            },
-            indent=2,
-            sort_keys=True,
-            default=str,
-        )
+    result = sync_universe_source(args.source_uid, timeout=args.timeout)
+    _print(
+        {
+            "unique_identifier": result.unique_identifier,
+            "display_name": result.display_name,
+            "asset_uids": [str(uid) for uid in result.asset_uids],
+            "asset_count": len(result.asset_uids),
+        }
     )
     return 0
+
+
+def run_list_command(args: argparse.Namespace) -> int:
+    from src.universes import list_materialized_universes
+
+    items, total = list_materialized_universes(
+        limit=args.limit,
+        offset=args.offset,
+        search=args.search,
+        ordering=args.ordering,
+    )
+    _print({"items": items, "total": total, "limit": args.limit, "offset": args.offset})
+    return 0
+
+
+def run_get_command(args: argparse.Namespace) -> int:
+    from src.universes import get_materialized_universe
+
+    item = get_materialized_universe(args.category_uid)
+    if item is None:
+        raise SystemExit(f"Universe {args.category_uid} does not exist.")
+    _print(item)
+    return 0
+
+
+def run_delete_command(args: argparse.Namespace) -> int:
+    from src.universes import delete_materialized_universe, get_materialized_universe
+
+    item = get_materialized_universe(args.category_uid)
+    if item is None:
+        raise SystemExit(f"Universe {args.category_uid} does not exist.")
+    if not args.execute:
+        _print(
+            {
+                "allowed": True,
+                "category_uid": args.category_uid,
+                "asset_count": item["asset_count"],
+                "detail": "The AssetCategory and its memberships will be deleted.",
+            }
+        )
+        return 0
+    _print(delete_materialized_universe(args.category_uid))
+    return 0
+
+
+__all__ = [
+    "configure_delete_parser",
+    "configure_get_parser",
+    "configure_list_parser",
+    "configure_sync_parser",
+]

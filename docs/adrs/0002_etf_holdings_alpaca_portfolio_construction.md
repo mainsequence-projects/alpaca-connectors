@@ -134,7 +134,7 @@ of signal, calendar, portfolio-row, configuration, and `PortfoliosDataNode` asse
 - `PortfolioTable` identity
 - rebalance strategy semantics
 
-`src/data_nodes/alpaca_bars.py` and `src/markets_storage/alpaca_bars.py` still own:
+`src/market_data/alpaca_bars.py` and `src/market_data/storage.py` still own:
 
 - fetching Alpaca bars
 - storage identity per `(frequency_id, feed, adjustment)`

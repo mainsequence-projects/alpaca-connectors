@@ -27,6 +27,18 @@ from src.settings import (
     get_openfigi_api_key,
 )
 
+AssetRegistrationProgressCallback = Callable[[str, str, str | None], None]
+
+
+def _emit_registration_progress(
+    progress: AssetRegistrationProgressCallback | None,
+    step_key: str,
+    status: str,
+    message: str,
+) -> None:
+    if progress is not None:
+        progress(step_key, status, message)
+
 
 def _chunked(values: Sequence[str], chunk_size: int) -> Iterable[list[str]]:
     for start in range(0, len(values), chunk_size):
@@ -44,9 +56,10 @@ def _build_symbol_alias_candidates(symbol: str) -> list[str]:
         normalized_symbol.replace(".", "/").replace("-", "/"),
         normalized_symbol.replace(".", "-").replace("/", "-"),
     ]
-    if all(separator not in normalized_symbol for separator in (".", "/", "-")) and len(
-        normalized_symbol
-    ) >= 3:
+    if (
+        all(separator not in normalized_symbol for separator in (".", "/", "-"))
+        and len(normalized_symbol) >= 3
+    ):
         base_symbol = normalized_symbol[:-1]
         share_class_suffix = normalized_symbol[-1]
         alias_candidates.extend(
@@ -271,14 +284,12 @@ def build_default_classification_passes() -> tuple[AlpacaEquityClassificationPas
     )
 
 
-def build_alpaca_us_equity_trading_client(
-) -> TradingClient:
+def build_alpaca_us_equity_trading_client() -> TradingClient:
     api_key = get_alpaca_api_key()
     secret_key = get_alpaca_secret_key()
     if not api_key or not secret_key:
         raise RuntimeError(
-            "Missing Alpaca credentials in the environment. Set ALPACA_API_KEY/"
-            "ALPACA_SECRET_KEY."
+            "Missing Alpaca credentials in the environment. Set ALPACA_API_KEY/ALPACA_SECRET_KEY."
         )
 
     return TradingClient(api_key=api_key, secret_key=secret_key)
@@ -313,11 +324,7 @@ def fetch_alpaca_us_equities(
 
 
 def _openfigi_chunk_size(api_key: str | None) -> int:
-    return (
-        OPENFIGI_MAX_JOBS_WITH_API_KEY
-        if api_key
-        else OPENFIGI_MAX_JOBS_WITHOUT_API_KEY
-    )
+    return OPENFIGI_MAX_JOBS_WITH_API_KEY if api_key else OPENFIGI_MAX_JOBS_WITHOUT_API_KEY
 
 
 def _build_openfigi_headers(api_key: str | None) -> dict[str, str]:
@@ -496,9 +503,7 @@ def classify_alpaca_us_equities(
         warnings_by_symbol.update(pass_warnings)
         for matched_symbol in pass_matches:
             warnings_by_symbol.pop(matched_symbol, None)
-        remaining_symbols = [
-            symbol for symbol in remaining_symbols if symbol not in pass_matches
-        ]
+        remaining_symbols = [symbol for symbol in remaining_symbols if symbol not in pass_matches]
 
     warnings_by_symbol = {
         symbol: warning
@@ -525,7 +530,14 @@ def build_alpaca_us_equity_registration_plan(
     exchange_code: str = OPENFIGI_DEFAULT_EXCHANGE_CODE,
     timeout: float = OPENFIGI_DEFAULT_TIMEOUT,
     requests_session: requests.Session | None = None,
+    progress: AssetRegistrationProgressCallback | None = None,
 ) -> AlpacaEquityRegistrationPlan:
+    _emit_registration_progress(
+        progress,
+        "load_alpaca_assets",
+        "running",
+        "Retrieving Alpaca credentials and loading the active US-equity catalog.",
+    )
     available_alpaca_assets = fetch_alpaca_us_equities(
         trading_client=trading_client,
         include_non_tradable=include_non_tradable,
@@ -542,7 +554,22 @@ def build_alpaca_us_equity_registration_plan(
             alpaca_assets=available_alpaca_assets,
             requested_symbols=symbols,
         )
-    return classify_alpaca_us_equities(
+    _emit_registration_progress(
+        progress,
+        "load_alpaca_assets",
+        "succeeded",
+        (
+            f"Loaded the Alpaca catalog and matched {len(alpaca_assets)} requested symbol(s); "
+            f"{len(missing_symbols_from_alpaca)} were not found."
+        ),
+    )
+    _emit_registration_progress(
+        progress,
+        "resolve_openfigi_identities",
+        "running",
+        f"Resolving OpenFIGI identities for {len(alpaca_assets)} Alpaca symbol(s).",
+    )
+    plan = classify_alpaca_us_equities(
         alpaca_assets,
         exchange_code=exchange_code,
         openfigi_api_key=get_openfigi_api_key(),
@@ -551,6 +578,16 @@ def build_alpaca_us_equity_registration_plan(
         missing_symbols_from_alpaca=missing_symbols_from_alpaca,
         requested_symbol_aliases=requested_symbol_aliases,
     )
+    _emit_registration_progress(
+        progress,
+        "resolve_openfigi_identities",
+        "succeeded",
+        (
+            f"Resolved {len(plan.matches_by_symbol)} OpenFIGI identity match(es); "
+            f"{len(plan.unresolved_symbols)} symbol(s) remain unresolved."
+        ),
+    )
+    return plan
 
 
 def _query_existing_assets_by_figi(

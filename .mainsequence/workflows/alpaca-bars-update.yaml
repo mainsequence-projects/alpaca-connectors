@@ -1,0 +1,16 @@
+api_version: 2.2.0
+name: alpaca-connectors-market-data
+resources:
+- key: alpaca-bars-update
+  kind: job
+  spec:
+    name: Alpaca Bars Update
+    description: Execute one enabled stored Alpaca bar configuration selected by a per-run configuration_uid argument.
+    execution_path: src/jobs/run_alpaca_bars_update.py
+    cpu_request: '0.25'
+    memory_request: '0.5'
+    max_runtime_seconds: 3600
+    spot: false
+    automatic_redeployment:
+      enabled: false
+      tag_regex: null

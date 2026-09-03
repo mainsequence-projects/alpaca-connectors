@@ -35,6 +35,25 @@ A symbol is eligible for registration only if:
 
 If FIGI is missing, the symbol is reported and skipped. There is no fallback custom-asset registration path.
 
+## Application progress
+
+The Command Center application uses the observable API operation contract rather than waiting on a
+single long-running response. The API persists these real orchestration boundaries:
+
+1. prepare exact-symbol input or expand ETF seeds;
+2. retrieve Alpaca credentials and load the active US-equity catalog;
+3. resolve the matching Alpaca symbols through OpenFIGI;
+4. check resolved FIGIs against registered Main Sequence assets;
+5. register missing assets for an execution request;
+6. finalize the plan or execution result.
+
+Each step exposes `pending`, `running`, `succeeded`, `failed`, or `skipped`, with timestamps and a
+safe user-facing message. Errors identify the failed dependency and distinguish credential lookup,
+Alpaca catalog loading, OpenFIGI timeout, OpenFIGI HTTP/DNS/response failures, Main Sequence asset
+lookup, and registration failure. If an upstream Alpaca or credential step fails, the message says
+that OpenFIGI was not called. See [FastAPI Backend](../api.md#observable-asset-registration) for
+the start and polling routes.
+
 ## Stock vs ETP Classification
 
 The registration plan classifies Alpaca symbols through ordered FIGI passes:
@@ -47,14 +66,19 @@ The FIGI market-sector and security-type constants are local string literals in 
 (`"Equity"`, `"Common Stock"`, `"ETP"`, `"REIT"`). They previously came from
 `mainsequence.client.MARKETS_CONSTANTS`, which was removed in SDK 4.x.
 
-## Environment And Secrets
+## Provider credentials
 
-Alpaca credentials are resolved in this order:
+Asset discovery/registration is a repository bootstrap flow and resolves the conventional
+provider credentials in this order:
 
 1. `ALPACA_API_KEY` / `ALPACA_SECRET_KEY` from the process environment
 2. MainSequence secrets with the same names
 
 If neither source exists, the code fails fast.
+
+This is distinct from account and market-data operations. Those select a registered account and
+resolve the two Main Sequence Secret names stored on its `AlpacaAccountDetails` row; their public
+CLI/API never accepts credential values.
 
 ## Symbol Normalization
 
@@ -80,7 +104,7 @@ alpaca-connectors asset register --seed-tickers IVV --component-provider ishares
 ```
 
 This remains an orchestration flow. ETF expansion is delegated to the external `etfhextractor`
-dependency through `src/etf_holdings.py`, and the resulting explicit symbols are then passed into
+dependency through `src.universes`, and the resulting explicit symbols are then passed into
 the Alpaca registration service in `src/assets/`.
 
 ## Strict Extraction Rule

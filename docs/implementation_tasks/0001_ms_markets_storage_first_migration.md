@@ -43,18 +43,18 @@ mainsequence code-repository freeze-env --path .
 
 `AlpacaStockBarsNode` is an `msm.data_nodes.assets.AssetIndexedDataNode`.
 
-- Schema is declared on project-owned storage classes under `src/markets_storage/`.
+- Schema is declared on project-owned storage classes in `src/market_data/storage.py`.
 - The node implements `_required_output_table()`; the removed `_required_storage_table()` and
   `storage_table` constructor/property surfaces are not used.
 - Rows are keyed by `(time_index, asset_identifier)` where `asset_identifier` is
   `AssetTable.unique_identifier`.
 - Each supported `(frequency, feed, adjustment)` triple has an explicit storage class and physical
   table.
-- The public chart compatibility aliases remain `alpaca_stock_bars_1d_sip_all` and
+- The published chart identifiers remain `alpaca_stock_bars_1d_sip_all` and
   `alpaca_stock_bars_1d_iex_raw`.
 
 SDK 8 migration-managed catalog identifiers are the authored physical table names, not those
-legacy DataNode aliases. The API maps the compatibility alias to its storage class and then
+former DataNode identifiers. The API maps the published identifier to its storage class and then
 resolves the catalog row by physical identity.
 
 ## Project-owned MetaTable migration

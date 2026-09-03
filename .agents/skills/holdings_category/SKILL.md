@@ -1,28 +1,29 @@
 ---
 name: alpaca-holdings-category
-description: Use this skill when the task is about creating or refreshing holdings-backed Main Sequence asset categories from ETF constituents through the supported project CLI.
+description: Use this skill when the task is about creating or refreshing holdings-backed Main Sequence asset universes through the supported project CLI.
 ---
 
-# Holdings Category Sync
+# Holdings-Backed Universe Sync
 
 ## Overview
 
 Use this skill when the task is about ETF constituent universes and holdings-backed
 `AssetCategory` sync.
 
-The supported operator surface is:
+The canonical operator surface is:
 
-- `alpaca-connectors holdings-category create`
+- `alpaca-connectors universe sync`
 
-This workflow builds or refreshes categories such as `HOLDINGS__IVV` from the external
-`etfhextractor` package and existing Main Sequence asset registration state.
+This workflow builds or refreshes categories such as `HOLDINGS__IVV` from a durable,
+user-maintained `UniverseSource`, the external `etfhextractor` package, and existing Main Sequence
+asset registration state.
 
 ## This Skill Can Do
 
-- explain or update the holdings-category CLI flow
-- change the local Alpaca orchestration adapter in `src/etf_holdings.py`
+- explain or update the holdings-backed universe CLI flow
+- change the local orchestration adapter in `src/universes/`
 - rely on `etfhextractor` for provider extraction and ms-markets holdings-category primitives
-- keep ETF provider inference and category naming aligned with the current project rules
+- keep source-based extraction and category naming aligned with the current project rules
 - keep docs aligned with the strict category-sync behavior
 
 ## This Skill Must Not Claim
@@ -34,11 +35,13 @@ This workflow builds or refreshes categories such as `HOLDINGS__IVV` from the ex
 ## Working Rules
 
 - dry run is the default
+- select extraction input by `UniverseSource.uid`; do not infer a provider from a Python map
 - execute only after extracted holdings resolve uniquely in Main Sequence
 - if symbols are missing, register them first instead of weakening the category-sync rules
 
 ## Examples
 
-- `alpaca-connectors holdings-category create --etf-ticker IVV`
-- `alpaca-connectors holdings-category create --etf-ticker QQQ --component-provider invesco`
-- `alpaca-connectors holdings-category create --etf-ticker IVV --execute`
+- `alpaca-connectors universe-source list`
+- `alpaca-connectors universe-source preview <SOURCE_UID>`
+- `alpaca-connectors universe sync --source-uid <SOURCE_UID>`
+- `alpaca-connectors universe sync --source-uid <SOURCE_UID> --execute`

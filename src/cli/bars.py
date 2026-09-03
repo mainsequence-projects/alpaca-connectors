@@ -1,327 +1,324 @@
+"""CLI for migrated Alpaca price datasets and account-backed update actions."""
+
 from __future__ import annotations
 
 import argparse
+import datetime as dt
 import json
+from dataclasses import asdict
 from typing import Any
 
-from src.assets.alpaca_us_equities import (
-    _resolve_requested_symbols_to_alpaca_assets,
-    fetch_alpaca_us_equities,
-)
-from src.data_nodes.alpaca_bars_support import normalize_frequency_id
+from src.market_data import normalize_frequency_id
 
 DEFAULT_PRICE_UPDATE_FEED = "sip"
 DEFAULT_PRICE_UPDATE_ADJUSTMENT = "all"
-PRICE_UPDATE_ACTION_ALIASES = ("update-prices", "update_prices")
+PRICE_UPDATE_ACTION = "update_prices"
+
+
+def _print(value: Any) -> None:
+    if hasattr(value, "__dataclass_fields__"):
+        value = asdict(value)
+    print(json.dumps(value, indent=2, sort_keys=True, default=str))
+
+
+def parse_csv(raw_value: str) -> list[str]:
+    values = [value.strip() for value in raw_value.split(",") if value.strip()]
+    if not values:
+        raise ValueError("At least one value must be provided.")
+    return list(dict.fromkeys(values))
 
 
 def parse_tickers(raw_value: str) -> list[str]:
-    tickers = [value.strip().upper() for value in raw_value.split(",") if value.strip()]
-    if not tickers:
-        raise ValueError("At least one ticker must be provided.")
-    return list(dict.fromkeys(tickers))
+    return [value.upper() for value in parse_csv(raw_value)]
 
 
 def normalize_price_update_period(period: str) -> str:
     normalized_period = period.strip().lower()
-    aliases = {
-        "daily": "1d",
-        "day": "1d",
-        "hourly": "1h",
-        "hour": "1h",
-        "minute": "1m",
-        "minutely": "1m",
-    }
+    aliases = {"daily": "1d", "day": "1d"}
     return normalize_frequency_id(aliases.get(normalized_period, normalized_period))
 
 
-def resolve_registered_assets_from_tickers(
-    *,
-    tickers: list[str],
-) -> tuple[list[str], dict[str, str]]:
-    """Resolve tickers to registered ms-markets asset unique identifiers (strings).
-
-    Preserves the three distinct strict errors: not available in Alpaca, available in Alpaca but
-    not registered in ms-markets, and ambiguous in ms-markets. Asset lookup goes through
-    ``OpenFigiDetails.ticker`` (provider symbols no longer live on the asset row).
-    """
-    from src.assets.resolution import assets_for_ticker
-
-    requested_tickers = parse_tickers(",".join(tickers))
-    alpaca_assets = fetch_alpaca_us_equities(include_non_tradable=False)
-    resolved_alpaca_assets, missing_alpaca_tickers, requested_symbol_aliases = (
-        _resolve_requested_symbols_to_alpaca_assets(
-            alpaca_assets=alpaca_assets,
-            requested_symbols=requested_tickers,
-        )
-    )
-    if missing_alpaca_tickers:
-        raise RuntimeError(
-            "These tickers are not available in Alpaca: "
-            f"{sorted(missing_alpaca_tickers)!r}"
-        )
-
-    resolved_alpaca_symbols = [asset.symbol for asset in resolved_alpaca_assets]
-    assets_by_ticker: dict[str, list[Any]] = {
-        ticker: assets_for_ticker(ticker) for ticker in resolved_alpaca_symbols
-    }
-
-    missing_platform_tickers = sorted(
-        ticker for ticker in resolved_alpaca_symbols if not assets_by_ticker[ticker]
-    )
-    if missing_platform_tickers:
-        raise RuntimeError(
-            "These tickers are available in Alpaca but not registered in MainSequence: "
-            f"{missing_platform_tickers!r}"
-        )
-
-    ambiguous_platform_tickers = sorted(
-        ticker for ticker, assets in assets_by_ticker.items() if len(assets) != 1
-    )
-    if ambiguous_platform_tickers:
-        raise RuntimeError(
-            "These tickers resolved ambiguously in MainSequence: "
-            f"{ambiguous_platform_tickers!r}"
-        )
-
-    resolved_unique_identifiers = [
-        assets_by_ticker[ticker][0].unique_identifier for ticker in resolved_alpaca_symbols
-    ]
-    return resolved_unique_identifiers, requested_symbol_aliases
-
-
-def build_stock_bars_node(
-    *,
-    asset_category_unique_identifier: str | None,
-    tickers: list[str] | None,
-    frequency_id: str,
-    feed: str,
-    adjustment: str,
-    hash_namespace: str | None,
-) -> tuple[Any, dict[str, Any]]:
-    # Storage-first: building/running the node attaches to the migrated+registered storage table,
-    # so the markets runtime must be initialized first (idempotent/cached).
-    from src.runtime import start_markets_engine
-
-    start_markets_engine()
-
-    requested_tickers = list(tickers) if tickers is not None else None
-    resolved_unique_identifiers = None
-    requested_symbol_aliases: dict[str, str] = {}
-    if requested_tickers is not None:
-        resolved_unique_identifiers, requested_symbol_aliases = (
-            resolve_registered_assets_from_tickers(tickers=requested_tickers)
-        )
-
-    config_kwargs: dict[str, Any] = {
-        "frequency_id": frequency_id,
-        "feed": feed,
-        "adjustment": adjustment,
-    }
-    if asset_category_unique_identifier:
-        config_kwargs["asset_category_unique_identifier"] = asset_category_unique_identifier
-    else:
-        config_kwargs["asset_list"] = resolved_unique_identifiers
-
-    from src.data_nodes import AlpacaStockBarsConfig, AlpacaStockBarsNode
-
-    config = AlpacaStockBarsConfig(**config_kwargs)
-    node = AlpacaStockBarsNode(
-        config=config,
-        hash_namespace=hash_namespace,
-    )
-
-    # get_asset_list() now returns asset unique-identifier strings (not asset objects).
-    node_assets = node.get_asset_list()
-    summary = {
-        "asset_category_unique_identifier": asset_category_unique_identifier,
-        "requested_tickers": requested_tickers,
-        "requested_symbol_aliases": requested_symbol_aliases,
-        "asset_count": len(node_assets),
-        "frequency_id": node.frequency_id,
-        "feed": node.feed,
-        "adjustment": node.adjustment,
-        "hash_namespace": node.hash_namespace or None,
-        "table_identifier": node.output_table.__metatable_identifier__,
-        "update_hash": node.update_hash,
-        "resolved_asset_unique_identifiers_sample": list(node_assets)[:20],
-    }
-    return node, summary
-
-
-def _print_stock_bars_run_summary(summary: dict[str, Any]) -> None:
-    print("Planned Alpaca stock bars run")
-    print(json.dumps(summary, indent=2, sort_keys=True))
-
-
-def _run_stock_bars_node(
-    *,
-    node: Any,
-    force_update: bool,
-) -> None:
-    error_on_last_update, update_result = node.run(
-        debug_mode=True,
-        force_update=force_update,
-    )
-    if update_result is None:
-        print("Run completed with no returned frame.")
-        return
-
-    print("Run completed")
-    print(
-        json.dumps(
-            {
-                "error_on_last_update": bool(error_on_last_update),
-                "rows_persisted": int(len(update_result)),
-                "columns": list(update_result.columns),
-            },
-            indent=2,
-            sort_keys=True,
-        )
-    )
-
-
 def configure_run_parser(parser: argparse.ArgumentParser) -> None:
-    parser.description = (
-        "Build and run Alpaca stock bars for a MainSequence asset category or a strict list "
-        "of registered tickers. The table identity is determined by frequency_id, feed, and "
-        "adjustment."
-    )
-    scope_group = parser.add_mutually_exclusive_group(required=True)
-    scope_group.add_argument(
-        "--asset-category-unique-identifier",
-        help="MainSequence AssetCategory unique_identifier, for example HOLDINGS__IVV.",
-    )
-    scope_group.add_argument(
-        "--tickers",
-        help="Comma-separated tickers to resolve strictly against Alpaca and MainSequence, for example NVDA or AAPL,MSFT.",
-    )
-    parser.add_argument(
-        "--frequency-id",
-        default="1d",
-        help="Alpaca bar frequency, for example 1d, 1h, 15m, 5m, or 1m.",
-    )
-    parser.add_argument(
-        "--feed",
-        default="iex",
-        help="Alpaca stock market data feed, for example iex or sip.",
-    )
-    parser.add_argument(
-        "--adjustment",
-        default="raw",
-        help="Alpaca adjustment mode, for example raw, split, dividend, or all.",
-    )
-    parser.add_argument(
-        "--hash-namespace",
-        default=None,
-        help="Optional hash namespace used to isolate the DataNode run.",
-    )
-    parser.add_argument(
-        "--force-update",
-        action=argparse.BooleanOptionalAction,
-        default=True,
-        help="Force one DataNode update cycle even if no new range is detected.",
-    )
-    parser.add_argument(
-        "--plan-only",
-        action="store_true",
-        help="Print the resolved DataNode plan without executing node.run().",
-    )
+    parser.description = "Resolve or execute one stored Alpaca bar configuration."
+    parser.add_argument("--configuration-uid", required=True)
+    parser.add_argument("--hash-namespace")
+    parser.add_argument("--force-update", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--execute", action="store_true")
     parser.set_defaults(handler=run_bars_command)
 
 
-def run_bars_command(args: argparse.Namespace) -> int:
-    requested_tickers = parse_tickers(args.tickers) if args.tickers else None
-    node, summary = build_stock_bars_node(
-        asset_category_unique_identifier=args.asset_category_unique_identifier,
-        tickers=requested_tickers,
-        frequency_id=args.frequency_id,
-        feed=args.feed,
-        adjustment=args.adjustment,
-        hash_namespace=args.hash_namespace,
-    )
-    _print_stock_bars_run_summary(summary)
-    if args.plan_only:
-        print("Plan only. Re-run without --plan-only to execute node.run().")
-        return 0
+def configure_configuration_list_parser(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--limit", type=int, default=25)
+    parser.add_argument("--offset", type=int, default=0)
+    parser.add_argument("--search")
+    parser.add_argument("--enabled", action=argparse.BooleanOptionalAction, default=None)
+    parser.add_argument("--asset-source", choices=("assets", "universe", "account_holdings"))
+    parser.add_argument("--ordering", default="name")
+    parser.set_defaults(handler=run_configuration_list_command)
 
-    _run_stock_bars_node(
-        node=node,
-        force_update=args.force_update,
+
+def configure_configuration_get_parser(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("configuration_uid")
+    parser.set_defaults(handler=run_configuration_get_command)
+
+
+def _add_configuration_values(parser: argparse.ArgumentParser, *, required: bool) -> None:
+    parser.add_argument("--name", required=required)
+    parser.add_argument("--description")
+    parser.add_argument("--account-uid", required=required)
+    parser.add_argument(
+        "--asset-source",
+        required=required,
+        choices=("assets", "universe", "account_holdings"),
     )
+    parser.add_argument("--asset-uids", help="Comma-separated Asset UIDs for the assets source.")
+    parser.add_argument("--universe-uid", help="AssetCategory UID for the universe source.")
+    parser.add_argument("--frequency", required=required)
+    parser.add_argument("--feed", required=required)
+    parser.add_argument("--adjustment", required=required)
+    parser.add_argument(
+        "--enabled",
+        action=argparse.BooleanOptionalAction,
+        default=True if required else None,
+    )
+
+
+def configure_configuration_create_parser(parser: argparse.ArgumentParser) -> None:
+    _add_configuration_values(parser, required=True)
+    parser.set_defaults(handler=run_configuration_create_command)
+
+
+def configure_configuration_update_parser(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("configuration_uid")
+    _add_configuration_values(parser, required=False)
+    parser.set_defaults(handler=run_configuration_update_command)
+
+
+def configure_configuration_delete_parser(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("configuration_uid")
+    parser.add_argument("--execute", action="store_true")
+    parser.set_defaults(handler=run_configuration_delete_command)
+
+
+def configure_dataset_list_parser(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--ordering", default="frequency_id")
+    parser.set_defaults(handler=run_dataset_list_command)
+
+
+def configure_dataset_get_parser(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("dataset_uid")
+    parser.set_defaults(handler=run_dataset_get_command)
+
+
+def configure_prices_parser(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--dataset-uid", required=True)
+    parser.add_argument("--asset-uids")
+    parser.add_argument("--asset-identifiers")
+    parser.add_argument("--start")
+    parser.add_argument("--end")
+    parser.add_argument("--limit", type=int, default=100)
+    parser.add_argument("--offset", type=int, default=0)
+    parser.add_argument("--ordering", default="-time_index")
+    parser.set_defaults(handler=run_prices_command)
+
+
+def run_bars_command(args: argparse.Namespace) -> int:
+    from src.market_data import build_market_data_update, execute_market_data_update
+
+    values = {
+        "configuration_uid": args.configuration_uid,
+        "hash_namespace": args.hash_namespace,
+    }
+    if not args.execute:
+        _, summary = build_market_data_update(**values)
+        _print({"allowed": True, **summary})
+        return 0
+    _print(execute_market_data_update(**values, force_update=args.force_update))
+    return 0
+
+
+def run_configuration_list_command(args: argparse.Namespace) -> int:
+    from src.market_data import list_bar_configurations
+
+    items, total = list_bar_configurations(
+        limit=args.limit,
+        offset=args.offset,
+        search=args.search,
+        enabled=args.enabled,
+        asset_source=args.asset_source,
+        ordering=args.ordering,
+    )
+    _print({"items": [item.model_dump(mode="json") for item in items], "total": total})
+    return 0
+
+
+def run_configuration_get_command(args: argparse.Namespace) -> int:
+    from src.market_data import get_bar_configuration
+
+    item = get_bar_configuration(args.configuration_uid)
+    if item is None:
+        raise SystemExit(f"Bar configuration {args.configuration_uid} does not exist.")
+    _print(item.model_dump(mode="json"))
+    return 0
+
+
+def _configuration_values(args: argparse.Namespace, *, exclude_none: bool) -> dict[str, Any]:
+    values = {
+        "name": args.name,
+        "description": args.description,
+        "account_uid": args.account_uid,
+        "asset_source": args.asset_source,
+        "asset_uids": parse_csv(args.asset_uids) if args.asset_uids else None,
+        "universe_uid": args.universe_uid,
+        "frequency_id": args.frequency,
+        "feed": args.feed,
+        "adjustment": args.adjustment,
+        "enabled": args.enabled,
+    }
+    return (
+        {key: value for key, value in values.items() if value is not None}
+        if exclude_none
+        else values
+    )
+
+
+def run_configuration_create_command(args: argparse.Namespace) -> int:
+    from src.market_data import create_bar_configuration
+
+    _print(create_bar_configuration(**_configuration_values(args, exclude_none=False)))
+    return 0
+
+
+def run_configuration_update_command(args: argparse.Namespace) -> int:
+    from src.market_data import update_bar_configuration
+
+    values = _configuration_values(args, exclude_none=True)
+    if not values:
+        raise SystemExit("At least one bar-configuration field must be provided.")
+    _print(update_bar_configuration(args.configuration_uid, **values))
+    return 0
+
+
+def run_configuration_delete_command(args: argparse.Namespace) -> int:
+    from src.market_data import delete_bar_configuration, get_bar_configuration
+
+    item = get_bar_configuration(args.configuration_uid)
+    if item is None:
+        raise SystemExit(f"Bar configuration {args.configuration_uid} does not exist.")
+    if not args.execute:
+        _print(
+            {
+                "allowed": True,
+                "configuration_uid": args.configuration_uid,
+                "detail": "The stored configuration and explicit memberships will be deleted.",
+            }
+        )
+        return 0
+    _print(delete_bar_configuration(args.configuration_uid))
+    return 0
+
+
+def run_dataset_list_command(args: argparse.Namespace) -> int:
+    from src.market_data import list_market_data_datasets
+
+    datasets = list_market_data_datasets()
+    descending = args.ordering.startswith("-")
+    ordering_key = args.ordering.removeprefix("-")
+    if ordering_key not in {"frequency_id", "feed", "adjustment"}:
+        raise ValueError(f"Unsupported dataset ordering {args.ordering!r}.")
+    datasets.sort(key=lambda item: getattr(item, ordering_key), reverse=descending)
+    _print({"items": [asdict(dataset) for dataset in datasets], "total": len(datasets)})
+    return 0
+
+
+def run_dataset_get_command(args: argparse.Namespace) -> int:
+    from src.market_data import get_market_data_dataset
+
+    dataset = get_market_data_dataset(args.dataset_uid)
+    if dataset is None:
+        raise SystemExit(f"Market-data dataset {args.dataset_uid} does not exist.")
+    _print(dataset)
+    return 0
+
+
+def _parse_datetime(value: str | None) -> dt.datetime | None:
+    return dt.datetime.fromisoformat(value.replace("Z", "+00:00")) if value else None
+
+
+def run_prices_command(args: argparse.Namespace) -> int:
+    from src.market_data import query_price_observations
+
+    rows, total = query_price_observations(
+        args.dataset_uid,
+        asset_uids=parse_csv(args.asset_uids) if args.asset_uids else None,
+        asset_identifiers=parse_csv(args.asset_identifiers) if args.asset_identifiers else None,
+        start=_parse_datetime(args.start),
+        end=_parse_datetime(args.end),
+        limit=args.limit,
+        offset=args.offset,
+        ordering=args.ordering,
+    )
+    _print({"items": rows, "total": total})
     return 0
 
 
 def build_asset_price_update_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        prog="alpaca-connectors asset <ticker> update-prices <period>",
-        description=(
-            "Resolve a registered MainSequence asset from a ticker and update its Alpaca "
-            "stock bars through the DataNode."
-        ),
-    )
-    parser.add_argument(
-        "ticker",
-        help="Registered Alpaca/MainSequence ticker to update, for example IVV or NVDA.",
-    )
-    parser.add_argument(
-        "asset_action",
-        choices=PRICE_UPDATE_ACTION_ALIASES,
-        help="Asset action to run.",
-    )
-    parser.add_argument(
-        "period",
-        help="Price update cadence, for example daily, hourly, 15m, 1h, or 1d.",
-    )
-    parser.add_argument(
-        "--feed",
-        default=DEFAULT_PRICE_UPDATE_FEED,
-        help="Alpaca stock market data feed, defaulting to sip for the shorthand asset flow.",
-    )
-    parser.add_argument(
-        "--adjustment",
-        default=DEFAULT_PRICE_UPDATE_ADJUSTMENT,
-        help="Alpaca adjustment mode, defaulting to all for the shorthand asset flow.",
-    )
-    parser.add_argument(
-        "--hash-namespace",
-        default=None,
-        help="Optional hash namespace used to isolate the DataNode run.",
-    )
-    parser.add_argument(
-        "--force-update",
-        action=argparse.BooleanOptionalAction,
-        default=True,
-        help="Force one DataNode update cycle even if no new range is detected.",
-    )
-    parser.add_argument(
-        "--plan-only",
-        action="store_true",
-        help="Print the resolved DataNode plan without executing node.run().",
-    )
+    parser = argparse.ArgumentParser(prog="alpaca-connectors asset <ticker> update_prices <period>")
+    parser.add_argument("ticker")
+    parser.add_argument("asset_action", choices=(PRICE_UPDATE_ACTION,))
+    parser.add_argument("period")
+    parser.add_argument("--configuration-uid", required=True)
+    parser.add_argument("--hash-namespace")
+    parser.add_argument("--force-update", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--execute", action="store_true")
     return parser
 
 
 def run_asset_price_update_command(argv: list[str]) -> int:
-    parser = build_asset_price_update_parser()
-    args = parser.parse_args(argv)
-    frequency_id = normalize_price_update_period(args.period)
-    node, summary = build_stock_bars_node(
-        asset_category_unique_identifier=None,
-        tickers=[args.ticker],
-        frequency_id=frequency_id,
-        feed=args.feed,
-        adjustment=args.adjustment,
-        hash_namespace=args.hash_namespace,
-    )
-    summary["requested_period"] = args.period
-    _print_stock_bars_run_summary(summary)
-    if args.plan_only:
-        print("Plan only. Re-run without --plan-only to execute node.run().")
-        return 0
+    from src.assets.resolution import assets_for_ticker
+    from src.market_data import build_market_data_update, execute_market_data_update
 
-    _run_stock_bars_node(
-        node=node,
-        force_update=args.force_update,
-    )
+    args = build_asset_price_update_parser().parse_args(argv)
+    assets = assets_for_ticker(args.ticker.strip().upper())
+    if len(assets) != 1:
+        raise SystemExit(
+            f"Ticker {args.ticker!r} must resolve to exactly one registered Main Sequence Asset."
+        )
+    values = {
+        "configuration_uid": args.configuration_uid,
+        "hash_namespace": args.hash_namespace,
+    }
+    _, summary = build_market_data_update(**values)
+    requested_frequency = normalize_price_update_period(args.period)
+    if summary["dataset"]["frequency_id"] != requested_frequency:
+        raise ValueError(
+            f"Stored configuration frequency is {summary['dataset']['frequency_id']!r}, not "
+            f"{requested_frequency!r}."
+        )
+    if assets[0].unique_identifier not in summary["asset_identifiers"]:
+        raise ValueError(
+            f"Ticker {args.ticker!r} is not present in the stored configuration's resolved scope."
+        )
+    if not args.execute:
+        _print({"allowed": True, "requested_period": args.period, **summary})
+        return 0
+    _print(execute_market_data_update(**values, force_update=args.force_update))
     return 0
+
+
+__all__ = [
+    "DEFAULT_PRICE_UPDATE_ADJUSTMENT",
+    "DEFAULT_PRICE_UPDATE_FEED",
+    "configure_dataset_get_parser",
+    "configure_dataset_list_parser",
+    "configure_configuration_create_parser",
+    "configure_configuration_delete_parser",
+    "configure_configuration_get_parser",
+    "configure_configuration_list_parser",
+    "configure_configuration_update_parser",
+    "configure_prices_parser",
+    "configure_run_parser",
+    "normalize_price_update_period",
+    "parse_tickers",
+    "run_asset_price_update_command",
+]

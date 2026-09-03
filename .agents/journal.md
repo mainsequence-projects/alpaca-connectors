@@ -2,6 +2,18 @@
 
 ## 2026-09-02
 
+- Capability backend refactor: introduced user-managed `UniverseSource` MetaTable CRUD, Secret-name
+  Alpaca account registration, independent canonical holdings capture, migrated price-dataset
+  discovery/query/update services, and matching thin CLI plus FastAPI resource surfaces. Applied
+  provider revision `0002` and seeded the requested IVV source row; live reads show one source,
+  zero accounts, and two empty daily-price datasets.
+- API contract work: added normalized resource collections, discovery, preflight/action envelopes,
+  bounded filtering/ordering, safe errors, caller-sensitive discovery caching, and an API 2.1.0
+  workflow. The payloads validate against the pinned static-client contract fixtures.
+- Seed correction: changed the fixed-UID IVV bootstrap source to the official US iShares product
+  page and made explicit seeding reconcile existing starter metadata in place. The connector keeps
+  provider extraction in `etfhextractor` and does not add a local parser shim.
+
 - Context: migrate the connector and its backend-owned project MetaTables from the old SDK stack
   to Main Sequence SDK 8 and ms-markets 1 while keeping dependency declarations compatible rather
   than exactly pinned.

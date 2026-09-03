@@ -22,6 +22,8 @@ class AccountStorageTests(unittest.TestCase):
             "alpaca_account_id",
             "account_number",
             "api_key_fingerprint",
+            "api_key_secret_name",
+            "secret_key_secret_name",
             "is_paper",
             "status",
             "multiplier",

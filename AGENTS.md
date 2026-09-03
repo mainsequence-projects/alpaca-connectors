@@ -8,14 +8,15 @@ operate within the Main Sequence platform and must follow Main Sequence platform
 
 This repository is the Alpaca connector project for Main Sequence.
 
-Primary project workflows:
+Primary project capabilities:
 
+- report the implemented capability catalog and current provider configuration
 - register Alpaca US equity assets as Main Sequence public assets
-- build holdings-backed `AssetCategory` universes from ETF constituents
+- build reusable `AssetCategory` universes from provider-derived constituents
+- register and refresh Alpaca brokerage accounts and their holdings snapshots
+- publish Alpaca stock-market data for one asset or a reusable asset universe
 - build ETF-tracking ms-markets portfolios from ETF holdings signals and interpolated Alpaca bars
-- update Alpaca stock-bar `TimeIndexTableUpdater`s for one registered asset or a reusable asset
-  universe
-- expose thin FastAPI endpoints that wrap the existing registration, holdings, and discovery logic
+- expose thin FastAPI endpoints that wrap existing Project State, Assets, and Universes behavior
 
 Supported operator surfaces:
 
@@ -26,6 +27,13 @@ Supported operator surfaces:
 
 Repository rules:
 
+- treat Assets, Universes, Market Data, Accounts, Holdings, Portfolios, and Operations as the
+  business capability boundaries; providers are supporting dependencies, not a `Connection`
+  domain
+- keep API-only capability descriptions under `api/app`; `src/` is reserved for reusable backend
+  behavior
+- use `src.universes`, `src.market_data`, `src.account`, `src.holdings`, and `src.portfolios` as
+  the public capability import paths
 - keep reusable planning, registration, holdings orchestration, and stock-bar logic under `src/`;
   ETF provider extraction itself comes from the `etfhextractor` dependency; do not reintroduce
   one-off workflow scripts for the main operations
@@ -47,7 +55,8 @@ Asset registration:
 
 Holdings categories:
 
-- use `alpaca-connectors holdings-category create --etf-ticker <ETF>`
+- maintain extraction targets with `alpaca-connectors universe-source` CRUD
+- use `alpaca-connectors universe sync --source-uid <UNIVERSE_SOURCE_UID>`
 - dry run is the default; pass `--execute` only after the extracted holdings are fully resolvable
   and registered
 - this flow refuses to create or refresh the category if holdings are missing from Main Sequence
@@ -57,26 +66,32 @@ Holdings categories:
 
 Price updates from Alpaca:
 
-- for one asset, prefer `alpaca-connectors asset <ticker> update_prices <period>`, for example
-  `alpaca-connectors asset IVV update_prices daily`
-- both `update_prices` and `update-prices` are accepted; repo examples should prefer
-  `update_prices`
-- this shorthand resolves the ticker strictly against Alpaca and Main Sequence, builds the
-  `AlpacaStockBarsConfig`, and runs the `AlpacaStockBarsNode` for that resolved asset
-- shorthand defaults are `--feed sip` and `--adjustment all`
-- use `--plan-only` to inspect the resolved asset, table identifier, and hashes without calling
-  `node.run()`
-- for a holdings universe or explicit ticker list, use `alpaca-connectors bars run`
-- generic `alpaca-connectors bars run` defaults to `--feed iex` and `--adjustment raw`, so set
-  those flags explicitly when you want single-asset shorthand behavior
+- maintain reusable definitions with `alpaca-connectors market-data bar-configuration` CRUD
+- each definition selects one registered account, one migrated frequency/feed/adjustment profile,
+  and exactly one asset source: explicit `assets`, an active `universe`, or recent
+  `account_holdings`
+- for account holdings, the configured Account UID resolves the newest stored holdings set inside
+  the inclusive trailing 30-day window; the resolver never captures holdings as a side effect
+- run `alpaca-connectors market-data update --configuration-uid <CONFIGURATION_UID>` for a dry-run
+  resolution and add `--execute` to publish
+- for one asset, the retained shorthand is configuration-backed, for example
+  `alpaca-connectors asset IVV update_prices daily --configuration-uid <CONFIGURATION_UID>`
+- use `update_prices` as the asset price-update action
+- the shorthand verifies that the ticker and period belong to the stored configuration; it never
+  constructs an ephemeral configuration
+- dry run is the default; pass `--execute` to call `node.run()`
+- update actions never accept a dataset UID, account override, bar-profile override, or asset-scope
+  override
+- only migrated dataset profiles are selectable; requests do not dynamically create schemas
 
 FastAPI surface:
 
 - the API is intentionally thin and should call the reusable logic already implemented under `src/`
   and the external `etfhextractor` dependency through the local adapter
 - keep route handlers contract-driven and avoid rebuilding the producer logic inside route bodies
-- the current API surface supports discovery config, asset registration, and holdings-category
-  execution
+- canonical routes are grouped under `/v1/project-state`, `/v1/assets`, `/v1/accounts`,
+  `/v1/universe-sources`, `/v1/universes`, `/v1/market-data/bar-configurations`, and
+  `/v1/market-data/datasets`
 
 Project-to-agent boundary:
 
@@ -84,9 +99,9 @@ Project-to-agent boundary:
   not by introducing a separate local runtime under `agents/`
 - do not assume an `agent.py` entrypoint exists or is required for this project unless the user
   explicitly asks for one
-- agent-facing descriptions must stay within the supported local project behavior: asset
-  registration, holdings-category sync, stock-bar planning and updates, and the existing API
-  support surface
+- agent-facing descriptions must stay within supported local project behavior: asset registration,
+  universe sync, account registration, market-data planning and updates, analytical portfolio
+  construction, and the existing API support surface
 - do not invent trading, portfolio-management, or platform-release capabilities that are not
   represented in the local repo
 - when documenting agent capabilities, treat the existing CLI and reusable modules as the action
@@ -97,10 +112,10 @@ Operational notes:
 - source `.env` and export `MAINSEQUENCE_AUTH_MODE=jwt` before live `mainsequence` or
   `alpaca-connectors` runs that need authenticated platform access
 - before live platform checks, run `mainsequence code-repository refresh-token --path .`
-- live price-update runs require the Main Sequence secret `ALPACA_API_KEY` to be retrievable in
-  the active authenticated context
-- if `alpaca-connectors asset <ticker> update_prices <period>` fails because the ticker is not
-  registered in Main Sequence, register it first instead of loosening the resolver
+- account registration records the names of the Main Sequence Secrets containing Alpaca
+  credentials; live holdings and price updates resolve those stored names at execution time
+- if a stored bar configuration resolves an asset that is missing or ambiguous in Alpaca, fix its
+  source or register the asset correctly instead of loosening the resolver
 - if `mainsequence code-repository current --debug` reports that the local SDK is behind the
   latest GitHub version, prefer `mainsequence code-repository update-sdk --path .` before changing
   CLI behavior or troubleshooting scaffold commands

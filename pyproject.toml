@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "alpaca-connectors"
-version = "0.1.22"
+version = "0.1.25"
 readme = "README.md"
 requires-python = ">=3.13,<3.14"
 dependencies = [
@@ -27,6 +27,9 @@ alpaca-connectors = "src.cli:main"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["src*", "agents*", "api*"]
+
+[tool.setuptools.package-data]
+"src.universes" = ["fixtures/*.json"]
 
 [tool.ruff]
 line-length = 100                 # Max line length for Ruff/Black.

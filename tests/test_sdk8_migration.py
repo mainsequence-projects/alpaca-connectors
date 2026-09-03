@@ -8,8 +8,8 @@ from etfhextractor.portfolio_publish import required_calendar_window
 from etfhextractor.portfolio_signal import ETFHoldingsSignal, ETFHoldingsSignalConfig
 from msm_portfolios.data_nodes.signals.storage import SignalWeightsStorage
 
-from src.data_nodes.alpaca_bars import AlpacaStockBarsNode
-from src.markets_storage.alpaca_bars import AlpacaStockBars1dSipAllStorage
+from src.market_data.alpaca_bars import AlpacaStockBarsNode
+from src.market_data.storage import AlpacaStockBars1dSipAllStorage
 from src.migrations import METADATA, PROJECT_TABLE_NAMES, migration
 from src.portfolios.etf_tracking import (
     AlpacaEtfPortfolioPlan,
@@ -39,10 +39,11 @@ def test_migration_metadata_includes_fk_dependencies_but_manages_only_project_ta
         "ms_markets__accountgroup",
         "ms_markets__account",
         "ms_markets__asset",
+        "ms_markets__assetcategory",
         *PROJECT_TABLE_NAMES,
     } == set(METADATA.tables)
     assert {model.__table__.name for model in migration.metatable_models} == PROJECT_TABLE_NAMES
-    assert [
+    assert {
         table.name
         for table in METADATA.sorted_tables
         if migration.include_name(
@@ -50,11 +51,15 @@ def test_migration_metadata_includes_fk_dependencies_but_manages_only_project_ta
             "table",
             {"schema_name": table.schema},
         )
-    ] == [
+    } == {
         "alpaca_connectors__bars_1d_iex_raw",
         "alpaca_connectors__bars_1d_sip_all",
+        "alpaca_connectors__bars_configuration",
+        "alpaca_connectors__bars_configuration_asset",
         "alpaca_connectors__acct_alpaca",
-    ]
+        "alpaca_connectors__asset_registration_operation",
+        "alpaca_connectors__universe_source",
+    }
 
 
 def test_required_calendar_window_includes_backtest_and_operational_buffers() -> None:

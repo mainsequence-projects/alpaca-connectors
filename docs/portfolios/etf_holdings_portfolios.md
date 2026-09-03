@@ -19,7 +19,7 @@ Reference ADR:
   portfolio-graph assembly
 - `msm_portfolios`: interpolated prices, signal storage, portfolio values, portfolio weights, and
   portfolio identity
-- `src/markets_storage/alpaca_bars.py`: project-owned Alpaca source bars
+- `src/market_data/storage.py`: project-owned Alpaca source bars
 
 ## Current Python API
 
@@ -106,7 +106,7 @@ alpaca_stock_bars_1d_iex_raw
 ```
 
 or any future registered `(frequency_id, feed, adjustment)` triple added to
-`src/markets_storage/alpaca_bars.py`.
+`src/market_data/storage.py`.
 
 ## Interpolated Prices
 

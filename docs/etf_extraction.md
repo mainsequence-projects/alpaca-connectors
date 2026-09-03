@@ -1,97 +1,41 @@
-# ETF Holdings Extraction Boundary
+# ETF Extraction Boundary
 
-## Purpose
+ETF constituent extraction is implemented by the external `etfhextractor` dependency. This
+repository supplies application orchestration around it.
 
-ETF holdings extraction is no longer implemented inside this repository. Provider parsing,
-provider URL handling, holdings models, and ms-markets category primitives are delegated to the
-external [`mainsequence-projects/etfholdingextractor`](https://github.com/mainsequence-projects/etfholdingextractor)
-package, imported as `etfhextractor`.
+## Universe Workflow
 
-This repository owns only Alpaca-specific orchestration:
+The user maintains extraction targets as `UniverseSource` rows. Each row supplies a symbol and
+absolute source URL. Preview passes that URL to `ETFHoldingsReader.read(...)`; sync validates
+registration coverage before materializing an ms-markets AssetCategory.
 
-- expand ETF seed tickers before Alpaca registration
-- preserve the CLI/API summary shape expected by this project
-- keep project-specific ETF provider defaults and discovery lists
-- call `etfhextractor` to plan and sync holdings-backed `AssetCategory` rows
+There is no source-code list of managed ETFs and no ticker-to-provider inference map.
 
-## Local Adapter
-
-Main module:
-
-- `src/etf_holdings.py`
-
-The adapter exposes:
-
-- `EtfExpansionRequest`
-- `EtfExpansionResult`
-- `expand_etf_seed_symbols(...)`
-- `infer_holdings_component_provider(...)`
-- `build_holdings_asset_category_unique_identifier(...)`
-- `build_holdings_asset_category_plan(...)`
-- `sync_holdings_asset_category(...)`
-
-It also carries project discovery constants:
-
-- `SUPPORTED_COMPONENT_PROVIDERS`
-- `ETF_PROVIDER_MAP_NORMALIZED`
-- `ETFS_MAIN_TICKERS`
-- `MAG_7_CATEGORY_SYMBOLS`
-
-## Dependency Direction
-
-```text
-alpaca-connectors/src -> etfhextractor -> ms-markets -> mainsequence
+```bash
+alpaca-connectors universe-source create \
+  --name "S&P 500 source" \
+  --symbol IVV \
+  --url "https://www.ishares.com/us/products/239726/ishares-core-sp-500-etf"
+alpaca-connectors universe-source preview <SOURCE_UID>
+alpaca-connectors universe sync --source-uid <SOURCE_UID> --execute
 ```
 
-Do not add provider parser code back into this repository. If provider behavior must change,
-change `etfhextractor` and consume the updated package here.
+The packaged default uses the official US iShares IVV product page. Running `universe-source
+seed-defaults` reconciles that source under its stable UUID, so an older seeded URL is updated in
+place rather than duplicated. Provider parsing remains owned by `etfhextractor`, not by a
+connector-local compatibility layer.
 
-## Seed Expansion Flow
+## Asset Registration Workflow
 
-Used by:
+Asset registration may still perform an explicit one-off seed expansion when the caller provides
+both the ticker and provider. That is discovery input for the strict Alpaca/OpenFIGI registration
+operation; it is not the durable universe registry.
 
 ```bash
 alpaca-connectors asset register --seed-tickers IVV --component-provider ishares
 ```
 
-Flow:
+## Portfolio Workflow
 
-1. CLI/API builds `EtfExpansionRequest`
-2. `src/etf_holdings.py` validates the provider against `etfhextractor`
-3. `ETFHoldingsReader.read_ticker(...)` reads provider holdings
-4. `derive_component_symbols_from_holdings(...)` returns component symbols
-5. the Alpaca registration planner receives explicit symbols only
-
-Alpaca registration still owns Alpaca availability and FIGI checks. ETF extraction does not.
-
-## Holdings Category Flow
-
-Used by:
-
-```bash
-alpaca-connectors holdings-category create --etf-ticker IVV
-alpaca-connectors holdings-category create --etf-ticker IVV --execute
-```
-
-Flow:
-
-1. provider is supplied or inferred from `ETF_PROVIDER_MAP_NORMALIZED`
-2. `etfhextractor.build_holdings_asset_category_plan(...)` extracts component symbols
-3. ticker-to-asset resolution uses ms-markets snapshots/detail tables from `etfhextractor`
-4. missing or ambiguous registered assets block sync
-5. `etfhextractor.sync_holdings_asset_category(...)` replaces `HOLDINGS__<ETF>` memberships
-
-Members are ms-markets asset UIDs, not old integer ids.
-
-## External CLI Reference
-
-`etfhextractor` also ships its own CLI for direct extraction and category workflows:
-
-```bash
-etfh extract-ticker --provider ishares --ticker IVV
-etfh category-sync --ticker IVV --provider ishares
-```
-
-The `alpaca-connectors` CLI remains the supported operator surface for this repository because it
-combines ETF extraction with Alpaca registration, category sync, bars updates, and project-specific
-defaults.
+Analytical ETF portfolio construction consumes `etfhextractor` signals and explicit provider or
+source URL input. It does not restore a hidden provider map.

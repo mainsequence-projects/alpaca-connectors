@@ -11,7 +11,8 @@ Use this skill when the task is about planning or executing stock-bar updates.
 
 Supported operator surfaces:
 
-- `alpaca-connectors bars run`
+- `alpaca-connectors market-data update`
+- `alpaca-connectors market-data bar-configuration`
 - `alpaca-connectors asset <ticker> update_prices <period>`
 
 These flows build and run the reusable `AlpacaStockBarsNode`.
@@ -19,28 +20,32 @@ These flows build and run the reusable `AlpacaStockBarsNode`.
 ## This Skill Can Do
 
 - explain or update the CLI orchestration around stock-bar runs
-- change reusable behavior under `src/data_nodes/alpaca_bars.py` and
-  `src/data_nodes/alpaca_bars_support.py`
-- keep the single-asset shorthand and generic category/ticker runner aligned with current project
-  defaults and validation rules
+- use `src.market_data` as the public capability boundary and change its underlying reusable
+  storage or DataNode implementation only when required
+- keep the single-asset shorthand and stored-configuration runner aligned with current project
+  validation rules
 - keep scheduled-job entrypoints aligned with the supported runners
 
 ## This Skill Must Not Claim
 
 - that unregistered Main Sequence assets can be updated directly
-- that the generic runner uses the same defaults as the single-asset shorthand unless flags are
-  set explicitly
+- that an update can execute without a registered Account whose stored Secret names resolve
 - ownership of asset registration or holdings-category extraction behavior
 
 ## Working Rules
 
-- single-asset shorthand defaults to `feed=sip` and `adjustment=all`
-- generic `bars run` defaults to `feed=iex` and `adjustment=raw`
-- use `--plan-only` when the task only needs the resolved node/table/hash plan
+- create and review a stored configuration before an update
+- exactly one source is valid: explicit assets, an active universe, or recent account holdings
+- account-holdings resolution uses the newest stored snapshot inside the inclusive trailing 30-day
+  window and never captures a snapshot as a side effect
+- frequency/feed/adjustment resolve one migrated output dataset and schema
+- dry run is the default; use `--execute` only when a write is intended
+- require a stored configuration UID; never accept a dataset UID or runtime scope override
 - keep the shared table identity keyed by `frequency_id`, `feed`, and `adjustment`
 
 ## Examples
 
-- `alpaca-connectors asset IVV update_prices daily --plan-only`
-- `alpaca-connectors bars run --tickers NVDA,AAPL --frequency-id 1d --feed sip --adjustment all`
-- `alpaca-connectors bars run --asset-category-unique-identifier HOLDINGS__IVV --frequency-id 1d --feed sip --adjustment all`
+- `alpaca-connectors market-data bar-configuration create --name "Daily account holdings" --account-uid <ACCOUNT_UID> --asset-source account_holdings --frequency 1d --feed sip --adjustment all`
+- `alpaca-connectors market-data update --configuration-uid <CONFIGURATION_UID>`
+- `alpaca-connectors market-data update --configuration-uid <CONFIGURATION_UID> --execute`
+- `alpaca-connectors asset IVV update_prices daily --configuration-uid <CONFIGURATION_UID>`

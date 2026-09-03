@@ -14,8 +14,7 @@ from etfhextractor.portfolio_publish import (
     build_etf_tracking_portfolio,
 )
 
-from src.etf_holdings import infer_holdings_component_provider
-from src.markets_storage.alpaca_bars import storage_for
+from src.market_data import storage_for
 
 
 @dataclass(frozen=True, slots=True)
@@ -165,7 +164,10 @@ def _resolved_provider(config: AlpacaEtfTrackingPortfolioConfig) -> str | None:
         return config.provider.strip().lower()
     if config.fund_url is not None:
         return None
-    return infer_holdings_component_provider(config.etf_ticker)
+    raise ValueError(
+        "ETF portfolio construction requires fund_url or an explicit provider; "
+        "ticker/provider mappings are no longer hardcoded."
+    )
 
 
 def resolve_alpaca_bars_time_index_meta_table_uid(

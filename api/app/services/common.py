@@ -1,0 +1,186 @@
+"""Serialization helpers shared by capability API services."""
+
+from __future__ import annotations
+
+import json
+from typing import Any
+
+from ..schemas import PageInfo, ResourceCollection, ResourceDiscoveryResponse
+
+
+def validate_page_window(*, limit: int, offset: int) -> None:
+    """Require the offset/page-size relationship used by the static-site adapter."""
+    if offset % limit:
+        from ..errors import bad_request
+
+        raise bad_request("offset must be an exact multiple of limit.")
+
+
+def validate_ordering(ordering: str, *, allowed_fields: set[str]) -> None:
+    key = ordering.removeprefix("-")
+    if key not in allowed_fields:
+        from ..errors import bad_request
+
+        allowed = ", ".join(sorted(allowed_fields))
+        raise bad_request(f"ordering must name one of: {allowed} (prefix with '-' for descending).")
+
+
+def boolean_option(options: dict[str, Any], key: str, *, default: bool) -> bool:
+    value = options.get(key, default)
+    if not isinstance(value, bool):
+        from ..errors import bad_request
+
+        raise bad_request(f"options.{key} must be a boolean.")
+    return value
+
+
+def positive_float_option(
+    options: dict[str, Any],
+    key: str,
+    *,
+    default: float,
+    maximum: float,
+) -> float:
+    value = options.get(key, default)
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        from ..errors import bad_request
+
+        raise bad_request(f"options.{key} must be a number.")
+    normalized = float(value)
+    if not 0 < normalized <= maximum:
+        from ..errors import bad_request
+
+        raise bad_request(f"options.{key} must be greater than 0 and at most {maximum:g}.")
+    return normalized
+
+
+def json_safe(value: Any) -> Any:
+    return json.loads(json.dumps(value, default=str))
+
+
+def coerce_asset_uid(asset_or_uid: Any) -> str:
+    if isinstance(asset_or_uid, str):
+        return asset_or_uid
+    asset_uid = getattr(asset_or_uid, "uid", None)
+    if asset_uid is not None:
+        return str(asset_uid)
+    asset_id = getattr(asset_or_uid, "id", None)
+    if asset_id is not None:
+        return str(asset_id)
+    raise ValueError(f"Could not coerce asset uid from {asset_or_uid!r}")
+
+
+def serialize_asset_mapping(raw_mapping: dict[str, Any]) -> dict[str, str]:
+    return {
+        symbol: coerce_asset_uid(asset_or_uid)
+        for symbol, asset_or_uid in sorted(raw_mapping.items())
+    }
+
+
+def collection_response(
+    *,
+    items: list[Any],
+    total: int,
+    limit: int,
+    offset: int,
+) -> ResourceCollection:
+    serialized = [
+        json_safe(item.model_dump(mode="json") if hasattr(item, "model_dump") else item)
+        for item in items
+    ]
+    page_index = offset // limit if limit else 0
+    return ResourceCollection(
+        items=serialized,
+        pageInfo=PageInfo(
+            pageIndex=page_index,
+            pageSize=limit,
+            totalItems=total,
+            hasNextPage=offset + len(serialized) < total,
+            hasPreviousPage=offset > 0,
+        ),
+    )
+
+
+def resource_discovery(
+    *,
+    resource_id: str,
+    label: str,
+    item_label: str,
+    identity_fields: list[str],
+    columns: list[dict[str, Any]],
+    actions: list[dict[str, Any]] | None = None,
+    searchable_fields: list[str] | None = None,
+    filterable_fields: list[str] | None = None,
+    filter_types: dict[str, str] | None = None,
+    filter_options: dict[str, list[dict[str, Any]]] | None = None,
+    orderable_fields: list[str] | None = None,
+) -> ResourceDiscoveryResponse:
+    """Build the installed Command Center SDK's canonical discovery envelope."""
+    normalized_columns = []
+    for column in columns:
+        raw_id = str(column["id"])
+        normalized_column = {**column, "id": raw_id.replace("_", "-")}
+        if "data_type" in normalized_column or normalized_column["id"] != raw_id:
+            normalized_column.setdefault("value_path", raw_id)
+            normalized_column.setdefault("data_type", "text")
+        normalized_columns.append(
+            {
+                "default_visible": True,
+                "hideable": True,
+                **normalized_column,
+            }
+        )
+    return ResourceDiscoveryResponse(
+        contract="command-center.resource_discovery@v1",
+        resource={
+            "id": resource_id,
+            "label": label,
+            "item_label": item_label,
+            "identity": {"fields": identity_fields},
+        },
+        list={
+            "controls": {
+                "search": (
+                    {
+                        "placeholder": f"Search {label.lower()}",
+                        "fields": searchable_fields,
+                    }
+                    if searchable_fields
+                    else None
+                ),
+                "filters": [
+                    {
+                        "key": field,
+                        "label": field.replace("_", " ").title(),
+                        "type": (
+                            "select"
+                            if field in (filter_options or {})
+                            else (filter_types or {}).get(field, "text")
+                        ),
+                        **(
+                            {"options": (filter_options or {})[field]}
+                            if field in (filter_options or {})
+                            else {}
+                        ),
+                    }
+                    for field in (filterable_fields or [])
+                ],
+                "ordering": orderable_fields or [],
+            },
+            "columns": normalized_columns,
+        },
+        bulk_actions=actions or [],
+    )
+
+
+__all__ = [
+    "boolean_option",
+    "coerce_asset_uid",
+    "collection_response",
+    "json_safe",
+    "positive_float_option",
+    "resource_discovery",
+    "serialize_asset_mapping",
+    "validate_ordering",
+    "validate_page_window",
+]
