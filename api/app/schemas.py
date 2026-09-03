@@ -34,7 +34,7 @@ class CapabilityCatalogResponse(BaseModel):
 
 
 class ProjectConfigurationResponse(BaseModel):
-    api_version: str = "0.1.24"
+    api_version: str = "0.1.27"
     supported_component_providers: list[str]
     migrated_market_data_profiles: list[str]
     universe_sources_are_user_managed: bool = True

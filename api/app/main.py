@@ -32,7 +32,7 @@ async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
 
 app = FastAPI(
     title="Alpaca Connectors API",
-    version="0.1.24",
+    version="0.1.27",
     description=("Capability-oriented API for the existing Alpaca Connectors project behavior."),
     lifespan=_lifespan,
 )
