@@ -1,6 +1,6 @@
 ---
 name: code-repository-workflows
-description: Create and validate backend-managed API 2.1.0 deployment declarations under .mainsequence/workflows, including target-owned environment variables, FastAPI browser origins, and authenticated-repository-action-authorized Static Site navigation placement.
+description: Create and validate backend-managed API 2.2.0 deployment declarations under .mainsequence/workflows, including target-owned environment variables, FastAPI browser origins, and authenticated-repository-action-authorized Static Site navigation placement with repository-backed icons.
 ---
 
 # Main Sequence CodeRepository Workflows
@@ -74,11 +74,12 @@ same DeploymentRun; do not call image creation again.
 
 - Every file is independent and requires `api_version`, `name`, and
   `resources`.
-- Version `2.1.0` is current and `2.0.0` remains supported. Both support `job`,
+- Version `2.2.0` is current; `2.1.0` and `2.0.0` remain supported. All support `job`,
   `resource_release`, including `widget_extension`, and
   `code_repository_coding_agent`. Runtime targets may use target-owned `env_vars`.
-  Version `2.1.0` additionally accepts approved Static Site
-  `navigation_link` placement. Pre-`2.0.0` versions are rejected.
+  Versions `2.1.0` and `2.2.0` accept approved Static Site
+  `navigation_link` placement; `2.2.0` adds repository-backed
+  `navigation_link.icon_mask_path`. Pre-`2.0.0` versions are rejected.
 - Each resource has a stable `key`, a supported `kind`, and a typed `spec`.
 - `spec` fields follow the canonical backend create/update endpoint contract.
 - Every runtime, static-site, or widget-extension `resource_release` spec may
@@ -110,7 +111,7 @@ An API promotion does not rebuild a consuming static site.
 
 ## Runtime Environment Variables
 
-The current API `2.1.0` template returned by
+The current API `2.2.0` template returned by
 `/api/v1/code-repository-branches/{uid}/workflow-template/` includes `env_vars`
 examples. Always preserve that list-of-items shape:
 
@@ -144,12 +145,14 @@ retired; this exact target-owned workflow contract is intentionally unchanged.
 
 ## Static Site Navigation Placement
 
-A `2.1.0` Static Site declaration may propose a managed navigation link:
+A `2.2.0` Static Site declaration may propose a managed Command Center link
+and a repository-backed custom monochrome mask:
 
 ```yaml
 navigation_link:
   label: Markets
   icon_key: line-chart
+  icon_mask_path: public/navigation-icon.svg
   is_enabled: true
   audiences:
     organization_wide: false
@@ -157,6 +160,29 @@ navigation_link:
       - "11111111-1111-4111-8111-111111111111"
     user_uids: []
 ```
+
+`icon_key` is always required as the loading/error fallback. `icon_mask_path` is optional
+and has one exact contract:
+
+- it is a non-empty repository-root-relative POSIX path of at most 1024 UTF-8
+  bytes;
+- it uses `/`, is not absolute, and contains no empty, `.`, `..`, `.git`,
+  backslash, or NUL component;
+- every parent in the exact event-commit checkout is a real directory, and the
+  target is a regular file; no symbolic link is allowed anywhere in the path;
+- the file is at most 512 KiB and contains either a sanitized basic-geometry
+  SVG with a finite positive square `viewBox`, at most 256 elements, and at
+  most 16 nesting levels; or one static square transparent PNG/WebP frame from
+  32 x 32 through 512 x 512 pixels inclusive;
+- raster input contains both fully transparent and visible pixels; and
+- scripts, event handlers, text, style, external references, embedded data,
+  advanced SVG elements, JPEG, opaque raster, and animation are rejected.
+
+These are the only accepted formats, dimensions, frame behavior, and file
+size. Do not rely on filename extensions or declared media types. Read-only
+workflow validation checks the path shape; exact file
+existence and content validation occur during repository-event application
+against the immutable event checkout.
 
 The Organization automation identity applies workflow state but does not
 authorize its audience. On an ordinary authenticated GitHub push, the backend
@@ -177,12 +203,20 @@ Commit authors, emails, usernames, uncorrelated bots or deploy-key pushes, the
 automation identity, and coding-agent identity are not navigation authority.
 Placement never grants Static Site access.
 
-Omission preserves the existing workflow-owned link. Explicit
-`navigation_link: null` removes it. An unresolved push actor, insufficient
+Omitting `navigation_link` preserves the existing workflow-owned link and
+`navigation_link: null` removes it. Within a present object, omitting
+`icon_mask_path` preserves the stored mask, `icon_mask_path: null` removes
+it, and a path replaces it only when the sanitized content digest differs. An
+exact mask digest no-op neither writes storage nor requires mutation
+authorization. An unresolved push actor, insufficient
 permission, or conflicting ownership blocks only link reconciliation; inspect the
 resource result and correlated DeploymentRun for a sanitized
 `blocks_deployment=false` warning. Malformed fields are blocking workflow
-validation errors.
+validation errors. A syntactically valid but missing, unreadable, symlinked,
+non-regular, oversized, or invalid mask preserves the previous navigation
+state and emits a non-blocking warning while Static Site deployment continues.
+A later valid push or redeployment re-resolves the exact-commit mask and
+restores it after the legacy-image hard cut.
 
 ## When An Image Is Needed
 
@@ -192,7 +226,7 @@ whether the declaration needs an image:
 | Workflow target | Effective automatic deployment | Image requirement |
 | --- | --- | --- |
 | Job | Either | The workflow never accepts an image or commit selector. The backend creates or reuses the exact image identity for the immutable repository-event commit and keeps the Job non-runnable until it is verified and digest-pinned. |
-| Static site | Either | No runtime image UID is needed. The backend owns the static-site build. |
+| Static site | Either | No runtime image UID is needed. The backend owns the static-site build. Optional `navigation_link.icon_mask_path` is a bounded monochrome presentation asset, not a runtime image selector. |
 | Widget extension | Always enabled | No runtime image or CodeRepositoryResource UID is accepted. The backend invokes the fixed SDK widget build through the existing ResourceReleaseRun pipeline. |
 | CodeRepository Coding Agent | Either | No code-repository-image or CodeRepository Executor image UID is needed. The backend builds the verified image chain. |
 | Runtime ResourceRelease (`fastapi` or runtime `agent`) | Enabled | `related_image_uid` is not needed. If present for compatibility, the backend ignores it. |
@@ -298,16 +332,16 @@ so `code_repository_image.create` is not a prerequisite.
 
 ## Widget Extensions
 
-Declare every widget implementation, including first-party widgets, through the ordinary
-`resource_release` workflow kind:
+Declare every Command Center widget implementation, including first-party
+widgets, through the ordinary `resource_release` workflow kind:
 
 ```yaml
-- key: widget-extensions
+- key: command-center-widgets
   kind: resource_release
   spec:
     release_kind: widget_extension
-    name: widget-extensions
-    root_directory: widget-extensions
+    name: command-center-widgets
+    root_directory: command-center
 ```
 
 This spec accepts exactly `release_kind`, `name`, and optional

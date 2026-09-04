@@ -13,10 +13,7 @@ def main() -> int:
         raise RuntimeError(
             "ALPACA_BARS_CONFIGURATION_UID must identify an enabled stored bar configuration."
         )
-    execute_market_data_update(
-        configuration_uid=configuration_uid,
-        force_update=True,
-    )
+    execute_market_data_update(configuration_uid=configuration_uid)
     return 0
 
 

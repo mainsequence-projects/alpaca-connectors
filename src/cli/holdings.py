@@ -21,12 +21,6 @@ def configure_list_parser(parser: argparse.ArgumentParser) -> None:
 def configure_capture_parser(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--account-uid", required=True)
     parser.add_argument("--execute", action="store_true")
-    parser.add_argument(
-        "--no-register-missing-assets",
-        dest="register_missing_assets",
-        action="store_false",
-        default=True,
-    )
     parser.set_defaults(handler=run_capture_command)
 
 
@@ -56,10 +50,7 @@ def run_capture_command(args: argparse.Namespace) -> int:
     if not args.execute:
         print(json.dumps(plan_alpaca_account_holdings(args.account_uid), indent=2))
         return 0
-    result = capture_alpaca_account_holdings(
-        args.account_uid,
-        register_missing_assets=args.register_missing_assets,
-    )
+    result = capture_alpaca_account_holdings(args.account_uid)
     print(json.dumps(asdict(result), indent=2, default=str))
     return 0
 

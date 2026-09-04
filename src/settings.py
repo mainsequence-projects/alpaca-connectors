@@ -3,6 +3,12 @@ from __future__ import annotations
 import os
 from functools import lru_cache
 
+from src.platform_secrets import (
+    PlatformSecretNotFoundError,
+    PlatformSecretValueMissingError,
+    read_platform_secret_value,
+)
+
 OPENFIGI_MAPPING_URL = "https://api.openfigi.com/v3/mapping"
 OPENFIGI_MAX_JOBS_WITHOUT_API_KEY = 10
 OPENFIGI_MAX_JOBS_WITH_API_KEY = 100
@@ -22,23 +28,9 @@ ALPACA_VENUE = "ALPACA"
 @lru_cache(maxsize=8)
 def get_platform_secret_value(secret_name: str) -> str | None:
     try:
-        import mainsequence.client as msc
-    except Exception as exc:  # pragma: no cover - import failure depends on runtime env
-        raise RuntimeError(
-            f"Failed to import MainSequence client while resolving secret {secret_name!r}."
-        ) from exc
-
-    try:
-        secret = msc.Secret.get_or_none(name=secret_name)
-    except Exception as exc:
-        raise RuntimeError(f"Failed to retrieve MainSequence secret {secret_name!r}.") from exc
-
-    if secret is None or secret.value is None:
+        return read_platform_secret_value(secret_name)
+    except (PlatformSecretNotFoundError, PlatformSecretValueMissingError):
         return None
-
-    if hasattr(secret.value, "get_secret_value"):
-        return secret.value.get_secret_value()
-    return str(secret.value)
 
 
 def get_alpaca_api_key() -> str:
@@ -80,8 +72,8 @@ def get_openfigi_api_key() -> str | None:
 #   - marketSector  -> "Equity"
 #   - securityType  -> "Common Stock"
 #   - securityType2 -> "ETP" / "REIT"
-# FIGI remains the asset identity; these values only classify/filter OpenFIGI candidates and help
-# derive AssetType from `security_market_sector`.
+# These values only classify/filter optional OpenFIGI candidates. Connector-owned asset identity
+# and AssetType come from Alpaca's immutable asset UUID and explicit asset-class mapping.
 FIGI_MARKET_SECTOR_EQUITY = "Equity"
 FIGI_SECURITY_TYPE_COMMON_STOCK = "Common Stock"
 FIGI_SECURITY_TYPE_ETP = "ETP"

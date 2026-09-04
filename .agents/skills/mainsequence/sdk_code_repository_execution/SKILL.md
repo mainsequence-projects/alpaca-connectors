@@ -38,6 +38,7 @@ This skill must not claim ownership of:
 
 - TimeIndexTableUpdater engineering
 - MetaTable design
+- Command Center-serving FastAPI contract and release design
 - jobs, schedules, images, resources, or releases
 - RBAC or sharing semantics
 - domain assets, translation tables, or construction logic
@@ -54,6 +55,8 @@ Do not let this skill become a domain manual.
   `.agents/skills/mainsequence/data_publishing/meta_tables/SKILL.md`
 - platform data discovery before implementation:
   `.agents/skills/mainsequence/data_access/exploration/SKILL.md`
+- FastAPI APIs serving the Command Center frontend:
+  `.agents/skills/mainsequence/application_surfaces/api_surfaces/SKILL.md`
 - CodeRepository audits, blocker analysis, and upstream SDK assessment:
   `.agents/skills/mainsequence/maintenance/bug_auditor/SKILL.md`
 - local environment repair, CodeRepository authentication refresh, SDK updates,

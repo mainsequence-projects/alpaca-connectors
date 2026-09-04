@@ -22,13 +22,32 @@ class AccountCredentialTests(unittest.TestCase):
     def test_resolver_fetches_each_platform_secret_by_name(self) -> None:
         import mainsequence.client as msc
 
-        values = {
-            "API_KEY_NAME": SimpleNamespace(value="raw-api-value"),
-            "SECRET_KEY_NAME": SimpleNamespace(value="raw-secret-value"),
+        summaries = {
+            "API_KEY_NAME": [SimpleNamespace(uid="api-secret-uid")],
+            "SECRET_KEY_NAME": [SimpleNamespace(uid="secret-secret-uid")],
         }
-        with patch.object(
-            msc.Secret, "get_or_none", side_effect=lambda **kwargs: values[kwargs["name"]]
-        ) as get_secret:
+        details = {
+            "api-secret-uid": SimpleNamespace(
+                name="API_KEY_NAME",
+                value="raw-api-value",
+            ),
+            "secret-secret-uid": SimpleNamespace(
+                name="SECRET_KEY_NAME",
+                value="raw-secret-value",
+            ),
+        }
+        with (
+            patch.object(
+                msc.Secret,
+                "filter",
+                side_effect=lambda **kwargs: summaries[kwargs["name"]],
+            ) as filter_secrets,
+            patch.object(
+                msc.Secret,
+                "get_by_uid",
+                side_effect=lambda uid: details[uid],
+            ) as get_secret_detail,
+        ):
             credentials = resolve_alpaca_credentials(
                 AlpacaSecretNames("API_KEY_NAME", "SECRET_KEY_NAME")
             )
@@ -36,9 +55,41 @@ class AccountCredentialTests(unittest.TestCase):
         self.assertEqual(credentials.api_key, "raw-api-value")
         self.assertEqual(credentials.secret_key, "raw-secret-value")
         self.assertEqual(
-            [call.kwargs["name"] for call in get_secret.call_args_list],
+            [call.kwargs["name"] for call in filter_secrets.call_args_list],
             ["API_KEY_NAME", "SECRET_KEY_NAME"],
         )
+        self.assertEqual(
+            [call.args[0] for call in get_secret_detail.call_args_list],
+            ["api-secret-uid", "secret-secret-uid"],
+        )
+
+    def test_resolver_does_not_treat_redacted_list_record_as_missing_value(self) -> None:
+        import mainsequence.client as msc
+
+        with (
+            patch.object(
+                msc.Secret,
+                "filter",
+                side_effect=[
+                    [SimpleNamespace(uid="api-secret-uid", value=None)],
+                    [SimpleNamespace(uid="secret-secret-uid", value=None)],
+                ],
+            ),
+            patch.object(
+                msc.Secret,
+                "get_by_uid",
+                side_effect=[
+                    SimpleNamespace(name="API_KEY_NAME", value="raw-api-value"),
+                    SimpleNamespace(name="SECRET_KEY_NAME", value="raw-secret-value"),
+                ],
+            ),
+        ):
+            credentials = resolve_alpaca_credentials(
+                AlpacaSecretNames("API_KEY_NAME", "SECRET_KEY_NAME")
+            )
+
+        self.assertEqual(credentials.api_key, "raw-api-value")
+        self.assertEqual(credentials.secret_key, "raw-secret-value")
 
 
 if __name__ == "__main__":

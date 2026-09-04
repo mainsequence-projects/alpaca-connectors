@@ -55,10 +55,7 @@ def test_launcher_executes_exact_stored_configuration(capsys) -> None:
         exit_code = main(["--configuration-uid", CONFIGURATION_UID])
 
     assert exit_code == 0
-    execute.assert_called_once_with(
-        configuration_uid=CONFIGURATION_UID,
-        force_update=True,
-    )
+    execute.assert_called_once_with(configuration_uid=CONFIGURATION_UID)
     summary = json.loads(capsys.readouterr().out)
     assert summary == {
         "asset_count": 503,

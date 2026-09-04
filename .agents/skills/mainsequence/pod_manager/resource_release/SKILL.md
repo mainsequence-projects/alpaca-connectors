@@ -38,7 +38,7 @@ operation when a different rollback history is required. The value is a
 positive integer, defaults to `3`, and belongs to the release, not
 `automatic_redeployment_policy`. Existing widget, workspace, active, desired,
 and live-run references remain protected. Revision candidate discovery is
-report-only until the approved platform maintenance and static-policy
+report-only until the approved Command Center maintenance and static-policy
 cutover exists; do not imply that editing the count synchronously deletes
 provider artifacts.
 
@@ -216,7 +216,7 @@ enabled by either `automatic_deployment: true` or
 `automatic_redeployment.enabled: true`. Policy eligibility is decided before
 the backend builds or reuses the exact-commit image.
 
-Workflow APIs `2.0.0` and `2.1.0` also accept target-owned non-secret `env_vars` for these
+Workflow APIs `2.0.0`, `2.1.0`, and `2.2.0` also accept target-owned non-secret `env_vars` for these
 runtime releases. The backend persists the normalized mapping on the release's
 generated Job before deployment. Omission preserves, an empty list clears, and
 a present list replaces the mapping. This workflow-only adapter does not add a
@@ -228,7 +228,7 @@ Workflow environment values never create, resolve, or mutate platform Secrets,
 Constants, or Organization Environments, and never enter the
 code-repository-image build. Deployment context contains only names, count, and a keyed
 HMAC digest; it never exposes values. Read the `code-repository-workflows` skill and
-use the backend-provided API `2.1.0` template for the exact YAML shape.
+use the backend-provided API `2.2.0` template for the exact YAML shape.
 
 ## Configure FastAPI Browser Origins
 
@@ -247,7 +247,7 @@ not derive the value from a CodeRepositoryBranch or
 `OrganizationEnvironment`. Retrieve the backend workflow template when
 authoring a workflow; do not copy the development value into production.
 
-Pass the canonical field on create, partial update, or an API `2.1.0`
+Pass the canonical field on create, partial update, or an API `2.2.0`
 code-repository workflow declaration only when an explicit override is intended.
 Creation omission uses the platform default. Update or workflow-reconciliation
 omission preserves the stored policy. An explicitly submitted `[]` denies all

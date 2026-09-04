@@ -40,6 +40,7 @@ This skill must not claim ownership of:
 
 - TimeIndexTableUpdater producer behavior
 - MetaTable schema and row semantics
+- Command Center FastAPI wire contracts
 - RBAC or sharing policy
 - application UI implementation details
 
@@ -49,6 +50,8 @@ This skill must not claim ownership of:
   `.agents/skills/mainsequence/data_publishing/time_index_table_updates/SKILL.md`
 - MetaTables:
   `.agents/skills/mainsequence/data_publishing/meta_tables/SKILL.md`
+- Command Center FastAPI provider implementation and contract validation:
+  `.agents/skills/mainsequence/application_surfaces/api_surfaces/SKILL.md`
 - RBAC and sharing:
   `.agents/skills/mainsequence/platform_operations/access_control_and_sharing/SKILL.md`
 

@@ -317,8 +317,7 @@ class AssetIndexedDataNodeConfiguration(DataNodeConfiguration):
     asset_category_unique_identifier: str | None = Field(
         default=None,
         description=(
-            "Optional asset category unique identifier used to resolve the "
-            "updater asset universe."
+            "Optional asset category unique identifier used to resolve the updater asset universe."
         ),
         examples=["us_equities"],
     )

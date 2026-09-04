@@ -53,6 +53,8 @@ This skill audits. It does not implement by default.
   `.agents/skills/mainsequence/data_publishing/time_index_table_updates/SKILL.md`
 - MetaTable implementation issues:
   `.agents/skills/mainsequence/data_publishing/meta_tables/SKILL.md`
+- Command Center FastAPI contract or release issues:
+  `.agents/skills/mainsequence/application_surfaces/api_surfaces/SKILL.md`
 - jobs, images, releases, and runtime environment issues:
   `.agents/skills/mainsequence/platform_operations/orchestration_and_releases/SKILL.md`
 - RBAC and access issues:

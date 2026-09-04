@@ -14,7 +14,7 @@ from pydantic import Field, field_validator, model_validator
 
 from src.assets.resolution import (
     asset_unique_identifiers_for_category,
-    ticker_figi_for_unique_identifier,
+    ticker_and_optional_figi_by_unique_identifiers,
 )
 
 from .alpaca_bars_support import (
@@ -193,12 +193,15 @@ class AlpacaStockBarsNode(AssetIndexedDataNode):
         unique_identifiers = [
             self._asset_unique_identifier(item) for item in (self.get_asset_list() or [])
         ]
-        records = []
-        for unique_identifier in unique_identifiers:
-            ticker, figi = ticker_figi_for_unique_identifier(unique_identifier)
-            records.append(
-                AssetTickerFigi(unique_identifier=unique_identifier, ticker=ticker, figi=figi)
+        identity_details = ticker_and_optional_figi_by_unique_identifiers(unique_identifiers)
+        records = [
+            AssetTickerFigi(
+                unique_identifier=unique_identifier,
+                ticker=identity_details.get(unique_identifier, (None, None))[0],
+                figi=identity_details.get(unique_identifier, (None, None))[1],
             )
+            for unique_identifier in unique_identifiers
+        ]
 
         self._asset_bindings = resolve_asset_bindings_from_category_assets(
             assets=records,

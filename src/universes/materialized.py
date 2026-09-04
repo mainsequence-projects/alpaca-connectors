@@ -1,149 +1,261 @@
-"""Read and manage materialized ms-markets AssetCategory universes."""
+"""Read and manage AssetUniverse registrations and their materialized categories."""
 
 from __future__ import annotations
 
+import uuid
 from typing import Any
 
+from src.universes.registry import (
+    AssetUniverse,
+    AssetUniverseTable,
+    create_asset_universe,
+    get_asset_universe,
+    get_asset_universe_by_source_uid,
+    update_asset_universe_state,
+)
+
 MATERIALIZED_UNIVERSE_PREFIX = "HOLDINGS__"
-MATERIALIZED_UNIVERSE_METADATA_NAMESPACE = "alpaca_connectors"
 
 
-def _is_managed_identifier(identifier: str) -> bool:
-    return identifier.startswith(MATERIALIZED_UNIVERSE_PREFIX)
+def require_asset_universe_links(universe_uid: uuid.UUID | str) -> tuple[Any, Any, Any]:
+    """Return the registered universe, its explicit source, and its category."""
+    from msm.api.assets import AssetCategory
+
+    from src.universes.sources import get_universe_source
+
+    universe = get_asset_universe(universe_uid)
+    if universe is None:
+        raise LookupError(f"Asset Universe {universe_uid!s} does not exist.")
+    source = get_universe_source(universe.source_uid)
+    if source is None:
+        raise RuntimeError(
+            f"Asset Universe {universe_uid!s} references missing source {universe.source_uid!s}."
+        )
+    category = AssetCategory.get_by_uid(universe.asset_category_uid)
+    if category is None:
+        raise RuntimeError(
+            "Asset Universe "
+            f"{universe_uid!s} references missing AssetCategory "
+            f"{universe.asset_category_uid!s}."
+        )
+    return universe, source, category
 
 
-def materialized_universe_is_active(metadata_json: Any) -> bool:
-    """Return the connector-owned lifecycle state stored in category metadata.
-
-    Existing categories predate lifecycle management, so a missing flag remains active.
-    """
-    if not isinstance(metadata_json, dict):
-        return True
-    connector_metadata = metadata_json.get(MATERIALIZED_UNIVERSE_METADATA_NAMESPACE)
-    if not isinstance(connector_metadata, dict):
-        return True
-    active = connector_metadata.get("active")
-    return active if isinstance(active, bool) else True
-
-
-def materialized_universe_source_uid(metadata_json: Any) -> str | None:
-    if not isinstance(metadata_json, dict):
-        return None
-    connector_metadata = metadata_json.get(MATERIALIZED_UNIVERSE_METADATA_NAMESPACE)
-    if not isinstance(connector_metadata, dict):
-        return None
-    source_uid = connector_metadata.get("source_uid")
-    return str(source_uid) if source_uid else None
-
-
-def _metadata_with_active_state(metadata_json: Any, *, is_active: bool) -> dict[str, Any]:
-    metadata = dict(metadata_json) if isinstance(metadata_json, dict) else {}
-    connector_metadata = metadata.get(MATERIALIZED_UNIVERSE_METADATA_NAMESPACE)
-    connector_metadata = dict(connector_metadata) if isinstance(connector_metadata, dict) else {}
-    connector_metadata["active"] = is_active
-    metadata[MATERIALIZED_UNIVERSE_METADATA_NAMESPACE] = connector_metadata
-    return metadata
-
-
-def get_materialized_universe(category_uid: str) -> dict[str, Any] | None:
-    from msm.api.assets import Asset, AssetCategory, AssetCategoryMembership
+def get_asset_universe_view(universe_uid: uuid.UUID | str) -> dict[str, Any] | None:
+    """Return one Universe and its linked category without loading every member Asset."""
+    from msm.api.base import operation_result_rows
+    from msm.models import AssetCategoryMembershipTable, AssetCategoryTable
+    from msm.repositories.base import compile_markets_statement, execute_markets_operation
+    from sqlalchemy import func, select
 
     from src.runtime import start_markets_engine
+    from src.universes.sources import UniverseSourceTable
 
-    start_markets_engine()
-    category = AssetCategory.get_by_uid(category_uid)
-    if category is None or not _is_managed_identifier(category.unique_identifier):
+    runtime = start_markets_engine()
+    models = [
+        UniverseSourceTable,
+        AssetCategoryTable,
+        AssetCategoryMembershipTable,
+        AssetUniverseTable,
+    ]
+    statement = (
+        select(
+            AssetUniverseTable.uid.label("uid"),
+            AssetUniverseTable.source_uid.label("source_uid"),
+            AssetUniverseTable.asset_category_uid.label("asset_category_uid"),
+            AssetUniverseTable.is_active.label("is_active"),
+            AssetUniverseTable.created_at.label("created_at"),
+            AssetUniverseTable.updated_at.label("updated_at"),
+            UniverseSourceTable.symbol.label("symbol"),
+            UniverseSourceTable.source_url.label("source_url"),
+            AssetCategoryTable.unique_identifier.label("category_unique_identifier"),
+            AssetCategoryTable.display_name.label("display_name"),
+            AssetCategoryTable.description.label("description"),
+            func.count(AssetCategoryMembershipTable.asset_uid).label("asset_count"),
+        )
+        .select_from(AssetUniverseTable)
+        .join(UniverseSourceTable, AssetUniverseTable.source_uid == UniverseSourceTable.uid)
+        .join(
+            AssetCategoryTable,
+            AssetUniverseTable.asset_category_uid == AssetCategoryTable.uid,
+        )
+        .outerjoin(
+            AssetCategoryMembershipTable,
+            AssetCategoryMembershipTable.category_uid == AssetCategoryTable.uid,
+        )
+        .where(AssetUniverseTable.uid == uuid.UUID(str(universe_uid)))
+        .group_by(
+            AssetUniverseTable.uid,
+            UniverseSourceTable.symbol,
+            UniverseSourceTable.source_url,
+            AssetCategoryTable.uid,
+        )
+    )
+    operation = compile_markets_statement(
+        statement,
+        context=runtime.context,
+        operation="select",
+        models=models,
+        access="read",
+    )
+    rows = operation_result_rows(execute_markets_operation(operation, context=runtime.context))
+    if not rows:
         return None
-    memberships = AssetCategoryMembership.filter(category_uid=category_uid, limit=10_000)
-    assets = [Asset.get_by_uid(membership.asset_uid) for membership in memberships]
+    row = rows[0]
     return {
-        **category.model_dump(mode="json"),
-        "uid": str(category.uid),
-        "is_active": materialized_universe_is_active(category.metadata_json),
-        "source_uid": materialized_universe_source_uid(category.metadata_json),
-        "asset_uids": [str(asset.uid) for asset in assets if asset is not None],
-        "asset_identifiers": [asset.unique_identifier for asset in assets if asset is not None],
-        "asset_count": len(memberships),
+        "uid": str(row["uid"]),
+        "source_uid": str(row["source_uid"]),
+        "asset_category_uid": str(row["asset_category_uid"]),
+        "display_name": row["display_name"],
+        "symbol": row["symbol"],
+        "source_url": row["source_url"],
+        "description": row.get("description"),
+        "is_active": bool(row["is_active"]),
+        "asset_count": int(row.get("asset_count", 0)),
+        "asset_category": {
+            "uid": str(row["asset_category_uid"]),
+            "unique_identifier": row["category_unique_identifier"],
+            "display_name": row["display_name"],
+            "description": row.get("description"),
+        },
+        "created_at": row.get("created_at"),
+        "updated_at": row.get("updated_at"),
     }
 
 
-def list_materialized_universes(
+def list_asset_universes(
     *,
     limit: int = 25,
     offset: int = 0,
     search: str | None = None,
     ordering: str = "display_name",
 ) -> tuple[list[dict[str, Any]], int]:
-    from msm.api.assets import AssetCategory
+    """List registered universes by their own UID, enriched from source/category rows."""
     from msm.api.base import operation_result_rows
+    from msm.bootstrap import resolve_runtime
+    from msm.models.assets.categories import (
+        AssetCategoryMembershipTable,
+        AssetCategoryTable,
+    )
     from msm.repositories.base import compile_markets_statement, execute_markets_operation
     from sqlalchemy import func, or_, select
 
     from src.runtime import start_markets_engine
+    from src.universes.sources import UniverseSourceTable
 
-    runtime = start_markets_engine()
-    model = AssetCategory.__table__
-    statement = select(model).where(
-        model.unique_identifier.startswith(MATERIALIZED_UNIVERSE_PREFIX)
+    start_markets_engine()
+    runtime = resolve_runtime(
+        models=[
+            UniverseSourceTable,
+            AssetCategoryTable,
+            AssetCategoryMembershipTable,
+            AssetUniverseTable,
+        ],
+        row_model_name="AssetUniverse",
+    )
+    statement = (
+        select(
+            AssetUniverseTable.uid.label("uid"),
+            AssetUniverseTable.source_uid.label("source_uid"),
+            AssetUniverseTable.asset_category_uid.label("asset_category_uid"),
+            AssetUniverseTable.is_active.label("is_active"),
+            AssetUniverseTable.created_at.label("created_at"),
+            AssetUniverseTable.updated_at.label("updated_at"),
+            UniverseSourceTable.symbol.label("symbol"),
+            UniverseSourceTable.source_url.label("source_url"),
+            AssetCategoryTable.display_name.label("display_name"),
+            AssetCategoryTable.description.label("description"),
+            func.count(AssetCategoryMembershipTable.asset_uid).label("asset_count"),
+        )
+        .join(UniverseSourceTable, AssetUniverseTable.source_uid == UniverseSourceTable.uid)
+        .join(
+            AssetCategoryTable,
+            AssetUniverseTable.asset_category_uid == AssetCategoryTable.uid,
+        )
+        .outerjoin(
+            AssetCategoryMembershipTable,
+            AssetCategoryMembershipTable.category_uid == AssetCategoryTable.uid,
+        )
     )
     if search:
         pattern = f"%{search.strip()}%"
         statement = statement.where(
             or_(
-                model.display_name.ilike(pattern),
-                model.unique_identifier.ilike(pattern),
+                UniverseSourceTable.name.ilike(pattern),
+                UniverseSourceTable.symbol.ilike(pattern),
+                AssetCategoryTable.display_name.ilike(pattern),
             )
         )
+    statement = statement.group_by(
+        AssetUniverseTable.uid,
+        UniverseSourceTable.symbol,
+        UniverseSourceTable.source_url,
+        AssetCategoryTable.uid,
+    )
     count_statement = select(func.count().label("count")).select_from(statement.subquery())
     descending = ordering.startswith("-")
     ordering_key = ordering.removeprefix("-")
     ordering_columns = {
-        "display_name": model.display_name,
-        "unique_identifier": model.unique_identifier,
+        "display_name": AssetCategoryTable.display_name,
+        "symbol": UniverseSourceTable.symbol,
+        "updated_at": AssetUniverseTable.updated_at,
     }
     if ordering_key not in ordering_columns:
         raise ValueError(f"Unsupported universe ordering {ordering!r}.")
     ordering_column = ordering_columns[ordering_key]
     ordering_expression = ordering_column.desc() if descending else ordering_column.asc()
-    page_statement = statement.order_by(ordering_expression, model.uid.asc())
-    page_statement = page_statement.limit(limit).offset(offset)
+    statement = statement.order_by(ordering_expression, AssetUniverseTable.uid.asc())
+    models = [
+        UniverseSourceTable,
+        AssetCategoryTable,
+        AssetCategoryMembershipTable,
+        AssetUniverseTable,
+    ]
     page_operation = compile_markets_statement(
-        page_statement,
+        statement.limit(limit).offset(offset),
         context=runtime.context,
         operation="select",
-        models=[model],
+        models=models,
         access="read",
     )
     count_operation = compile_markets_statement(
         count_statement,
         context=runtime.context,
         operation="select",
-        models=[model],
+        models=models,
         access="read",
     )
-    category_rows = operation_result_rows(
-        execute_markets_operation(page_operation, context=runtime.context)
-    )
+    rows = operation_result_rows(execute_markets_operation(page_operation, context=runtime.context))
     count_rows = operation_result_rows(
         execute_markets_operation(count_operation, context=runtime.context)
     )
+    items = [
+        {
+            **row,
+            "uid": str(row["uid"]),
+            "source_uid": str(row["source_uid"]),
+            "asset_category_uid": str(row["asset_category_uid"]),
+            "asset_count": int(row.get("asset_count", 0)),
+        }
+        for row in rows
+    ]
     total = int(count_rows[0].get("count", 0)) if count_rows else 0
-    items = [get_materialized_universe(str(category["uid"])) for category in category_rows]
-    return [item for item in items if item is not None], total
+    return items, total
 
 
-def create_materialized_universe_configuration(
+def create_asset_universe_configuration(
     *,
     name: str,
     symbol: str,
     source_url: str,
 ) -> dict[str, Any]:
-    """Create universe identity and source configuration without running extraction."""
+    """Register explicit source/category links without extracting holdings."""
     from msm.api.assets import AssetCategory
 
     from src.runtime import start_markets_engine
     from src.universes.etf_holdings import build_holdings_asset_category_unique_identifier
     from src.universes.sources import (
+        UniverseSource,
         create_universe_source,
         list_universe_sources,
         normalize_source_values,
@@ -152,12 +264,12 @@ def create_materialized_universe_configuration(
 
     normalized = normalize_source_values(name=name, symbol=symbol, source_url=source_url)
     start_markets_engine()
-    unique_identifier = build_holdings_asset_category_unique_identifier(normalized["symbol"])
-    if AssetCategory.get_by_unique_identifier(unique_identifier) is not None:
-        raise ValueError(f"Universe for {normalized['symbol']} already exists.")
+    category_identifier = build_holdings_asset_category_unique_identifier(normalized["symbol"])
+    if AssetCategory.get_by_unique_identifier(category_identifier) is not None:
+        raise ValueError(f"AssetCategory for {normalized['symbol']} already exists.")
 
     sources, _ = list_universe_sources(search=normalized["symbol"], limit=100)
-    source = next(
+    source: UniverseSource | None = next(
         (
             candidate
             for candidate in sources
@@ -166,90 +278,134 @@ def create_materialized_universe_configuration(
         ),
         None,
     )
+    created_source = source is None
     if source is None:
         source = create_universe_source(**normalized, enabled=True)
+    elif get_asset_universe_by_source_uid(source.uid) is not None:
+        raise ValueError(f"Universe source {source.uid!s} already has a registered Asset Universe.")
     elif not source.enabled:
         source = update_universe_source(source.uid, enabled=True)
 
-    metadata_json = {
-        MATERIALIZED_UNIVERSE_METADATA_NAMESPACE: {
-            "active": True,
-            "source_uid": str(source.uid),
-        }
-    }
-    category = AssetCategory.create(
-        unique_identifier=unique_identifier,
-        display_name=normalized["name"],
-        description=f"Configured holdings universe for ETF {normalized['symbol']}.",
-        metadata_json=metadata_json,
-    )
-    created = get_materialized_universe(str(category.uid))
-    if created is None:
-        raise RuntimeError("Created universe could not be read back.")
-    return created
+    category = None
+    universe: AssetUniverse | None = None
+    try:
+        category = AssetCategory.create(
+            unique_identifier=category_identifier,
+            display_name=normalized["name"],
+            description=f"Configured holdings universe for ETF {normalized['symbol']}.",
+            metadata_json=None,
+        )
+        universe = create_asset_universe(
+            source_uid=source.uid,
+            asset_category_uid=category.uid,
+            is_active=True,
+        )
+        created = get_asset_universe_view(universe.uid)
+        if created is None:
+            raise RuntimeError("Created Asset Universe could not be read back.")
+        return created
+    except Exception:
+        if universe is not None:
+            AssetUniverse.delete(universe.uid)
+        if category is not None:
+            AssetCategory.delete(category.uid)
+        if created_source:
+            UniverseSource.delete(source.uid)
+        raise
 
 
-def update_materialized_universe(
-    category_uid: str,
+def update_asset_universe(
+    universe_uid: uuid.UUID | str,
     *,
     display_name: str | None = None,
     description: str | None = None,
-    metadata_json: dict[str, Any] | None = None,
     is_active: bool | None = None,
 ) -> dict[str, Any]:
+    """Update category presentation and universe lifecycle without metadata JSON."""
     from msm.api.assets import AssetCategory
 
-    existing = get_materialized_universe(category_uid)
+    existing = get_asset_universe_view(universe_uid)
     if existing is None:
-        raise LookupError(f"AssetCategory {category_uid} does not exist.")
-    values = {
+        raise LookupError(f"Asset Universe {universe_uid!s} does not exist.")
+    category_values = {
         key: value
         for key, value in {
             "display_name": display_name,
             "description": description,
-            "metadata_json": metadata_json,
         }.items()
         if value is not None
     }
+    if category_values:
+        AssetCategory.update(existing["asset_category_uid"], category_values)
     if is_active is not None:
-        metadata_base = metadata_json if metadata_json is not None else existing.get("metadata_json")
-        values["metadata_json"] = _metadata_with_active_state(
-            metadata_base,
-            is_active=is_active,
-        )
-    if values:
-        AssetCategory.update(category_uid, values)
-    updated = get_materialized_universe(category_uid)
+        update_asset_universe_state(universe_uid, is_active=is_active)
+    updated = get_asset_universe_view(universe_uid)
     if updated is None:
-        raise RuntimeError("Updated AssetCategory could not be read back.")
+        raise RuntimeError("Updated Asset Universe could not be read back.")
     return updated
 
 
-def delete_materialized_universe(category_uid: str) -> dict[str, Any]:
-    from msm.api.assets import AssetCategory, AssetCategoryMembership
+def delete_asset_universe(universe_uid: uuid.UUID | str) -> dict[str, Any]:
+    """Delete one registered universe and its materialization, retaining its source."""
+    from msm.api.assets import AssetCategory
+    from msm.models import AssetCategoryMembershipTable
+    from msm.repositories.asset_categories import (
+        build_delete_asset_category_memberships_for_category_operation,
+    )
+    from msm.repositories.base import execute_markets_operation
 
-    universe = get_materialized_universe(category_uid)
+    from src.market_data.configurations import bar_configurations_for_universe
+    from src.operations.signal_job_configurations import signal_job_configurations_for_universe
+    from src.runtime import start_markets_engine
+
+    universe = get_asset_universe_view(universe_uid)
     if universe is None:
-        raise LookupError(f"AssetCategory {category_uid} does not exist.")
-    memberships = AssetCategoryMembership.filter(category_uid=category_uid, limit=10_000)
-    for membership in memberships:
-        AssetCategoryMembership.delete(membership.uid)
+        raise LookupError(f"Asset Universe {universe_uid!s} does not exist.")
+    dependent_configurations = bar_configurations_for_universe(universe_uid)
+    if dependent_configurations:
+        dependencies = ", ".join(
+            f"{configuration.name} ({configuration.uid!s})"
+            for configuration in dependent_configurations
+        )
+        raise ValueError(
+            f"Asset Universe {universe_uid!s} is referenced by bar configuration(s): "
+            f"{dependencies}. Delete or change those configurations first."
+        )
+    dependent_signal_configurations = signal_job_configurations_for_universe(universe_uid)
+    if dependent_signal_configurations:
+        dependencies = ", ".join(
+            f"{configuration.name} ({configuration.uid!s})"
+            for configuration in dependent_signal_configurations
+        )
+        raise ValueError(
+            f"Asset Universe {universe_uid!s} is referenced by signal Job configuration(s): "
+            f"{dependencies}. Delete or change those configurations first."
+        )
+
+    category_uid = universe["asset_category_uid"]
+    runtime = start_markets_engine()
+    delete_memberships = build_delete_asset_category_memberships_for_category_operation(
+        runtime.context,
+        category_uid=category_uid,
+    )
+    execute_markets_operation(delete_memberships, context=runtime.context)
+    AssetUniverse.delete(universe_uid)
     AssetCategory.delete(category_uid)
     return {
-        "category_uid": category_uid,
+        "universe_uid": str(universe_uid),
+        "source_uid": universe["source_uid"],
+        "asset_category_uid": category_uid,
         "deleted": True,
-        "deleted_memberships": len(memberships),
+        "deleted_memberships": int(universe["asset_count"]),
     }
 
 
 __all__ = [
-    "MATERIALIZED_UNIVERSE_METADATA_NAMESPACE",
     "MATERIALIZED_UNIVERSE_PREFIX",
-    "create_materialized_universe_configuration",
-    "delete_materialized_universe",
-    "get_materialized_universe",
-    "list_materialized_universes",
-    "materialized_universe_is_active",
-    "materialized_universe_source_uid",
-    "update_materialized_universe",
+    "create_asset_universe_configuration",
+    "delete_asset_universe",
+    "get_asset_universe_view",
+    "list_asset_universes",
+    "require_asset_universe_links",
+    "update_asset_universe",
 ]

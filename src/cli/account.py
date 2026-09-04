@@ -29,13 +29,6 @@ def configure_register_parser(parser: argparse.ArgumentParser) -> None:
         help="Use the Alpaca paper environment (default); --no-paper selects live.",
     )
     parser.add_argument("--account-name")
-    parser.add_argument("--capture-initial-holdings", action="store_true")
-    parser.add_argument(
-        "--no-register-missing-assets",
-        dest="register_missing_assets",
-        action="store_false",
-        default=True,
-    )
     parser.add_argument("--plan-only", action="store_true")
     parser.set_defaults(handler=run_account_register_command)
 
@@ -92,8 +85,6 @@ def run_account_register_command(args: argparse.Namespace) -> int:
     result = register_alpaca_account(
         **common,
         account_name=args.account_name,
-        capture_initial_holdings=args.capture_initial_holdings,
-        register_missing_assets=args.register_missing_assets,
     )
     _print(result)
     return 0

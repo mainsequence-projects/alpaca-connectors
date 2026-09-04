@@ -19,8 +19,9 @@ def project_runtime_models() -> list[type[Any]]:
     """MetaTable models this project attaches at runtime, in rough dependency order.
 
     Includes the ms-markets asset graph the business logic touches (assets, asset types,
-    OpenFIGI provider details, asset snapshots, categories + memberships) plus the project-owned
-    Alpaca bars storage classes. ``msm.start_engine`` re-orders by foreign-key dependencies and
+    optional OpenFIGI enrichment, asset snapshots, categories + memberships) plus the
+    project-owned Alpaca identity and bars storage classes. ``msm.start_engine`` re-orders by
+    foreign-key dependencies and
     auto-includes referenced built-in tables (e.g. ``AssetTable``).
     """
     from msm.data_nodes.assets.storage import AssetSnapshotsStorage
@@ -31,21 +32,27 @@ def project_runtime_models() -> list[type[Any]]:
         AssetTypeTable,
         OpenFigiAssetDetailsTable,
     )
+    from msm_portfolios.data_nodes.signals.storage import SignalWeightsStorage
+    from msm_portfolios.models import SignalMetadataTable
 
+    from src.assets.alpaca_asset_details import project_asset_models
     from src.market_data import project_configuration_models, project_storage_models
     from src.operations import project_operation_models
-    from src.universes.sources import project_universe_models
+    from src.universes import project_universe_models
 
     return [
         AssetTypeTable,
         AssetTable,
+        *project_asset_models(),
         OpenFigiAssetDetailsTable,
         AssetSnapshotsStorage,
         AssetCategoryTable,
         AssetCategoryMembershipTable,
+        SignalMetadataTable,
+        SignalWeightsStorage,
         *project_storage_models(),
-        *project_configuration_models(),
         *project_universe_models(),
+        *project_configuration_models(),
         *project_operation_models(),
     ]
 
@@ -99,10 +106,12 @@ def portfolio_runtime_models(extra_models: list[type[Any]] | None = None) -> lis
     )
     from msm_portfolios.bootstrap import resolve_portfolio_models
 
+    from src.assets.alpaca_asset_details import project_asset_models
     from src.market_data import project_storage_models
 
     return [
         *resolve_portfolio_models(None),
+        *project_asset_models(),
         OpenFigiAssetDetailsTable,
         AssetSnapshotsStorage,
         AssetCategoryTable,

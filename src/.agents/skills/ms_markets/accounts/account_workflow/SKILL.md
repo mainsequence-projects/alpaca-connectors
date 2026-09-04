@@ -305,7 +305,7 @@ for account in accounts:
                     "target_uid": target_sleeve.uid,
                     "portfolio_uid": target_sleeve.uid,
                     "weight_notional_exposure": 0.4,
-                }
+                },
             ],
         )
     )
@@ -348,7 +348,7 @@ for account, quantities in zip(
                     "direction": 1,
                     "target_trade_time": workflow_time,
                     "extra_details": {"ticker": "ETH", "name": "Ethereum"},
-                }
+                },
             ],
         )
     )

@@ -1,27 +1,26 @@
+"""Construct Universe-backed ETF portfolios with Alpaca valuation data."""
+
 from __future__ import annotations
 
 import re
 from dataclasses import dataclass
 from typing import Any
 
-from etfhextractor import (
-    ETFHoldingsReader,
-    derive_component_weights_from_holdings,
-    resolve_asset_identifiers_by_ticker,
-)
 from etfhextractor.portfolio_publish import (
     US_EQUITY_CALENDAR_KEY,
-    build_etf_tracking_portfolio,
+    ensure_trading_calendar,
 )
 
 from src.market_data import storage_for
+from src.portfolios.alpaca_etf_signal import build_alpaca_etf_holdings_signal
 
 
 @dataclass(frozen=True, slots=True)
 class AlpacaEtfTrackingPortfolioConfig:
-    etf_ticker: str
-    provider: str | None = None
-    fund_url: str | None = None
+    """Portfolio configuration around one durable Asset Universe signal."""
+
+    universe_uid: str
+    account_uid: str
     frequency_id: str = "1d"
     feed: str = "sip"
     adjustment: str = "all"
@@ -33,20 +32,17 @@ class AlpacaEtfTrackingPortfolioConfig:
     portfolio_unique_identifier: str | None = None
     portfolio_name: str | None = None
     description: str | None = None
-    signal_validity_days: int = 90
-    min_update_interval_days: float = 1.0
-    backtest_start_days: int = 60
-    allowed_asset_classes: tuple[str, ...] | None = ("Equity",)
-    renormalize_weights: bool = True
     commission_fee: float = 0.00018
     timeout: float = 30.0
-    debug_mode: bool = True
 
 
 @dataclass(frozen=True, slots=True)
 class ResolvedEtfUniverse:
+    universe_uid: str
+    source_uid: str
+    asset_category_uid: str
     etf_ticker: str
-    provider: str | None
+    provider: str
     component_weights_by_symbol: dict[str, float]
     asset_identifiers_by_symbol: dict[str, str]
 
@@ -60,6 +56,9 @@ class ResolvedEtfUniverse:
 
     def summary(self) -> dict[str, Any]:
         return {
+            "universe_uid": self.universe_uid,
+            "source_uid": self.source_uid,
+            "asset_category_uid": self.asset_category_uid,
             "etf_ticker": self.etf_ticker,
             "provider": self.provider,
             "component_symbol_count": len(self.component_symbols),
@@ -73,6 +72,7 @@ class ResolvedEtfUniverse:
 class AlpacaEtfPortfolioPlan:
     config: AlpacaEtfTrackingPortfolioConfig
     universe: ResolvedEtfUniverse
+    universe_run_plan: Any
     source_time_index_meta_table_uid: str
     source_storage_identifier: str
     source_storage_table_name: str
@@ -82,6 +82,7 @@ class AlpacaEtfPortfolioPlan:
     def summary(self) -> dict[str, Any]:
         return {
             **self.universe.summary(),
+            "account_uid": self.config.account_uid,
             "portfolio_unique_identifier": self.portfolio_unique_identifier,
             "source_time_index_meta_table_uid": self.source_time_index_meta_table_uid,
             "source_storage_identifier": self.source_storage_identifier,
@@ -90,7 +91,6 @@ class AlpacaEtfPortfolioPlan:
             "upsample_frequency_id": self.config.upsample_frequency_id,
             "intraday_bar_interpolation_rule": self.config.intraday_bar_interpolation_rule,
             "valuation_column": self.config.valuation_column,
-            "allowed_asset_classes": self.config.allowed_asset_classes,
             "calendar_key": self.config.calendar_key,
         }
 
@@ -117,13 +117,6 @@ class AlpacaEtfPortfolioBuild:
         }
 
 
-def _normalize_ticker(value: str) -> str:
-    normalized = value.strip().upper()
-    if not normalized:
-        raise ValueError("ETF ticker must not be empty.")
-    return normalized
-
-
 def _identifier_token(value: str) -> str:
     token = re.sub(r"[^A-Z0-9]+", "_", value.strip().upper()).strip("_")
     if not token:
@@ -134,15 +127,11 @@ def _identifier_token(value: str) -> str:
 def build_alpaca_etf_tracking_portfolio_unique_identifier(
     config: AlpacaEtfTrackingPortfolioConfig,
     *,
-    etf_ticker: str | None = None,
+    etf_ticker: str,
 ) -> str:
-    """Build the Portfolio.unique_identifier for this Alpaca-backed ETF tracker.
-
-    The portfolio row identity must reflect the ETF and the price-source configuration, not just
-    the ETF ticker. The only double-underscore segment is the venue suffix, mirroring the account
-    convention: ``...__ALPACA``.
-    """
-    ticker = _identifier_token(etf_ticker or config.etf_ticker)
+    """Build identity from Universe business identity and valuation configuration."""
+    ticker = _identifier_token(etf_ticker)
+    universe_token = _identifier_token(config.universe_uid)
     bars_token = "_".join(
         [
             _identifier_token(config.frequency_id),
@@ -156,17 +145,9 @@ def build_alpaca_etf_tracking_portfolio_unique_identifier(
             _identifier_token(config.intraday_bar_interpolation_rule),
         ]
     )
-    return f"{ticker}_TRACKER_BARS_{bars_token}_INTERP_{interpolation_token}__ALPACA"
-
-
-def _resolved_provider(config: AlpacaEtfTrackingPortfolioConfig) -> str | None:
-    if config.provider is not None:
-        return config.provider.strip().lower()
-    if config.fund_url is not None:
-        return None
-    raise ValueError(
-        "ETF portfolio construction requires fund_url or an explicit provider; "
-        "ticker/provider mappings are no longer hardcoded."
+    return (
+        f"{ticker}_UNIVERSE_{universe_token}_TRACKER_BARS_{bars_token}_"
+        f"INTERP_{interpolation_token}__ALPACA"
     )
 
 
@@ -176,7 +157,7 @@ def resolve_alpaca_bars_time_index_meta_table_uid(
     feed: str = "sip",
     adjustment: str = "all",
 ) -> str:
-    """Resolve the registered Alpaca bars TimeIndexMetaTable uid for a storage triple."""
+    """Resolve the registered Alpaca bars table UID for one migrated storage profile."""
     from mainsequence.client import TimeIndexMetaTable
 
     storage = storage_for(frequency_id, feed, adjustment)
@@ -203,48 +184,6 @@ def resolve_alpaca_bars_time_index_meta_table_uid(
     return str(exact_matches[0].uid)
 
 
-def resolve_etf_component_asset_identifiers(
-    *,
-    etf_ticker: str,
-    provider: str | None = None,
-    fund_url: str | None = None,
-    timeout: float = 30.0,
-    allowed_asset_classes: tuple[str, ...] | None = ("Equity",),
-) -> ResolvedEtfUniverse:
-    """Extract ETF weights and resolve component tickers to Asset.unique_identifier values."""
-    normalized_ticker = _normalize_ticker(etf_ticker)
-    reader = ETFHoldingsReader(timeout=timeout)
-    holdings = (
-        reader.read(fund_url)
-        if fund_url is not None
-        else reader.read_ticker(normalized_ticker, provider=provider)
-    )
-    weights_by_symbol = derive_component_weights_from_holdings(
-        holdings,
-        allowed_asset_classes=allowed_asset_classes,
-    )
-    if not weights_by_symbol:
-        raise RuntimeError(f"No component weights were extracted for {normalized_ticker}.")
-
-    identifiers_by_symbol, missing, ambiguous = resolve_asset_identifiers_by_ticker(
-        component_symbols=sorted(weights_by_symbol),
-    )
-    if missing or ambiguous:
-        raise RuntimeError(
-            f"ETF {normalized_ticker} cannot be used for a portfolio until all components "
-            "resolve to one registered ms-markets asset. "
-            f"missing={missing} ambiguous={ambiguous}. Register missing symbols through "
-            "`alpaca-connectors asset register` before building the portfolio."
-        )
-
-    return ResolvedEtfUniverse(
-        etf_ticker=normalized_ticker,
-        provider=provider,
-        component_weights_by_symbol=dict(sorted(weights_by_symbol.items())),
-        asset_identifiers_by_symbol=dict(sorted(identifiers_by_symbol.items())),
-    )
-
-
 def alpaca_interpolated_prices_storage_model(
     *,
     source_time_index_meta_table_uid: str,
@@ -254,7 +193,7 @@ def alpaca_interpolated_prices_storage_model(
     upsample_frequency_id: str = "1d",
     intraday_bar_interpolation_rule: str = "ffill",
 ) -> type[Any]:
-    """Return the dynamic msm_portfolios storage model for Alpaca-derived prices."""
+    """Return the dynamic msm-portfolios storage model for Alpaca-derived prices."""
     from msm_portfolios.data_nodes.prices.storage import configured_interpolated_prices_storage
 
     source_storage = storage_for(frequency_id, feed, adjustment)
@@ -294,20 +233,47 @@ def plan_alpaca_etf_tracking_portfolio(
     *,
     start_engine: bool = True,
 ) -> AlpacaEtfPortfolioPlan:
-    """Plan the ETF holdings portfolio without writing portfolio rows or running nodes."""
+    """Resolve one registered Universe without writing assets, signals, or portfolios."""
     if start_engine:
         from src.runtime import start_portfolio_markets_engine
 
         start_portfolio_markets_engine()
 
-    normalized_ticker = _normalize_ticker(config.etf_ticker)
-    provider = _resolved_provider(config)
-    universe = resolve_etf_component_asset_identifiers(
-        etf_ticker=normalized_ticker,
-        provider=provider,
-        fund_url=config.fund_url,
+    from src.universes import (
+        asset_identifiers_by_symbol_for_universe_plan,
+        preview_asset_universe,
+    )
+
+    universe_run_plan = preview_asset_universe(
+        config.universe_uid,
+        account_uid=config.account_uid,
         timeout=config.timeout,
-        allowed_asset_classes=config.allowed_asset_classes,
+    )
+    if universe_run_plan.has_blockers():
+        missing = ", ".join(
+            universe_run_plan.registration_resolution.unresolved_symbols_from_alpaca
+        )
+        raise ValueError(
+            f"Asset Universe {config.universe_uid} cannot produce a complete signal because "
+            f"Alpaca did not resolve: {missing}."
+        )
+    identifiers_by_symbol = asset_identifiers_by_symbol_for_universe_plan(universe_run_plan)
+    missing_identifiers = sorted(
+        set(universe_run_plan.component_weights_by_symbol) - identifiers_by_symbol.keys()
+    )
+    if missing_identifiers:
+        raise RuntimeError(
+            f"Asset Universe {config.universe_uid} has no canonical Alpaca identity for: "
+            + ", ".join(missing_identifiers)
+        )
+    resolved_universe = ResolvedEtfUniverse(
+        universe_uid=universe_run_plan.universe_uid,
+        source_uid=universe_run_plan.source_uid,
+        asset_category_uid=universe_run_plan.asset_category_uid,
+        etf_ticker=universe_run_plan.holdings_plan.etf_ticker,
+        provider=universe_run_plan.holdings_plan.provider,
+        component_weights_by_symbol=dict(universe_run_plan.component_weights_by_symbol),
+        asset_identifiers_by_symbol=identifiers_by_symbol,
     )
     source_uid = config.price_source_table_uid or resolve_alpaca_bars_time_index_meta_table_uid(
         frequency_id=config.frequency_id,
@@ -327,12 +293,13 @@ def plan_alpaca_etf_tracking_portfolio(
         config.portfolio_unique_identifier
         or build_alpaca_etf_tracking_portfolio_unique_identifier(
             config,
-            etf_ticker=normalized_ticker,
+            etf_ticker=resolved_universe.etf_ticker,
         )
     )
     return AlpacaEtfPortfolioPlan(
         config=config,
-        universe=universe,
+        universe=resolved_universe,
+        universe_run_plan=universe_run_plan,
         source_time_index_meta_table_uid=source_uid,
         source_storage_identifier=source_storage.__metatable_identifier__,
         source_storage_table_name=source_storage.__table__.name,
@@ -347,65 +314,86 @@ def build_alpaca_etf_tracking_portfolio(
     run: bool = False,
     start_engine: bool = True,
 ) -> AlpacaEtfPortfolioBuild:
-    """Build an ETF-tracking portfolio graph backed by interpolated Alpaca bars.
-
-    This writes/reuses the Calendar and Portfolio rows needed by ms-markets portfolios. Set
-    ``run=True`` to execute the signal, interpolation, portfolio-values, and portfolio-weights
-    DataNodes.
-    """
+    """Build the ms-markets graph around the connector-owned Universe signal."""
     if start_engine:
         from src.runtime import start_portfolio_markets_engine
 
         start_portfolio_markets_engine()
 
+    from msm.api.portfolios import Portfolio
+    from msm_portfolios.configuration import (
+        BacktestingWeightsConfig,
+        FrontEndDetails,
+        PortfolioBuildConfiguration,
+        PortfolioConfiguration,
+        PortfolioExecutionConfiguration,
+        PortfolioMarketsConfig,
+    )
+    from msm_portfolios.data_nodes import PortfoliosDataNode
+    from msm_portfolios.rebalance_strategy.immediate_signal import ImmediateSignal
+
     plan = plan_alpaca_etf_tracking_portfolio(config, start_engine=False)
+    signal = build_alpaca_etf_holdings_signal(
+        universe_uid=config.universe_uid,
+        account_uid=config.account_uid,
+        prepared_plan=plan.universe_run_plan,
+    )
     valuation_source = build_alpaca_interpolated_prices(
         source_time_index_meta_table_uid=plan.source_time_index_meta_table_uid,
         asset_identifiers=plan.universe.asset_identifiers,
         upsample_frequency_id=config.upsample_frequency_id,
         intraday_bar_interpolation_rule=config.intraday_bar_interpolation_rule,
     )
-
+    calendar_row = ensure_trading_calendar(config.calendar_key, backtest_start_days=0)
     portfolio_name = config.portfolio_name or f"Alpaca ETF Tracker {plan.universe.etf_ticker}"
     description = config.description or (
-        f"Tracks ETF {plan.universe.etf_ticker} using etfhextractor holdings weights and "
-        f"interpolated Alpaca {config.frequency_id}/{config.feed}/{config.adjustment} bars."
+        f"Tracks registered Asset Universe {config.universe_uid} using observed ETF holdings "
+        f"weights and interpolated Alpaca {config.frequency_id}/{config.feed}/"
+        f"{config.adjustment} bars. Observation timestamps record extraction time and do not "
+        "guarantee the provider weights became economically effective at that exact time."
     )
-    external_build = build_etf_tracking_portfolio(
-        etf_ticker=plan.universe.etf_ticker,
-        provider=plan.universe.provider,
-        fund_url=config.fund_url,
-        price_source_instance=valuation_source,
-        portfolio_unique_identifier=plan.portfolio_unique_identifier,
-        portfolio_name=portfolio_name,
-        description=description,
-        valuation_column=config.valuation_column,
-        signal_name=f"{plan.universe.etf_ticker} holdings signal",
-        rebalance_strategy_name="ImmediateSignal",
-        signal_validity_days=config.signal_validity_days,
-        min_update_interval_days=config.min_update_interval_days,
-        renormalize_weights=config.renormalize_weights,
-        commission_fee=config.commission_fee,
-        calendar_key=config.calendar_key,
-        backtest_start_days=config.backtest_start_days,
-        timeout=config.timeout,
-        run=run,
-        debug_mode=config.debug_mode,
-        asset_identifiers=plan.universe.asset_identifiers,
-        allowed_asset_classes=config.allowed_asset_classes,
-        # The project runtime already includes the Alpaca storage and the full
-        # portfolio model graph; a second runtime attachment is invalid.
-        start_engine=False,
+    portfolio_configuration = PortfolioConfiguration(
+        portfolio_build_configuration=PortfolioBuildConfiguration(
+            valuation_source_instance=valuation_source,
+            valuation_column=config.valuation_column,
+            execution_configuration=PortfolioExecutionConfiguration(
+                commission_fee=config.commission_fee
+            ),
+            backtesting_weights_configuration=BacktestingWeightsConfig(
+                rebalance_strategy_instance=ImmediateSignal(calendar_key=config.calendar_key),
+                signal_weights_instance=signal,
+            ),
+        ),
+        portfolio_markets_configuration=PortfolioMarketsConfig(
+            portfolio_name=portfolio_name,
+            front_end_details=FrontEndDetails(
+                description=description,
+                signal_name=f"{plan.universe.etf_ticker} observed holdings",
+                rebalance_strategy_name="ImmediateSignal",
+            ),
+        ),
     )
+    portfolio_row = Portfolio.upsert(
+        unique_identifier=plan.portfolio_unique_identifier,
+        calendar_uid=calendar_row.uid,
+    )
+    portfolio_node = PortfoliosDataNode(portfolio_configuration=portfolio_configuration)
+    portfolio_node.set_portfolio_configuration(
+        portfolio_configuration,
+        portfolio_description=description,
+    )
+    portfolio_node.target_portfolio = portfolio_row
+    portfolio_node._explicit_portfolio_identifier = plan.portfolio_unique_identifier
 
+    run_result = portfolio_node.run() if run else None
     return AlpacaEtfPortfolioBuild(
         plan=plan,
-        calendar_row=external_build.calendar_row,
-        portfolio_row=external_build.portfolio_row,
-        signal=external_build.signal,
-        valuation_source=external_build.valuation_source,
-        portfolio_node=external_build.portfolio_node,
-        run_result=external_build.run_result,
+        calendar_row=calendar_row,
+        portfolio_row=portfolio_row,
+        signal=signal,
+        valuation_source=valuation_source,
+        portfolio_node=portfolio_node,
+        run_result=run_result,
     )
 
 
@@ -434,5 +422,4 @@ __all__ = [
     "build_alpaca_interpolated_prices",
     "plan_alpaca_etf_tracking_portfolio",
     "resolve_alpaca_bars_time_index_meta_table_uid",
-    "resolve_etf_component_asset_identifiers",
 ]

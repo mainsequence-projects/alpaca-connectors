@@ -26,13 +26,13 @@ def utc_now() -> dt.datetime:
 
 
 class UniverseSourceTable(ProjectStorageNameMixin, AlpacaMarketsMetaTableMixin, MarketsBase):
-    """One user-maintained URL that can be materialized as an AssetCategory universe."""
+    """One explicit provider extraction configuration for an Asset Universe."""
 
     __project_storage_concept__ = "universe_source"
     __markets_base_identifier__ = "UniverseSource"
     __metatable_description__ = (
         "User-maintained universe extraction sources. Each row identifies one provider URL and "
-        "symbol that can be previewed or synchronized into a separate AssetCategory."
+        "symbol that can be previewed and linked to one registered Asset Universe."
     )
     __table_args__ = markets_table_args(
         "UniverseSource",
@@ -56,7 +56,7 @@ class UniverseSourceTable(ProjectStorageNameMixin, AlpacaMarketsMetaTableMixin, 
         nullable=False,
         info={
             "label": "Symbol",
-            "description": "Normalized source symbol used to name the materialized universe.",
+            "description": "Normalized symbol used by an explicitly registered universe.",
         },
     )
     source_url: Mapped[str] = mapped_column(
@@ -73,7 +73,7 @@ class UniverseSourceTable(ProjectStorageNameMixin, AlpacaMarketsMetaTableMixin, 
         default=True,
         info={
             "label": "Enabled",
-            "description": "Whether this source is eligible for preview and synchronization.",
+            "description": "Whether this source is eligible for preview and Universe Runs.",
         },
     )
     created_at: Mapped[dt.datetime] = mapped_column(
@@ -249,6 +249,15 @@ def update_universe_source(
     current = get_universe_source(source_uid)
     if current is None:
         raise LookupError(f"Universe source {source_uid!s} does not exist.")
+    if symbol is not None and symbol.strip().upper() != current.symbol:
+        from src.universes.registry import get_asset_universe_by_source_uid
+
+        universe = get_asset_universe_by_source_uid(source_uid)
+        if universe is not None:
+            raise ValueError(
+                f"Universe source {source_uid!s} is linked to Asset Universe "
+                f"{universe.uid!s}; recreate the universe to change its symbol."
+            )
     normalized = normalize_source_values(
         name=name if name is not None else current.name,
         symbol=symbol if symbol is not None else current.symbol,
@@ -263,6 +272,14 @@ def update_universe_source(
 def delete_universe_source(source_uid: uuid.UUID | str) -> dict[str, Any]:
     if get_universe_source(source_uid) is None:
         raise LookupError(f"Universe source {source_uid!s} does not exist.")
+    from src.universes.registry import get_asset_universe_by_source_uid
+
+    universe = get_asset_universe_by_source_uid(source_uid)
+    if universe is not None:
+        raise ValueError(
+            f"Universe source {source_uid!s} is linked to Asset Universe {universe.uid!s} "
+            "and cannot be deleted."
+        )
     return UniverseSource.delete(source_uid)
 
 
@@ -318,7 +335,7 @@ def seed_default_universe_sources() -> list[UniverseSource]:
     return seeded
 
 
-def project_universe_models() -> list[type[UniverseSourceTable]]:
+def project_universe_source_models() -> list[type[UniverseSourceTable]]:
     return [UniverseSourceTable]
 
 
@@ -331,7 +348,7 @@ __all__ = [
     "list_universe_sources",
     "load_default_universe_sources",
     "normalize_source_values",
-    "project_universe_models",
+    "project_universe_source_models",
     "seed_default_universe_sources",
     "update_universe_source",
 ]

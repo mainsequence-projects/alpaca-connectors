@@ -17,6 +17,7 @@ from .routers.holdings import router as holdings_router
 from .routers.market_data import router as market_data_router
 from .routers.operations import router as operations_router
 from .routers.project_state import router as project_state_router
+from .routers.signal_jobs import router as signal_jobs_router
 from .routers.universe_sources import router as universe_sources_router
 from .routers.universes import router as universes_router
 
@@ -100,4 +101,5 @@ app.include_router(universe_sources_router)
 app.include_router(universes_router)
 app.include_router(market_data_router)
 app.include_router(bar_configurations_router)
+app.include_router(signal_jobs_router)
 app.include_router(operations_router)

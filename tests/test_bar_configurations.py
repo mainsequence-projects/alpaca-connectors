@@ -15,6 +15,7 @@ from src.market_data.alpaca_bars import AlpacaStockBarsConfig
 from src.market_data.configurations import (
     AlpacaBarsConfigurationAssetTable,
     AlpacaBarsConfigurationTable,
+    _replace_memberships,
     project_configuration_models,
     validate_configuration_scope,
 )
@@ -29,6 +30,12 @@ def test_configuration_table_has_uuid_identity_and_no_dataset_pointer() -> None:
     assert "account_uid" in table.columns
     assert "asset_source" in table.columns
     assert "universe_uid" in table.columns
+    universe_foreign_key = next(
+        foreign_key
+        for foreign_key in table.foreign_keys
+        if foreign_key.parent.name == "universe_uid"
+    )
+    assert universe_foreign_key.target_fullname == "alpaca_connectors__asset_universe.uid"
 
 
 def test_explicit_assets_use_a_normalized_composite_membership() -> None:
@@ -47,6 +54,46 @@ def test_configuration_models_are_migration_managed() -> None:
         AlpacaBarsConfigurationTable,
         AlpacaBarsConfigurationAssetTable,
     ]
+
+
+def test_explicit_asset_memberships_use_one_bulk_upsert_and_one_stale_delete() -> None:
+    configuration_uid = uuid.UUID("11111111-1111-4111-8111-111111111111")
+    asset_uids = [uuid.UUID(int=index + 1) for index in range(503)]
+    context = object()
+    returned_rows = [
+        {"configuration_uid": str(configuration_uid), "asset_uid": str(asset_uid)}
+        for asset_uid in asset_uids
+    ]
+
+    with (
+        patch(
+            "msm.bootstrap.resolve_runtime",
+            return_value=SimpleNamespace(context=context),
+        ),
+        patch(
+            "msm.repositories.crud.bulk_upsert_model",
+            return_value={"rows": returned_rows},
+        ) as bulk_upsert,
+        patch(
+            "msm.repositories.base.compile_markets_statement",
+            return_value="delete-stale-operation",
+        ) as compile_statement,
+        patch("msm.repositories.base.execute_markets_operation") as execute_operation,
+    ):
+        _replace_memberships(configuration_uid, asset_uids)
+
+    bulk_upsert.assert_called_once_with(
+        context,
+        model=AlpacaBarsConfigurationAssetTable,
+        values=[
+            {"configuration_uid": configuration_uid, "asset_uid": asset_uid}
+            for asset_uid in asset_uids
+        ],
+        conflict_columns=("configuration_uid", "asset_uid"),
+    )
+    assert len(bulk_upsert.call_args.kwargs["values"]) == 503
+    compile_statement.assert_called_once()
+    execute_operation.assert_called_once_with("delete-stale-operation", context=context)
 
 
 def test_scope_validation_owns_three_exclusive_source_shapes() -> None:

@@ -35,8 +35,9 @@ For durable universe management, the exact provider URL is stored in a user-main
 `UniverseSource` MetaTable row and passed directly to `ETFHoldingsReader.read(url)`. The repository
 does not keep a ticker list, ticker-to-provider map, or inferred universe target.
 
-The asset-registration command also retains an explicit, one-off expansion mode that requires both
-`--seed-tickers` and `--component-provider`. That operation is not durable universe configuration.
+The asset-registration command accepts exact symbols only. Provider-derived expansion exists only
+inside a configured Asset Universe Run. The source is durable; the Alpaca account is explicit
+execution input and is not part of the Universe.
 
 ## Published-Source Rule
 
@@ -64,7 +65,7 @@ alpaca-connectors universe-source create \
   --symbol IVV \
   --url "https://www.ishares.com/us/products/239726/ishares-core-sp-500-etf"
 alpaca-connectors universe-source preview <source-uid>
-alpaca-connectors universe sync --source-uid <source-uid> --execute
+alpaca-connectors universe run <universe-uid> --execute
 ```
 
 ## Important Decision

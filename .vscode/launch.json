@@ -21,7 +21,7 @@
       "env": {
         "PYTHONPATH": "${workspaceFolder}",
         "MAINSEQUENCE_AUTH_MODE": "jwt",
-        "ALPACA_CONNECTORS_CORS_ORIGINS": "http://127.0.0.1:5421"
+        "ALPACA_CONNECTORS_CORS_ORIGINS": "http://127.0.0.1:5421,http://localhost:5421"
       },
       "justMyCode": true,
       "subProcess": true
@@ -52,131 +52,6 @@
         "action": "debugWithChrome",
         "webRoot": "${workspaceFolder}/../alpacaconnectorssite-ab9d29c9-2dcb-417f-8d88-ee9c9e9c8baf"
       }
-    },
-    {
-      "name": "Register Asset From iShares Ticker",
-      "type": "python",
-      "request": "launch",
-      "program": "${workspaceFolder}/scripts/register_asset.py",
-      "args": ["--seed-tickers", "IVV", "--component-provider", "ishares"],
-      "console": "integratedTerminal",
-      "envFile": "${workspaceFolder}/.env",
-      "env": {
-        "PYTHONPATH": "${workspaceFolder}"
-      },
-      "justMyCode": true
-    },
-    {
-      "name": "Register Asset From iShares Ticker Execute",
-      "type": "python",
-      "request": "launch",
-      "program": "${workspaceFolder}/scripts/register_asset.py",
-      "args": ["--seed-tickers", "IVV", "--component-provider", "ishares", "--execute"],
-      "console": "integratedTerminal",
-      "envFile": "${workspaceFolder}/.env",
-      "env": {
-        "PYTHONPATH": "${workspaceFolder}"
-      },
-      "justMyCode": true
-    },
-    {
-      "name": "Create Holdings Category IVV",
-      "type": "python",
-      "request": "launch",
-      "program": "${workspaceFolder}/scripts/create_holdings_category.py",
-      "args": ["--etf-ticker", "IVV", "--execute"],
-      "console": "integratedTerminal",
-      "envFile": "${workspaceFolder}/.env",
-      "env": {
-        "PYTHONPATH": "${workspaceFolder}"
-      },
-      "justMyCode": true
-    },
-    {
-      "name": "Run Daily Stock Bars HOLDINGS__IVV",
-      "type": "python",
-      "request": "launch",
-      "program": "${workspaceFolder}/scripts/run_daily_stock_bars.py",
-      "args": [
-        "--asset-category-unique-identifier",
-        "HOLDINGS__IVV",
-        "--frequency-id",
-        "1d",
-        "--feed",
-        "sip",
-        "--adjustment",
-        "all"
-      ],
-      "console": "integratedTerminal",
-      "envFile": "${workspaceFolder}/.env",
-      "env": {
-        "PYTHONPATH": "${workspaceFolder}"
-      },
-      "justMyCode": true
-    },
-    {
-      "name": "Run Daily Stock Bars NVDA",
-      "type": "python",
-      "request": "launch",
-      "program": "${workspaceFolder}/scripts/run_daily_stock_bars.py",
-      "args": [
-        "--tickers",
-        "NVDA",
-        "--frequency-id",
-        "1d",
-        "--feed",
-        "sip",
-        "--adjustment",
-        "all"
-      ],
-      "console": "integratedTerminal",
-      "envFile": "${workspaceFolder}/.env",
-      "env": {
-        "PYTHONPATH": "${workspaceFolder}"
-      },
-      "justMyCode": true
-    },
-    {
-      "name": "Run Alpaca Connectors API",
-      "type": "python",
-      "request": "launch",
-      "module": "uvicorn",
-      "args": [
-        "api.app.main:app",
-        "--host",
-        "127.0.0.1",
-        "--port",
-        "8001",
-        "--reload"
-      ],
-      "console": "integratedTerminal",
-      "envFile": "${workspaceFolder}/.env",
-      "env": {
-        "PYTHONPATH": "${workspaceFolder}",
-        "API_CORS_ALLOW_ORIGINS": "http://localhost:5173"
-      },
-      "justMyCode": true
-    },
-    {
-      "name": "Run Alpaca Connectors API (port 8002)",
-      "type": "python",
-      "request": "launch",
-      "module": "uvicorn",
-      "args": [
-        "api.app.main:app",
-        "--host",
-        "127.0.0.1",
-        "--port",
-        "8002",
-        "--reload"
-      ],
-      "console": "integratedTerminal",
-      "envFile": "${workspaceFolder}/.env",
-      "env": {
-        "PYTHONPATH": "${workspaceFolder}",
-        "API_CORS_ALLOW_ORIGINS": "http://localhost:5173"
-      },
-      "justMyCode": true
     }
   ],
   "compounds": [

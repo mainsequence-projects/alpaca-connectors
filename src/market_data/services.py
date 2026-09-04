@@ -174,67 +174,54 @@ def query_price_observations(
         execute_markets_operation(count_operation, context=runtime.context)
     )
     total = int(count_rows[0].get("count", 0)) if count_rows else 0
-    from msm.api.assets import Asset
+    from src.assets.resolution import assets_by_unique_identifiers
 
-    asset_uid_by_identifier: dict[str, str | None] = {}
+    identifiers = list(dict.fromkeys(str(row["asset_identifier"]) for row in rows))
+    assets_by_identifier = assets_by_unique_identifiers(identifiers)
     for row in rows:
         identifier = str(row["asset_identifier"])
-        if identifier not in asset_uid_by_identifier:
-            asset = Asset.get_by_unique_identifier(identifier)
-            asset_uid_by_identifier[identifier] = str(asset.uid) if asset else None
-        row["asset_uid"] = asset_uid_by_identifier[identifier]
+        asset = assets_by_identifier.get(identifier)
+        row["asset_uid"] = str(asset.uid) if asset else None
     return rows, total
 
 
 def _asset_identifiers_from_uids(asset_uids: list[str]) -> list[str]:
-    from msm.api.assets import Asset
+    from src.assets.resolution import assets_by_uids
 
-    identifiers: list[str] = []
-    missing: list[str] = []
-    for asset_uid in asset_uids:
-        asset = Asset.get_by_uid(asset_uid)
-        if asset is None:
-            missing.append(str(asset_uid))
-        else:
-            identifiers.append(asset.unique_identifier)
+    assets = assets_by_uids(asset_uids)
+    missing = [str(asset_uid) for asset_uid in asset_uids if str(asset_uid) not in assets]
     if missing:
         raise LookupError(f"These Asset UIDs do not exist: {sorted(missing)!r}")
-    return identifiers
+    return [assets[str(asset_uid)].unique_identifier for asset_uid in asset_uids]
 
 
-def _asset_identifiers_from_universe_uid(universe_uid: str) -> tuple[list[str], str]:
-    from msm.api.assets import AssetCategory
-
+def _asset_identifiers_from_universe_uid(
+    universe_uid: str,
+) -> tuple[list[str], str, str]:
     from src.assets.resolution import asset_unique_identifiers_for_category
-    from src.universes import materialized_universe_is_active
+    from src.universes import require_asset_universe_links
 
-    category = AssetCategory.get_by_uid(universe_uid)
-    if category is None:
-        raise LookupError(f"AssetCategory {universe_uid!s} does not exist.")
-    if not materialized_universe_is_active(category.metadata_json):
+    universe, _source, category = require_asset_universe_links(universe_uid)
+    if not universe.is_active:
         raise ValueError(
-            f"AssetCategory {universe_uid!s} is inactive and cannot be used for market-data updates."
+            f"Asset Universe {universe_uid!s} is inactive and cannot be used for market-data "
+            "updates."
         )
     return (
         asset_unique_identifiers_for_category(category.unique_identifier),
         category.unique_identifier,
+        str(category.uid),
     )
 
 
 def _asset_uids_from_identifiers(asset_identifiers: list[str]) -> list[str]:
-    from msm.api.assets import Asset
+    from src.assets.resolution import assets_by_unique_identifiers
 
-    asset_uids: list[str] = []
-    missing: list[str] = []
-    for identifier in asset_identifiers:
-        asset = Asset.get_by_unique_identifier(identifier)
-        if asset is None:
-            missing.append(identifier)
-        else:
-            asset_uids.append(str(asset.uid))
+    assets = assets_by_unique_identifiers(asset_identifiers)
+    missing = [identifier for identifier in asset_identifiers if identifier not in assets]
     if missing:
         raise LookupError(f"These Asset identifiers do not exist: {sorted(missing)!r}")
-    return asset_uids
+    return [str(assets[identifier].uid) for identifier in asset_identifiers]
 
 
 def build_market_data_update(
@@ -275,6 +262,7 @@ def build_market_data_update(
     dataset = _dataset_from_storage(triple, storage)
     source_snapshot: dict[str, Any] | None = None
     category_identifier: str | None = None
+    asset_category_uid: str | None = None
     runtime_config_values: dict[str, Any] = {
         "frequency_id": configuration.frequency_id,
         "feed": configuration.feed,
@@ -286,7 +274,7 @@ def build_market_data_update(
         identifiers = _asset_identifiers_from_uids(asset_uids)
         runtime_config_values["asset_list"] = identifiers
     elif configuration.asset_source == "universe":
-        identifiers, category_identifier = _asset_identifiers_from_universe_uid(
+        identifiers, category_identifier, asset_category_uid = _asset_identifiers_from_universe_uid(
             str(configuration.universe_uid)
         )
         asset_uids = _asset_uids_from_identifiers(identifiers)
@@ -321,7 +309,8 @@ def build_market_data_update(
         "universe_uid": (
             str(configuration.universe_uid) if configuration.universe_uid is not None else None
         ),
-        "universe_unique_identifier": category_identifier,
+        "asset_category_unique_identifier": category_identifier,
+        "asset_category_uid": asset_category_uid,
         "source_snapshot": source_snapshot,
         "update_hash": node.update_hash,
         "hash_namespace": hash_namespace,
@@ -345,7 +334,6 @@ def resolve_market_data_update(
 def execute_market_data_update(
     *,
     configuration_uid: uuid.UUID | str,
-    force_update: bool = True,
     hash_namespace: str | None = None,
 ) -> dict[str, Any]:
     from src.account.services import get_account_registration
@@ -368,10 +356,7 @@ def execute_market_data_update(
         credentials=credentials,
         paper=bool(registration["is_paper"]),
     )
-    error_on_last_update, result = node.run(
-        debug_mode=True,
-        force_update=force_update,
-    )
+    error_on_last_update, result = node.run()
     if error_on_last_update:
         raise RuntimeError("Alpaca market-data update reported an error.")
     return {

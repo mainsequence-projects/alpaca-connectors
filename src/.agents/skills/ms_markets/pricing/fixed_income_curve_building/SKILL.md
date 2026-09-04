@@ -245,9 +245,7 @@ class ExampleFixingsNode(FixingRatesNode):
         )
 
 
-node = ExampleFixingsNode(
-    IndexFixingConfiguration(index_unique_identifiers=["USD-SOFR-3M"])
-)
+node = ExampleFixingsNode(IndexFixingConfiguration(index_unique_identifiers=["USD-SOFR-3M"]))
 node.run(debug_mode=True, force_update=True)
 ```
 
@@ -293,9 +291,7 @@ class ExampleDiscountCurveNode(DiscountCurvesNode):
         )
 
 
-node = ExampleDiscountCurveNode(
-    CurveConfig(curve_unique_identifier="USD-SOFR-3M-DISCOUNT")
-)
+node = ExampleDiscountCurveNode(CurveConfig(curve_unique_identifier="USD-SOFR-3M-DISCOUNT"))
 node.run(debug_mode=True, force_update=True)
 ```
 

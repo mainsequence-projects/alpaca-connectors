@@ -7,25 +7,25 @@ user-maintained universes, and analytical portfolios to Main Sequence and ms-mar
 
 - **Project State:** API health, capability catalog, migrated datasets, account count, and
   universe-source count.
-- **Assets:** strict Alpaca and OpenFIGI resolution and Main Sequence public-asset registration.
+- **Assets:** provider-native Alpaca UUID identity, required Alpaca details, and optional OpenFIGI enrichment.
 - **Universe Sources:** durable user-maintained extraction URLs in the project
   `UniverseSource` MetaTable.
-- **Universes:** provider-derived holdings materialized as managed ms-markets `AssetCategory`
-  memberships.
+- **Universes:** connector-owned `AssetUniverse` registrations linking one explicit source to one
+  ms-markets `AssetCategory` materialization target through real foreign keys.
 - **Market Data:** maintain reusable bar configurations and query or publish Alpaca OHLCV
   observations in migrated asset-indexed tables.
 - **Accounts:** register and maintain Alpaca accounts using Main Sequence Secret names only.
 - **Holdings:** capture Alpaca positions and cash as immutable ms-markets account snapshots.
-- **Portfolios:** build analytical ETF-tracking portfolios from extracted weights and Alpaca bars.
+- **Portfolios:** publish scheduled Universe-backed ETF signals and build analytical ETF-tracking
+  portfolios from extracted weights and Alpaca bars.
 
 ETF extraction is supplied by `etfhextractor`; it is an input to Universes and Portfolios, not the
-project's top-level ontology. The Streamlit work is intentionally unchanged and is not part of this
-backend refactor.
+project's top-level ontology.
 
 ## Repository Boundaries
 
 - `src/assets/`: instrument discovery, FIGI resolution, and strict registration.
-- `src/universes/`: durable source rows, extraction preview, and category materialization.
+- `src/universes/`: source configurations, registered Asset Universes, and category materialization.
 - `src/market_data/`: migrated price storage, updater, queries, and account-backed execution.
 - `src/account/`: account identity, Secret-name resolution, registration, and refresh.
 - `src/holdings/`: Alpaca-position translation and canonical snapshot publication.
@@ -36,8 +36,8 @@ backend refactor.
 - `.mainsequence/workflows/`: backend-validated Job and FastAPI deployment declarations.
 - `docs/`: architecture and operating instructions.
 
-The repository currently provides backend surfaces only. A future static application can consume
-the FastAPI collection and discovery contracts without moving business logic into a frontend.
+The sibling Command Center static application consumes the FastAPI collection and discovery
+contracts without moving business logic into the frontend.
 
 ## Install And Migrate
 
@@ -70,7 +70,7 @@ alpaca-connectors account refresh <ACCOUNT_UID>
 alpaca-connectors holdings capture --account-uid <ACCOUNT_UID> --execute
 ```
 
-Manage extraction targets and materialized universes:
+Manage extraction targets and registered universes:
 
 ```bash
 alpaca-connectors universe-source list
@@ -79,9 +79,15 @@ alpaca-connectors universe-source create \
   --symbol IVV \
   --url "https://www.ishares.com/us/products/239726/ishares-core-sp-500-etf"
 alpaca-connectors universe-source preview <SOURCE_UID>
-alpaca-connectors universe sync --source-uid <SOURCE_UID> --execute
 alpaca-connectors universe list
+alpaca-connectors universe run <UNIVERSE_UID>
+alpaca-connectors universe run <UNIVERSE_UID> --execute
 ```
+
+An executed Universe run extracts once, bulk-registers missing Alpaca assets, bulk-replaces the
+linked category membership, and publishes the complete observed weights as one canonical
+`SignalWeightsStorage` batch. `universe_uid` defines signal identity; the required `account_uid`
+is execution configuration only.
 
 Create a reusable update configuration and run it:
 
@@ -106,12 +112,34 @@ The FastAPI update action queues the generic `Alpaca Bars Update` Job with only 
 configuration UID. Its JobRun can be polled at `/v1/operations/job-runs/{job_run_uid}`; the API
 does not execute the bars update in its own process.
 
+Create one dedicated scheduled Job for a Universe-backed signal:
+
+```bash
+alpaca-connectors signal create \
+  --name "Daily S&P 500 observation" \
+  --universe-uid <UNIVERSE_UID> \
+  --account-uid <ACCOUNT_UID> \
+  --schedule-type interval \
+  --schedule-every 1 \
+  --schedule-period days
+alpaca-connectors signal run <CONFIGURATION_UID>
+```
+
+The JobRun receives no signal arguments. Its launcher resolves the stored configuration through
+`JOB_RUN_UID` and the owning Job. Each configuration owns one Job. The current CodeRepositoryBranch
+resolves Environment scope automatically; the user never supplies an Environment UID.
+
 Exact asset registration remains independently available:
 
 ```bash
-alpaca-connectors asset register --symbols NVDA,AAPL
-alpaca-connectors asset register --seed-tickers IVV --component-provider ishares --execute
+alpaca-connectors asset register --account-uid <ACCOUNT_UID> --symbols NVDA,AAPL
 ```
+
+Provider-derived constituent registration belongs to a configured Asset Universe. A Universe is
+the durable ETF holdings source used to resolve current constituents and weights. Run receives an
+Alpaca account as serialized signal-updater runtime configuration so scheduled execution can
+resolve its Secret names; the account is not stored on the Universe and does not change the final
+signal UID.
 
 ## API
 
@@ -125,7 +153,7 @@ debugging enabled. See [the development workflow](docs/operations/development.md
 
 The API exposes `/v1/accounts`, account holdings, `/v1/assets`, `/v1/universe-sources`,
 `/v1/universes`, `/v1/market-data/bar-configurations`, `/v1/market-data/datasets`,
-`/v1/operations/job-runs/{job_run_uid}`, and `/v1/project-state`. Collections use
+`/v1/signal-jobs`, `/v1/operations/job-runs/{job_run_uid}`, and `/v1/project-state`. Collections use
 authoritative `pageInfo`; selectable collections have separate resource-discovery endpoints.
 Main Sequence injects the authenticated request identity in deployed FastAPI requests.
 

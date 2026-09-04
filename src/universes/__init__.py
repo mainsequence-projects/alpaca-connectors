@@ -1,30 +1,38 @@
-"""Asset-universe construction and synchronization capability."""
+"""Asset-universe registration, configuration, and materialization capability."""
 
 from .etf_holdings import (
     SUPPORTED_COMPONENT_PROVIDERS,
-    EtfExpansionRequest,
-    EtfExpansionResult,
-    ExpandedSymbolUniverse,
     build_holdings_asset_category_plan,
     build_holdings_asset_category_unique_identifier,
-    expand_etf_seed_symbols,
-    sync_holdings_asset_category,
 )
 from .materialized import (
-    MATERIALIZED_UNIVERSE_METADATA_NAMESPACE,
-    create_materialized_universe_configuration,
-    delete_materialized_universe,
-    get_materialized_universe,
-    list_materialized_universes,
-    materialized_universe_is_active,
-    materialized_universe_source_uid,
-    update_materialized_universe,
+    MATERIALIZED_UNIVERSE_PREFIX,
+    create_asset_universe_configuration,
+    delete_asset_universe,
+    get_asset_universe_view,
+    list_asset_universes,
+    require_asset_universe_links,
+    update_asset_universe,
+)
+from .registry import (
+    AssetUniverse,
+    AssetUniverseTable,
+    create_asset_universe,
+    get_asset_universe,
+    get_asset_universe_by_category_uid,
+    get_asset_universe_by_source_uid,
+    project_asset_universe_models,
+    update_asset_universe_state,
 )
 from .services import (
-    preview_materialized_universe,
+    AssetUniverseRunPlan,
+    AssetUniverseRunResult,
+    asset_identifiers_by_symbol_for_universe_plan,
+    asset_identifiers_for_universe_plan,
+    materialize_asset_universe,
+    preview_asset_universe,
     preview_universe_source,
-    run_materialized_universe,
-    sync_universe_source,
+    run_asset_universe,
 )
 from .sources import (
     UniverseSource,
@@ -34,38 +42,54 @@ from .sources import (
     get_universe_source,
     list_universe_sources,
     load_default_universe_sources,
+    project_universe_source_models,
     seed_default_universe_sources,
     update_universe_source,
 )
 
+
+def project_universe_models() -> list[type]:
+    """Project-owned universe MetaTables in parent-before-child order."""
+    return [
+        *project_universe_source_models(),
+        *project_asset_universe_models(),
+    ]
+
+
 __all__ = [
-    "MATERIALIZED_UNIVERSE_METADATA_NAMESPACE",
+    "MATERIALIZED_UNIVERSE_PREFIX",
     "SUPPORTED_COMPONENT_PROVIDERS",
-    "EtfExpansionRequest",
-    "EtfExpansionResult",
-    "ExpandedSymbolUniverse",
-    "build_holdings_asset_category_plan",
-    "build_holdings_asset_category_unique_identifier",
-    "expand_etf_seed_symbols",
+    "AssetUniverse",
+    "AssetUniverseRunPlan",
+    "AssetUniverseRunResult",
+    "AssetUniverseTable",
     "UniverseSource",
     "UniverseSourceTable",
+    "asset_identifiers_by_symbol_for_universe_plan",
+    "asset_identifiers_for_universe_plan",
+    "build_holdings_asset_category_plan",
+    "build_holdings_asset_category_unique_identifier",
+    "create_asset_universe",
+    "create_asset_universe_configuration",
     "create_universe_source",
-    "create_materialized_universe_configuration",
-    "delete_materialized_universe",
+    "delete_asset_universe",
     "delete_universe_source",
+    "get_asset_universe",
+    "get_asset_universe_by_category_uid",
+    "get_asset_universe_by_source_uid",
+    "get_asset_universe_view",
     "get_universe_source",
-    "get_materialized_universe",
-    "list_materialized_universes",
-    "materialized_universe_is_active",
-    "materialized_universe_source_uid",
+    "list_asset_universes",
     "list_universe_sources",
     "load_default_universe_sources",
+    "materialize_asset_universe",
+    "preview_asset_universe",
     "preview_universe_source",
-    "preview_materialized_universe",
-    "run_materialized_universe",
+    "project_universe_models",
+    "require_asset_universe_links",
+    "run_asset_universe",
     "seed_default_universe_sources",
-    "sync_holdings_asset_category",
-    "sync_universe_source",
+    "update_asset_universe",
+    "update_asset_universe_state",
     "update_universe_source",
-    "update_materialized_universe",
 ]

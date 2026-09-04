@@ -28,8 +28,10 @@ UTC = dt.timezone.utc
 
 _COMMON_STEPS: tuple[tuple[str, str], ...] = (
     ("prepare_scope", "Prepare registration scope"),
-    ("load_alpaca_assets", "Load Alpaca credentials and asset catalog"),
-    ("resolve_openfigi_identities", "Resolve OpenFIGI identities"),
+    ("resolve_account", "Resolve registered Alpaca account"),
+    ("load_alpaca_assets", "Load Alpaca asset catalog"),
+    ("resolve_alpaca_identities", "Resolve Alpaca asset identities"),
+    ("enrich_openfigi_details", "Enrich optional OpenFIGI details"),
     ("check_existing_assets", "Check existing Main Sequence assets"),
 )
 _FINAL_STEPS: dict[OperationAction, tuple[tuple[str, str], ...]] = {

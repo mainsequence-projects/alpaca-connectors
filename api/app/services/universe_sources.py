@@ -8,7 +8,6 @@ from src.universes import (
     get_universe_source,
     list_universe_sources,
     preview_universe_source,
-    sync_universe_source,
     update_universe_source,
 )
 
@@ -68,23 +67,11 @@ def preview_source(source_uid: str, *, timeout: float) -> UniverseSourcePreviewR
     )
 
 
-def sync_source(source_uid: str, *, timeout: float) -> dict:
-    result = sync_universe_source(source_uid, timeout=timeout)
-    return {
-        "source_uid": source_uid,
-        "unique_identifier": result.unique_identifier,
-        "display_name": result.display_name,
-        "asset_uids": [str(uid) for uid in result.asset_uids],
-        "asset_count": len(result.asset_uids),
-    }
-
-
 __all__ = [
     "create_source",
     "delete_source",
     "get_source",
     "list_sources",
     "preview_source",
-    "sync_source",
     "update_source",
 ]

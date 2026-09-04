@@ -5,8 +5,6 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from src.universes import SUPPORTED_COMPONENT_PROVIDERS
-
 
 def _normalize_symbol_list(values: list[str] | None) -> list[str] | None:
     if values is None:
@@ -38,6 +36,8 @@ class ProjectConfigurationResponse(BaseModel):
     supported_component_providers: list[str]
     migrated_market_data_profiles: list[str]
     universe_sources_are_user_managed: bool = True
+    organization_environment_uid: str | None = None
+    organization_environment_name: str | None = None
     request_user_uid: str | None = None
     registered_account_count: int = 0
     has_registered_account: bool = False
@@ -49,49 +49,33 @@ class ProjectConfigurationResponse(BaseModel):
 class AssetRegistrationRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    symbols: list[str] | None = Field(
-        default=None,
-        description="Exact symbols to resolve against Alpaca and FIGI without component extraction.",
+    account_uid: str = Field(
+        min_length=1,
+        description=(
+            "Registered Alpaca Account UID whose stored Main Sequence Secret references are used "
+            "for provider access."
+        ),
+    )
+    symbols: list[str] = Field(
+        min_length=1,
+        description="Exact symbols to resolve against Alpaca without component extraction.",
         examples=[["AAPL", "MSFT", "NVDA"]],
-    )
-    seed_tickers: list[str] | None = Field(
-        default=None,
-        description="ETF seed tickers used for holdings expansion.",
-        examples=[["IVV"]],
-    )
-    component_provider: str | None = Field(
-        default=None,
-        description="Holdings provider used with seed_tickers.",
-        examples=["ishares"],
-    )
-    include_non_tradable: bool = Field(
-        default=False,
-        description="Include Alpaca assets that are active but not tradable.",
     )
     timeout: float = Field(
         default=30.0,
         gt=0,
         le=300.0,
-        description="HTTP timeout in seconds for Alpaca, OpenFIGI, and provider requests.",
+        description="HTTP timeout in seconds for Alpaca and optional enrichment requests.",
     )
 
     @model_validator(mode="after")
     def validate_scope(self) -> "AssetRegistrationRequest":
-        self.symbols = _normalize_symbol_list(self.symbols)
-        self.seed_tickers = _normalize_symbol_list(self.seed_tickers)
-        if self.symbols and self.seed_tickers:
-            raise ValueError("Use either symbols or seed_tickers, not both.")
-        if not self.symbols and not self.seed_tickers:
-            raise ValueError("Either symbols or seed_tickers must be provided.")
-        if self.seed_tickers and self.component_provider is None:
-            raise ValueError("component_provider is required when seed_tickers are provided.")
-        if self.component_provider and not self.seed_tickers:
-            raise ValueError("seed_tickers are required when component_provider is provided.")
-        if self.component_provider and self.component_provider not in SUPPORTED_COMPONENT_PROVIDERS:
-            raise ValueError(
-                "Unsupported component_provider. Supported values: "
-                + ", ".join(SUPPORTED_COMPONENT_PROVIDERS)
-            )
+        self.account_uid = self.account_uid.strip()
+        if not self.account_uid:
+            raise ValueError("account_uid is required.")
+        self.symbols = _normalize_symbol_list(self.symbols) or []
+        if not self.symbols:
+            raise ValueError("At least one exact symbol must be provided.")
         return self
 
 
@@ -100,9 +84,9 @@ class AssetRegistrationDiscoveryResponse(BaseModel):
     plan_summary: dict[str, Any]
     resolution_summary: dict[str, Any]
     can_register: bool
-    unresolved_symbols: list[str]
     missing_symbols_from_alpaca: list[str]
     missing_symbols_to_register: list[str]
+    openfigi_unmatched_symbols: list[str]
     warnings_by_symbol: dict[str, str]
 
 
@@ -113,9 +97,8 @@ class AssetRegistrationExecuteResponse(BaseModel):
     assets_by_symbol: dict[str, str]
     existing_asset_uids_by_symbol: dict[str, str]
     created_asset_uids_by_symbol: dict[str, str]
-    unresolved_symbols: list[str]
-    not_registered_missing_figi_symbols: list[str]
     not_registered_missing_alpaca_symbols: list[str]
+    openfigi_unmatched_symbols: list[str]
     warnings_by_symbol: dict[str, str]
 
 
@@ -196,8 +179,6 @@ class AccountRegistrationRequest(BaseModel):
     environment: Literal["paper", "live"] = "paper"
     api_key_secret_name: str = Field(min_length=1, max_length=255)
     secret_key_secret_name: str = Field(min_length=1, max_length=255)
-    capture_initial_holdings: bool = False
-    register_missing_assets: bool = True
 
 
 class AccountUpdateRequest(BaseModel):
@@ -280,9 +261,9 @@ class BulkActionRequest(BaseModel):
 
 
 class HoldingsCaptureRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    """Holdings capture has no relaxations; complete asset registration is mandatory."""
 
-    register_missing_assets: bool = True
+    model_config = ConfigDict(extra="forbid")
 
 
 class HoldingsCaptureResponse(BaseModel):
@@ -291,7 +272,6 @@ class HoldingsCaptureResponse(BaseModel):
     time_index: Any
     holdings_rows: int
     unresolved_symbols: list[str]
-    skipped_non_equity_symbols: list[str]
 
 
 class UniverseSourceCreateRequest(BaseModel):
@@ -340,22 +320,21 @@ class UniverseSourcePreviewResponse(BaseModel):
     has_blockers: bool
 
 
-class MaterializedUniverseUpdateRequest(BaseModel):
+class AssetUniverseUpdateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     display_name: str | None = Field(default=None, min_length=1, max_length=255)
     description: str | None = None
-    metadata_json: dict[str, Any] | None = None
     is_active: bool | None = None
 
     @model_validator(mode="after")
-    def require_change(self) -> "MaterializedUniverseUpdateRequest":
+    def require_change(self) -> "AssetUniverseUpdateRequest":
         if all(getattr(self, field_name) is None for field_name in self.__class__.model_fields):
             raise ValueError("At least one universe display field must be provided.")
         return self
 
 
-class MaterializedUniverseCreateRequest(BaseModel):
+class AssetUniverseCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: str = Field(min_length=1, max_length=255)
@@ -363,18 +342,26 @@ class MaterializedUniverseCreateRequest(BaseModel):
     source_url: str = Field(min_length=1, max_length=2048)
 
 
-class MaterializedUniverseResponse(BaseModel):
-    model_config = ConfigDict(extra="allow")
-
+class AssetCategorySummaryResponse(BaseModel):
     uid: str
     unique_identifier: str
     display_name: str
     description: str | None = None
+
+
+class AssetUniverseResponse(BaseModel):
+    uid: str
+    source_uid: str
+    asset_category_uid: str
+    display_name: str
+    symbol: str
+    source_url: str
+    description: str | None = None
     is_active: bool
-    source_uid: str | None = None
-    asset_uids: list[str]
-    asset_identifiers: list[str]
     asset_count: int
+    asset_category: AssetCategorySummaryResponse
+    created_at: Any
+    updated_at: Any
 
 
 class BarConfigurationCreateRequest(BaseModel):
@@ -467,6 +454,126 @@ class BarConfigurationResolutionResponse(BaseModel):
 
 
 class BarConfigurationUpdateAcceptedResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    configuration_uid: str
+    job_uid: str
+    job_run_uid: str
+    status: str
+    status_url: str
+    poll_after_ms: int = 1000
+
+
+class SignalJobConfigurationCreateRequest(BaseModel):
+    """Create one durable signal configuration and its dedicated platform Job."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1, max_length=255)
+    description: str | None = None
+    universe_uid: str = Field(min_length=1)
+    account_uid: str = Field(min_length=1)
+    enabled: bool = True
+    schedule_type: Literal["interval", "crontab"]
+    schedule_every: int | None = Field(default=None, gt=0)
+    schedule_period: Literal["seconds", "minutes", "hours", "days"] | None = None
+    schedule_expression: str | None = Field(default=None, max_length=128)
+    schedule_start_time: dt.datetime | None = None
+    cpu_request: str = "0.25"
+    memory_request: str = "0.5"
+    max_runtime_seconds: int = Field(default=3600, gt=0)
+    spot: bool = False
+
+    @model_validator(mode="after")
+    def validate_schedule_shape(self) -> "SignalJobConfigurationCreateRequest":
+        if self.schedule_type == "interval":
+            if self.schedule_every is None or self.schedule_period is None:
+                raise ValueError("interval schedule requires schedule_every and schedule_period.")
+            if self.schedule_expression is not None:
+                raise ValueError("interval schedule forbids schedule_expression.")
+        elif (
+            not self.schedule_expression
+            or self.schedule_every is not None
+            or self.schedule_period is not None
+        ):
+            raise ValueError(
+                "crontab schedule requires schedule_expression and forbids interval fields."
+            )
+        return self
+
+
+class SignalJobConfigurationUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str | None = Field(default=None, min_length=1, max_length=255)
+    description: str | None = None
+    universe_uid: str | None = None
+    account_uid: str | None = None
+    enabled: bool | None = None
+    schedule_type: Literal["interval", "crontab"] | None = None
+    schedule_every: int | None = Field(default=None, gt=0)
+    schedule_period: Literal["seconds", "minutes", "hours", "days"] | None = None
+    schedule_expression: str | None = Field(default=None, max_length=128)
+    schedule_start_time: dt.datetime | None = None
+    cpu_request: str | None = None
+    memory_request: str | None = None
+    max_runtime_seconds: int | None = Field(default=None, gt=0)
+    spot: bool | None = None
+
+    @model_validator(mode="after")
+    def require_change(self) -> "SignalJobConfigurationUpdateRequest":
+        if not self.model_fields_set:
+            raise ValueError("At least one signal Job configuration field must be provided.")
+        return self
+
+
+class SignalJobConfigurationResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    uid: str
+    name: str
+    description: str | None
+    signal_uid: str
+    universe_uid: str
+    account_uid: str
+    job_uid: str | None
+    enabled: bool
+    schedule_type: Literal["interval", "crontab"]
+    schedule_every: int | None
+    schedule_period: Literal["seconds", "minutes", "hours", "days"] | None
+    schedule_expression: str | None
+    schedule_start_time: dt.datetime | None
+    cpu_request: str
+    memory_request: str
+    max_runtime_seconds: int
+    spot: bool
+    lifecycle_state: Literal["provisioning", "ready", "paused", "error", "deleting"]
+    last_error: str | None
+    job_image_status: str | None = None
+    job_automatic_deployment: bool | None = None
+    latest_run_status: str | None = None
+    latest_run_at: dt.datetime | None = None
+    created_at: dt.datetime
+    updated_at: dt.datetime
+
+
+class SignalJobRunResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    uid: str
+    job_uid: str
+    job_name: str
+    status: str
+    execution_start: dt.datetime | None
+    execution_end: dt.datetime | None
+    commit_hash: str | None
+    runtime_image_uid: str | None
+    runtime_image_digest: str | None
+    logs_url: str | None
+    failure_message: str | None
+
+
+class SignalJobRunAcceptedResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     configuration_uid: str

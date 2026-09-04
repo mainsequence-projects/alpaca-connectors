@@ -1,6 +1,6 @@
 ---
 name: code-repository-design
-description: Design, explain, review, and maintain a Main Sequence CodeRepository architecture and its connected CodeRepository Blueprint. Use for initial CodeRepository design, organization-environment architecture, architectural changes, ontology maintenance, Blueprint review or reconciliation, and implementation handoff across MetaTables, TimeIndexMetaTables, TimeIndexTableUpdaters, jobs, APIs, CLI commands, code-repository-to-agent skills, and static sites.
+description: Design, explain, review, and maintain a Main Sequence CodeRepository architecture and its connected CodeRepository Blueprint. Use for initial CodeRepository design, organization-environment architecture, architectural changes, ontology maintenance, Blueprint review or reconciliation, and implementation handoff across MetaTables, TimeIndexMetaTables, TimeIndexTableUpdaters, jobs, APIs, CLI commands, code-repository-to-agent skills, and static sites including repository-backed navigation-mask intent.
 ---
 
 # Main Sequence CodeRepository Design
@@ -33,8 +33,9 @@ Do not own:
 - secret values or runtime credentials.
 
 Use the SDK and domain execution skills after the design is accepted. For a
-static-site frontend, its repository-selected frontend toolchain owns the implementation.
-The MCP `resource-release` skill owns shared release
+static-site frontend, the complete version-matched skill bundle shipped by the
+CodeRepository's installed `@dev-mainsequence/command-center-sdk` package owns the
+frontend implementation. The MCP `resource-release` skill owns shared release
 creation, configuration, deployment, and state observation; the `static-site`
 skill owns only the static-specific capability and frontend handoff.
 
@@ -162,7 +163,7 @@ Keep these distinctions:
   fixed SDK workload build are backend-owned. Never design an `extension_id`,
   image selector, build command, environment, active deployment, or a second
   publication-attempt system.
-- Workflow APIs `2.0.0` and `2.1.0` can carry non-secret target-owned `env_vars` for Jobs,
+- Workflow APIs `2.0.0`, `2.1.0`, and `2.2.0` can carry non-secret target-owned `env_vars` for Jobs,
   runtime ResourceReleases, and CodeRepository Coding Agents. Static sites use
   `build_environment`; widget extensions accept neither. These literals configure only the declared target or
   its backing Job: they do not create or resolve platform Secrets/Constants,
@@ -254,8 +255,10 @@ why each relationship needs a foreign key or constraint, and which access
 pattern justifies an index. State the physical database dialect because it
 affects the SQLAlchemy types, defaults, and constraint behavior.
 
-For a TimeIndexTableUpdater, explain the produced dataset, complete output grain, cadence,
-dependencies, incremental boundary, determinism, and consumers.
+For a TimeIndexTableUpdater, explain the produced dataset, complete output grain,
+input/output data frequency and freshness expectations, dependencies,
+incremental boundary, determinism, and consumers. Do not assign executable
+cadence to the updater.
 
 ### Advanced Mode
 
@@ -390,7 +393,7 @@ consumer.
 When a component requires process configuration, record the required variable
 names, non-secret value intent, target ownership, and secret exclusions in its
 existing constraints, decisions, dependencies, and acceptance criteria. The
-implementation handoff uses the live `code-repository-workflows` API `2.1.0` template.
+implementation handoff uses the live `code-repository-workflows` API `2.2.0` template.
 Do not add a second Blueprint environment-variable domain or represent a
 workflow literal as a platform Secret/Constant resource.
 
@@ -442,7 +445,8 @@ Record:
 - the output `TimeIndexMetaTable` reference (stored in the Blueprint's existing
   `output_metatable` field);
 - complete output grain: time index plus all identity dimensions;
-- cadence and freshness expectation;
+- input/output data frequency and freshness expectation, without treating it as
+  executable cadence;
 - TimeIndexTableUpdater, MetaTable, and external-data dependencies;
 - update boundary and partitioning;
 - determinism and idempotency expectations;
@@ -491,7 +495,7 @@ Direct manual Job creation selects one already-ready exact CodeRepository image.
 Direct automatic Job creation does not accept an image selector: the backend
 derives one exact initial image from the CodeRepositoryBranch's persisted synchronized
 commit and owns its preparation. Workflow Job declarations likewise carry no
-image or commit selectors: workflow API `2.1.0` derives the exact image from
+image or commit selectors: workflow API `2.2.0` derives the exact image from
 the immutable repository event. Neither automatic path resolves branch HEAD at
 runtime or persists an image-less Job.
 
@@ -535,9 +539,9 @@ the requirement as unresolved until the design chooses a supported target.
 For a widget-extension deliverable, record only why the CodeRepository needs the
 extension and the repository-relative source ownership needed for
 implementation handoff. Do not add a `widgets` top-level Blueprint domain or
-copy SDK manifest/instance contracts into CodeRepository design. The selected frontend
-toolchain owns the manifest and executable module; the `code-repository-workflows` and
-`resource-release` skills own deployment.
+copy SDK manifest/instance contracts into CodeRepository design. The installed
+Command Center SDK skill bundle owns the manifest and executable module; the
+`code-repository-workflows` and `resource-release` skills own deployment.
 
 For a browser-called FastAPI, record the intended exact or wildcard browser
 origins as API deployment intent when the platform default is not sufficient.
@@ -558,8 +562,8 @@ release identities, not a new persistent Blueprint relationship model; if the
 releases do not yet exist, make their later UID resolution an explicit handoff
 condition rather than inventing values.
 
-The frontend asks the platform for delegated access to the stable target release URL;
-backend routing selects only its ready `active_revision`. A
+The frontend asks Command Center for delegated access to the stable target
+release URL; backend routing selects only its ready `active_revision`. A
 failed desired API revision leaves the previous active revision serving, and a
 successful promotion does not rebuild the static site. Do not invent browser
 release-identity configuration, provider URLs, dependency registries, logical
@@ -630,8 +634,8 @@ target policy owns later automatic-redeployment eligibility.
 Use `static_sites` when the CodeRepository needs a browser frontend deployed through a
 static ResourceRelease. Keep the item connected to CodeRepository outcomes, domain
 concepts, consumers, and accepted APIs. Do not turn the Blueprint into a
-route-by-route UI specification, a frontend scaffold, a frontend SDK contract, or a
-duplicate ResourceRelease request.
+route-by-route UI specification, a frontend scaffold, a Command Center SDK
+contract, or a duplicate ResourceRelease request.
 
 Record:
 
@@ -649,8 +653,9 @@ Record:
   non-default rollback-history decision is accepted; and
 - observable acceptance criteria.
 
-When an accepted Static Site must appear in platform navigation, record
-the intended label, allowlisted icon, enabled state, and recipient category in
+When an accepted Static Site must appear in Command Center navigation, record
+the intended label, required allowlisted fallback icon key, optional
+repository-backed monochrome mask intent, enabled state, and recipient category in
 that Static Site's constraints and acceptance criteria. The implementation
 handoff uses the workflow's nested `navigation_link`; it does not add a
 top-level Blueprint links domain. Record that authenticated repository-action
@@ -664,17 +669,35 @@ authorship, email, username, uncorrelated bot or deploy-key identity,
 coding-agent identity, or the automation identity as audience approval, and do
 not claim placement grants target access.
 
+When repository-backed mask intent is accepted, the implementation handoff
+uses workflow API `2.2.0` `navigation_link.icon_mask_path`; the Blueprint does
+not copy the path as a deployment field. The only supported asset is at most
+512 KiB and is either a sanitized basic-geometry SVG with a finite positive
+square `viewBox`, or a static square transparent PNG/WebP from 32 x 32 through
+512 x 512 pixels inclusive. Scripts, text, style, external references,
+embedded data, JPEG, animation, and opaque rasters are rejected. The path is a forward-slash,
+repository-root-relative POSIX path of at most 1024 UTF-8 bytes, contains no
+empty, `.`, `..`, `.git`, backslash, NUL, or symbolic-link component, and ends
+at a regular file in the exact event-commit checkout. Filename extensions and
+media types do not substitute for byte validation. Omission preserves the
+stored mask, explicit null removes it, identical sanitized bytes are a digest no-op,
+and `icon_key` remains the required fallback. Missing or invalid mask content
+warns without blocking Static Site deployment and preserves prior navigation
+state; unsafe path syntax is a blocking workflow validation error. A later
+valid push or redeployment re-resolves and restores the mask.
+
 Represent an API dependency through `depends_on`, using its `apis.<key>`
 reference. Do not invent a build-environment variable name in CodeRepository design;
-transport configuration belongs to the selected frontend implementation.
+transport configuration belongs to the frontend implementation selected
+through the installed Command Center SDK skills.
 
 If the static site will call that API through platform delegation, its API
 dependency and constraints must state that implementation resolves the exact
 source StaticSiteRelease UID and target FastAPI ResourceRelease UID, configures
 the target CORS policy for the source origin, and preserves same-Organization
 ownership. Do not add a CodeRepositoryBranch or OrganizationEnvironment
-co-location constraint. The selected frontend tooling owns credential transport; the Blueprint
-must not contain tokens or reproduce that
+co-location constraint. The installed Command Center SDK skills own frontend
+credential transport; the Blueprint must not contain tokens or reproduce that
 protocol.
 
 Do not put API URLs, environment values, tokens, credentials, provider state,
@@ -701,7 +724,7 @@ static_sites:
     consumers:
       - code_repository.users.portfolio_manager
     constraints:
-      - Must be usable from the supported application surface.
+      - Must be usable from the supported Command Center application surface.
     decision_refs:
       - decisions.browser_frontend
     deployment:
@@ -744,7 +767,8 @@ Before handoff, verify:
   release fields;
 - automatic redeployment intent is target-specific, uses only the nested
   `tag_regex`, and does not invent a trigger mode or client-side evaluator;
-- no static-site item duplicates frontend implementation contracts;
+- no static-site item duplicates frontend implementation or Command Center SDK
+  contracts;
 - no secret, credential, provider location, numeric database ID, or transient
   run state appears.
 

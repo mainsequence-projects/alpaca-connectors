@@ -4,11 +4,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Body, HTTPException, Query
+from fastapi import APIRouter, Body, Query
 
 from ..errors import api_http_error, not_found
 from ..schemas import (
-    BulkActionRequest,
     ResourceCollection,
     ResourceDiscoveryResponse,
     UniverseSourceActionRequest,
@@ -18,7 +17,6 @@ from ..schemas import (
     UniverseSourceUpdateRequest,
 )
 from ..services.common import (
-    positive_float_option,
     resource_discovery,
     validate_ordering,
     validate_page_window,
@@ -29,7 +27,6 @@ from ..services.universe_sources import (
     get_source,
     list_sources,
     preview_source,
-    sync_source,
     update_source,
 )
 
@@ -81,17 +78,7 @@ def sources_discovery() -> ResourceDiscoveryResponse:
                 "sortable_key": "updated_at",
             },
         ],
-        actions=[
-            {
-                "id": "sync",
-                "label": "Synchronize",
-                "endpoint": "/actions/sync",
-                "method": "POST",
-                "selection_modes": ["explicit"],
-                "options": [],
-                "preflight_endpoint": "/actions/sync/preflight",
-            }
-        ],
+        actions=[],
     )
 
 
@@ -99,48 +86,6 @@ def sources_discovery() -> ResourceDiscoveryResponse:
 def source_create(request: UniverseSourceCreateRequest = Body(...)) -> UniverseSourceResponse:
     try:
         return create_source(request)
-    except Exception as exc:
-        raise api_http_error(exc) from exc
-
-
-@router.post("/actions/sync/preflight", response_model=dict[str, Any])
-def sources_sync_preflight(request: BulkActionRequest = Body(...)) -> dict[str, Any]:
-    timeout = positive_float_option(request.options, "timeout", default=30.0, maximum=300.0)
-    results = []
-    blockers = []
-    for uid in request.selection.uids:
-        if get_source(uid) is None:
-            blockers.append(f"Missing source: {uid}")
-            continue
-        try:
-            preview = preview_source(uid, timeout=timeout)
-        except Exception:
-            blockers.append(f"Source {uid} could not be extracted and validated.")
-            continue
-        results.append(preview.model_dump(mode="json"))
-        if preview.has_blockers:
-            blockers.append(f"Source {uid} has unresolved asset-registration blockers.")
-    return {
-        "contract": "command-center.bulk_action_preflight@v1",
-        "allowed": not blockers,
-        "detail": "Sources are available for synchronization."
-        if not blockers
-        else "One or more sources are blocked from synchronization.",
-        "matched_count": len(results),
-        "blockers": blockers,
-        "warnings": [],
-        "results": results,
-    }
-
-
-@router.post("/actions/sync", response_model=dict[str, Any])
-def sources_sync(request: BulkActionRequest = Body(...)) -> dict[str, Any]:
-    preflight = sources_sync_preflight(request)
-    if not preflight["allowed"]:
-        raise HTTPException(status_code=409, detail=preflight)
-    timeout = positive_float_option(request.options, "timeout", default=30.0, maximum=300.0)
-    try:
-        return {"results": [sync_source(uid, timeout=timeout) for uid in request.selection.uids]}
     except Exception as exc:
         raise api_http_error(exc) from exc
 

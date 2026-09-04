@@ -79,6 +79,7 @@ Portfolios owns analytical construction based on registered assets and market da
 - price-source binding
 - interpolated prices
 - signals and calculation results
+- one dedicated scheduled Job per Universe-backed signal configuration
 
 The repository does not provide order placement or trade execution.
 

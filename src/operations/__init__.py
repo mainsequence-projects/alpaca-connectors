@@ -7,8 +7,10 @@ from .asset_registration import (
     create_asset_registration_operation,
     fail_asset_registration_operation,
     get_asset_registration_operation,
-    project_operation_models,
     set_asset_registration_step,
+)
+from .asset_registration import (
+    project_operation_models as project_asset_registration_operation_models,
 )
 from .bar_updates import (
     ALPACA_BARS_UPDATE_EXECUTION_PATH,
@@ -18,20 +20,73 @@ from .bar_updates import (
     get_alpaca_bars_update_job_run,
     launch_alpaca_bars_update,
 )
+from .signal_job_configurations import (
+    AlpacaETFSignalJobConfiguration,
+    AlpacaETFSignalJobConfigurationTable,
+    get_signal_job_configuration,
+    list_signal_job_configurations,
+    project_signal_job_models,
+    signal_job_configurations_for_account,
+    signal_job_configurations_for_universe,
+)
+from .signal_jobs import (
+    ALPACA_ETF_SIGNAL_EXECUTION_PATH,
+    SignalJobRun,
+    SignalJobSubmission,
+    create_signal_job_configuration,
+    delete_signal_job_configuration,
+    execute_current_signal_job,
+    get_signal_job_run,
+    launch_signal_job,
+    list_signal_job_runs,
+    pause_signal_job_configuration,
+    reconcile_signal_job_configuration,
+    resume_signal_job_configuration,
+    signal_uid_for_configuration,
+    update_signal_job_configuration,
+)
+
+
+def project_operation_models() -> list[type]:
+    """All project-owned operational/control-plane MetaTables."""
+    return [
+        *project_asset_registration_operation_models(),
+        *project_signal_job_models(),
+    ]
 
 __all__ = [
     "AssetRegistrationOperation",
     "AssetRegistrationOperationTable",
     "ALPACA_BARS_UPDATE_EXECUTION_PATH",
     "ALPACA_BARS_UPDATE_JOB_NAME",
+    "ALPACA_ETF_SIGNAL_EXECUTION_PATH",
+    "AlpacaETFSignalJobConfiguration",
+    "AlpacaETFSignalJobConfigurationTable",
     "AlpacaBarsUpdateJobRun",
     "AlpacaBarsUpdateSubmission",
+    "SignalJobRun",
+    "SignalJobSubmission",
     "complete_asset_registration_operation",
+    "create_signal_job_configuration",
     "create_asset_registration_operation",
     "fail_asset_registration_operation",
     "get_asset_registration_operation",
+    "get_signal_job_configuration",
+    "get_signal_job_run",
     "get_alpaca_bars_update_job_run",
     "launch_alpaca_bars_update",
+    "launch_signal_job",
+    "list_signal_job_configurations",
+    "list_signal_job_runs",
+    "pause_signal_job_configuration",
     "project_operation_models",
+    "reconcile_signal_job_configuration",
+    "resume_signal_job_configuration",
+    "signal_job_configurations_for_account",
+    "signal_job_configurations_for_universe",
+    "signal_uid_for_configuration",
     "set_asset_registration_step",
+    "update_signal_job_configuration",
+    "delete_signal_job_configuration",
+    "execute_current_signal_job",
 ]

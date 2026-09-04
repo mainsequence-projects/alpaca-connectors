@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from src.platform_secrets import read_platform_secret_value
+
 
 def normalize_secret_name(value: str, *, field_name: str) -> str:
     """Validate a user-supplied Main Sequence Secret name without resolving its value."""
@@ -56,21 +58,7 @@ class ResolvedAlpacaCredentials:
 
 
 def _secret_value(secret_name: str) -> str:
-    import mainsequence.client as msc
-
-    try:
-        secret = msc.Secret.get_or_none(name=secret_name)
-    except Exception as exc:
-        raise RuntimeError(f"Could not retrieve Main Sequence Secret {secret_name!r}.") from exc
-
-    if secret is None or secret.value is None:
-        raise LookupError(f"Main Sequence Secret {secret_name!r} does not exist or has no value.")
-
-    value = secret.value
-    resolved = value.get_secret_value() if hasattr(value, "get_secret_value") else str(value)
-    if not resolved:
-        raise LookupError(f"Main Sequence Secret {secret_name!r} has no value.")
-    return resolved
+    return read_platform_secret_value(secret_name)
 
 
 def resolve_alpaca_credentials(secret_names: AlpacaSecretNames) -> ResolvedAlpacaCredentials:

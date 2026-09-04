@@ -42,7 +42,6 @@ def configure_run_parser(parser: argparse.ArgumentParser) -> None:
     parser.description = "Resolve or execute one stored Alpaca bar configuration."
     parser.add_argument("--configuration-uid", required=True)
     parser.add_argument("--hash-namespace")
-    parser.add_argument("--force-update", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--execute", action="store_true")
     parser.set_defaults(handler=run_bars_command)
 
@@ -72,7 +71,7 @@ def _add_configuration_values(parser: argparse.ArgumentParser, *, required: bool
         choices=("assets", "universe", "account_holdings"),
     )
     parser.add_argument("--asset-uids", help="Comma-separated Asset UIDs for the assets source.")
-    parser.add_argument("--universe-uid", help="AssetCategory UID for the universe source.")
+    parser.add_argument("--universe-uid", help="Registered Asset Universe UID.")
     parser.add_argument("--frequency", required=required)
     parser.add_argument("--feed", required=required)
     parser.add_argument("--adjustment", required=required)
@@ -133,7 +132,7 @@ def run_bars_command(args: argparse.Namespace) -> int:
         _, summary = build_market_data_update(**values)
         _print({"allowed": True, **summary})
         return 0
-    _print(execute_market_data_update(**values, force_update=args.force_update))
+    _print(execute_market_data_update(**values))
     return 0
 
 
@@ -269,7 +268,6 @@ def build_asset_price_update_parser() -> argparse.ArgumentParser:
     parser.add_argument("period")
     parser.add_argument("--configuration-uid", required=True)
     parser.add_argument("--hash-namespace")
-    parser.add_argument("--force-update", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--execute", action="store_true")
     return parser
 
@@ -302,7 +300,7 @@ def run_asset_price_update_command(argv: list[str]) -> int:
     if not args.execute:
         _print({"allowed": True, "requested_period": args.period, **summary})
         return 0
-    _print(execute_market_data_update(**values, force_update=args.force_update))
+    _print(execute_market_data_update(**values))
     return 0
 
 

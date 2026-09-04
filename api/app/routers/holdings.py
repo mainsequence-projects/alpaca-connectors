@@ -49,12 +49,10 @@ def holdings_list(
         raise api_http_error(exc) from exc
 
 
-@router.get("/discovery", response_model=ResourceDiscoveryResponse)
-def holdings_discovery(account_uid: str) -> ResourceDiscoveryResponse:
-    del account_uid
+def _holdings_discovery(*, latest: bool) -> ResourceDiscoveryResponse:
     return resource_discovery(
-        resource_id="alpaca-account-holdings",
-        label="Account Holdings",
+        resource_id=("alpaca-account-latest-holdings" if latest else "alpaca-account-holdings"),
+        label="Latest holdings" if latest else "Account Holdings",
         item_label="holding",
         identity_fields=["time_index", "account_uid", "asset_identifier"],
         filterable_fields=["asset_identifier"],
@@ -75,6 +73,41 @@ def holdings_discovery(account_uid: str) -> ResourceDiscoveryResponse:
     )
 
 
+@router.get("/discovery", response_model=ResourceDiscoveryResponse)
+def holdings_discovery(account_uid: str) -> ResourceDiscoveryResponse:
+    del account_uid
+    return _holdings_discovery(latest=False)
+
+
+@router.get("/latest", response_model=ResourceCollection)
+def holdings_latest_list(
+    account_uid: str,
+    limit: int = Query(default=25, ge=1, le=250),
+    offset: int = Query(default=0, ge=0),
+    asset_identifier: list[str] | None = Query(default=None),
+    ordering: str = "asset_identifier",
+) -> ResourceCollection:
+    validate_page_window(limit=limit, offset=offset)
+    validate_ordering(ordering, allowed_fields={"time_index", "asset_identifier"})
+    try:
+        return list_holdings(
+            account_uid,
+            limit=limit,
+            offset=offset,
+            latest_only=True,
+            asset_identifiers=asset_identifier,
+            ordering=ordering,
+        )
+    except Exception as exc:
+        raise api_http_error(exc) from exc
+
+
+@router.get("/latest/discovery", response_model=ResourceDiscoveryResponse)
+def holdings_latest_discovery(account_uid: str) -> ResourceDiscoveryResponse:
+    del account_uid
+    return _holdings_discovery(latest=True)
+
+
 @router.post("/actions/capture/preflight", response_model=dict[str, Any])
 def holdings_capture_preflight(account_uid: str) -> dict[str, Any]:
     try:
@@ -86,15 +119,10 @@ def holdings_capture_preflight(account_uid: str) -> dict[str, Any]:
 @router.post("/actions/capture", response_model=HoldingsCaptureResponse)
 def holdings_capture(
     account_uid: str,
-    request: HoldingsCaptureRequest = Body(default=HoldingsCaptureRequest()),
+    _request: HoldingsCaptureRequest = Body(default=HoldingsCaptureRequest()),
 ) -> HoldingsCaptureResponse:
     try:
-        return HoldingsCaptureResponse.model_validate(
-            capture_holdings(
-                account_uid,
-                register_missing_assets=request.register_missing_assets,
-            )
-        )
+        return HoldingsCaptureResponse.model_validate(capture_holdings(account_uid))
     except Exception as exc:
         raise api_http_error(exc) from exc
 

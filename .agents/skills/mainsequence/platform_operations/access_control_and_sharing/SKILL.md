@@ -56,6 +56,8 @@ This skill must not claim ownership of:
   `.agents/skills/mainsequence/data_publishing/time_index_table_updates/SKILL.md`
 - MetaTables:
   `.agents/skills/mainsequence/data_publishing/meta_tables/SKILL.md`
+- Command Center-serving FastAPI providers:
+  `.agents/skills/mainsequence/application_surfaces/api_surfaces/SKILL.md`
 This skill only reasons about access to deployed resources such as `ResourceRelease`.
 
 ## Read First

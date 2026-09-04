@@ -45,8 +45,7 @@ def list_secret_references(*, limit: int, offset: int, search: str | None):
         {
             secret.name.strip()
             for secret in msc.Secret.filter()
-            if secret.name.strip()
-            and (not search_term or search_term in secret.name.casefold())
+            if secret.name.strip() and (not search_term or search_term in secret.name.casefold())
         }
     )
     return collection_response(
@@ -71,8 +70,6 @@ def create_account_registration(request: AccountRegistrationRequest) -> AccountR
         secret_key_secret_name=request.secret_key_secret_name,
         paper=request.environment == "paper",
         account_name=request.account_name,
-        capture_initial_holdings=request.capture_initial_holdings,
-        register_missing_assets=request.register_missing_assets,
     )
     account = get_account_registration(result.account_uid)
     if account is None:
@@ -101,8 +98,19 @@ def remove_account(account_uid: str) -> dict:
     return remove_account_registration(account_uid)
 
 
+def account_delete_blockers(account_uid: str) -> list[str]:
+    from src.operations.signal_job_configurations import signal_job_configurations_for_account
+
+    return [
+        f"Account {account_uid} is referenced by signal Job configuration "
+        f"{configuration.name} ({configuration.uid!s})."
+        for configuration in signal_job_configurations_for_account(account_uid)
+    ]
+
+
 __all__ = [
     "create_account_registration",
+    "account_delete_blockers",
     "get_account",
     "list_accounts",
     "list_secret_references",

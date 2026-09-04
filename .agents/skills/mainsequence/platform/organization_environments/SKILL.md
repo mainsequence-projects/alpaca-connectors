@@ -74,7 +74,7 @@ Decision Checklist are approved, including:
 The strict normalization implementation is deployed in Django source: the canonical
 DRF relation, shared resolver contract, direct/derived/projected/snapshot model
 roles, exact-environment query boundaries, and deterministic data migrations
-are present. Public Secret, Constant, MetaTable, Namespace, Scheduler, Agent,
+are present. Public Secret, Constant, MetaTable, Namespace, Agent,
 capability, Workspace, widget-group, Bucket, and branch-owned paths now require
 or derive one exact Environment. After deterministic resolution, ambiguous
 legacy operational rows are retired and every stored Environment FK is
@@ -138,7 +138,7 @@ pod_manager
 └── CodeRepository, DataSource, CloudTenancy, Cluster, registries -> not singular
 
 ts_manager
-├── MetaTable, Namespace, Scheduler, TableUpdateNode -> direct Environment
+├── MetaTable, Namespace, TableUpdateNode -> direct Environment
 └── columns, indexes, foreign keys, TimeIndexTableUpdate updates -> derive through
     their mandatory MetaTable/update-graph parent
 
@@ -151,7 +151,7 @@ agents
     or snapshot from their Pod Manager parent
 └── sessions, tasks, messages, handles, and bindings -> derive and must match
 
-application_surfaces
+command_center
 ├── Workspace and SavedWidgetGroup -> direct Environment
 ├── workspace/widget/navigation/publication descendants -> derive and match
 └── ConnectionInstance and ConnectionHealthCheck -> Organization control-plane,
@@ -192,7 +192,7 @@ Organization
 │   ├── MetaTable (managed or external)
 │   ├── Secret
 │   ├── Constant
-│   ├── Namespace, Scheduler, and TableUpdateNode
+│   ├── Namespace and TableUpdateNode
 │   ├── Bucket and PVCDisk
 │   ├── Agent and AgentCapability
 │   ├── UserOrchestratorAgentService through its Environment-owned Agent

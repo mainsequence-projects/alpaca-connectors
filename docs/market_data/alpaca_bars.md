@@ -70,7 +70,9 @@ identifiers, never raw SQL, and return both identities on every observation.
 
 ## Create stored configurations
 
-An `assets` source stores normalized membership rows:
+An `assets` source stores normalized membership rows. Create and update operations write the full
+set with one bulk upsert and remove stale rows with one delete; they never issue one MetaTable
+request per selected Asset:
 
 ```bash
 alpaca-connectors market-data bar-configuration create \
@@ -83,14 +85,14 @@ alpaca-connectors market-data bar-configuration create \
   --adjustment all
 ```
 
-A `universe` source resolves current members of one active `AssetCategory`:
+A `universe` source resolves current members of one active `AssetUniverse`:
 
 ```bash
 alpaca-connectors market-data bar-configuration create \
   --name "Daily managed universe" \
   --account-uid <account-uid> \
   --asset-source universe \
-  --universe-uid <asset-category-uid> \
+  --universe-uid <asset-universe-uid> \
   --frequency 1d \
   --feed sip \
   --adjustment all
@@ -112,6 +114,10 @@ alpaca-connectors market-data bar-configuration create \
 
 List, inspect, update, and delete stored definitions with the other `market-data
 bar-configuration` subcommands.
+
+Before an update, Asset rows plus their Alpaca symbols and optional FIGIs are loaded with set-based
+governed queries. The provider bars request is then grouped by incremental start time and sent in
+symbol batches. No Main Sequence lookup or provider bars request is issued once per Asset.
 
 ## Resolve or execute updates
 

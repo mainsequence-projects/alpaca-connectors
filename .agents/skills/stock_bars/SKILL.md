@@ -42,6 +42,8 @@ These flows build and run the reusable `AlpacaStockBarsNode`.
 - dry run is the default; use `--execute` only when a write is intended
 - require a stored configuration UID; never accept a dataset UID or runtime scope override
 - keep the shared table identity keyed by `frequency_id`, `feed`, and `adjustment`
+- load Asset identity/provider details with set-based governed queries and fetch bars in symbol
+  batches; never issue one Main Sequence lookup or Alpaca bars request per Asset
 
 ## Examples
 

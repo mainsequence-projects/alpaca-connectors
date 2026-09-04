@@ -10,18 +10,12 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 import pandas as pd
-import requests
 from alpaca.data.enums import Adjustment, DataFeed
 from alpaca.data.historical.stock import StockHistoricalDataClient
 from alpaca.data.requests import StockBarsRequest
 from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
 
 from src.assets.alpaca_us_equities import fetch_alpaca_us_equities
-from src.settings import (
-    OPENFIGI_DEFAULT_TIMEOUT,
-    OPENFIGI_MAPPING_URL,
-    get_openfigi_api_key,
-)
 
 UTC = dt.timezone.utc
 NEW_YORK = ZoneInfo("America/New_York")
@@ -42,10 +36,9 @@ DEFAULT_BAR_SYMBOL_BATCH_SIZE = 200
 class AssetTickerFigi:
     """Lightweight asset-resolution record fed to the symbol binder.
 
-    Replaces the old SDK ``Asset`` object. In storage-first ms-markets provider facts such as
-    ticker and FIGI live on ``OpenFigiDetails``; the bars DataNode resolves them via
-    ``src.assets.resolution`` and passes records here. The canonical ``unique_identifier`` is the
-    FIGI-backed asset identity used as ``asset_identifier`` in storage.
+    Replaces the old SDK ``Asset`` object. The ticker comes from required
+    ``AlpacaAssetDetails``; FIGI is optional reference metadata only. The canonical
+    ``unique_identifier`` is the Alpaca-UUID-backed identity used in storage.
     """
 
     unique_identifier: str
@@ -189,43 +182,10 @@ def build_alpaca_symbol_lookup(*, trading_client=None) -> dict[str, str]:
     lookup: dict[str, str] = {}
     for alpaca_asset in fetch_alpaca_us_equities(
         trading_client=trading_client,
-        include_non_tradable=False,
     ):
         for candidate in _build_symbol_alias_candidates(alpaca_asset.symbol):
             lookup[candidate] = alpaca_asset.symbol
     return lookup
-
-
-def _build_openfigi_headers() -> dict[str, str]:
-    headers = {"Content-Type": "application/json"}
-    api_key = get_openfigi_api_key()
-    if api_key:
-        headers["X-OPENFIGI-APIKEY"] = api_key
-    return headers
-
-
-def query_openfigi_ticker_by_figi(figis: Sequence[str]) -> dict[str, str]:
-    normalized_figis = sorted({figi.strip().upper() for figi in figis if figi and figi.strip()})
-    if not normalized_figis:
-        return {}
-
-    response = requests.post(
-        OPENFIGI_MAPPING_URL,
-        headers=_build_openfigi_headers(),
-        json=[{"idType": "ID_BB_GLOBAL", "idValue": figi} for figi in normalized_figis],
-        timeout=OPENFIGI_DEFAULT_TIMEOUT,
-    )
-    response.raise_for_status()
-
-    resolved_tickers_by_figi: dict[str, str] = {}
-    for figi, payload in zip(normalized_figis, response.json(), strict=True):
-        data = payload.get("data") or []
-        if not data:
-            continue
-        ticker = data[0].get("ticker")
-        if ticker:
-            resolved_tickers_by_figi[figi] = str(ticker).strip().upper()
-    return resolved_tickers_by_figi
 
 
 def resolve_asset_bindings_from_category_assets(
@@ -260,38 +220,6 @@ def resolve_asset_bindings_from_category_assets(
                 alpaca_symbol=resolved_symbol,
             )
         )
-
-    if unresolved_assets:
-        figi_fallback_tickers = query_openfigi_ticker_by_figi(
-            [getattr(asset, "figi", None) or asset.unique_identifier for asset in unresolved_assets]
-        )
-        remaining_unresolved_assets: list[Any] = []
-        for asset in unresolved_assets:
-            figi = getattr(asset, "figi", None) or asset.unique_identifier
-            figi_ticker = figi_fallback_tickers.get(figi)
-            if not figi_ticker:
-                remaining_unresolved_assets.append(asset)
-                continue
-
-            resolved_symbol = None
-            for candidate in _build_symbol_alias_candidates(figi_ticker):
-                resolved_symbol = symbol_lookup.get(candidate)
-                if resolved_symbol is not None:
-                    break
-
-            if resolved_symbol is None:
-                remaining_unresolved_assets.append(asset)
-                continue
-
-            bindings.append(
-                AlpacaBarAssetBinding(
-                    asset=asset,
-                    unique_identifier=asset.unique_identifier,
-                    alpaca_symbol=resolved_symbol,
-                )
-            )
-
-        unresolved_assets = remaining_unresolved_assets
 
     if unresolved_assets:
         raise ValueError(

@@ -10,18 +10,20 @@ from mainsequence.meta_tables.migrations import (
     metadata_for_models,
 )
 from src.account.alpaca_account_details import project_account_models
+from src.assets.alpaca_asset_details import project_asset_models
 from src.market_data import project_configuration_models, project_storage_models
 from src.operations import project_operation_models
-from src.universes.sources import project_universe_models
+from src.universes import project_universe_models
 
 
 def all_project_metatable_models() -> list[type]:
     """Every project-owned MetaTable managed by this migration provider."""
     return [
+        *project_asset_models(),
         *project_storage_models(),
-        *project_configuration_models(),
         *project_account_models(),
         *project_universe_models(),
+        *project_configuration_models(),
         *project_operation_models(),
     ]
 

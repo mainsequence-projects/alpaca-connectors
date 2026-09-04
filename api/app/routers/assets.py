@@ -43,7 +43,7 @@ def assets_list(
     ordering: str = "ticker",
 ) -> ResourceCollection:
     validate_page_window(limit=limit, offset=offset)
-    validate_ordering(ordering, allowed_fields={"ticker", "unique_identifier"})
+    validate_ordering(ordering, allowed_fields={"ticker", "alpaca_asset_id"})
     try:
         return list_asset_resources(limit=limit, offset=offset, search=search, ordering=ordering)
     except Exception as exc:
@@ -54,20 +54,24 @@ def assets_list(
 def assets_discovery() -> ResourceDiscoveryResponse:
     return resource_discovery(
         resource_id="alpaca-assets",
-        label="Registered Assets",
+        label="Registered Alpaca assets",
         item_label="asset",
         identity_fields=["uid"],
-        searchable_fields=["ticker", "name", "unique_identifier"],
-        orderable_fields=["ticker", "unique_identifier"],
+        searchable_fields=["ticker", "name", "alpaca_asset_id", "unique_identifier"],
+        orderable_fields=["ticker", "alpaca_asset_id"],
         columns=[
+            {"id": "uid", "header": "UID", "hideable": False},
             {"id": "ticker", "header": "Ticker", "sortable_key": "ticker", "hideable": False},
-            {"id": "name", "header": "Name"},
+            {"id": "name", "header": "Name", "data_type": "text"},
             {
-                "id": "unique_identifier",
-                "header": "Identifier",
-                "sortable_key": "unique_identifier",
+                "id": "alpaca-asset-id",
+                "header": "Alpaca Asset ID",
+                "sortable_key": "alpaca_asset_id",
             },
-            {"id": "asset_type", "header": "Asset Type"},
+            {"id": "exchange", "header": "Exchange"},
+            {"id": "figi", "header": "FIGI (optional)"},
+            {"id": "tradable", "header": "Trading", "data_type": "boolean"},
+            {"id": "asset-type", "header": "Asset Type"},
         ],
     )
 
@@ -91,7 +95,10 @@ def asset_registration_plan(
     "/registration/execute",
     response_model=AssetRegistrationExecuteResponse,
     summary="Execute asset registration",
-    description="Create missing Main Sequence assets after strict Alpaca and FIGI resolution.",
+    description=(
+        "Create missing Main Sequence assets using immutable Alpaca asset IDs; OpenFIGI metadata "
+        "is optional enrichment."
+    ),
 )
 def asset_registration_execute(
     request: AssetRegistrationRequest = Body(...),

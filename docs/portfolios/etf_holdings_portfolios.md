@@ -2,28 +2,43 @@
 
 ## Goal
 
-Build ms-markets portfolios that track ETF holdings while using this project's Alpaca bars as the
-valuation source.
+Build an ms-markets portfolio from one registered Asset Universe's observed ETF holdings and this
+project's Alpaca bars.
 
-Main module:
+The implementation lives in:
 
+- `src/portfolios/alpaca_etf_signal.py`
 - `src/portfolios/etf_tracking.py`
 
-Reference ADR:
+See [ADR 0006](../adrs/0006_universe_backed_alpaca_etf_signal.md) for signal identity and
+observation semantics.
 
-- `docs/adrs/0002_etf_holdings_alpaca_portfolio_construction.md`
+## Ownership
 
-## Dependency Stack
+- `etfhextractor` extracts provider holdings and derives component weights.
+- `AlpacaETFHoldingsSignal` owns the connector-specific execution: registered Universe lookup,
+  account Secret-name resolution, bulk Alpaca registration, category materialization, and signal
+  frame production.
+- `msm_portfolios` owns `SignalWeightsStorage`, interpolated prices, Portfolio identity, portfolio
+  values, and portfolio weights.
+- `src/market_data/storage.py` owns the source Alpaca bar tables.
 
-- `etfhextractor`: ETF holdings extraction, `ETFHoldingsSignal`, calendar persistence, and reusable
-  portfolio-graph assembly
-- `msm_portfolios`: interpolated prices, signal storage, portfolio values, portfolio weights, and
-  portfolio identity
-- `src/market_data/storage.py`: project-owned Alpaca source bars
+The signal defines no custom table. Its configuration is exactly:
 
-## Current Python API
+```python
+AlpacaETFHoldingsSignalConfig(
+    universe_uid="<UNIVERSE_UID>",
+    account_uid="<ACCOUNT_UID>",
+)
+```
 
-Plan without writing portfolio rows:
+`universe_uid` defines the stable signal UID. `account_uid` remains part of the serialized updater
+configuration so automatic execution can resolve the correct registered account, but it is
+excluded from `_signal_uid_payload()` and never appears in `SignalWeightsStorage`.
+
+## Build API
+
+Plan the graph without writing assets, signals, calendars, or portfolios:
 
 ```python
 from src.portfolios import (
@@ -31,175 +46,68 @@ from src.portfolios import (
     plan_alpaca_etf_tracking_portfolio,
 )
 
-plan = plan_alpaca_etf_tracking_portfolio(
-    AlpacaEtfTrackingPortfolioConfig(
-        etf_ticker="IVV",
-        provider="ishares",
-        frequency_id="1d",
-        feed="sip",
-        adjustment="all",
-        valuation_column="close",
-        allowed_asset_classes=("Equity",),
-    )
+config = AlpacaEtfTrackingPortfolioConfig(
+    universe_uid="<UNIVERSE_UID>",
+    account_uid="<ACCOUNT_UID>",
+    frequency_id="1d",
+    feed="sip",
+    adjustment="all",
 )
+plan = plan_alpaca_etf_tracking_portfolio(config)
 print(plan.summary())
 ```
 
-Build the portfolio graph:
+Build or execute the graph:
 
 ```python
-from src.portfolios import (
-    AlpacaEtfTrackingPortfolioConfig,
-    build_alpaca_etf_tracking_portfolio,
-)
+from src.portfolios import build_alpaca_etf_tracking_portfolio
 
-build = build_alpaca_etf_tracking_portfolio(
-    AlpacaEtfTrackingPortfolioConfig(etf_ticker="IVV", provider="ishares"),
-    run=False,
-)
-print(build.summary())
+build = build_alpaca_etf_tracking_portfolio(config, run=False)
+result = build_alpaca_etf_tracking_portfolio(config, run=True)
 ```
 
-Run the DataNode graph only after the required tables are migrated and the Alpaca bars table has
-data:
+Planning extracts once and prepares a transient execution plan. When the same process executes the
+graph, the signal consumes that plan rather than extracting again. The plan is not serialized and
+does not affect updater or signal identity.
 
-```python
-build = build_alpaca_etf_tracking_portfolio(
-    AlpacaEtfTrackingPortfolioConfig(etf_ticker="IVV", provider="ishares"),
-    run=True,
-)
+## Signal Observation Semantics
+
+Each successful update writes one complete batch with the canonical grain:
+
+```text
+(time_index, signal_uid, asset_identifier) -> signal_weight
 ```
+
+Provider percentage weights are normalized to sum to one. An unchanged extraction is still a new
+observation. The signal does not backdate the first observation, suppress unchanged weights, or
+rewrite timestamps to a market-session close.
+
+`time_index` records when this application observed the extracted provider response. It does not
+guarantee that the provider weights became economically effective at precisely that time. This is
+an observed-snapshot series, not perfect point-in-time holdings history.
 
 ## Required Platform State
 
-Before running the portfolio graph:
+Before execution:
 
-- ETF component assets must be registered as ms-markets assets with FIGI as
-  `Asset.unique_identifier`
-- `OpenFigiDetails` / snapshots must contain ticker facts for component resolution
-- selected Alpaca bars storage must be migrated and registered
-- selected Alpaca bars DataNode must have bars for the component universe
-- dynamic `InterpolatedPrices` storage for the selected source table UID must be migrated and
-  registered
-- ms-markets portfolio built-in tables must be migrated and registered
+- the Asset Universe, its Universe Source, linked Asset Category, and registered Alpaca Account
+  must exist
+- the account's referenced Main Sequence Secrets must be readable at runtime
+- built-in ms-markets signal and portfolio tables must be migrated and registered
+- the selected Alpaca bars table and dynamic `InterpolatedPrices` table must be migrated
+- the bars table must contain prices for the current component assets
 
-## Source Bars
+Universe execution registers missing Alpaca-backed component Assets automatically. It does so in
+bulk and replaces category memberships in bulk; it does not perform a backend request per asset.
 
-The default source is:
+## Runtime And Verification
 
-```text
-frequency_id = 1d
-feed         = sip
-adjustment   = all
-```
-
-This resolves to:
-
-```text
-alpaca_stock_bars_1d_sip_all
-```
-
-The module can also use:
-
-```text
-alpaca_stock_bars_1d_iex_raw
-```
-
-or any future registered `(frequency_id, feed, adjustment)` triple added to
-`src/market_data/storage.py`.
-
-## Interpolated Prices
-
-The portfolio does not consume raw Alpaca bars directly. It creates an `InterpolatedPrices` node
-from `msm_portfolios` and passes that node into the current portfolio build contract as:
-
-```text
-PortfolioBuildConfiguration(
-    valuation_source_instance=<InterpolatedPrices>,
-    valuation_column="close",
-)
-```
-
-The interpolation node is configured with:
-
-- source Alpaca bars `TimeIndexMetaTable.uid`
-- explicit ETF component asset list
-- `upsample_frequency_id`
-- `intraday_bar_interpolation_rule`
-- `valuation_column`, defaulting to `close` for Alpaca OHLCV bars
-
-For daily Alpaca bars, the default is:
-
-```text
-upsample_frequency_id = 1d
-intraday_bar_interpolation_rule = ffill
-valuation_column = close
-```
-
-The dynamic storage identity includes the source table UID, so the interpolation table must be
-prepared for each registered source table.
-
-After constructing that Alpaca-specific valuation source, the project delegates calendar, signal,
-Portfolio row, configuration, and `PortfoliosDataNode` assembly to
-`etfhextractor.build_etf_tracking_portfolio(...)`. It passes the explicit configuration-derived
-`...__ALPACA` portfolio identifier, so delegation does not change portfolio identity.
-
-## Holdings Filter
-
-The upgraded `etfhextractor` signal config carries the holdings asset-class filter. This project
-uses the same value for both preflight resolution and the `ETFHoldingsSignalConfig` so the planned
-component universe matches the signal universe.
-
-The default is:
-
-```text
-allowed_asset_classes = ("Equity",)
-```
-
-Set it to `None` only when a portfolio intentionally tracks every provider holding class.
-
-## Portfolio Identity
-
-The default `Portfolio.unique_identifier` includes the ETF, bars configuration, interpolation
-configuration, and the Alpaca venue suffix at the end. The only double-underscore segment is
-`__ALPACA`.
-
-```text
-<ETF>_TRACKER_BARS_<FREQ>_<FEED>_<ADJUSTMENT>_INTERP_<UPSAMPLE>_<RULE>__ALPACA
-```
-
-Example:
-
-```text
-IVV_TRACKER_BARS_1D_SIP_ALL_INTERP_1D_FFILL__ALPACA
-```
-
-Do not use a ticker-only identity such as `etf_tracker_<ETF>` for this project. Two portfolios that
-use the same ETF but different Alpaca price or interpolation configuration are different portfolio
-rows.
-
-## Runtime
-
-Use the portfolio runtime path:
-
-```python
-from src.runtime import start_portfolio_markets_engine
-
-start_portfolio_markets_engine()
-```
-
-Do not start the lighter asset/category runtime first in the same process if the process will build
-or run portfolios. A process may only attach one compatible ms-markets runtime model set.
-
-## Live Verification
+Use `start_portfolio_markets_engine()` for the complete portfolio graph. Normal API and Universe
+execution include `SignalMetadataTable` and `SignalWeightsStorage` in their application runtime.
 
 After a live run, verify:
 
-- signal weights exist in `SignalWeightsStorage`
-- interpolated prices exist in the configured dynamic `InterpolatedPrices` storage
-- portfolio values exist in `PortfoliosStorage`
-- portfolio weights exist in `PortfolioWeightsStorage`
-- `PortfolioTable.unique_identifier` exists for the configuration-specific identifier, for example
-  `IVV_TRACKER_BARS_1D_SIP_ALL_INTERP_1D_FFILL__ALPACA`
-
-These checks require an authenticated platform session and migrated tables.
+- the linked Asset Category contains the extracted components
+- `SignalWeightsStorage` contains one observation under the Universe-derived signal UID
+- interpolated prices exist for those asset identifiers
+- `PortfoliosStorage` and `PortfolioWeightsStorage` contain the resulting portfolio output

@@ -6,7 +6,7 @@ from typing import Any
 
 from fastapi import APIRouter, Body, HTTPException, Query
 
-from ..errors import api_http_error, not_found
+from ..errors import api_http_error, bad_request, not_found
 from ..schemas import (
     AccountRegistrationRequest,
     AccountResponse,
@@ -17,6 +17,7 @@ from ..schemas import (
     SecretReferenceCollectionResponse,
 )
 from ..services.accounts import (
+    account_delete_blockers,
     create_account_registration,
     get_account,
     list_accounts,
@@ -26,12 +27,7 @@ from ..services.accounts import (
     remove_account,
     update_account,
 )
-from ..services.common import (
-    boolean_option,
-    resource_discovery,
-    validate_ordering,
-    validate_page_window,
-)
+from ..services.common import resource_discovery, validate_ordering, validate_page_window
 from ..services.holdings import capture_holdings, preflight_holdings
 
 router = APIRouter(prefix="/v1/accounts", tags=["Accounts"])
@@ -111,15 +107,7 @@ def accounts_discovery() -> ResourceDiscoveryResponse:
                 "endpoint": "/actions/capture-holdings",
                 "method": "POST",
                 "selection_modes": ["explicit"],
-                "options": [
-                    {
-                        "key": "register_missing_assets",
-                        "type": "boolean",
-                        "default": True,
-                        "label": "Register missing assets",
-                        "description": "Register strictly FIGI-resolved held equities.",
-                    }
-                ],
+                "options": [],
                 "preflight_endpoint": "/actions/capture-holdings/preflight",
             },
             {
@@ -158,25 +146,27 @@ def account_create(request: AccountRegistrationRequest = Body(...)) -> AccountRe
 def accounts_remove_preflight(request: BulkActionRequest = Body(...)) -> dict[str, Any]:
     try:
         missing = [uid for uid in request.selection.uids if get_account(uid) is None]
+        blockers = [f"Missing account: {uid}" for uid in missing]
         retained_rows = 0
         if not missing:
             from src.holdings import list_account_holdings
 
             for uid in request.selection.uids:
+                blockers.extend(account_delete_blockers(uid))
                 _, count = list_account_holdings(uid, limit=1)
                 retained_rows += count
     except Exception as exc:
         raise api_http_error(exc) from exc
     return {
         "contract": "command-center.bulk_action_preflight@v1",
-        "allowed": not missing,
+        "allowed": not blockers,
         "detail": (
             "Registrations will be removed, accounts deactivated, and holdings retained."
-            if not missing
-            else "One or more account registrations do not exist."
+            if not blockers
+            else "One or more account registrations have blocking dependencies."
         ),
         "matched_count": len(request.selection.uids) - len(missing),
-        "blockers": [f"Missing account: {uid}" for uid in missing],
+        "blockers": blockers,
         "warnings": [f"{retained_rows} historical holdings rows will be retained."],
     }
 
@@ -196,11 +186,18 @@ def accounts_remove(request: BulkActionRequest = Body(...)) -> dict[str, Any]:
 def accounts_capture_holdings_preflight(
     request: BulkActionRequest = Body(...),
 ) -> dict[str, Any]:
+    if request.options:
+        raise bad_request(
+            "Capture holdings accepts no options; complete asset registration is mandatory."
+        )
     results = []
     blockers = []
     for uid in request.selection.uids:
         try:
-            results.append(preflight_holdings(uid))
+            result = preflight_holdings(uid)
+            results.append(result)
+            if not result.get("allowed", False):
+                blockers.extend(result.get("blockers") or [f"Account {uid} is not ready."])
         except Exception:
             blockers.append(f"Account {uid} is not ready for holdings capture.")
     return {
@@ -220,21 +217,11 @@ def accounts_capture_holdings_preflight(
 
 @router.post("/actions/capture-holdings", response_model=dict[str, Any])
 def accounts_capture_holdings(request: BulkActionRequest = Body(...)) -> dict[str, Any]:
-    register_missing = boolean_option(
-        request.options,
-        "register_missing_assets",
-        default=True,
-    )
     preflight = accounts_capture_holdings_preflight(request)
     if not preflight["allowed"]:
         raise HTTPException(status_code=409, detail=preflight)
     try:
-        return {
-            "results": [
-                capture_holdings(uid, register_missing_assets=register_missing)
-                for uid in request.selection.uids
-            ]
-        }
+        return {"results": [capture_holdings(uid) for uid in request.selection.uids]}
     except Exception as exc:
         raise api_http_error(exc) from exc
 

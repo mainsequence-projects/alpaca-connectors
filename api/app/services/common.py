@@ -54,6 +54,15 @@ def positive_float_option(
     return normalized
 
 
+def required_string_option(options: dict[str, Any], key: str) -> str:
+    value = options.get(key)
+    if not isinstance(value, str) or not value.strip():
+        from ..errors import bad_request
+
+        raise bad_request(f"options.{key} must be a non-empty string.")
+    return value.strip()
+
+
 def json_safe(value: Any) -> Any:
     return json.loads(json.dumps(value, default=str))
 
@@ -120,9 +129,8 @@ def resource_discovery(
     for column in columns:
         raw_id = str(column["id"])
         normalized_column = {**column, "id": raw_id.replace("_", "-")}
-        if "data_type" in normalized_column or normalized_column["id"] != raw_id:
-            normalized_column.setdefault("value_path", raw_id)
-            normalized_column.setdefault("data_type", "text")
+        normalized_column.setdefault("value_path", raw_id.replace("-", "_"))
+        normalized_column.setdefault("data_type", "text")
         normalized_columns.append(
             {
                 "default_visible": True,

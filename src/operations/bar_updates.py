@@ -71,18 +71,14 @@ def _resolve_update_job() -> Any:
             f"The {ALPACA_BARS_UPDATE_JOB_NAME!r} Job has not been deployed for this branch."
         )
     if len(jobs) > 1:
-        raise RuntimeError(
-            f"More than one branch Job is named {ALPACA_BARS_UPDATE_JOB_NAME!r}."
-        )
+        raise RuntimeError(f"More than one branch Job is named {ALPACA_BARS_UPDATE_JOB_NAME!r}.")
     job = jobs[0]
     if job.execution_path != ALPACA_BARS_UPDATE_EXECUTION_PATH:
         raise RuntimeError(
             f"The {ALPACA_BARS_UPDATE_JOB_NAME!r} Job does not use the reviewed launcher."
         )
     if not _job_image_is_ready(job):
-        raise ValueError(
-            f"The {ALPACA_BARS_UPDATE_JOB_NAME!r} Job image is not ready."
-        )
+        raise ValueError(f"The {ALPACA_BARS_UPDATE_JOB_NAME!r} Job image is not ready.")
     return job
 
 

@@ -15,7 +15,6 @@ from typing import Any, ClassVar, Literal
 from msm.api.base import MarketsMetaTableRow, operation_result_rows
 from msm.base import MarketsBase, markets_table_args, new_markets_uid
 from msm.models import AccountTable
-from msm.models.assets.categories import AssetCategoryTable
 from msm.models.assets.core import AssetTable
 from pydantic import ConfigDict, Field
 from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, Index, String, Text, delete
@@ -23,6 +22,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.types import Uuid
 
 from src.metatables import AlpacaMarketsMetaTableMixin, ProjectStorageNameMixin
+from src.universes.registry import AssetUniverseTable
 
 AssetSource = Literal["assets", "universe", "account_holdings"]
 ASSET_SOURCES: tuple[AssetSource, ...] = ("assets", "universe", "account_holdings")
@@ -111,11 +111,11 @@ class AlpacaBarsConfigurationTable(
     )
     universe_uid: Mapped[uuid.UUID | None] = mapped_column(
         Uuid(as_uuid=True),
-        ForeignKey(f"{AssetCategoryTable.__table__.fullname}.uid", ondelete="RESTRICT"),
+        ForeignKey(f"{AssetUniverseTable.__table__.fullname}.uid", ondelete="RESTRICT"),
         nullable=True,
         info={
             "label": "Universe UID",
-            "description": "AssetCategory UID when asset_source is universe; otherwise null.",
+            "description": "Registered AssetUniverse UID when the asset source is universe.",
         },
     )
     frequency_id: Mapped[str] = mapped_column(
@@ -260,41 +260,76 @@ def _validate_references(
     asset_uids: list[uuid.UUID],
     universe_uid: uuid.UUID | None,
 ) -> None:
-    from msm.api.assets import Asset, AssetCategory
-
     from src.account.services import get_account_registration
-    from src.universes import materialized_universe_is_active
+    from src.assets.resolution import assets_by_uids
+    from src.universes import get_asset_universe
 
     if get_account_registration(account_uid) is None:
         raise LookupError(f"Alpaca account registration {account_uid!s} does not exist.")
+    existing_assets = assets_by_uids(asset_uids)
     missing_assets = [
-        str(asset_uid) for asset_uid in asset_uids if Asset.get_by_uid(asset_uid) is None
+        str(asset_uid) for asset_uid in asset_uids if str(asset_uid) not in existing_assets
     ]
     if missing_assets:
         raise LookupError(f"These Asset UIDs do not exist: {sorted(missing_assets)!r}")
     if asset_source == "universe":
-        category = AssetCategory.get_by_uid(universe_uid)
-        if category is None:
-            raise LookupError(f"AssetCategory {universe_uid!s} does not exist.")
-        if not materialized_universe_is_active(category.metadata_json):
+        universe = get_asset_universe(universe_uid)
+        if universe is None:
+            raise LookupError(f"Asset Universe {universe_uid!s} does not exist.")
+        if not universe.is_active:
             raise ValueError(
-                f"AssetCategory {universe_uid!s} is inactive and cannot be configured."
+                f"Asset Universe {universe_uid!s} is inactive and cannot be configured."
             )
 
 
+def bar_configurations_for_universe(
+    universe_uid: uuid.UUID | str,
+) -> list[AlpacaBarsConfiguration]:
+    """Return stored bar configurations that hold a real FK to one Asset Universe."""
+    from src.runtime import account_runtime_models, start_markets_engine
+
+    start_markets_engine(models=account_runtime_models())
+    return sorted(
+        AlpacaBarsConfiguration.filter(universe_uid=str(universe_uid), limit=10_000),
+        key=lambda configuration: (configuration.name, str(configuration.uid)),
+    )
+
+
 def _configuration_asset_uids(configuration_uid: uuid.UUID | str) -> list[uuid.UUID]:
+    return _configuration_asset_uids_by_configuration([configuration_uid]).get(
+        str(configuration_uid),
+        [],
+    )
+
+
+def _configuration_asset_uids_by_configuration(
+    configuration_uids: list[uuid.UUID | str],
+) -> dict[str, list[uuid.UUID]]:
     from msm.bootstrap import resolve_runtime
     from msm.repositories.base import compile_markets_statement, execute_markets_operation
     from sqlalchemy import select
 
+    normalized_configuration_uids = list(
+        dict.fromkeys(uuid.UUID(str(configuration_uid)) for configuration_uid in configuration_uids)
+    )
+    if not normalized_configuration_uids:
+        return {}
     runtime = resolve_runtime(
         models=[AlpacaBarsConfigurationAssetTable],
         row_model_name="AlpacaBarsConfigurationAsset",
     )
     statement = (
-        select(AlpacaBarsConfigurationAssetTable.asset_uid)
-        .where(AlpacaBarsConfigurationAssetTable.configuration_uid == configuration_uid)
-        .order_by(AlpacaBarsConfigurationAssetTable.asset_uid.asc())
+        select(
+            AlpacaBarsConfigurationAssetTable.configuration_uid,
+            AlpacaBarsConfigurationAssetTable.asset_uid,
+        )
+        .where(
+            AlpacaBarsConfigurationAssetTable.configuration_uid.in_(normalized_configuration_uids)
+        )
+        .order_by(
+            AlpacaBarsConfigurationAssetTable.configuration_uid.asc(),
+            AlpacaBarsConfigurationAssetTable.asset_uid.asc(),
+        )
     )
     operation = compile_markets_statement(
         statement,
@@ -304,44 +339,82 @@ def _configuration_asset_uids(configuration_uid: uuid.UUID | str) -> list[uuid.U
         access="read",
     )
     rows = operation_result_rows(execute_markets_operation(operation, context=runtime.context))
-    return [uuid.UUID(str(row["asset_uid"])) for row in rows]
+    memberships = {
+        str(configuration_uid): [] for configuration_uid in normalized_configuration_uids
+    }
+    for row in rows:
+        memberships[str(row["configuration_uid"])].append(uuid.UUID(str(row["asset_uid"])))
+    return memberships
 
 
-def _with_memberships(row: AlpacaBarsConfiguration) -> AlpacaBarsConfiguration:
-    return row.model_copy(update={"asset_uids": _configuration_asset_uids(row.uid)})
+def _with_memberships(
+    row: AlpacaBarsConfiguration,
+    *,
+    asset_uids: list[uuid.UUID] | None = None,
+) -> AlpacaBarsConfiguration:
+    return row.model_copy(
+        update={
+            "asset_uids": (_configuration_asset_uids(row.uid) if asset_uids is None else asset_uids)
+        }
+    )
 
 
 def _replace_memberships(
     configuration_uid: uuid.UUID | str,
     asset_uids: list[uuid.UUID],
 ) -> None:
+    from msm.api.base import operation_result_rows
     from msm.bootstrap import resolve_runtime
     from msm.repositories.base import compile_markets_statement, execute_markets_operation
-    from msm.repositories.crud import create_model
+    from msm.repositories.crud import bulk_upsert_model
 
+    normalized_configuration_uid = uuid.UUID(str(configuration_uid))
+    normalized_asset_uids = list(dict.fromkeys(asset_uids))
     runtime = resolve_runtime(
         models=[AlpacaBarsConfigurationAssetTable],
         row_model_name="AlpacaBarsConfigurationAsset",
     )
+    if normalized_asset_uids:
+        upsert_result = bulk_upsert_model(
+            runtime.context,
+            model=AlpacaBarsConfigurationAssetTable,
+            values=[
+                {
+                    "configuration_uid": normalized_configuration_uid,
+                    "asset_uid": asset_uid,
+                }
+                for asset_uid in normalized_asset_uids
+            ],
+            conflict_columns=("configuration_uid", "asset_uid"),
+        )
+        returned_asset_uids = {
+            uuid.UUID(str(row["asset_uid"]))
+            for row in operation_result_rows(upsert_result)
+            if row.get("asset_uid") is not None
+        }
+        missing_asset_uids = set(normalized_asset_uids) - returned_asset_uids
+        if missing_asset_uids:
+            missing = ", ".join(str(asset_uid) for asset_uid in sorted(missing_asset_uids))
+            raise RuntimeError(
+                "Bulk bar-configuration membership upsert returned an incomplete result for: "
+                f"{missing}. Existing memberships were not removed."
+            )
+
+    stale_memberships = delete(AlpacaBarsConfigurationAssetTable).where(
+        AlpacaBarsConfigurationAssetTable.configuration_uid == normalized_configuration_uid
+    )
+    if normalized_asset_uids:
+        stale_memberships = stale_memberships.where(
+            AlpacaBarsConfigurationAssetTable.asset_uid.notin_(normalized_asset_uids)
+        )
     delete_operation = compile_markets_statement(
-        delete(AlpacaBarsConfigurationAssetTable).where(
-            AlpacaBarsConfigurationAssetTable.configuration_uid == configuration_uid
-        ),
+        stale_memberships,
         context=runtime.context,
         operation="delete",
         models=[AlpacaBarsConfigurationAssetTable],
         access="write",
     )
     execute_markets_operation(delete_operation, context=runtime.context)
-    for asset_uid in asset_uids:
-        create_model(
-            runtime.context,
-            model=AlpacaBarsConfigurationAssetTable,
-            values={
-                "configuration_uid": uuid.UUID(str(configuration_uid)),
-                "asset_uid": asset_uid,
-            },
-        )
 
 
 def create_bar_configuration(
@@ -490,11 +563,13 @@ def list_bar_configurations(
         access="read",
     )
     rows = [
-        _with_memberships(AlpacaBarsConfiguration.model_validate(row))
+        AlpacaBarsConfiguration.model_validate(row)
         for row in operation_result_rows(
             execute_markets_operation(page_operation, context=runtime.context)
         )
     ]
+    memberships = _configuration_asset_uids_by_configuration([row.uid for row in rows])
+    rows = [_with_memberships(row, asset_uids=memberships.get(str(row.uid), [])) for row in rows]
     count_rows = operation_result_rows(
         execute_markets_operation(count_operation, context=runtime.context)
     )
@@ -588,6 +663,7 @@ __all__ = [
     "AlpacaBarsConfigurationTable",
     "AssetSource",
     "create_bar_configuration",
+    "bar_configurations_for_universe",
     "delete_bar_configuration",
     "get_bar_configuration",
     "list_bar_configurations",

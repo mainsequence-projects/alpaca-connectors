@@ -168,9 +168,7 @@ class MyProjectMarketsMetaTableMixin(MarketsMetaTableMixin):
 
 class MyAssetDetailsTable(MyProjectMarketsMetaTableMixin, MarketsBase):
     __markets_base_identifier__ = "MyAssetDetails"
-    __metatable_description__ = (
-        "Project-local asset details keyed one-to-one by AssetTable.uid."
-    )
+    __metatable_description__ = "Project-local asset details keyed one-to-one by AssetTable.uid."
 ```
 
 Already-qualified `__metatable_identifier__` values remain accepted for existing

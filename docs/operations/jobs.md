@@ -1,5 +1,61 @@
 # Jobs And Deployment
 
+## Universe-Backed ETF Signal Jobs
+
+Every stored signal configuration projects to its own Main Sequence Job. Different Universes can
+therefore have different accounts, schedules, compute requests, and lifecycle state. The durable
+record is `AlpacaETFSignalJobConfiguration`; JobRuns are execution history only.
+
+Create and operate a signal Job through the CLI:
+
+```bash
+alpaca-connectors signal create \
+  --name "Daily S&P 500 observation" \
+  --universe-uid <UNIVERSE_UID> \
+  --account-uid <ACCOUNT_UID> \
+  --schedule-type interval \
+  --schedule-every 1 \
+  --schedule-period days
+
+alpaca-connectors signal list
+alpaca-connectors signal run <CONFIGURATION_UID>
+alpaca-connectors signal runs <CONFIGURATION_UID>
+alpaca-connectors signal pause <CONFIGURATION_UID>
+alpaca-connectors signal resume <CONFIGURATION_UID>
+alpaca-connectors signal reconcile <CONFIGURATION_UID>
+```
+
+Creation stores desired state, materializes the deterministic ms-markets Signal metadata, creates
+an initially unscheduled Job with automatic deployment, links its UID, then activates the schedule.
+It does not publish weights. The launcher accepts no business arguments. It resolves the
+configuration from `JOB_RUN_UID` and the owning Job UID, then runs one Universe-backed signal
+update. Environment scope is derived from the current CodeRepositoryBranch and is never a caller
+argument. See [ADR 0007](../adrs/0007_one_signal_configuration_per_job.md).
+
+The API exposes the same lifecycle at `/v1/signal-jobs`, including list discovery, CRUD,
+run/pause/resume/reconcile actions, and per-configuration JobRun history.
+
+The browser form generates calendar schedules from daily, weekday, weekly, or monthly controls and
+shows the resulting five-field expression. Advanced numeric expressions support wildcards, lists,
+ranges, and steps; the API validates both syntax and the legal range of every cron field before it
+stores desired state. The platform's current Job schedule contract does not expose a per-Job
+timezone.
+
+The Job schedule and the `TimeIndexTableUpdater` configuration are separate contracts. The schedule
+decides when the JobRun starts. `AlpacaETFHoldingsSignal` receives `universe_uid` and the runtime
+`account_uid`, and its output remains the canonical `SignalWeightsStorage` grain. ms-markets nests
+that producer input under `SignalWeightsConfiguration.signal_configuration` and deliberately
+excludes it from the canonical shared `SignalWeights` update hash; `signal_uid` separates each
+Universe's observations in storage. The dedicated Job configuration row is the durable source for
+reconstructing those runtime values.
+
+With Main Sequence SDK 8.1, each `run()` call performs one update cycle directly. The removed
+`force_update` and `debug_mode` parameters are not configuration fields and are not exposed in the
+GUI, API, CLI, or Job launcher. This producer therefore publishes one observation on every
+successful call, including unchanged weights. Dependency-tree execution remains a run control. The
+inherited `offset_start` updater field is not exposed because this producer observes the provider's
+current holdings and cannot backfill historically effective ETF weights.
+
 ## Alpaca Bars Update Job
 
 The canonical market-data Job is declared by:
@@ -17,8 +73,8 @@ mainsequence code-repository jobs run <JOB_UID> -- \
 
 The launcher resolves the stored configuration at run time and always executes the update. It does
 not accept a dataset UID, account override, asset-source override, bar-profile override, Secret
-name, credential value, hash namespace, or `force_update` option. Main Sequence records the two
-command arguments on the resulting JobRun.
+name, credential value, hash namespace, or removed `force_update` option. Main Sequence records the
+two command arguments on the resulting JobRun.
 
 The workflow uses backend API `2.2.0`, has no schedule or configuration environment variable, and
 keeps automatic redeployment disabled. A recurring schedule needs a separate durable

@@ -20,6 +20,7 @@ def list_holdings(
     limit: int,
     offset: int,
     as_of=None,
+    latest_only: bool = False,
     asset_identifiers: list[str] | None = None,
     ordering: str = "-time_index",
 ):
@@ -28,6 +29,7 @@ def list_holdings(
         limit=limit,
         offset=offset,
         as_of=as_of,
+        latest_only=latest_only,
         asset_identifiers=asset_identifiers,
         ordering=ordering,
     )
@@ -38,13 +40,8 @@ def get_holdings_snapshot(account_uid: str, holdings_set_uid: str):
     return get_account_holdings_snapshot(account_uid, holdings_set_uid)
 
 
-def capture_holdings(account_uid: str, *, register_missing_assets: bool):
-    return asdict(
-        capture_alpaca_account_holdings(
-            account_uid,
-            register_missing_assets=register_missing_assets,
-        )
-    )
+def capture_holdings(account_uid: str):
+    return asdict(capture_alpaca_account_holdings(account_uid))
 
 
 def preflight_holdings(account_uid: str):

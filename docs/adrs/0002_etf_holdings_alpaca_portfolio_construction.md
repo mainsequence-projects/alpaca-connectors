@@ -2,7 +2,9 @@
 
 ## Status
 
-Accepted
+Superseded in part by
+[ADR 0006](0006_universe_backed_alpaca_etf_signal.md). The Alpaca valuation and portfolio graph
+remain accepted; signal ownership, identity, configuration, and observation timing follow ADR 0006.
 
 ## Context
 
@@ -267,7 +269,7 @@ Tradeoffs:
   runtime graph
 - one ETF can have multiple valid portfolio rows when the Alpaca price source or interpolation
   configuration changes; those rows must not collapse to one `etf_tracker_<ETF>` identity
-- missing ETF components remain blockers until assets are registered by FIGI and bars exist for the
+- missing ETF components remain blockers until assets are registered by Alpaca UUID and bars exist for the
   selected Alpaca bars table
 
 ## Notes

@@ -6,9 +6,6 @@ from collections.abc import Callable
 from typing import Any
 
 from alpaca.common.exceptions import APIError as AlpacaAPIError
-from requests import ConnectionError as RequestsConnectionError
-from requests import HTTPError, JSONDecodeError
-from requests import Timeout as RequestsTimeout
 
 from src.assets import (
     build_alpaca_us_equity_registration_plan,
@@ -24,7 +21,6 @@ from src.operations import (
     get_asset_registration_operation,
     set_asset_registration_step,
 )
-from src.universes import EtfExpansionRequest, expand_etf_seed_symbols
 
 from ..errors import api_http_error
 from ..schemas import (
@@ -38,44 +34,26 @@ from .common import collection_response, serialize_asset_mapping
 ProgressCallback = Callable[[str, str, str | None], None]
 
 
-def list_asset_resources(*, limit: int, offset: int, search: str | None, ordering: str):
-    items, total = list_assets(limit=limit, offset=offset, search=search, ordering=ordering)
+def list_asset_resources(
+    *,
+    limit: int,
+    offset: int,
+    search: str | None,
+    ordering: str,
+    category_uid: str | None = None,
+):
+    items, total = list_assets(
+        limit=limit,
+        offset=offset,
+        search=search,
+        ordering=ordering,
+        category_uid=category_uid,
+    )
     return collection_response(items=items, total=total, limit=limit, offset=offset)
 
 
 def get_asset_resource(asset_uid: str):
     return get_asset(asset_uid)
-
-
-def _resolve_asset_registration_symbols(
-    request: AssetRegistrationRequest,
-) -> tuple[list[str] | None, Any | None]:
-    if request.symbols:
-        return request.symbols, None
-
-    expansion_result = expand_etf_seed_symbols(
-        EtfExpansionRequest(
-            seed_tickers=request.seed_tickers or [],
-            component_provider=request.component_provider or "",
-            timeout=request.timeout,
-        )
-    )
-    return expansion_result.symbols_for_registration, expansion_result
-
-
-def _asset_registration_plan_summary(plan: Any, expansion_result: Any | None) -> dict[str, Any]:
-    summary = plan.summary()
-    if expansion_result is None:
-        return summary
-
-    return {
-        **summary,
-        "seed_symbols": expansion_result.universe.seed_symbols,
-        "component_provider": expansion_result.component_provider,
-        "expanded_candidate_symbols": expansion_result.universe.expanded_symbols,
-        "expanded_component_symbols_by_seed": expansion_result.universe.component_symbols_by_seed,
-        "unsupported_seed_symbols": expansion_result.universe.unsupported_seed_symbols,
-    }
 
 
 def _emit_progress(
@@ -92,19 +70,19 @@ def _prepare_asset_registration(
     request: AssetRegistrationRequest,
     *,
     progress: ProgressCallback | None,
-) -> tuple[Any, Any, Any]:
+) -> tuple[Any, Any]:
     _emit_progress(progress, "prepare_scope", "running", "Preparing registration inputs.")
-    symbols, expansion_result = _resolve_asset_registration_symbols(request)
-    scope_message = (
-        f"Expanded {len(request.seed_tickers or [])} ETF seed(s) into {len(symbols or [])} symbol(s)."
-        if expansion_result is not None
-        else f"Prepared {len(symbols or [])} exact symbol(s)."
+    symbols = request.symbols
+    _emit_progress(
+        progress,
+        "prepare_scope",
+        "succeeded",
+        f"Prepared {len(symbols)} exact symbol(s).",
     )
-    _emit_progress(progress, "prepare_scope", "succeeded", scope_message)
 
     plan = build_alpaca_us_equity_registration_plan(
+        account_uid=request.account_uid,
         symbols=symbols,
-        include_non_tradable=request.include_non_tradable,
         timeout=request.timeout,
         progress=progress,
     )
@@ -113,7 +91,7 @@ def _prepare_asset_registration(
         progress,
         "check_existing_assets",
         "running",
-        "Checking resolved FIGIs against registered Main Sequence assets.",
+        "Checking canonical Alpaca asset IDs against registered Main Sequence assets.",
     )
     resolution = resolve_alpaca_us_equity_registration_plan(plan, timeout=request.timeout)
     _emit_progress(
@@ -122,10 +100,10 @@ def _prepare_asset_registration(
         "succeeded",
         (
             f"Found {len(resolution.existing_assets_by_symbol)} existing asset(s) and "
-            f"{len(resolution.missing_matches)} asset(s) eligible for registration."
+            f"{len(resolution.missing_assets)} asset(s) eligible for registration."
         ),
     )
-    return plan, resolution, expansion_result
+    return plan, resolution
 
 
 def build_asset_registration_discovery(
@@ -133,19 +111,19 @@ def build_asset_registration_discovery(
     *,
     progress: ProgressCallback | None = None,
 ) -> AssetRegistrationDiscoveryResponse:
-    plan, resolution, expansion_result = _prepare_asset_registration(
+    plan, resolution = _prepare_asset_registration(
         request,
         progress=progress,
     )
     _emit_progress(progress, "finalize_plan", "running", "Building the registration plan result.")
     result = AssetRegistrationDiscoveryResponse(
         request=request,
-        plan_summary=_asset_registration_plan_summary(plan, expansion_result),
+        plan_summary=plan.summary(),
         resolution_summary=resolution.summary(),
-        can_register=not bool(plan.unresolved_symbols or plan.missing_symbols_from_alpaca),
-        unresolved_symbols=list(plan.unresolved_symbols),
+        can_register=not bool(plan.missing_symbols_from_alpaca),
         missing_symbols_from_alpaca=list(plan.missing_symbols_from_alpaca),
-        missing_symbols_to_register=sorted(match.symbol for match in resolution.missing_matches),
+        missing_symbols_to_register=sorted(asset.symbol for asset in resolution.missing_assets),
+        openfigi_unmatched_symbols=list(plan.openfigi_unmatched_symbols),
         warnings_by_symbol=dict(sorted(plan.warnings_by_symbol.items())),
     )
     _emit_progress(
@@ -162,7 +140,7 @@ def execute_asset_registration(
     *,
     progress: ProgressCallback | None = None,
 ) -> AssetRegistrationExecuteResponse:
-    plan, resolution, expansion_result = _prepare_asset_registration(
+    plan, resolution = _prepare_asset_registration(
         request,
         progress=progress,
     )
@@ -170,7 +148,7 @@ def execute_asset_registration(
         progress,
         "register_assets",
         "running",
-        f"Registering {len(resolution.missing_matches)} missing asset(s).",
+        f"Registering {len(resolution.missing_assets)} missing asset(s) and refreshing details.",
     )
     registration_result = register_alpaca_us_equity_assets(
         registration_resolution=resolution,
@@ -190,20 +168,17 @@ def execute_asset_registration(
     )
     result = AssetRegistrationExecuteResponse(
         request=request,
-        plan_summary=_asset_registration_plan_summary(plan, expansion_result),
+        plan_summary=plan.summary(),
         resolution_summary=resolution.summary(),
         assets_by_symbol=serialize_asset_mapping(registration_result["assets"]),
         existing_asset_uids_by_symbol=serialize_asset_mapping(
             registration_result["existing_assets"]
         ),
         created_asset_uids_by_symbol=serialize_asset_mapping(registration_result["created_assets"]),
-        unresolved_symbols=list(registration_result["unresolved_symbols"]),
-        not_registered_missing_figi_symbols=list(
-            registration_result["not_registered_missing_figi_symbols"]
-        ),
         not_registered_missing_alpaca_symbols=list(
             registration_result["not_registered_missing_alpaca_symbols"]
         ),
+        openfigi_unmatched_symbols=list(registration_result["openfigi_unmatched_symbols"]),
         warnings_by_symbol=dict(sorted(registration_result["warnings_by_symbol"].items())),
     )
     _emit_progress(
@@ -278,34 +253,56 @@ def _asset_registration_public_error(
     exception_names = {type(item).__name__ for item in chain}
     message = str(exc)
 
-    if step_key == "load_alpaca_assets":
-        if message.startswith("Failed to retrieve MainSequence secret"):
+    if step_key == "resolve_account":
+        if isinstance(exc, LookupError) and "account registration" in message:
+            return {
+                "code": "account_registration_not_found",
+                "message": (
+                    "The selected Alpaca account registration does not exist. Select a registered "
+                    "account or register one before retrying. OpenFIGI was not called."
+                ),
+                "retryable": False,
+            }
+        if "Secret" in message:
             if "NameResolutionError" in exception_names or "gaierror" in exception_names:
                 return {
                     "code": "credential_service_dns_failure",
                     "message": (
                         "DNS could not resolve the configured Main Sequence backend while "
-                        "retrieving the Alpaca credential secret. OpenFIGI was not called."
+                        "retrieving the selected account's credential Secret. OpenFIGI was not "
+                        "called."
                     ),
                     "retryable": True,
+                }
+            if isinstance(exc, LookupError):
+                return {
+                    "code": "account_credentials_missing",
+                    "message": (
+                        "The selected Alpaca account references a credential Secret that does not "
+                        "exist or has no value. Update the account registration before retrying. "
+                        "OpenFIGI was not called."
+                    ),
+                    "retryable": False,
                 }
             return {
                 "code": "credential_lookup_failed",
                 "message": (
-                    "Main Sequence could not retrieve the configured Alpaca credential secret. "
-                    "OpenFIGI was not called. Check backend connectivity and secret access."
+                    "Main Sequence could not retrieve a credential Secret referenced by the "
+                    "selected Alpaca account. OpenFIGI was not called. Check backend connectivity "
+                    "and Secret access."
                 ),
                 "retryable": True,
             }
-        if message.startswith("Missing Alpaca"):
-            return {
-                "code": "alpaca_credentials_missing",
-                "message": (
-                    "Alpaca credentials are not configured. Set the ALPACA_API_KEY and "
-                    "ALPACA_SECRET_KEY secrets before retrying. OpenFIGI was not called."
-                ),
-                "retryable": False,
-            }
+        return {
+            "code": "account_resolution_failed",
+            "message": (
+                "The selected Alpaca account could not be resolved for asset registration. "
+                "OpenFIGI was not called."
+            ),
+            "retryable": True,
+        }
+
+    if step_key == "load_alpaca_assets":
         if isinstance(exc, AlpacaAPIError):
             status_code = getattr(exc, "status_code", None)
             if status_code in {401, 403}:
@@ -327,55 +324,16 @@ def _asset_registration_public_error(
             "retryable": True,
         }
 
-    if step_key == "resolve_openfigi_identities":
-        if any(isinstance(item, RequestsTimeout) for item in chain):
-            return {
-                "code": "openfigi_timeout",
-                "message": f"OpenFIGI did not respond within the configured {timeout:g}-second timeout.",
-                "retryable": True,
-            }
-        http_error = next((item for item in chain if isinstance(item, HTTPError)), None)
-        if http_error is not None:
-            status_code = (
-                http_error.response.status_code if http_error.response is not None else None
-            )
-            if status_code in {401, 403}:
-                detail = "OpenFIGI rejected the configured API key."
-            elif status_code == 429:
-                detail = "OpenFIGI rate-limited the mapping request after its retry window."
-            else:
-                suffix = f" (HTTP {status_code})" if status_code else ""
-                detail = f"OpenFIGI rejected the mapping request{suffix}."
-            return {"code": "openfigi_request_failed", "message": detail, "retryable": True}
-        if any(isinstance(item, JSONDecodeError) for item in chain):
-            return {
-                "code": "openfigi_invalid_response",
-                "message": "OpenFIGI returned a response that was not valid JSON.",
-                "retryable": True,
-            }
-        if any(isinstance(item, RequestsConnectionError) for item in chain):
-            detail = (
-                "DNS could not resolve api.openfigi.com."
-                if "NameResolutionError" in exception_names or "gaierror" in exception_names
-                else "The API could not connect to api.openfigi.com."
-            )
-            return {"code": "openfigi_unavailable", "message": detail, "retryable": True}
-        return {
-            "code": "openfigi_resolution_failed",
-            "message": "OpenFIGI identity resolution failed unexpectedly.",
-            "retryable": True,
-        }
-
     if step_key == "check_existing_assets":
         return {
             "code": "mainsequence_asset_lookup_failed",
-            "message": "Main Sequence could not check the resolved FIGIs against registered assets.",
+            "message": "Main Sequence could not check the resolved Alpaca asset IDs.",
             "retryable": True,
         }
     if step_key == "register_assets":
         return {
             "code": "mainsequence_asset_registration_failed",
-            "message": "Main Sequence could not register the resolved missing assets.",
+            "message": "Main Sequence could not register the Alpaca-backed assets.",
             "retryable": True,
         }
 

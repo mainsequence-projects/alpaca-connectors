@@ -19,12 +19,14 @@ record at `docs/implementation_tasks/0001_ms_markets_storage_first_migration.md`
 
 - `api/app/capabilities.py`: API-facing capability catalog
 - `src/assets/`: asset registration, FIGI resolution, Alpaca universe checks
-- `src/universes/`: source CRUD, asset-universe expansion, validation, and synchronization
+- `src/universes/`: source CRUD and Asset Universe execution across extraction, bulk registration,
+  category membership, and observed signal weights
 - `src/market_data/`: Alpaca bar storage, update logic, and supporting functions
 - `src/account/`: Alpaca account registration and project-owned account details
 - `src/holdings/`: public account-holdings capability boundary
 - `src/cli/`: thin capability command adapters
 - `src/jobs/`: repository-local launchers for platform-managed execution
+- `src/operations/`: durable workflow state and one-configuration-per-Job reconciliation
 - `src/portfolios/`: ETF holdings portfolio construction with `msm_portfolios`
 
 See [Capability Model](capabilities/index.md) before the workflow-specific pages.
@@ -38,8 +40,8 @@ ETF extraction has its own standalone architecture page:
 Use that page first when the question is about:
 
 - provider extraction behavior
-- seed expansion
-- ETF-owned holdings category sync
+- configured provider extraction
+- source-owned holdings membership refresh
 - the boundary between ETF logic and Alpaca logic
 
 ## Main Decisions
@@ -47,7 +49,10 @@ Use that page first when the question is about:
 - Assets are registered in MainSequence by FIGI, not as custom assets.
 - ETF holdings extraction is delegated to `etfhextractor`; managed extraction targets are
   `UniverseSource` rows, not Python constants.
-- Holdings categories are ETF-owned: ETF extraction defines category membership, and only MainSequence asset registration ambiguity/missing assets block category sync.
+- Holdings categories are source-owned: Universe Run resolves current ETF holdings and weights,
+  registers missing Alpaca-backed constituents through the account selected for that execution,
+  changes membership only after the complete constituent set is available, and publishes that same
+  extraction through `AlpacaETFHoldingsSignal`. Universes do not own accounts.
 - Alpaca daily bars share one storage table per `frequency_id`, `feed`, and `adjustment`
   (`src/market_data/storage.py`); the table identifier preserves the legacy
   `alpaca_stock_bars_<freq>_<feed>_<adjustment>` string. Physical table names include the triple
@@ -58,9 +63,9 @@ Use that page first when the question is about:
 - Bar updates are configuration-first: users maintain UUID-keyed `AlpacaBarsConfiguration` rows
   with `assets`, `universe`, or recent `account_holdings` sources. The output MetaTable is resolved
   from frequency/feed/adjustment and is never a write input.
-- Portfolio construction uses the portfolio runtime (`start_portfolio_markets_engine()`), an ETF
-  holdings signal from `etfhextractor`, and `msm_portfolios.InterpolatedPrices` over the registered
-  Alpaca bars table.
+- Portfolio construction uses the portfolio runtime (`start_portfolio_markets_engine()`), the
+  connector-owned Universe-backed `AlpacaETFHoldingsSignal`, and
+  `msm_portfolios.InterpolatedPrices` over the registered Alpaca bars table.
 - Daily bar `time_index` is normalized to `16:00 America/New_York` on the session date as a project convention.
 
 ## Build The Docs
@@ -78,12 +83,14 @@ uv run mkdocs build
 ## Related Entry Points
 
 - `alpaca-connectors asset register`
-- `alpaca-connectors universe sync`
+- `alpaca-connectors universe run <UNIVERSE_UID>`
 - `alpaca-connectors universe-source list`
 - `alpaca-connectors account register`
 - `alpaca-connectors holdings capture`
 - `alpaca-connectors market-data update`
 - `alpaca-connectors market-data bar-configuration create`
 - `alpaca-connectors asset <ticker> update_prices <period>`
+- `alpaca-connectors signal create ...`
+- `alpaca-connectors signal run <CONFIGURATION_UID>`
 - `src/jobs/run_alpaca_bars_update.py`
 - `.mainsequence/workflows/alpaca-bars-update.yaml`

@@ -2,7 +2,13 @@
 
 from __future__ import annotations
 
+import logging
+
 from fastapi import HTTPException
+
+from src.platform_secrets import PlatformSecretAccessError
+
+logger = logging.getLogger(__name__)
 
 
 def bad_request(message: str) -> HTTPException:
@@ -13,6 +19,15 @@ def bad_request(message: str) -> HTTPException:
 
 
 def api_http_error(exc: Exception) -> HTTPException:
+    if isinstance(exc, PlatformSecretAccessError):
+        return HTTPException(
+            status_code=502,
+            detail={
+                "code": "secret_resolution_failed",
+                "message": str(exc),
+                "retryable": True,
+            },
+        )
     if isinstance(exc, LookupError):
         return HTTPException(
             status_code=404,
@@ -36,6 +51,7 @@ def api_http_error(exc: Exception) -> HTTPException:
                 "retryable": False,
             },
         )
+    logger.exception("Unhandled API dependency failure")
     return HTTPException(
         status_code=503,
         detail={

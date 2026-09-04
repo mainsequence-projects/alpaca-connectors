@@ -46,10 +46,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     from src.market_data import execute_market_data_update
 
-    result = execute_market_data_update(
-        configuration_uid=args.configuration_uid,
-        force_update=True,
-    )
+    result = execute_market_data_update(configuration_uid=args.configuration_uid)
     print(json.dumps(_result_summary(args.configuration_uid, result), sort_keys=True, default=str))
     return 0
 

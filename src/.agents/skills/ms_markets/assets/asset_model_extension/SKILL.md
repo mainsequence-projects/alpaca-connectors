@@ -140,6 +140,7 @@ class FutureDetails(MarketsMetaTableRow):
     uid: uuid.UUID = Field(validation_alias=AliasChoices("uid", "asset_uid"))
     asset_uid: uuid.UUID
 
+
 msm.start_engine(models=[FutureAssetDetailsTable])
 ```
 

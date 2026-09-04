@@ -94,9 +94,15 @@ alpaca-connectors holdings capture --account-uid <account-uid> --execute
 alpaca-connectors holdings list --account-uid <account-uid>
 ```
 
-Held equities resolve strictly to registered ms-markets Assets. Execution may register missing
-FIGI-backed equities through the existing strict Alpaca/OpenFIGI path; unsupported asset classes
-and unresolved symbols are reported. Cash is emitted only when the canonical cash Asset exists.
+Account registration always registers missing held assets and creates an initial holdings snapshot.
+Registration and later holdings capture are hard-registry: every non-zero position must resolve to
+a registered ms-markets Asset before publication. Execution registers missing held assets from
+Alpaca's immutable provider identity; OpenFIGI remains optional enrichment for US equities. Invalid
+position identities and provider catalog identity conflicts block the operation with the affected
+symbol and exact identifiers. Cash uses the shared canonical `USD` currency Asset: planning reports
+when it must be ensured, and execution idempotently upserts the built-in currency AssetType and
+`USD` Asset. It never creates Alpaca details or a CurrencySpot row for cash. No partial Account or
+holdings snapshot is written and there is no relaxed capture mode.
 
 ## Live verification still required
 

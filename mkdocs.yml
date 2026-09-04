@@ -44,6 +44,11 @@ nav:
       - "0001 ETF Holdings AssetCategory Ownership": adrs/0001_etf_holdings_asset_category_ownership.md
       - "0002 ETF Holdings Alpaca Portfolio Construction": adrs/0002_etf_holdings_alpaca_portfolio_construction.md
       - "0003 Stored Alpaca Bars Configurations And Asset Sources": adrs/0003_stored_alpaca_bars_configurations_and_asset_sources.md
+      - "0004 Alpaca-Native Asset Identity": adrs/0004_alpaca_native_asset_identity.md
+      - "0005 Asset Universe Run Owns Constituent Registration": adrs/0005_asset_universe_run_owns_constituent_registration.md
+      - "0006 Universe-Backed Alpaca ETF Signal": adrs/0006_universe_backed_alpaca_etf_signal.md
+      - "0007 One Signal Configuration Per Job": adrs/0007_one_signal_configuration_per_job.md
   - Implementation Records:
       - SDK 8 And ms-markets Migration: implementation_tasks/0001_ms_markets_storage_first_migration.md
       - Alpaca Account Storage: implementation_tasks/0002_alpaca_account_module.md
+      - AssetUniverse Relational Identity Plan: implementation_tasks/0003_asset_universe_relational_identity.md

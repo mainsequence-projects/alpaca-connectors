@@ -49,6 +49,8 @@ This skill discovers and identifies data. It does not publish, redesign, or defi
   `.agents/skills/mainsequence/data_publishing/time_index_table_updates/SKILL.md`
 - `MetaTable` registration or operation work:
   `.agents/skills/mainsequence/data_publishing/meta_tables/SKILL.md`
+- FastAPI providers serving the Command Center frontend:
+  `.agents/skills/mainsequence/application_surfaces/api_surfaces/SKILL.md`
 - blocker and failure analysis:
   `.agents/skills/mainsequence/maintenance/bug_auditor/SKILL.md`
 

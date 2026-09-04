@@ -1,4 +1,4 @@
-"""Materialized AssetCategory universe API."""
+"""Registered Asset Universe API."""
 
 from __future__ import annotations
 
@@ -8,15 +8,16 @@ from fastapi import APIRouter, Body, HTTPException, Query
 
 from ..errors import api_http_error, not_found
 from ..schemas import (
+    AssetUniverseCreateRequest,
+    AssetUniverseResponse,
+    AssetUniverseUpdateRequest,
     BulkActionRequest,
-    MaterializedUniverseCreateRequest,
-    MaterializedUniverseResponse,
-    MaterializedUniverseUpdateRequest,
     ResourceCollection,
     ResourceDiscoveryResponse,
 )
 from ..services.common import (
     positive_float_option,
+    required_string_option,
     resource_discovery,
     validate_ordering,
     validate_page_window,
@@ -25,9 +26,11 @@ from ..services.universes import (
     create_universe,
     delete_universe,
     get_universe,
+    list_universe_assets,
     list_universes,
     preview_universe_run,
     run_universe,
+    universe_delete_blockers,
     update_universe,
 )
 
@@ -42,17 +45,17 @@ def universes_list(
     ordering: str = "display_name",
 ) -> ResourceCollection:
     validate_page_window(limit=limit, offset=offset)
-    validate_ordering(ordering, allowed_fields={"display_name", "unique_identifier"})
+    validate_ordering(ordering, allowed_fields={"display_name", "symbol", "updated_at"})
     try:
         return list_universes(limit=limit, offset=offset, search=search, ordering=ordering)
     except Exception as exc:
         raise api_http_error(exc) from exc
 
 
-@router.post("", response_model=MaterializedUniverseResponse, status_code=201)
+@router.post("", response_model=AssetUniverseResponse, status_code=201)
 def universe_create(
-    request: MaterializedUniverseCreateRequest = Body(...),
-) -> MaterializedUniverseResponse:
+    request: AssetUniverseCreateRequest = Body(...),
+) -> AssetUniverseResponse:
     try:
         return create_universe(request)
     except Exception as exc:
@@ -62,12 +65,12 @@ def universe_create(
 @router.get("/discovery", response_model=ResourceDiscoveryResponse)
 def universes_discovery() -> ResourceDiscoveryResponse:
     return resource_discovery(
-        resource_id="materialized-universes",
+        resource_id="asset-universes",
         label="Registered Universes",
         item_label="universe",
         identity_fields=["uid"],
-        searchable_fields=["display_name", "unique_identifier"],
-        orderable_fields=["display_name", "unique_identifier"],
+        searchable_fields=["display_name", "symbol"],
+        orderable_fields=["display_name", "symbol", "updated_at"],
         columns=[
             {
                 "id": "display_name",
@@ -79,19 +82,11 @@ def universes_discovery() -> ResourceDiscoveryResponse:
                 "id": "uid",
                 "header": "UID",
             },
+            {"id": "symbol", "header": "Symbol", "sortable_key": "symbol"},
             {"id": "asset_count", "header": "Assets", "data_type": "number"},
             {"id": "is_active", "header": "Status", "data_type": "boolean"},
         ],
         actions=[
-            {
-                "id": "run",
-                "label": "Run",
-                "endpoint": "/v1/universes/actions/run",
-                "method": "POST",
-                "selection_modes": ["explicit"],
-                "options": [],
-                "preflight_endpoint": "/v1/universes/actions/run/preflight",
-            },
             {
                 "id": "activate",
                 "label": "Activate",
@@ -132,7 +127,7 @@ def universes_discovery() -> ResourceDiscoveryResponse:
                     "button_label": "Delete",
                     "warning": "The category and all of its memberships will be permanently deleted.",
                 },
-            }
+            },
         ],
     )
 
@@ -140,8 +135,10 @@ def universes_discovery() -> ResourceDiscoveryResponse:
 @router.post("/actions/run/preflight", response_model=dict[str, Any])
 def universes_run_preflight(request: BulkActionRequest = Body(...)) -> dict[str, Any]:
     timeout = positive_float_option(request.options, "timeout", default=30.0, maximum=300.0)
+    account_uid = required_string_option(request.options, "account_uid")
     results: list[dict[str, Any]] = []
     blockers: list[str] = []
+    warnings: list[str] = []
     for uid in request.selection.uids:
         universe = get_universe(uid)
         if universe is None:
@@ -150,42 +147,47 @@ def universes_run_preflight(request: BulkActionRequest = Body(...)) -> dict[str,
         if not universe.is_active:
             blockers.append(f"Universe {uid} is inactive.")
             continue
-        if universe.source_uid is None:
-            blockers.append(f"Universe {uid} has no configured holdings source.")
-            continue
         try:
-            preview = preview_universe_run(uid, timeout=timeout)
+            preview = preview_universe_run(uid, account_uid=account_uid, timeout=timeout)
+        except (LookupError, ValueError) as exc:
+            blockers.append(str(exc))
+            continue
         except Exception:
-            blockers.append(f"Universe {uid} could not be extracted and validated.")
+            blockers.append(f"Universe {uid} could not prepare component extraction.")
             continue
         results.append(preview)
+        warnings.extend(preview.get("warnings", []))
         if preview["has_blockers"]:
-            blockers.append(f"Universe {uid} has unresolved asset-registration blockers.")
+            blockers.extend(
+                preview.get("blockers")
+                or [f"Universe {uid} has unresolved asset-registration blockers."]
+            )
     return {
         "contract": "command-center.bulk_action_preflight@v1",
         "allowed": not blockers,
         "detail": (
-            "Selected universes are ready to synchronize."
+            "Selected universes are ready to extract components. Missing constituents will be "
+            "registered automatically through the selected Alpaca account. Market-data bars "
+            "will not be updated."
             if not blockers
-            else "One or more universes are blocked from synchronization."
+            else "One or more universes cannot extract components."
         ),
         "matched_count": len(results),
         "blockers": blockers,
-        "warnings": [],
+        "warnings": warnings,
         "results": results,
     }
 
 
 @router.post("/actions/run", response_model=dict[str, Any])
 def universes_run(request: BulkActionRequest = Body(...)) -> dict[str, Any]:
-    preflight = universes_run_preflight(request)
-    if not preflight["allowed"]:
-        raise HTTPException(status_code=409, detail=preflight)
     timeout = positive_float_option(request.options, "timeout", default=30.0, maximum=300.0)
+    account_uid = required_string_option(request.options, "account_uid")
     try:
         return {
             "results": [
-                run_universe(uid, timeout=timeout) for uid in request.selection.uids
+                run_universe(uid, account_uid=account_uid, timeout=timeout)
+                for uid in request.selection.uids
             ]
         }
     except Exception as exc:
@@ -215,7 +217,9 @@ def _universes_status_preflight(
         ),
         "matched_count": len(request.selection.uids) - len(missing),
         "blockers": [f"Missing universe: {uid}" for uid in missing],
-        "warnings": ([f"{len(unchanged)} selected universe(s) are already {state}."] if unchanged else []),
+        "warnings": (
+            [f"{len(unchanged)} selected universe(s) are already {state}."] if unchanged else []
+        ),
     }
 
 
@@ -235,7 +239,7 @@ def universes_activate(request: BulkActionRequest = Body(...)) -> dict[str, Any]
     try:
         return {
             "results": [
-                update_universe(uid, MaterializedUniverseUpdateRequest(is_active=True))
+                update_universe(uid, AssetUniverseUpdateRequest(is_active=True))
                 for uid in request.selection.uids
             ]
         }
@@ -259,7 +263,7 @@ def universes_deactivate(request: BulkActionRequest = Body(...)) -> dict[str, An
     try:
         return {
             "results": [
-                update_universe(uid, MaterializedUniverseUpdateRequest(is_active=False))
+                update_universe(uid, AssetUniverseUpdateRequest(is_active=False))
                 for uid in request.selection.uids
             ]
         }
@@ -272,6 +276,12 @@ def universes_remove_preflight(request: BulkActionRequest = Body(...)) -> dict[s
     try:
         universes = {uid: get_universe(uid) for uid in request.selection.uids}
         missing = [uid for uid, universe in universes.items() if universe is None]
+        dependency_blockers = [
+            blocker
+            for uid, universe in universes.items()
+            if universe is not None
+            for blocker in universe_delete_blockers(uid)
+        ]
         membership_count = sum(
             universe.asset_count for universe in universes.values() if universe is not None
         )
@@ -279,12 +289,18 @@ def universes_remove_preflight(request: BulkActionRequest = Body(...)) -> dict[s
         raise api_http_error(exc) from exc
     return {
         "contract": "command-center.bulk_action_preflight@v1",
-        "allowed": not missing,
-        "detail": "Universe memberships and category rows will be deleted."
-        if not missing
-        else "One or more universes do not exist.",
+        "allowed": not missing and not dependency_blockers,
+        "detail": (
+            "The Asset Universe, its memberships, and its category will be deleted."
+            if not missing and not dependency_blockers
+            else (
+                "One or more universes do not exist."
+                if missing
+                else "One or more universes have blocking dependent configurations."
+            )
+        ),
         "matched_count": len(request.selection.uids) - len(missing),
-        "blockers": [f"Missing universe: {uid}" for uid in missing],
+        "blockers": [f"Missing universe: {uid}" for uid in missing] + dependency_blockers,
         "warnings": [f"{membership_count} AssetCategory memberships will be deleted."],
     }
 
@@ -300,28 +316,52 @@ def universes_remove(request: BulkActionRequest = Body(...)) -> dict[str, Any]:
         raise api_http_error(exc) from exc
 
 
-@router.get("/{category_uid}", response_model=MaterializedUniverseResponse)
-def universe_get(category_uid: str) -> MaterializedUniverseResponse:
-    universe = get_universe(category_uid)
+@router.get("/{universe_uid}/assets", response_model=ResourceCollection)
+def universe_assets_list(
+    universe_uid: str,
+    limit: int = Query(default=25, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    search: str | None = None,
+    ordering: str = "ticker",
+) -> ResourceCollection:
+    validate_page_window(limit=limit, offset=offset)
+    validate_ordering(ordering, allowed_fields={"ticker", "alpaca_asset_id"})
+    try:
+        return list_universe_assets(
+            universe_uid,
+            limit=limit,
+            offset=offset,
+            search=search,
+            ordering=ordering,
+        )
+    except LookupError as exc:
+        raise not_found(str(exc)) from exc
+    except Exception as exc:
+        raise api_http_error(exc) from exc
+
+
+@router.get("/{universe_uid}", response_model=AssetUniverseResponse)
+def universe_get(universe_uid: str) -> AssetUniverseResponse:
+    universe = get_universe(universe_uid)
     if universe is None:
         raise not_found("Universe not found.")
     return universe
 
 
-@router.patch("/{category_uid}", response_model=MaterializedUniverseResponse)
+@router.patch("/{universe_uid}", response_model=AssetUniverseResponse)
 def universe_update(
-    category_uid: str,
-    request: MaterializedUniverseUpdateRequest = Body(...),
-) -> MaterializedUniverseResponse:
+    universe_uid: str,
+    request: AssetUniverseUpdateRequest = Body(...),
+) -> AssetUniverseResponse:
     try:
-        return update_universe(category_uid, request)
+        return update_universe(universe_uid, request)
     except Exception as exc:
         raise api_http_error(exc) from exc
 
 
-@router.delete("/{category_uid}", response_model=dict[str, Any])
-def universe_delete(category_uid: str) -> dict[str, Any]:
+@router.delete("/{universe_uid}", response_model=dict[str, Any])
+def universe_delete(universe_uid: str) -> dict[str, Any]:
     try:
-        return delete_universe(category_uid)
+        return delete_universe(universe_uid)
     except Exception as exc:
         raise api_http_error(exc) from exc

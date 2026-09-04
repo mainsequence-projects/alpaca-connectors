@@ -1,6 +1,6 @@
 ---
 name: a2a-communication
-description: Resolve an explicit Organization Environment for human/local discovery or use the authenticated target Environment for a deployed coding-agent runtime, discover a target Main Sequence Agent, establish a stable AgentSession, resolve ephemeral runtime access, and communicate directly with the runtime using standard A2A semantics.
+description: Discover an Environment-authorized Main Sequence Agent and use the canonical MCP A2A sender, with exact active caller-session proof for deployed Agent runtimes and a fully documented direct-runtime fallback.
 ---
 
 # A2A Communication
@@ -10,11 +10,73 @@ bounded request or when a request explicitly arrives through an A2A channel.
 The workflow is language-neutral and does not require Python or the Main
 Sequence CLI.
 
-Main Sequence MCP resolves platform objects and runtime access. It does not
-proxy, stream, poll, cancel, or detach the live A2A turn. After resolving
-access, the calling host communicates directly with the target runtime under
-the standard A2A protocol and the runtime contract documented by
+Main Sequence MCP advertises the canonical message-only `a2a.send_message`
+sender. It resolves platform objects and runtime access, calls the target
+runtime, and returns the validated response without exposing transport
+credentials to the model. A harness may project the canonical name into its
+local tool namespace; Astro exposes it as `mainsequence__a2a_send_message`.
+Agent discovery also advertises the fixed `agent.update_runtime` operation
+when persisted evidence proves that the selected Agent needs replacement.
+
+Streaming and durable Task execution remain direct-runtime concerns. The
+explicit direct-runtime construction below remains the complete fallback for
+trusted A2A-capable hosts that do not expose the MCP tool or another
+constrained sender. That fallback follows the runtime contract documented by
 `docs/agents/adr/adr-016-direct-runtime-a2a-communication.md`.
+
+## Preferred constrained sender
+
+After fresh discovery selects a target, call `a2a.send_message`, or its harness-projected name such
+as `mainsequence__a2a_send_message`. Its input is a host-tool call, not the A2A wire envelope. A new
+target conversation uses:
+
+```json
+{
+  "agent_uid": "<selected-Agent.uid>",
+  "handle_unique_id": "<stable-task-handle>",
+  "message": "<bounded request>",
+  "message_id": "<stable-message-id>"
+}
+```
+
+An existing target conversation uses:
+
+```json
+{
+  "agent_uid": "<selected-Agent.uid>",
+  "agent_session_uid": "<existing-target-AgentSession.uid>",
+  "message": "<bounded request>",
+  "message_id": "<stable-message-id>"
+}
+```
+
+`agent_uid` is required and is copied from the selected `Agent.uid`. Exactly one session selector
+is present: `handle_unique_id` for a new conversation or `agent_session_uid` for a continuation.
+The host tool owns session resolution and constructs the A2A transport envelope shown under
+Request Construction.
+
+For an Agent-originated call, trusted harness code privately injects the exact active caller
+session's UID, lease holder, and lease token through MCP request metadata. Django validates that
+proof against the authenticated coding-agent service and the current unexpired `runtime_run`
+lease. Caller-session identity is not a model-visible tool argument. A human MCP caller needs no
+Agent caller-session proof; Django creates or reuses a root target session for the authenticated
+User.
+
+When the selected discovery result has `runtime_update.state` equal to
+`update_required` or `update_failed`, confirm the destructive operation and
+call `agent.update_runtime` with exactly:
+
+```json
+{
+  "agent_uid": "<selected-Agent.uid>"
+}
+```
+
+The tool has no AgentSession UID, action, interaction revision, idempotency
+key, service, branch, image, Environment, or deployment-strategy input. Django
+reloads the Agent, revalidates current state and permission, and prepares or
+reuses the canonical fenced operation. Private caller-session proof
+authenticates a deployed Agent caller but never selects the deployment target.
 
 ## Canonical Flow
 
@@ -26,14 +88,23 @@ the standard A2A protocol and the runtime contract documented by
 2. Discover a bounded set of candidates with `agent.search`, passing the
    selected environment UID when it is model-visible.
 3. Inspect the selected Agent with `agent.get` when more detail is needed.
-4. Create or reuse its session with `agent.get_or_create_session`.
-5. Resolve the session's current runtime endpoint and short-lived credential
+4. Inspect `runtime_update`. When it is `update_required` or `update_failed`,
+   call `agent.update_runtime` with only the selected `agent_uid`, then poll
+   `agent.get` while it is `updating`. Continue only when it is `current`.
+   Treat `unknown` as unknown and do not infer permission or currency.
+5. Create or reuse its session with `agent.get_or_create_session`.
+6. Resolve the session's current runtime endpoint and short-lived credential
    with `agent_session.resolve_runtime_access`.
-6. Send the message directly to that runtime using the returned access data.
-7. Read the selected Agent's `a2a_profile`, choose an advertised response kind,
+7. Inspect `runtime_interaction.can_submit`. Send the message directly to that
+   runtime only when it is `true`; otherwise stop and surface the backend-owned
+   notice without attempting to infer or execute remediation.
+8. Read the selected Agent's `a2a_profile`, choose an advertised response kind,
    and send the versioned response-kind extension header.
-8. Consume the returned `message` directly or follow the returned `task` using
+9. Consume the returned `message` directly or follow the returned `task` using
    its documented lifecycle operations.
+
+For the canonical MCP sender or a constrained host sender, steps 5 through 9 are one tool operation
+after candidate selection. The detailed steps remain the fallback implementation contract.
 
 The `AgentSession.uid` is the durable conversation context. Runtime locations
 and credentials are ephemeral and must be resolved again when they expire or
@@ -95,6 +166,12 @@ Every `agent.search` and `agent.get` result includes an `a2a_profile` with:
 Missing legacy profile data means Message-only support. Never infer Task support
 from runtime routes, an empty answer, or prior knowledge of another Agent.
 
+Every Agent discovery result also includes `runtime_update` with `state`,
+tri-state `needs_redeploy`, and nullable `remediation`. `needs_redeploy=null`
+is not false. Discovery is read-only and never updates, wakes, or creates a
+session. When remediation names `agent.update_runtime`, use the Agent UID from
+that same result; never invent another identifier.
+
 ## Session Reuse
 
 Use a stable `handle_unique_id` for repeated work in the same target
@@ -107,8 +184,10 @@ therefore have the same handle string on two distinct Environment-owned Astro
 Agents. Never collapse or reuse those handles across Agent or Environment
 boundaries.
 
-If the request originates from an existing caller session, supply that
-authorized parent session UID when creating the target session. An Astro
+If the request originates from an existing caller session, the trusted host
+supplies its exact active session as the parent provenance. The canonical MCP
+sender carries this privately; a direct-runtime fallback supplies that verified
+UID when creating the target session. An Astro
 Orchestrator or Code Repository Executor runtime may target only a typed Code
 Repository Executor Agent in its own Organization Environment, and the parent
 session's Agent must be the calling service's Agent. Astro-to-Astro and
@@ -119,6 +198,11 @@ linkage proves the calling Agent, while the inherited owner preserves the User
 whose request the chain is serving. Parent linkage is durable authorization
 provenance for later delegated runtime-access and task operations; it does not
 broaden the task or grant access outside that exact parent-child relationship.
+
+For a continuation, the target session's immediate `parent_session_uid` must
+still equal the exact active caller session. Service-level authorization or a
+different concurrent session of the same calling Agent is not equivalent
+provenance.
 
 Each target runtime independently asks Django for the child session owner's
 model-provider credential after exact runtime/session authorization. Never
@@ -135,19 +219,22 @@ The successful runtime-access result contains ephemeral sensitive data.
   credential in metrics or error details.
 - Never send it to a different runtime or agent.
 - Do not treat runtime access as authorization for any platform operation.
-- If access is expired, unavailable, or reports runtime drift, resolve it
-  through the platform again instead of guessing an endpoint or token.
+- If access is expired or unavailable, resolve it through the platform again
+  instead of guessing an endpoint or token.
 
-Treat `image_drift.has_drift` as the complete runtime-image truth even when a
-presentation redacts backend-owned checks. `image_drift.requires_user_action`
-is true only when at least one drifted check is not backend-autohealable. When
-drift is true but user action is false, let the canonical reconciliation path
-repair it and resolve access again; do not ask the user to rebuild or select an
-executor image.
+Treat `runtime_interaction.can_submit` as the sole new-message admission
+decision. `is_ready` is routing health and `image_drift` is diagnostic input;
+neither may override the interaction decision. When submission is blocked,
+use the returned notice and `retry_after_ms` to decide whether to resolve again.
+When the structured block also returns `runtime_update` with the fixed
+`agent.update_runtime` remediation, the caller may explicitly invoke that
+Agent-scoped tool after confirmation. Never turn a session UI action into an
+arbitrary deployment call, never update automatically inside A2A, and never
+resend the blocked message automatically after an update.
 
-The credential may be visible to the calling host because that host must make
-the direct runtime request. Keep it out of model-authored prose and reusable
-artifacts.
+The canonical MCP sender keeps the credential private. In the direct-runtime
+fallback, the credential is visible only to the trusted host that makes the
+request; keep it out of model-authored prose and reusable artifacts.
 
 ## Request Construction
 
@@ -170,10 +257,33 @@ another turn. Select `task` when durable recovery is required.
 
 For a normal request, select `message`. For durable asynchronous work, select
 `task` only when `supported_response_kinds` contains `task`. Send the explicit
-selection as:
+selection to the A2A v1 message endpoint returned in the atomic runtime-access
+bundle:
+
+```http
+POST {rpc_url}{runtime_paths.a2a}/message:send
+Authorization: Bearer {token}
+Content-Type: application/a2a+json
+Accept: application/a2a+json
+A2A-Extensions: https://mainsequence.ai/a2a/extensions/response-kind/v1
+```
+
+`runtime_paths.a2a` must be present for this standard flow. Treat it as an
+opaque backend-owned path. Never substitute `runtime_paths.chat`, a removed
+`/api/a2a/sessions/.../runtime/chat` path, or a guessed `/api/a2a/v1` value.
+
+The complete direct-Message request envelope is:
 
 ```json
 {
+  "message": {
+    "messageId": "<stable-message-id>",
+    "contextId": "<target-AgentSession.uid>",
+    "role": "ROLE_REQUESTER",
+    "parts": [
+      {"text": "<bounded request>"}
+    ]
+  },
   "configuration": {
     "responseKind": "message"
   }
@@ -191,10 +301,32 @@ Do not send the removed `returnImmediately` Boolean. Do not send
 `responseKind` on `message:stream`, because streaming already selects a
 different result contract.
 
+### Requester and responder direction
+
+Model and serialize message direction directly as `requester` and `responder`. The Main Sequence
+A2A wire values are:
+
+- requester -> `ROLE_REQUESTER` on the wire;
+- responder -> `ROLE_RESPONDER` on the wire.
+
+These values are transport direction, not principal identity. An Agent calling another Agent is
+the requester for that exchange and sends `ROLE_REQUESTER`; it remains authenticated and audited
+as an Agent through
+`caller_kind=agent`, the caller Agent and service UIDs, and the authorized
+parent-session UID. A human request uses the same requester wire direction but
+has `caller_kind=user`. Never infer, assert, or override caller identity from
+`message.role` or message metadata.
+
+Request messages serialize the direction as `ROLE_REQUESTER`; response messages serialize it as
+`ROLE_RESPONDER`. Do not emit or require the removed v0.3 `kind` discriminator on Message, Part,
+or Task objects.
+
 ## Response Handling
 
 - For `message`, require a valid `message` result and consume only documented
-  response parts. An empty successful answer is a runtime contract failure.
+  response parts. The result must have the responder direction (`ROLE_RESPONDER`),
+  and its `contextId` must equal the target AgentSession UID.
+  An empty successful answer is a runtime contract failure.
 - For `task`, require a valid `task` result, preserve its ID and context ID, and
   use task get/wait/cancel operations until a terminal state when the caller
   needs completion.
@@ -208,7 +340,7 @@ different result contract.
 - Report target-agent failures without exposing credentials or internal
   transport details.
 
-## Role Boundaries
+## Delegation Boundaries
 
 An orchestrating agent may discover candidates without confirmation. For a
 user-originated request, obtain user confirmation before sending real work to

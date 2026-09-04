@@ -57,7 +57,7 @@ and its registered `TimeIndexMetaTable`.
 | `enabled` | Whether resolution and execution are allowed. |
 | `account_uid` | Required FK to the registered ms-markets `AccountTable.uid`. |
 | `asset_source` | Required discriminator: `assets`, `universe`, or `account_holdings`. |
-| `universe_uid` | Nullable FK to `AssetCategoryTable.uid`; populated only for `universe`. |
+| `universe_uid` | Nullable FK to project-owned `AssetUniverseTable.uid`; populated only for `universe`. |
 | `frequency_id` | Normalized Alpaca bars frequency. |
 | `feed` | Normalized Alpaca data feed. |
 | `adjustment` | Normalized Alpaca adjustment mode. |
@@ -73,7 +73,7 @@ The table will not persist:
 - Main Sequence Secret values;
 - a DataNode `update_hash`;
 - `hash_namespace`;
-- per-invocation controls such as `force_update`.
+- removed SDK run switches such as `force_update` or `debug_mode`.
 
 Explicit multi-asset selections will be normalized into
 `AlpacaBarsConfigurationAssetTable`, keyed by `(configuration_uid, asset_uid)`, rather than stored
@@ -95,7 +95,8 @@ records.
 
 - `universe_uid` is required.
 - Explicit configuration-asset membership rows are forbidden.
-- Resolution loads the referenced `AssetCategory` and verifies that it currently contains assets.
+- Resolution loads the referenced active `AssetUniverse`, follows its required
+  `asset_category_uid`, and verifies that the linked category currently contains assets.
 - The runtime `AlpacaStockBarsConfig` uses the category's stable `unique_identifier`, rather than
   freezing the current members into `asset_list`.
 - Universe membership may change without editing the bars configuration or changing its updater
@@ -151,7 +152,7 @@ hashed business inputs are:
 | Asset source | Hashed scope identity |
 | --- | --- |
 | `assets` | Explicit canonical asset identifiers. |
-| `universe` | Stable `AssetCategory.unique_identifier`. |
+| `universe` | Stable linked `AssetCategory.unique_identifier`, resolved through the stored Universe UID. |
 | `account_holdings` | Stable Account UID as holdings-source identity. |
 
 `frequency_id`, `feed`, `adjustment`, and `asset_source` also participate in the update hash.
@@ -280,14 +281,15 @@ Implementation is complete only when tests prove that:
 
 The platform execution surface is one generic, on-demand Main Sequence Job named
 `Alpaca Bars Update`. A JobRun accepts only `--configuration-uid <UUID>`. The launcher resolves the
-durable row when the run starts and delegates to `execute_market_data_update` with
-`force_update=True`.
+durable row when the run starts and delegates to `execute_market_data_update`. With Main Sequence
+SDK 8.1, `TimeIndexTableUpdater.run()` executes one update cycle directly and no longer accepts a
+separate force switch.
 
 The FastAPI update action performs the read-only resolver preflight and then submits this Job. It
 returns `202 Accepted` with the JobRun UID instead of running the producer inside the request
 process. JobRun state is exposed under the Operations API with no-store caching and sanitized
-failure output. Dataset, account, source, bar profile, Secret, hash, and force-update overrides are
-not part of the Job contract.
+failure output. Dataset, account, source, bar profile, Secret, hash, and legacy run-switch overrides
+are not part of the Job contract.
 
 The Job has no default schedule because a schedule cannot currently provide the per-run
 configuration argument. The previous environment-variable scheduled launcher remains only until

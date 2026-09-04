@@ -1,7 +1,7 @@
 # 0001 - SDK 8 And ms-markets Storage-First Migration
 
 > **Status:** implemented locally and applied to the backend on 2026-09-02.
-> **Supported runtime:** Python 3.13, `mainsequence>=8.0.7`, `ms-markets>=1.0.2`.
+> **Supported runtime:** Python 3.13, `mainsequence>=8.0.7`, `ms-markets>=1.0.3`.
 > `pyproject.toml` intentionally uses compatible lower bounds; `uv.lock` and the exported
 > `requirements.txt` provide the reproducible resolution.
 
@@ -10,8 +10,8 @@
 Migrate the connector from the removed `mainsequence.tdag`/implicit-registration architecture to
 SDK 8 and current ms-markets while preserving these workflows:
 
-- strict Alpaca plus OpenFIGI public-asset registration
-- ETF holdings extraction and `HOLDINGS__<ETF>` category synchronization
+- provider-native Alpaca UUID registration with optional OpenFIGI enrichment
+- ETF holdings extraction and `HOLDINGS__<ETF>` category membership refresh
 - single-asset and category-scoped Alpaca OHLCV publication
 - ETF-holdings portfolio construction
 - thin FastAPI, CLI, and scheduled-job surfaces
@@ -27,7 +27,7 @@ The migration is successful when:
 ## Dependency and packaging changes
 
 - Python moved to `>=3.13,<3.14`; `.python-version` is `3.13`.
-- `mainsequence>=8.0.7` and `ms-markets>=1.0.2` are lower bounds, not exact pins.
+- `mainsequence>=8.0.7` and `ms-markets>=1.0.3` are lower bounds, not exact pins.
 - `uv.lock` is the source of reproducible dependency resolution.
 - `requirements.txt` is exported from the lock for execution images.
 - The Docker base moved to the Python 3.13 Main Sequence image family.

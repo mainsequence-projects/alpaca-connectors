@@ -47,7 +47,30 @@ from .holdings_category import (
 )
 from .holdings_category import configure_get_parser as configure_universe_get_parser
 from .holdings_category import configure_list_parser as configure_universe_list_parser
-from .holdings_category import configure_sync_parser
+from .holdings_category import configure_run_parser as configure_universe_run_parser
+from .signal_jobs import (
+    configure_action_parser as configure_signal_action_parser,
+)
+from .signal_jobs import (
+    configure_create_parser as configure_signal_create_parser,
+)
+from .signal_jobs import (
+    configure_delete_parser as configure_signal_delete_parser,
+)
+from .signal_jobs import configure_get_parser as configure_signal_get_parser
+from .signal_jobs import configure_list_parser as configure_signal_list_parser
+from .signal_jobs import configure_runs_parser as configure_signal_runs_parser
+from .signal_jobs import configure_update_parser as configure_signal_update_parser
+from .signal_jobs import (
+    run_pause_command as run_signal_pause_command,
+)
+from .signal_jobs import (
+    run_reconcile_command as run_signal_reconcile_command,
+)
+from .signal_jobs import (
+    run_resume_command as run_signal_resume_command,
+)
+from .signal_jobs import run_run_command as run_signal_run_command
 from .universe_source import (
     configure_create_parser as configure_source_create_parser,
 )
@@ -161,12 +184,31 @@ def build_parser() -> argparse.ArgumentParser:
     configure_universe_list_parser(universe_commands.add_parser("list"))
     configure_universe_get_parser(universe_commands.add_parser("get"))
     configure_universe_delete_parser(universe_commands.add_parser("delete"))
-    configure_sync_parser(
+    configure_universe_run_parser(
         universe_commands.add_parser(
-            "sync",
-            help="Plan or synchronize a holdings-backed AssetCategory universe.",
+            "run",
+            help="Plan or run a registered Asset Universe by its UID.",
         )
     )
+
+    signal_parser = top_level.add_parser(
+        "signal",
+        help="Create and operate Universe-backed Alpaca ETF signal Jobs.",
+    )
+    signal_commands = signal_parser.add_subparsers(dest="signal_command")
+    configure_signal_list_parser(signal_commands.add_parser("list"))
+    configure_signal_get_parser(signal_commands.add_parser("get"))
+    configure_signal_create_parser(signal_commands.add_parser("create"))
+    configure_signal_update_parser(signal_commands.add_parser("update"))
+    configure_signal_delete_parser(signal_commands.add_parser("delete"))
+    configure_signal_action_parser(signal_commands.add_parser("run"), run_signal_run_command)
+    configure_signal_action_parser(signal_commands.add_parser("pause"), run_signal_pause_command)
+    configure_signal_action_parser(signal_commands.add_parser("resume"), run_signal_resume_command)
+    configure_signal_action_parser(
+        signal_commands.add_parser("reconcile"),
+        run_signal_reconcile_command,
+    )
+    configure_signal_runs_parser(signal_commands.add_parser("runs"))
     return parser
 
 
