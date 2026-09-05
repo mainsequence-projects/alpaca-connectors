@@ -94,40 +94,19 @@ def application_runtime_models() -> list[type[Any]]:
 def portfolio_runtime_models(extra_models: list[type[Any]] | None = None) -> list[type[Any]]:
     """Runtime models for ETF-holdings portfolio construction.
 
-    This attaches the msm_portfolios graph plus the project-owned Alpaca bars storage classes.
-    Configured interpolated-price storage classes are dynamic and should be prepared/migrated
-    before normal portfolio execution; keep them out of this static runtime list.
+    This is a strict superset of the application runtime because shared configuration readers
+    resolve that runtime after the portfolio process has bootstrapped. Configured
+    interpolated-price storage classes are dynamic and should be prepared/migrated before normal
+    portfolio execution; keep them out of this static runtime list.
     """
-    from msm.data_nodes.assets.storage import AssetSnapshotsStorage
-    from msm.models import (
-        AssetCategoryMembershipTable,
-        AssetCategoryTable,
-        CalendarDateTable,
-        CalendarSessionTable,
-        OpenFigiAssetDetailsTable,
-    )
+    from msm.models import CalendarDateTable, CalendarSessionTable
     from msm_portfolios.bootstrap import resolve_portfolio_models
-
-    from src.assets.alpaca_asset_details import project_asset_models
-    from src.market_data import project_configuration_models, project_storage_models
-    from src.operations import project_signal_job_models
-    from src.portfolios import project_portfolio_configuration_models
-    from src.universes import project_universe_models
 
     return [
         *resolve_portfolio_models(None),
-        *project_asset_models(),
-        OpenFigiAssetDetailsTable,
-        AssetSnapshotsStorage,
-        AssetCategoryTable,
-        AssetCategoryMembershipTable,
+        *application_runtime_models(),
         CalendarDateTable,
         CalendarSessionTable,
-        *project_storage_models(),
-        *project_universe_models(),
-        *project_configuration_models(),
-        *project_signal_job_models(),
-        *project_portfolio_configuration_models(),
         *(extra_models or []),
     ]
 
