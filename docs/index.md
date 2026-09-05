@@ -9,7 +9,8 @@ Current scope:
 - maintain durable extraction sources and materialize provider-derived asset universes
 - publish Alpaca stock bars through an ms-markets `AssetIndexedDataNode` (storage-first)
 - register Alpaca brokerage accounts by Secret names and capture holdings snapshots independently
-- build analytical portfolios from provider-derived weights and interpolated Alpaca bars
+- build durable scheduled analytical portfolios from existing ETF Weight Signals, persistent
+  interpolated Alpaca bars, and reusable ImmediateSignal rebalance configurations
 - expose plans, executions, validation outcomes, and existing invocation paths
 
 Market-domain behavior runs on **ms-markets** (`msm`) over `mainsequence`. See the migration
@@ -65,7 +66,9 @@ Use that page first when the question is about:
   from frequency/feed/adjustment and is never a write input.
 - Portfolio construction uses the portfolio runtime (`start_portfolio_markets_engine()`), the
   connector-owned Universe-backed `AlpacaETFHoldingsSignal`, and
-  `msm_portfolios.InterpolatedPrices` over the registered Alpaca bars table.
+  persistent `msm_portfolios.InterpolatedPrices` over the registered Alpaca bars table. Durable
+  Portfolio Configurations reference existing Signal, Bars, and Rebalance Configurations; their
+  dedicated Jobs exclusively own schedule and compute state.
 - Daily bar `time_index` is normalized to `16:00 America/New_York` on the session date as a project convention.
 
 ## Build The Docs
@@ -92,5 +95,8 @@ uv run mkdocs build
 - `alpaca-connectors asset <ticker> update_prices <period>`
 - `alpaca-connectors signal create ...`
 - `alpaca-connectors signal run <CONFIGURATION_UID>`
+- `alpaca-connectors portfolio rebalance create ...`
+- `alpaca-connectors portfolio create ...`
+- `alpaca-connectors portfolio run <CONFIGURATION_UID>`
 - `src/jobs/run_alpaca_bars_update.py`
 - `.mainsequence/workflows/alpaca-bars-update.yaml`

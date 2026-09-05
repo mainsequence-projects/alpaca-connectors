@@ -16,6 +16,7 @@ from .routers.bar_configurations import router as bar_configurations_router
 from .routers.holdings import router as holdings_router
 from .routers.market_data import router as market_data_router
 from .routers.operations import router as operations_router
+from .routers.portfolio_configurations import router as portfolio_configurations_router
 from .routers.project_state import router as project_state_router
 from .routers.signal_jobs import router as signal_jobs_router
 from .routers.universe_sources import router as universe_sources_router
@@ -33,7 +34,7 @@ async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
 
 app = FastAPI(
     title="Alpaca Connectors API",
-    version="0.1.27",
+    version="0.1.28",
     description=("Capability-oriented API for the existing Alpaca Connectors project behavior."),
     lifespan=_lifespan,
 )
@@ -64,7 +65,9 @@ async def response_boundary_headers(request: Request, call_next):
         response.headers["Cache-Control"] = "private, max-age=0, must-revalidate"
         response.headers["ETag"] = f'"{digest}"'
         response.headers["Vary"] = "Authorization, X-Resource-Release-UID"
-    elif request.url.path.startswith("/v1/operations/job-runs/"):
+    elif request.url.path.startswith("/v1/operations/job-runs/") or request.url.path.endswith(
+        "/observations"
+    ):
         response.headers["Cache-Control"] = "no-store"
     return response
 
@@ -102,4 +105,5 @@ app.include_router(universes_router)
 app.include_router(market_data_router)
 app.include_router(bar_configurations_router)
 app.include_router(signal_jobs_router)
+app.include_router(portfolio_configurations_router)
 app.include_router(operations_router)

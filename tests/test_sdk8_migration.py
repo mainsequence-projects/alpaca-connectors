@@ -40,6 +40,10 @@ def test_migration_metadata_includes_fk_dependencies_but_manages_only_project_ta
         "ms_markets__account",
         "ms_markets__asset",
         "ms_markets__assetcategory",
+        "ms_markets__calendar",
+        "ms_markets__index",
+        "ms_markets__portfolio",
+        "ms_markets__signalmetadata",
         *PROJECT_TABLE_NAMES,
     } == set(METADATA.tables)
     assert {model.__table__.name for model in migration.metatable_models} == PROJECT_TABLE_NAMES
@@ -59,10 +63,12 @@ def test_migration_metadata_includes_fk_dependencies_but_manages_only_project_ta
         "alpaca_connectors__bars_configuration_asset",
         "alpaca_connectors__acct_alpaca",
         "alpaca_connectors__asset_alpaca",
-            "alpaca_connectors__asset_registration_operation",
-            "alpaca_connectors__etf_signal_job_configuration",
-            "alpaca_connectors__universe_source",
-        }
+        "alpaca_connectors__asset_registration_operation",
+        "alpaca_connectors__etf_portfolio_configuration",
+        "alpaca_connectors__etf_signal_job_configuration",
+        "alpaca_connectors__portfolio_rebalance_configuration",
+        "alpaca_connectors__universe_source",
+    }
 
 
 def test_required_calendar_window_includes_backtest_and_operational_buffers() -> None:

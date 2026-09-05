@@ -75,6 +75,10 @@ class AlpacaETFHoldingsSignal(SignalWeights):
 
     def get_asset_list(self) -> list[str] | None:
         """Return current/prepared Universe scope without changing signal identity."""
+        runtime_asset_list = getattr(self, "_runtime_asset_list", None)
+        if runtime_asset_list is not None:
+            return list(runtime_asset_list)
+
         prepared_plan = getattr(self, "_prepared_universe_plan", None)
         if prepared_plan is not None:
             from src.universes.services import asset_identifiers_for_universe_plan
@@ -93,6 +97,14 @@ class AlpacaETFHoldingsSignal(SignalWeights):
         )
         identifiers = asset_unique_identifiers_for_category(category.unique_identifier)
         return identifiers or None
+
+    def set_runtime_asset_list(self, asset_identifiers: list[str]) -> AlpacaETFHoldingsSignal:
+        """Attach an already-published observation scope without changing signal identity."""
+        normalized = sorted({str(identifier).strip() for identifier in asset_identifiers if str(identifier).strip()})
+        if not normalized:
+            raise ValueError("Runtime signal asset list must not be empty.")
+        self._runtime_asset_list = normalized
+        return self
 
     def set_prepared_universe_plan(self, plan: Any) -> AlpacaETFHoldingsSignal:
         """Attach a one-shot read-only plan without adding it to serialized config."""

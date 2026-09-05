@@ -48,6 +48,7 @@ nav:
       - "0005 Asset Universe Run Owns Constituent Registration": adrs/0005_asset_universe_run_owns_constituent_registration.md
       - "0006 Universe-Backed Alpaca ETF Signal": adrs/0006_universe_backed_alpaca_etf_signal.md
       - "0007 One Signal Configuration Per Job": adrs/0007_one_signal_configuration_per_job.md
+      - "0008 Portfolio Configuration And Job Ownership": adrs/0008_portfolio_configuration_and_job_ownership.md
   - Implementation Records:
       - SDK 8 And ms-markets Migration: implementation_tasks/0001_ms_markets_storage_first_migration.md
       - Alpaca Account Storage: implementation_tasks/0002_alpaca_account_module.md

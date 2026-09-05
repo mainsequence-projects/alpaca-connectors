@@ -38,6 +38,7 @@ def project_runtime_models() -> list[type[Any]]:
     from src.assets.alpaca_asset_details import project_asset_models
     from src.market_data import project_configuration_models, project_storage_models
     from src.operations import project_operation_models
+    from src.portfolios import project_portfolio_configuration_models
     from src.universes import project_universe_models
 
     return [
@@ -54,6 +55,7 @@ def project_runtime_models() -> list[type[Any]]:
         *project_universe_models(),
         *project_configuration_models(),
         *project_operation_models(),
+        *project_portfolio_configuration_models(),
     ]
 
 
@@ -108,6 +110,7 @@ def portfolio_runtime_models(extra_models: list[type[Any]] | None = None) -> lis
 
     from src.assets.alpaca_asset_details import project_asset_models
     from src.market_data import project_storage_models
+    from src.portfolios import project_portfolio_configuration_models
 
     return [
         *resolve_portfolio_models(None),
@@ -119,6 +122,7 @@ def portfolio_runtime_models(extra_models: list[type[Any]] | None = None) -> lis
         CalendarDateTable,
         CalendarSessionTable,
         *project_storage_models(),
+        *project_portfolio_configuration_models(),
         *(extra_models or []),
     ]
 
@@ -139,6 +143,41 @@ def start_portfolio_markets_engine(
         return msm_portfolios.start_engine(models=models, timeout=timeout)
 
 
+def portfolio_job_runtime_models() -> list[type[Any]]:
+    """Resolve every phase-one persistent interpolation table before process bootstrap.
+
+    The interpolation table identity includes the registered source TimeIndexMetaTable UID.
+    Jobs therefore discover each deliberately migrated Alpaca bars profile before the one allowed
+    ``msm.start_engine`` call and attach all phase-one interpolation outputs in the same runtime.
+    """
+    from src.portfolios.interpolated_prices_schema import (
+        assert_interpolated_prices_registered,
+        configured_alpaca_interpolated_prices_storage,
+        resolve_interpolated_prices_storage_specs,
+    )
+
+    specs = resolve_interpolated_prices_storage_specs()
+    assert_interpolated_prices_registered(specs)
+    dynamic_models = [
+        configured_alpaca_interpolated_prices_storage(
+            source_time_index_meta_table_uid=spec.source_time_index_meta_table_uid,
+            source_cadence=spec.source_cadence,
+        )
+        for spec in specs
+    ]
+    return portfolio_runtime_models(extra_models=dynamic_models)
+
+
+def start_portfolio_job_engine(
+    *,
+    timeout: int | float | tuple[float, float] | None = None,
+) -> Any:
+    """Attach the complete phase-one portfolio runtime in one process bootstrap."""
+    import msm_portfolios
+
+    return msm_portfolios.start_engine(models=portfolio_job_runtime_models(), timeout=timeout)
+
+
 def start_markets_engine(
     *,
     models: list[type[Any]] | None = None,
@@ -151,18 +190,24 @@ def start_markets_engine(
     if the platform backend is unreachable or a required MetaTable has not been migrated yet.
     """
     import msm
+    from msm.bootstrap import resolve_runtime
 
-    return msm.start_engine(
-        models=models if models is not None else application_runtime_models(),
-        timeout=timeout,
-    )
+    resolved_models = models if models is not None else application_runtime_models()
+    try:
+        return resolve_runtime(models=resolved_models, row_model_name="src.runtime")
+    except RuntimeError as exc:
+        if "requires an initialized markets runtime" not in str(exc):
+            raise
+    return msm.start_engine(models=resolved_models, timeout=timeout)
 
 
 __all__ = [
     "account_runtime_models",
     "application_runtime_models",
     "portfolio_runtime_models",
+    "portfolio_job_runtime_models",
     "project_runtime_models",
     "start_markets_engine",
     "start_portfolio_markets_engine",
+    "start_portfolio_job_engine",
 ]

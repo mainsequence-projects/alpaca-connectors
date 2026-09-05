@@ -194,12 +194,13 @@ def alpaca_interpolated_prices_storage_model(
     intraday_bar_interpolation_rule: str = "ffill",
 ) -> type[Any]:
     """Return the dynamic msm-portfolios storage model for Alpaca-derived prices."""
-    from msm_portfolios.data_nodes.prices.storage import configured_interpolated_prices_storage
+    from src.portfolios.interpolated_prices_schema import (
+        configured_alpaca_interpolated_prices_storage,
+    )
 
-    source_storage = storage_for(frequency_id, feed, adjustment)
-    return configured_interpolated_prices_storage(
+    return configured_alpaca_interpolated_prices_storage(
         source_time_index_meta_table_uid=source_time_index_meta_table_uid,
-        source_cadence=source_storage.__cadence__,
+        source_cadence=storage_for(frequency_id, feed, adjustment).__cadence__,
         upsample_frequency_id=upsample_frequency_id,
         intraday_bar_interpolation_rule=intraday_bar_interpolation_rule,
     )

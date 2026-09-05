@@ -37,7 +37,8 @@ authorization and Resource Release headers.
 | Universes | Create/list/get/update registered `AssetUniverse` rows; list linked category Assets at `GET /v1/universes/{universe_uid}/assets`; run, activate, deactivate, and confirmed delete actions under `/v1/universes` |
 | Market Data | configuration CRUD and resolve/update actions under `/v1/market-data/bar-configurations`; dataset list/get and bounded observations under `/v1/market-data/datasets` |
 | ETF Signals | dedicated Job configuration CRUD under `/v1/signal-jobs`; run, pause, resume, reconcile, and JobRun-history actions |
-| Operations | poll an accepted Alpaca bars or ETF signal JobRun under `GET /v1/operations/job-runs/{job_run_uid}` |
+| ETF Portfolios | calculation-only configuration CRUD under `/v1/portfolio-configurations`; reusable ImmediateSignal policies under `/v1/portfolio-rebalance-configurations`; run and JobRun-history actions |
+| Operations | poll an accepted Alpaca bars, ETF signal, or ETF portfolio JobRun under `GET /v1/operations/job-runs/{job_run_uid}` |
 
 Market-data writes are configuration-oriented. Create one stored definition with exactly one
 source (`assets`, `universe`, or `account_holdings`), review it with the `resolve` action, and run it
@@ -87,10 +88,48 @@ POST /v1/signal-jobs/{configuration_uid}/actions/pause
 POST /v1/signal-jobs/{configuration_uid}/actions/resume
 POST /v1/signal-jobs/{configuration_uid}/actions/reconcile
 GET  /v1/signal-jobs/{configuration_uid}/runs
+GET  /v1/signal-jobs/{configuration_uid}/observations?limit=100
 ```
 
 Deleting the configuration removes its dedicated Job and desired-state row while retaining prior
 signal observations.
+
+The observations endpoint resolves the signal UID from the stored configuration, selects the
+latest distinct observation timestamps from canonical ms-markets `SignalWeightsStorage`, and
+returns all constituent rows for those timestamps as a compact aligned payload. It never accepts an
+arbitrary signal UID and performs one set-based backend query rather than one request per Asset.
+The limit is between 1 and 100 and defaults to 100. Timestamps are returned chronologically and each
+Asset carries one aligned weight per timestamp; the frontend projects that payload with timestamps
+as rows and Assets as columns. Because signal updates publish complete frames, an absent Asset row
+is represented as zero while an explicit stored null remains null.
+
+## Scheduled ETF Portfolios
+
+`POST /v1/portfolio-configurations` creates one durable calculation definition and one dedicated
+Main Sequence Job. The calculation definition references an existing ETF Signal Configuration,
+Bars Configuration, and Rebalance Configuration. Phase 1 accepts only `ImmediateSignal`, daily
+persistent `InterpolatedPrices`, and forward-fill interpolation.
+
+Job settings are nested under `job` in create and update requests. They are written only to the
+Main Sequence Job; the Portfolio Configuration MetaTable does not duplicate schedule, compute,
+image, deployment, Environment, or JobRun state. Responses compose the calculation row with a live
+Job projection.
+
+```text
+GET|POST /v1/portfolio-configurations
+GET|PATCH|DELETE /v1/portfolio-configurations/{configuration_uid}
+POST /v1/portfolio-configurations/{configuration_uid}/actions/run
+GET  /v1/portfolio-configurations/{configuration_uid}/runs
+
+GET|POST /v1/portfolio-rebalance-configurations
+GET|PATCH|DELETE /v1/portfolio-rebalance-configurations/{configuration_uid}
+```
+
+There is no Environment request field. Manual and scheduled JobRuns contain no business
+arguments. The launcher resolves `JOB_RUN_UID -> Job.uid -> Portfolio Configuration.job_uid`,
+updates persistent interpolation, and calculates the portfolio without rerunning the Signal or raw
+Bars producers. Signal observation timestamps are observation times, so the ImmediateSignal result
+is an analytical reconstruction rather than guaranteed point-in-time ETF replication.
 
 ## Observable Asset Registration
 

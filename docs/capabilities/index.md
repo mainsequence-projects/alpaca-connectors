@@ -77,9 +77,11 @@ Portfolios owns analytical construction based on registered assets and market da
 - portfolio identity
 - resolved component weights
 - price-source binding
-- interpolated prices
-- signals and calculation results
-- one dedicated scheduled Job per Universe-backed signal configuration
+- persistent interpolated prices
+- reusable ImmediateSignal rebalance configurations
+- durable calculation configurations composed from existing Signal and Bars configurations
+- portfolio weights and valuation results
+- one dedicated scheduled Job per Portfolio Configuration
 
 The repository does not provide order placement or trade execution.
 

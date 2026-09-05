@@ -1,7 +1,7 @@
 {
   "name": "Alpaca Connectors",
   "description": "Agent-ready project card for the Alpaca Connectors repository. The repository is organized around Assets, Universes, Market Data, Accounts, Holdings, Portfolios, and Operations; its current agent skills expose the supported CLI workflows without treating providers as a separate Connection domain.",
-  "version": "0.1.27",
+  "version": "0.1.28",
   "supportedInterfaces": [
     {
       "protocolBinding": "HTTP+JSON",

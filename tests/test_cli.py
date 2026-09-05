@@ -347,6 +347,23 @@ class CliTests(unittest.TestCase):
                 ]
             )
 
+    def test_portfolio_prepare_interpolated_prices_uses_migration_preflight(self) -> None:
+        result = {
+            "created_revision": False,
+            "dynamic_provider": "src.portfolios.interpolated_prices_migration:migration",
+            "storages": [],
+        }
+        with patch(
+            "src.portfolios.interpolated_prices_schema.prepare_interpolated_prices_schema",
+            return_value=result,
+        ) as prepare:
+            exit_code = main(
+                ["portfolio", "prepare-interpolated-prices", "--check-only"]
+            )
+
+        self.assertEqual(exit_code, 0)
+        prepare.assert_called_once_with(check_only=True, revision_message=None)
+
     def test_unexpected_provider_error_is_sanitized(self) -> None:
         stderr = io.StringIO()
         sensitive = "raw-secret-value"

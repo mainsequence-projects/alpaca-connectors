@@ -35,6 +35,12 @@ argument. See [ADR 0007](../adrs/0007_one_signal_configuration_per_job.md).
 The API exposes the same lifecycle at `/v1/signal-jobs`, including list discovery, CRUD,
 run/pause/resume/reconcile actions, and per-configuration JobRun history.
 
+`GET /v1/signal-jobs/{configuration_uid}/observations?limit=100` is the read-only inspection
+surface for published weights. It resolves the stable signal identity from the saved configuration
+and returns the latest 100 distinct frames from `SignalWeightsStorage` as aligned timestamps,
+Assets, and weights. The static site displays timestamps as rows and Assets as columns. Opening
+signal details triggers this query; listing signals does not.
+
 The browser form generates calendar schedules from daily, weekday, weekly, or monthly controls and
 shows the resulting five-field expression. Advanced numeric expressions support wildcards, lists,
 ranges, and steps; the API validates both syntax and the legal range of every cron field before it
@@ -55,6 +61,52 @@ GUI, API, CLI, or Job launcher. This producer therefore publishes one observatio
 successful call, including unchanged weights. Dependency-tree execution remains a run control. The
 inherited `offset_start` updater field is not exposed because this producer observes the provider's
 current holdings and cannot backfill historically effective ETF weights.
+
+## ETF Portfolio Jobs
+
+Every durable Portfolio Configuration owns one dedicated Main Sequence Job. The Portfolio
+Configuration stores only calculation inputs and its `job_uid` relationship. Schedule, compute,
+spot, maximum runtime, automatic deployment, and image state remain exclusively on the Job.
+
+```bash
+alpaca-connectors portfolio rebalance create \
+  --name "Immediate observed weights" \
+  --strategy immediate_signal
+
+alpaca-connectors portfolio create \
+  --name "Daily IVV analytical portfolio" \
+  --signal-configuration-uid <SIGNAL_CONFIGURATION_UID> \
+  --bars-configuration-uid <BARS_CONFIGURATION_UID> \
+  --rebalance-configuration-uid <REBALANCE_CONFIGURATION_UID> \
+  --schedule-type interval \
+  --schedule-every 1 \
+  --schedule-period days
+
+alpaca-connectors portfolio run <PORTFOLIO_CONFIGURATION_UID>
+alpaca-connectors portfolio runs <PORTFOLIO_CONFIGURATION_UID>
+```
+
+The Job is first created without a schedule, linked to the Portfolio Configuration, and then
+patched with its schedule. Automatic deployment is always enabled. The launcher accepts no
+business arguments and resolves its definition through
+`JOB_RUN_UID -> Job.uid -> Portfolio Configuration.job_uid`.
+
+Execution reads an existing Signal observation, updates the configuration-derived persistent
+`InterpolatedPrices`, and calculates `PortfoliosDataNode` with dependency traversal disabled. It
+does not rerun Universe extraction, the Signal producer, or the raw Bars updater. Revision `0010`
+and the configuration-derived interpolation storage must be migrated before the first live run.
+See [ADR 0008](../adrs/0008_portfolio_configuration_and_job_ownership.md).
+
+Prepare that dynamic storage through the supported migration wrapper:
+
+```bash
+alpaca-connectors portfolio prepare-interpolated-prices
+alpaca-connectors portfolio prepare-interpolated-prices --check-only
+```
+
+The first command generates a provider-scoped Alembic revision only when one is missing, upgrades
+the shared project history, and verifies the registered output tables. The second is read-only and
+fails if either the local revision or platform table is missing.
 
 ## Alpaca Bars Update Job
 

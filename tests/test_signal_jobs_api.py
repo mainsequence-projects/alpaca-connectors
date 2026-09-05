@@ -7,6 +7,8 @@ from api.app.main import app
 from api.app.schemas import (
     SignalJobConfigurationResponse,
     SignalJobRunAcceptedResponse,
+    SignalObservationAssetResponse,
+    SignalObservationsResponse,
 )
 from fastapi.testclient import TestClient
 
@@ -128,3 +130,43 @@ def test_signal_run_returns_the_accepted_job_run_without_arguments() -> None:
     assert result.status_code == 202
     assert result.json()["job_run_uid"] == JOB_RUN_UID
     run.assert_called_once_with(CONFIGURATION_UID)
+
+
+def test_signal_observations_are_loaded_on_demand_with_the_default_limit() -> None:
+    observed_at = dt.datetime(2026, 9, 4, 14, tzinfo=dt.UTC)
+    observations = SignalObservationsResponse(
+        configuration_uid=CONFIGURATION_UID,
+        signal_uid="signal-uid",
+        observation_count=1,
+        asset_count=1,
+        time_indexes=[observed_at],
+        assets=[
+            SignalObservationAssetResponse(
+                asset_identifier="ALPACA::asset-uuid",
+                symbol="AAPL",
+                name="Apple Inc.",
+                weights=[0.075],
+            )
+        ],
+    )
+    with patch(
+        "api.app.routers.signal_jobs.get_configuration_observations",
+        return_value=observations,
+    ) as get_observations:
+        result = TestClient(app).get(
+            f"/v1/signal-jobs/{CONFIGURATION_UID}/observations",
+        )
+
+    assert result.status_code == 200
+    assert result.headers["cache-control"] == "no-store"
+    assert result.json()["time_indexes"] == ["2026-09-04T14:00:00Z"]
+    assert result.json()["assets"][0]["weights"] == [0.075]
+    get_observations.assert_called_once_with(CONFIGURATION_UID, limit=100)
+
+
+def test_signal_observation_limit_is_bounded() -> None:
+    result = TestClient(app).get(
+        f"/v1/signal-jobs/{CONFIGURATION_UID}/observations?limit=101",
+    )
+
+    assert result.status_code == 422

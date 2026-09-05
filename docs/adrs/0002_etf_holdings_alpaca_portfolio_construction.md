@@ -3,8 +3,10 @@
 ## Status
 
 Superseded in part by
-[ADR 0006](0006_universe_backed_alpaca_etf_signal.md). The Alpaca valuation and portfolio graph
-remain accepted; signal ownership, identity, configuration, and observation timing follow ADR 0006.
+[ADR 0006](0006_universe_backed_alpaca_etf_signal.md) and
+[ADR 0008](0008_portfolio_configuration_and_job_ownership.md). The Alpaca valuation and portfolio
+graph remain accepted; signal ownership follows ADR 0006, while durable portfolio configuration,
+Job ownership, and the supported backtest policy follow ADR 0008.
 
 ## Context
 

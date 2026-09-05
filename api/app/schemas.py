@@ -557,6 +557,28 @@ class SignalJobConfigurationResponse(BaseModel):
     updated_at: dt.datetime
 
 
+class SignalObservationAssetResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    asset_identifier: str
+    symbol: str | None
+    name: str | None
+    weights: list[float | None]
+
+
+class SignalObservationsResponse(BaseModel):
+    """Transposed latest observations for one configured signal."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    configuration_uid: str
+    signal_uid: str
+    observation_count: int = Field(ge=0)
+    asset_count: int = Field(ge=0)
+    time_indexes: list[dt.datetime]
+    assets: list[SignalObservationAssetResponse]
+
+
 class SignalJobRunResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -582,6 +604,166 @@ class SignalJobRunAcceptedResponse(BaseModel):
     status: str
     status_url: str
     poll_after_ms: int = 1000
+
+
+class PortfolioRebalanceConfigurationCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1, max_length=255)
+    description: str | None = None
+    strategy: Literal["immediate_signal"] = "immediate_signal"
+
+
+class PortfolioRebalanceConfigurationUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str | None = Field(default=None, min_length=1, max_length=255)
+    description: str | None = None
+    strategy: Literal["immediate_signal"] | None = None
+
+    @model_validator(mode="after")
+    def require_change(self) -> "PortfolioRebalanceConfigurationUpdateRequest":
+        if not self.model_fields_set:
+            raise ValueError("At least one rebalance configuration field must be provided.")
+        return self
+
+
+class PortfolioRebalanceConfigurationResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    uid: str
+    name: str
+    description: str | None
+    strategy: Literal["immediate_signal"]
+    created_at: dt.datetime
+    updated_at: dt.datetime
+
+
+class PortfolioJobSettingsRequest(BaseModel):
+    """Operational settings written directly to the Main Sequence Job."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    schedule_type: Literal["interval", "crontab"]
+    schedule_every: int | None = Field(default=None, gt=0)
+    schedule_period: Literal["seconds", "minutes", "hours", "days"] | None = None
+    schedule_expression: str | None = Field(default=None, max_length=128)
+    schedule_start_time: dt.datetime | None = None
+    cpu_request: str = "0.25"
+    memory_request: str = "0.5"
+    max_runtime_seconds: int = Field(default=3600, gt=0)
+    spot: bool = False
+
+    @model_validator(mode="after")
+    def validate_schedule_shape(self) -> "PortfolioJobSettingsRequest":
+        if self.schedule_type == "interval":
+            if self.schedule_every is None or self.schedule_period is None:
+                raise ValueError("interval schedule requires schedule_every and schedule_period.")
+            if self.schedule_expression is not None:
+                raise ValueError("interval schedule forbids schedule_expression.")
+        elif (
+            not self.schedule_expression
+            or self.schedule_every is not None
+            or self.schedule_period is not None
+        ):
+            raise ValueError(
+                "crontab schedule requires schedule_expression and forbids interval fields."
+            )
+        return self
+
+
+class PortfolioConfigurationCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1, max_length=255)
+    description: str | None = None
+    signal_configuration_uid: str = Field(min_length=1)
+    bars_configuration_uid: str = Field(min_length=1)
+    rebalance_configuration_uid: str = Field(min_length=1)
+    upsample_frequency_id: Literal["1d"] = "1d"
+    intraday_bar_interpolation_rule: Literal["ffill"] = "ffill"
+    valuation_column: str = Field(default="close", min_length=1, max_length=64)
+    portfolio_prices_frequency: Literal["1d"] | None = "1d"
+    forward_fill_to_now: bool = False
+    fail_on_missing_prices: bool = True
+    commission_fee: float = Field(default=0.00018, ge=0)
+    job: PortfolioJobSettingsRequest
+
+
+class PortfolioConfigurationUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str | None = Field(default=None, min_length=1, max_length=255)
+    description: str | None = None
+    signal_configuration_uid: str | None = None
+    bars_configuration_uid: str | None = None
+    rebalance_configuration_uid: str | None = None
+    upsample_frequency_id: Literal["1d"] | None = None
+    intraday_bar_interpolation_rule: Literal["ffill"] | None = None
+    valuation_column: str | None = Field(default=None, min_length=1, max_length=64)
+    portfolio_prices_frequency: Literal["1d"] | None = None
+    forward_fill_to_now: bool | None = None
+    fail_on_missing_prices: bool | None = None
+    commission_fee: float | None = Field(default=None, ge=0)
+    job: PortfolioJobSettingsRequest | None = None
+
+    @model_validator(mode="after")
+    def require_change(self) -> "PortfolioConfigurationUpdateRequest":
+        if not self.model_fields_set:
+            raise ValueError("At least one portfolio configuration field must be provided.")
+        return self
+
+
+class PortfolioJobResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    uid: str
+    schedule_type: Literal["interval", "crontab"] | None
+    schedule_every: int | None
+    schedule_period: Literal["seconds", "minutes", "hours", "days"] | None
+    schedule_expression: str | None
+    schedule_start_time: dt.datetime | None
+    cpu_request: str | None
+    memory_request: str | None
+    max_runtime_seconds: int | None
+    spot: bool
+    image_status: str | None
+    automatic_deployment: bool
+
+
+class PortfolioConfigurationResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    uid: str
+    name: str
+    description: str | None
+    signal_configuration_uid: str
+    signal_uid: str
+    bars_configuration_uid: str
+    rebalance_configuration_uid: str
+    rebalance_strategy: Literal["immediate_signal"]
+    portfolio_uid: str | None
+    job_uid: str | None
+    upsample_frequency_id: Literal["1d"]
+    intraday_bar_interpolation_rule: Literal["ffill"]
+    valuation_column: str
+    portfolio_prices_frequency: Literal["1d"] | None
+    forward_fill_to_now: bool
+    fail_on_missing_prices: bool
+    commission_fee: float
+    job: PortfolioJobResponse | None
+    latest_run_status: str | None = None
+    latest_run_at: dt.datetime | None = None
+    created_at: dt.datetime
+    updated_at: dt.datetime
+
+
+class PortfolioJobRunResponse(SignalJobRunResponse):
+    pass
+
+
+class PortfolioJobRunAcceptedResponse(SignalJobRunAcceptedResponse):
+    pass
 
 
 class JobRunFailureResponse(BaseModel):

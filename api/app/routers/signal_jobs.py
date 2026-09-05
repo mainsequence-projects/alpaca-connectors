@@ -13,6 +13,7 @@ from ..schemas import (
     SignalJobConfigurationUpdateRequest,
     SignalJobRunAcceptedResponse,
     SignalJobRunResponse,
+    SignalObservationsResponse,
 )
 from ..services.common import resource_discovery, validate_ordering, validate_page_window
 from ..services.signal_jobs import (
@@ -20,6 +21,7 @@ from ..services.signal_jobs import (
     create_configuration,
     delete_configuration,
     get_configuration,
+    get_configuration_observations,
     list_configurations,
     pause_configuration,
     reconcile_configuration,
@@ -107,6 +109,20 @@ def signal_job_get(configuration_uid: str) -> SignalJobConfigurationResponse:
     if item is None:
         raise not_found("Signal Job configuration not found.")
     return item
+
+
+@router.get(
+    "/{configuration_uid}/observations",
+    response_model=SignalObservationsResponse,
+)
+def signal_job_observations(
+    configuration_uid: str,
+    limit: int = Query(default=100, ge=1, le=100),
+) -> SignalObservationsResponse:
+    try:
+        return get_configuration_observations(configuration_uid, limit=limit)
+    except Exception as exc:
+        raise api_http_error(exc) from exc
 
 
 @router.patch("/{configuration_uid}", response_model=SignalJobConfigurationResponse)

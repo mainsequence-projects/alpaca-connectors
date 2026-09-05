@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
-from src.operations import get_alpaca_bars_update_job_run, get_signal_job_run
+from src.operations import (
+    get_alpaca_bars_update_job_run,
+    get_portfolio_job_run,
+    get_signal_job_run,
+)
 
 from ..schemas import JobRunStatusResponse
 
@@ -13,9 +17,13 @@ def get_job_run(job_run_uid: str) -> JobRunStatusResponse | None:
     command_args = run.command_args if run is not None else []
     if run is None:
         signal_result = get_signal_job_run(job_run_uid)
-        if signal_result is None:
-            return None
-        configuration_uid, run = signal_result
+        if signal_result is not None:
+            configuration_uid, run = signal_result
+        else:
+            portfolio_result = get_portfolio_job_run(job_run_uid)
+            if portfolio_result is None:
+                return None
+            configuration_uid, run = portfolio_result
     error = None
     if run.failure_message:
         error = {

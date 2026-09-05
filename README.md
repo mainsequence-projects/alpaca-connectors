@@ -16,8 +16,9 @@ user-maintained universes, and analytical portfolios to Main Sequence and ms-mar
   observations in migrated asset-indexed tables.
 - **Accounts:** register and maintain Alpaca accounts using Main Sequence Secret names only.
 - **Holdings:** capture Alpaca positions and cash as immutable ms-markets account snapshots.
-- **Portfolios:** publish scheduled Universe-backed ETF signals and build analytical ETF-tracking
-  portfolios from extracted weights and Alpaca bars.
+- **Portfolios:** publish scheduled Universe-backed ETF signals and create durable scheduled
+  analytical ETF-tracking portfolios from existing signals, persistent interpolated Alpaca bars,
+  and reusable ImmediateSignal rebalance configurations.
 
 ETF extraction is supplied by `etfhextractor`; it is an input to Universes and Portfolios, not the
 project's top-level ontology.
@@ -48,11 +49,13 @@ the reproducible resolution.
 uv sync
 mainsequence code-repository refresh-token --path .
 mainsequence migrations upgrade --provider src.migrations:migration head
+alpaca-connectors portfolio prepare-interpolated-prices
 alpaca-connectors universe-source seed-defaults
 ```
 
-The explicit seed command creates the starter IVV source idempotently. Application startup never
-creates schema and never seeds rows.
+The portfolio preparation command derives and migrates the persistent `InterpolatedPrices` tables
+from the registered Alpaca bars profiles. The explicit seed command creates the starter IVV source
+idempotently. Application startup never creates schema and never seeds rows.
 
 ## Core CLI
 
@@ -129,6 +132,28 @@ The JobRun receives no signal arguments. Its launcher resolves the stored config
 `JOB_RUN_UID` and the owning Job. Each configuration owns one Job. The current CodeRepositoryBranch
 resolves Environment scope automatically; the user never supplies an Environment UID.
 
+Create a reusable rebalance policy and one durable Portfolio Configuration with its dedicated Job:
+
+```bash
+alpaca-connectors portfolio rebalance create \
+  --name "Immediate observed weights" \
+  --strategy immediate_signal
+alpaca-connectors portfolio create \
+  --name "Daily IVV analytical portfolio" \
+  --signal-configuration-uid <SIGNAL_CONFIGURATION_UID> \
+  --bars-configuration-uid <BARS_CONFIGURATION_UID> \
+  --rebalance-configuration-uid <REBALANCE_CONFIGURATION_UID> \
+  --schedule-type interval \
+  --schedule-every 1 \
+  --schedule-period days
+alpaca-connectors portfolio run <PORTFOLIO_CONFIGURATION_UID>
+```
+
+The Portfolio Configuration stores calculation intent only. Schedule, compute, image, and
+automatic-deployment state remain on its Job. The JobRun has no business arguments and resolves
+the Portfolio Configuration from `JOB_RUN_UID` and the owning Job. Phase 1 is an ImmediateSignal
+observation-time backtest; it does not claim exact point-in-time ETF holdings or live execution.
+
 Exact asset registration remains independently available:
 
 ```bash
@@ -153,7 +178,9 @@ debugging enabled. See [the development workflow](docs/operations/development.md
 
 The API exposes `/v1/accounts`, account holdings, `/v1/assets`, `/v1/universe-sources`,
 `/v1/universes`, `/v1/market-data/bar-configurations`, `/v1/market-data/datasets`,
-`/v1/signal-jobs`, `/v1/operations/job-runs/{job_run_uid}`, and `/v1/project-state`. Collections use
+`/v1/signal-jobs`, `/v1/portfolio-configurations`,
+`/v1/portfolio-rebalance-configurations`, `/v1/operations/job-runs/{job_run_uid}`, and
+`/v1/project-state`. Collections use
 authoritative `pageInfo`; selectable collections have separate resource-discovery endpoints.
 Main Sequence injects the authenticated request identity in deployed FastAPI requests.
 

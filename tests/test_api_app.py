@@ -103,6 +103,7 @@ class ApiAppTests(unittest.TestCase):
             "/v1/market-data/datasets",
             "/v1/market-data/bar-configurations",
             "/v1/operations/job-runs/{job_run_uid}",
+            "/v1/signal-jobs/{configuration_uid}/observations",
         }
         self.assertTrue(expected_capability_roots.issubset(visible_paths))
         self.assertNotIn("/v1/universes/holdings/plan", visible_paths)

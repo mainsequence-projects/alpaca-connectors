@@ -26,6 +26,8 @@ from ..schemas import (
     SignalJobConfigurationUpdateRequest,
     SignalJobRunAcceptedResponse,
     SignalJobRunResponse,
+    SignalObservationAssetResponse,
+    SignalObservationsResponse,
 )
 from .common import collection_response
 
@@ -134,6 +136,40 @@ def get_configuration(configuration_uid: str) -> SignalJobConfigurationResponse 
     return _responses([row])[0] if row else None
 
 
+def get_configuration_observations(
+    configuration_uid: str,
+    *,
+    limit: int,
+) -> SignalObservationsResponse:
+    """Resolve configuration identity and read its latest complete signal observations."""
+    from src.portfolios import read_signal_observation_matrix
+
+    row = get_signal_job_configuration(configuration_uid)
+    if row is None:
+        raise LookupError(f"Signal Job configuration {configuration_uid!s} does not exist.")
+    matrix = read_signal_observation_matrix(
+        signal_uid=signal_uid_for_configuration(row),
+        observation_limit=limit,
+    )
+    assets = [
+        SignalObservationAssetResponse(
+            asset_identifier=asset.asset_identifier,
+            symbol=asset.symbol,
+            name=asset.name,
+            weights=list(asset.weights),
+        )
+        for asset in matrix.assets
+    ]
+    return SignalObservationsResponse(
+        configuration_uid=str(row.uid),
+        signal_uid=matrix.signal_uid,
+        observation_count=len(matrix.time_indexes),
+        asset_count=len(assets),
+        time_indexes=list(matrix.time_indexes),
+        assets=assets,
+    )
+
+
 def create_configuration(
     request: SignalJobConfigurationCreateRequest,
 ) -> SignalJobConfigurationResponse:
@@ -202,6 +238,7 @@ __all__ = [
     "create_configuration",
     "delete_configuration",
     "get_configuration",
+    "get_configuration_observations",
     "list_configurations",
     "pause_configuration",
     "reconcile_configuration",

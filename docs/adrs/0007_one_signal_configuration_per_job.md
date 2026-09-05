@@ -2,7 +2,10 @@
 
 ## Status
 
-Accepted
+Superseded in part by
+[ADR 0008](0008_portfolio_configuration_and_job_ownership.md). One dedicated Job per signal
+configuration remains accepted. Schedule, compute, deployment, and execution-state ownership now
+follows ADR 0008 and belongs only to the Main Sequence Job or JobRun.
 
 ## Context
 

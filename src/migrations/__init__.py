@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from msm.models import AccountGroupTable, AccountTable
+from msm.models import AccountGroupTable, AccountTable, CalendarTable, IndexTable, PortfolioTable
 from msm.models.assets.categories import AssetCategoryTable
 from msm.models.assets.core import AssetTable
+from msm_portfolios.models import SignalMetadataTable
 
 from mainsequence.meta_tables.migrations import (
     build_alembic_version_metatable,
@@ -13,6 +14,7 @@ from src.account.alpaca_account_details import project_account_models
 from src.assets.alpaca_asset_details import project_asset_models
 from src.market_data import project_configuration_models, project_storage_models
 from src.operations import project_operation_models
+from src.portfolios import project_portfolio_configuration_models
 from src.universes import project_universe_models
 
 
@@ -25,6 +27,7 @@ def all_project_metatable_models() -> list[type]:
         *project_universe_models(),
         *project_configuration_models(),
         *project_operation_models(),
+        *project_portfolio_configuration_models(),
     ]
 
 
@@ -51,6 +54,10 @@ METADATA = metadata_for_models(
         AssetCategoryTable,
         AccountGroupTable,
         AccountTable,
+        CalendarTable,
+        IndexTable,
+        SignalMetadataTable,
+        PortfolioTable,
         *all_project_metatable_models(),
     ]
 )
@@ -63,13 +70,17 @@ ProjectAlembicVersion = build_alembic_version_metatable(
     table_name="alpaca_connectors__alembic_version",
 )
 
+SHARED_PROVIDER_KWARGS = {
+    "package": "src",
+    "migration_namespace": "alpaca-connectors",
+    "script_location": "src.migrations:",
+    "version_location_prefix": "src.migrations:versions",
+    "alembic_registry": ProjectAlembicVersion,
+}
+
 migration = build_metatable_migration_provider(
-    package="src",
-    migration_namespace="alpaca-connectors",
-    script_location="src.migrations:",
-    version_location_prefix="src.migrations:versions",
+    **SHARED_PROVIDER_KWARGS,
     target_metadata=METADATA,
-    alembic_registry=ProjectAlembicVersion,
     metatable_models=all_project_metatable_models(),
     include_name_hook=_include_project_tables,
 )
@@ -78,6 +89,7 @@ migration = build_metatable_migration_provider(
 __all__ = [
     "PROJECT_TABLE_NAMES",
     "ProjectAlembicVersion",
+    "SHARED_PROVIDER_KWARGS",
     "all_project_metatable_models",
     "migration",
 ]

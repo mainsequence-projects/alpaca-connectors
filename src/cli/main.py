@@ -48,6 +48,35 @@ from .holdings_category import (
 from .holdings_category import configure_get_parser as configure_universe_get_parser
 from .holdings_category import configure_list_parser as configure_universe_list_parser
 from .holdings_category import configure_run_parser as configure_universe_run_parser
+from .portfolios import (
+    configure_action_parser as configure_portfolio_action_parser,
+)
+from .portfolios import (
+    configure_create_parser as configure_portfolio_create_parser,
+)
+from .portfolios import (
+    configure_delete_parser as configure_portfolio_delete_parser,
+)
+from .portfolios import (
+    configure_get_parser as configure_portfolio_get_parser,
+)
+from .portfolios import (
+    configure_list_parser as configure_portfolio_list_parser,
+)
+from .portfolios import (
+    configure_prepare_interpolated_prices_parser,
+    configure_rebalance_create_parser,
+    configure_rebalance_delete_parser,
+    configure_rebalance_get_parser,
+    configure_rebalance_list_parser,
+    configure_rebalance_update_parser,
+)
+from .portfolios import (
+    configure_runs_parser as configure_portfolio_runs_parser,
+)
+from .portfolios import (
+    configure_update_parser as configure_portfolio_update_parser,
+)
 from .signal_jobs import (
     configure_action_parser as configure_signal_action_parser,
 )
@@ -209,6 +238,35 @@ def build_parser() -> argparse.ArgumentParser:
         run_signal_reconcile_command,
     )
     configure_signal_runs_parser(signal_commands.add_parser("runs"))
+
+    portfolio_parser = top_level.add_parser(
+        "portfolio",
+        help="Create and operate analytical ETF portfolio Jobs.",
+    )
+    portfolio_commands = portfolio_parser.add_subparsers(dest="portfolio_command")
+    configure_portfolio_list_parser(portfolio_commands.add_parser("list"))
+    configure_portfolio_get_parser(portfolio_commands.add_parser("get"))
+    configure_portfolio_create_parser(portfolio_commands.add_parser("create"))
+    configure_portfolio_update_parser(portfolio_commands.add_parser("update"))
+    configure_portfolio_delete_parser(portfolio_commands.add_parser("delete"))
+    configure_portfolio_action_parser(portfolio_commands.add_parser("run"))
+    configure_portfolio_runs_parser(portfolio_commands.add_parser("runs"))
+    configure_prepare_interpolated_prices_parser(
+        portfolio_commands.add_parser(
+            "prepare-interpolated-prices",
+            help="Generate, apply, and verify persistent InterpolatedPrices storage.",
+        )
+    )
+    rebalance_parser = portfolio_commands.add_parser(
+        "rebalance",
+        help="Manage reusable portfolio rebalance configurations.",
+    )
+    rebalance_commands = rebalance_parser.add_subparsers(dest="rebalance_command")
+    configure_rebalance_list_parser(rebalance_commands.add_parser("list"))
+    configure_rebalance_get_parser(rebalance_commands.add_parser("get"))
+    configure_rebalance_create_parser(rebalance_commands.add_parser("create"))
+    configure_rebalance_update_parser(rebalance_commands.add_parser("update"))
+    configure_rebalance_delete_parser(rebalance_commands.add_parser("delete"))
     return parser
 
 
