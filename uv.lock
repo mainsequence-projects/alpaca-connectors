@@ -53,7 +53,7 @@ requires-dist = [
     { name = "mainsequence", specifier = ">=8.1.0" },
     { name = "mkdocs", specifier = ">=1.6.1" },
     { name = "mkdocs-material", specifier = ">=9.7.6" },
-    { name = "ms-markets", specifier = ">=1.0.3" },
+    { name = "ms-markets", specifier = ">=1.0.4" },
     { name = "playwright" },
     { name = "uvicorn", specifier = ">=0.44.0" },
 ]
@@ -577,7 +577,7 @@ wheels = [
 
 [[package]]
 name = "ms-markets"
-version = "1.0.3"
+version = "1.0.4"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "alembic" },
@@ -595,9 +595,9 @@ dependencies = [
     { name = "sqlalchemy" },
     { name = "uvicorn" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/d7/54/c13a253ed6fd21ecd60616d776656d96781545536636b5e35335227aaf0b/ms_markets-1.0.3.tar.gz", hash = "sha256:5895321e8863e0eef3f8fc8a67fb0937ecc877cda0924ce9b2b0b561bfc69803", size = 2207624, upload-time = "2026-09-04T09:22:17.612Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/11/b5/92b6194cb2111148c61ffcd8c8d4e316dc208c6e382d24070d4f0ed7c1e2/ms_markets-1.0.4.tar.gz", hash = "sha256:cd41533cc63a6d6ec8fee0e55480c6a4fdf5429fbf4de0566842bac91ff51d87", size = 2207622, upload-time = "2026-09-05T20:31:18.273Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/f1/ed/123c8ef0e3cb1bd2803cc186682f3555ae419a403de57799676e756ea5ce/ms_markets-1.0.3-py3-none-any.whl", hash = "sha256:1e5598afa5c2346ee06a2bfe3bd20e8cab879b08ad870adb96dac2aab07c1b87", size = 642751, upload-time = "2026-09-04T09:22:15.648Z" },
+    { url = "https://files.pythonhosted.org/packages/c5/ea/b152839c96639ba8abbd89d38005babe406503397403325c9b016bad308e/ms_markets-1.0.4-py3-none-any.whl", hash = "sha256:2aeeae8324fcfa4010703d2a4b2a432080d01b4e63fa89511c0c3620661cec70", size = 642647, upload-time = "2026-09-05T20:31:16.091Z" },
 ]
 
 [[package]]
