@@ -22,8 +22,12 @@ contain `open`, `high`, `low`, `close`, `volume`, `trade_count`, and `vwap`.
 
 The currently migrated profiles are:
 
-- `1d/iex/raw`
-- `1d/sip/all`
+- `1d/iex/raw`: daily IEX-feed bars with raw, unadjusted prices.
+- `1d/sip/all`: daily consolidated SIP-feed bars adjusted for all corporate actions.
+
+The `all` token is Alpaca's adjusted mode. Alpaca also defines `split` and `dividend` adjustment
+modes, but they are not selectable here because this repository does not yet contain migrated
+storage profiles for those exact triples.
 
 Frequency, feed, and adjustment are stored on the configuration. Their triple resolves exactly one
 output storage class. A request cannot create a new combination dynamically; adding one requires a

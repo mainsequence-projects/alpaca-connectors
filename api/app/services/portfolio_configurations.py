@@ -12,16 +12,19 @@ from src.operations import (
     launch_portfolio_job,
     list_portfolio_job_runs,
     normalize_portfolio_job_settings,
+    signal_job_configurations_by_uids,
     signal_uid_for_configuration,
     update_portfolio_job_configuration,
 )
 from src.portfolios import (
+    PortfolioRebalanceConfiguration,
     create_rebalance_configuration,
     delete_rebalance_configuration,
     get_portfolio_configuration,
     get_rebalance_configuration,
     list_portfolio_configurations,
     list_rebalance_configurations,
+    rebalance_configurations_by_uids,
     update_rebalance_configuration,
 )
 
@@ -132,32 +135,17 @@ def _canonical_status(value: Any) -> str:
 
 
 def _responses(rows: list[Any]) -> list[PortfolioConfigurationResponse]:
-    from src.operations import AlpacaETFSignalJobConfiguration
-    from src.portfolios import PortfolioRebalanceConfiguration
-
     if not rows:
         return []
     jobs, latest_runs = _runtime_by_job_uid(rows)
     signal_uids = list(dict.fromkeys(str(row.signal_configuration_uid) for row in rows))
     rebalance_uids = list(dict.fromkeys(str(row.rebalance_configuration_uid) for row in rows))
-    signal_configurations = {
-        str(item.uid): item
-        for item in AlpacaETFSignalJobConfiguration.filter(
-            uid__in=signal_uids,
-            limit=max(len(signal_uids), 1),
-        )
-    }
-    rebalance_configurations = {
-        str(item.uid): item
-        for item in PortfolioRebalanceConfiguration.filter(
-            uid__in=rebalance_uids,
-            limit=max(len(rebalance_uids), 1),
-        )
-    }
+    signal_configurations = signal_job_configurations_by_uids(signal_uids)
+    rebalance_configurations = rebalance_configurations_by_uids(rebalance_uids)
     responses: list[PortfolioConfigurationResponse] = []
     for row in rows:
-        signal_configuration = signal_configurations[str(row.signal_configuration_uid)]
-        rebalance_configuration = rebalance_configurations[str(row.rebalance_configuration_uid)]
+        signal_configuration = signal_configurations.get(str(row.signal_configuration_uid))
+        rebalance_configuration = rebalance_configurations.get(str(row.rebalance_configuration_uid))
         if signal_configuration is None or rebalance_configuration is None:
             raise RuntimeError(
                 f"Portfolio configuration {row.uid!s} has an unresolved required relationship."
@@ -265,27 +253,38 @@ def list_rebalances(*, limit: int, offset: int, search: str | None, ordering: st
         search=search,
         ordering=ordering,
     )
-    return collection_response(items=rows, total=total, limit=limit, offset=offset)
+    return collection_response(
+        items=[_rebalance_response(row) for row in rows],
+        total=total,
+        limit=limit,
+        offset=offset,
+    )
+
+
+def _rebalance_response(
+    row: PortfolioRebalanceConfiguration,
+) -> PortfolioRebalanceConfigurationResponse:
+    """Convert the storage-domain model into the API response contract."""
+
+    return PortfolioRebalanceConfigurationResponse.model_validate(row.model_dump(mode="json"))
 
 
 def create_rebalance(
     request: PortfolioRebalanceConfigurationCreateRequest,
 ) -> PortfolioRebalanceConfigurationResponse:
-    return PortfolioRebalanceConfigurationResponse.model_validate(
-        create_rebalance_configuration(**request.model_dump())
-    )
+    return _rebalance_response(create_rebalance_configuration(**request.model_dump()))
 
 
 def get_rebalance(configuration_uid: str) -> PortfolioRebalanceConfigurationResponse | None:
     row = get_rebalance_configuration(configuration_uid)
-    return PortfolioRebalanceConfigurationResponse.model_validate(row) if row else None
+    return _rebalance_response(row) if row else None
 
 
 def update_rebalance(
     configuration_uid: str,
     request: PortfolioRebalanceConfigurationUpdateRequest,
 ) -> PortfolioRebalanceConfigurationResponse:
-    return PortfolioRebalanceConfigurationResponse.model_validate(
+    return _rebalance_response(
         update_rebalance_configuration(
             configuration_uid,
             **request.model_dump(exclude_unset=True),

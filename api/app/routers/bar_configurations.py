@@ -67,7 +67,7 @@ def configurations_discovery() -> ResourceDiscoveryResponse:
         filter_options={
             "asset_source": [
                 {"value": "account_holdings", "label": "Latest account holdings"},
-                {"value": "universe", "label": "Registered universe"},
+                {"value": "universe", "label": "Universe assets"},
                 {"value": "assets", "label": "Explicit assets"},
             ]
         },

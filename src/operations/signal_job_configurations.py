@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import datetime as dt
 import uuid
+from collections.abc import Sequence
 from typing import Any, ClassVar, Literal
 
 from msm.api.base import MarketsMetaTableRow, operation_result_rows
@@ -91,8 +92,7 @@ class AlpacaETFSignalJobConfigurationTable(
             name="ck_alpaca_etf_signal_job_schedule_shape",
         ),
         CheckConstraint(
-            "schedule_period IS NULL OR schedule_period IN "
-            "('seconds', 'minutes', 'hours', 'days')",
+            "schedule_period IS NULL OR schedule_period IN ('seconds', 'minutes', 'hours', 'days')",
             name="ck_alpaca_etf_signal_job_schedule_period",
         ),
         CheckConstraint(
@@ -302,9 +302,7 @@ def _validate_crontab_field(
             raise ValueError(f"Invalid crontab {label} field {value!r}.")
         numbers = [int(bound) for bound in bounds]
         if any(number < minimum or number > maximum for number in numbers):
-            raise ValueError(
-                f"Crontab {label} must stay between {minimum} and {maximum}."
-            )
+            raise ValueError(f"Crontab {label} must stay between {minimum} and {maximum}.")
         if len(numbers) == 2 and numbers[0] > numbers[1]:
             raise ValueError(f"Invalid descending crontab {label} range {range_part!r}.")
 
@@ -479,6 +477,44 @@ def get_signal_job_configuration(
     return AlpacaETFSignalJobConfiguration.get_by_uid(configuration_uid)
 
 
+def signal_job_configurations_by_uids(
+    configuration_uids: Sequence[uuid.UUID | str],
+) -> dict[str, AlpacaETFSignalJobConfiguration]:
+    """Load a Signal Job configuration UID set with one governed backend query."""
+    from msm.bootstrap import resolve_runtime
+    from msm.repositories.base import compile_markets_statement, execute_markets_operation
+    from sqlalchemy import select
+
+    from src.runtime import account_runtime_models, start_markets_engine
+
+    normalized_uids = list(
+        dict.fromkeys(uuid.UUID(str(configuration_uid)) for configuration_uid in configuration_uids)
+    )
+    if not normalized_uids:
+        return {}
+    start_markets_engine(models=account_runtime_models())
+    runtime = resolve_runtime(
+        models=[AlpacaETFSignalJobConfigurationTable],
+        row_model_name="AlpacaETFSignalJobConfiguration",
+    )
+    operation = compile_markets_statement(
+        select(AlpacaETFSignalJobConfigurationTable).where(
+            AlpacaETFSignalJobConfigurationTable.uid.in_(normalized_uids)
+        ),
+        context=runtime.context,
+        operation="select",
+        models=[AlpacaETFSignalJobConfigurationTable],
+        access="read",
+    )
+    rows = [
+        AlpacaETFSignalJobConfiguration.model_validate(row)
+        for row in operation_result_rows(
+            execute_markets_operation(operation, context=runtime.context)
+        )
+    ]
+    return {str(row.uid): row for row in rows}
+
+
 def get_signal_job_configuration_by_job_uid(
     job_uid: uuid.UUID | str,
 ) -> AlpacaETFSignalJobConfiguration | None:
@@ -633,6 +669,7 @@ __all__ = [
     "project_signal_job_models",
     "signal_job_configurations_for_account",
     "signal_job_configurations_for_universe",
+    "signal_job_configurations_by_uids",
     "update_signal_job_configuration_row",
     "validate_signal_job_references",
 ]

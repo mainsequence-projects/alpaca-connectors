@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import datetime as dt
 import uuid
+from collections.abc import Sequence
 from typing import Any, ClassVar, Literal
 
 from msm.api.base import MarketsMetaTableRow, operation_result_rows
@@ -327,6 +328,42 @@ def get_rebalance_configuration(
 ) -> PortfolioRebalanceConfiguration | None:
     _start_runtime()
     return PortfolioRebalanceConfiguration.get_by_uid(configuration_uid)
+
+
+def rebalance_configurations_by_uids(
+    configuration_uids: Sequence[uuid.UUID | str],
+) -> dict[str, PortfolioRebalanceConfiguration]:
+    """Load a rebalance configuration UID set with one governed backend query."""
+    from msm.bootstrap import resolve_runtime
+    from msm.repositories.base import compile_markets_statement, execute_markets_operation
+    from sqlalchemy import select
+
+    normalized_uids = list(
+        dict.fromkeys(uuid.UUID(str(configuration_uid)) for configuration_uid in configuration_uids)
+    )
+    if not normalized_uids:
+        return {}
+    _start_runtime()
+    runtime = resolve_runtime(
+        models=[PortfolioRebalanceConfigurationTable],
+        row_model_name="PortfolioRebalanceConfiguration",
+    )
+    operation = compile_markets_statement(
+        select(PortfolioRebalanceConfigurationTable).where(
+            PortfolioRebalanceConfigurationTable.uid.in_(normalized_uids)
+        ),
+        context=runtime.context,
+        operation="select",
+        models=[PortfolioRebalanceConfigurationTable],
+        access="read",
+    )
+    rows = [
+        PortfolioRebalanceConfiguration.model_validate(row)
+        for row in operation_result_rows(
+            execute_markets_operation(operation, context=runtime.context)
+        )
+    ]
+    return {str(row.uid): row for row in rows}
 
 
 def list_rebalance_configurations(
@@ -732,6 +769,7 @@ __all__ = [
     "list_rebalance_configurations",
     "normalize_rebalance_strategy",
     "project_portfolio_configuration_models",
+    "rebalance_configurations_by_uids",
     "update_portfolio_calculation_configuration",
     "update_portfolio_configuration_row",
     "update_rebalance_configuration",

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import datetime as dt
+import uuid
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from api.app.main import app
@@ -8,8 +10,12 @@ from api.app.schemas import (
     PortfolioConfigurationResponse,
     PortfolioJobResponse,
     PortfolioJobRunAcceptedResponse,
+    PortfolioRebalanceConfigurationResponse,
 )
+from api.app.services import portfolio_configurations as portfolio_service
 from fastapi.testclient import TestClient
+
+from src.portfolios import AlpacaETFPortfolioConfiguration, PortfolioRebalanceConfiguration
 
 CONFIGURATION_UID = "11111111-1111-4111-8111-111111111111"
 SIGNAL_CONFIGURATION_UID = "22222222-2222-4222-8222-222222222222"
@@ -88,6 +94,120 @@ def create_request() -> dict:
     }
 
 
+def rebalance_row() -> PortfolioRebalanceConfiguration:
+    now = dt.datetime(2026, 9, 5, 12, tzinfo=dt.UTC)
+    return PortfolioRebalanceConfiguration.model_validate(
+        {
+            "uid": uuid.UUID(REBALANCE_CONFIGURATION_UID),
+            "name": "Immediate ETF observations",
+            "description": "Apply each observed ETF weight frame immediately.",
+            "strategy": "immediate_signal",
+            "created_at": now,
+            "updated_at": now,
+        }
+    )
+
+
+def portfolio_row() -> AlpacaETFPortfolioConfiguration:
+    now = dt.datetime(2026, 9, 5, 12, tzinfo=dt.UTC)
+    return AlpacaETFPortfolioConfiguration.model_validate(
+        {
+            "uid": uuid.UUID(CONFIGURATION_UID),
+            "name": "Daily IVV analytical portfolio",
+            "description": "Immediate-signal observation-time backtest.",
+            "signal_configuration_uid": uuid.UUID(SIGNAL_CONFIGURATION_UID),
+            "bars_configuration_uid": uuid.UUID(BARS_CONFIGURATION_UID),
+            "rebalance_configuration_uid": uuid.UUID(REBALANCE_CONFIGURATION_UID),
+            "portfolio_uid": None,
+            "job_uid": uuid.UUID(JOB_UID),
+            "upsample_frequency_id": "1d",
+            "intraday_bar_interpolation_rule": "ffill",
+            "valuation_column": "close",
+            "portfolio_prices_frequency": "1d",
+            "forward_fill_to_now": False,
+            "fail_on_missing_prices": True,
+            "commission_fee": 0.00018,
+            "created_at": now,
+            "updated_at": now,
+        }
+    )
+
+
+def test_portfolio_response_resolves_linked_metatables_with_bulk_uid_queries() -> None:
+    row = portfolio_row()
+    signal = SimpleNamespace(uid=uuid.UUID(SIGNAL_CONFIGURATION_UID))
+    rebalance = rebalance_row()
+
+    with (
+        patch.object(portfolio_service, "_runtime_by_job_uid", return_value=({}, {})),
+        patch.object(
+            portfolio_service,
+            "signal_job_configurations_by_uids",
+            return_value={SIGNAL_CONFIGURATION_UID: signal},
+        ) as signals_by_uids,
+        patch.object(
+            portfolio_service,
+            "rebalance_configurations_by_uids",
+            return_value={REBALANCE_CONFIGURATION_UID: rebalance},
+        ) as rebalances_by_uids,
+        patch.object(
+            portfolio_service,
+            "signal_uid_for_configuration",
+            return_value="signal-uid",
+        ),
+    ):
+        result = portfolio_service._responses([row])
+
+    assert result[0].uid == CONFIGURATION_UID
+    assert result[0].rebalance_strategy == "immediate_signal"
+    signals_by_uids.assert_called_once_with([SIGNAL_CONFIGURATION_UID])
+    rebalances_by_uids.assert_called_once_with([REBALANCE_CONFIGURATION_UID])
+
+
+def test_rebalance_crud_serializes_storage_domain_models() -> None:
+    row = rebalance_row()
+    request = {
+        "name": row.name,
+        "description": row.description,
+        "strategy": row.strategy,
+    }
+    client = TestClient(app)
+
+    with patch(
+        "api.app.services.portfolio_configurations.list_rebalance_configurations",
+        return_value=([row], 1),
+    ):
+        listed = client.get("/v1/portfolio-rebalance-configurations")
+    with patch(
+        "api.app.services.portfolio_configurations.create_rebalance_configuration",
+        return_value=row,
+    ):
+        created = client.post("/v1/portfolio-rebalance-configurations", json=request)
+    with patch(
+        "api.app.services.portfolio_configurations.get_rebalance_configuration",
+        return_value=row,
+    ):
+        retrieved = client.get(
+            f"/v1/portfolio-rebalance-configurations/{REBALANCE_CONFIGURATION_UID}"
+        )
+    with patch(
+        "api.app.services.portfolio_configurations.update_rebalance_configuration",
+        return_value=row,
+    ):
+        updated = client.patch(
+            f"/v1/portfolio-rebalance-configurations/{REBALANCE_CONFIGURATION_UID}",
+            json={"name": row.name},
+        )
+
+    assert [created.status_code, retrieved.status_code, updated.status_code] == [201, 200, 200]
+    for response in (created, retrieved, updated):
+        assert PortfolioRebalanceConfigurationResponse.model_validate(response.json()).uid == (
+            REBALANCE_CONFIGURATION_UID
+        )
+    assert listed.status_code == 200
+    assert listed.json()["items"][0]["uid"] == REBALANCE_CONFIGURATION_UID
+
+
 def test_portfolio_discovery_columns_are_renderable() -> None:
     result = TestClient(app).get("/v1/portfolio-configurations/discovery")
 
@@ -140,7 +260,9 @@ def test_portfolio_create_rejects_unimplemented_rebalance_and_interpolation() ->
 
     client = TestClient(app)
     assert client.post("/v1/portfolio-configurations", json=invalid_strategy).status_code == 422
-    assert client.post("/v1/portfolio-configurations", json=invalid_interpolation).status_code == 422
+    assert (
+        client.post("/v1/portfolio-configurations", json=invalid_interpolation).status_code == 422
+    )
 
 
 def test_portfolio_run_returns_jobrun_status_url_without_arguments() -> None:

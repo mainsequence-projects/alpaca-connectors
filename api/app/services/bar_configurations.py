@@ -23,6 +23,14 @@ from ..schemas import (
 from .common import collection_response
 
 
+def _configuration_response(row: object) -> BarConfigurationResponse:
+    """Project the reusable typed row into the API-owned response model."""
+
+    if not hasattr(row, "model_dump"):
+        raise TypeError("Bar configuration rows must provide model_dump().")
+    return BarConfigurationResponse.model_validate(row.model_dump(mode="json"))
+
+
 def list_configurations(
     *,
     limit: int,
@@ -46,19 +54,19 @@ def list_configurations(
 def create_configuration(
     request: BarConfigurationCreateRequest,
 ) -> BarConfigurationResponse:
-    return BarConfigurationResponse.model_validate(create_bar_configuration(**request.model_dump()))
+    return _configuration_response(create_bar_configuration(**request.model_dump()))
 
 
 def get_configuration(configuration_uid: str) -> BarConfigurationResponse | None:
     row = get_bar_configuration(configuration_uid)
-    return BarConfigurationResponse.model_validate(row) if row else None
+    return _configuration_response(row) if row else None
 
 
 def update_configuration(
     configuration_uid: str,
     request: BarConfigurationUpdateRequest,
 ) -> BarConfigurationResponse:
-    return BarConfigurationResponse.model_validate(
+    return _configuration_response(
         update_bar_configuration(
             configuration_uid,
             **request.model_dump(exclude_unset=True),

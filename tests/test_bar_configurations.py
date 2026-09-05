@@ -6,13 +6,23 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
-from api.app.schemas import BarConfigurationCreateRequest
+from api.app.schemas import BarConfigurationCreateRequest, BarConfigurationUpdateRequest
+from api.app.services.bar_configurations import (
+    create_configuration as create_api_configuration,
+)
+from api.app.services.bar_configurations import (
+    get_configuration as get_api_configuration,
+)
+from api.app.services.bar_configurations import (
+    update_configuration as update_api_configuration,
+)
 from pydantic import ValidationError
 
 from src.holdings import held_asset_identifiers_from_snapshot_rows
 from src.holdings.services import _recent_holdings_set_statement
 from src.market_data.alpaca_bars import AlpacaStockBarsConfig
 from src.market_data.configurations import (
+    AlpacaBarsConfiguration,
     AlpacaBarsConfigurationAssetTable,
     AlpacaBarsConfigurationTable,
     _replace_memberships,
@@ -20,6 +30,65 @@ from src.market_data.configurations import (
     validate_configuration_scope,
 )
 from src.market_data.services import MarketDataDataset, build_market_data_update
+
+
+def _typed_configuration_row() -> AlpacaBarsConfiguration:
+    return AlpacaBarsConfiguration(
+        uid=uuid.UUID("11111111-1111-4111-8111-111111111111"),
+        name="Daily bars",
+        description="Daily account holdings",
+        enabled=True,
+        account_uid=uuid.UUID("22222222-2222-4222-8222-222222222222"),
+        asset_source="account_holdings",
+        asset_uids=[],
+        universe_uid=None,
+        frequency_id="1d",
+        feed="sip",
+        adjustment="all",
+        created_at=datetime(2026, 9, 5, tzinfo=UTC),
+        updated_at=datetime(2026, 9, 5, tzinfo=UTC),
+    )
+
+
+def test_api_service_projects_typed_configuration_rows_for_create_get_and_update() -> None:
+    row = _typed_configuration_row()
+    create_request = BarConfigurationCreateRequest(
+        name=row.name,
+        description=row.description,
+        enabled=row.enabled,
+        account_uid=str(row.account_uid),
+        asset_source=row.asset_source,
+        asset_uids=[],
+        universe_uid=None,
+        frequency_id=row.frequency_id,
+        feed=row.feed,
+        adjustment=row.adjustment,
+    )
+
+    with (
+        patch(
+            "api.app.services.bar_configurations.create_bar_configuration",
+            return_value=row,
+        ),
+        patch(
+            "api.app.services.bar_configurations.get_bar_configuration",
+            return_value=row,
+        ),
+        patch(
+            "api.app.services.bar_configurations.update_bar_configuration",
+            return_value=row,
+        ),
+    ):
+        created = create_api_configuration(create_request)
+        retrieved = get_api_configuration(str(row.uid))
+        updated = update_api_configuration(
+            str(row.uid),
+            BarConfigurationUpdateRequest(name="Updated"),
+        )
+
+    assert created.uid == str(row.uid)
+    assert retrieved is not None and retrieved.account_uid == str(row.account_uid)
+    assert updated.asset_uids == []
 
 
 def test_configuration_table_has_uuid_identity_and_no_dataset_pointer() -> None:

@@ -42,6 +42,7 @@ from .signal_job_configurations import (
     get_signal_job_configuration,
     list_signal_job_configurations,
     project_signal_job_models,
+    signal_job_configurations_by_uids,
     signal_job_configurations_for_account,
     signal_job_configurations_for_universe,
 )
@@ -69,6 +70,7 @@ def project_operation_models() -> list[type]:
         *project_asset_registration_operation_models(),
         *project_signal_job_models(),
     ]
+
 
 __all__ = [
     "AssetRegistrationOperation",
@@ -105,6 +107,7 @@ __all__ = [
     "reconcile_signal_job_configuration",
     "resume_signal_job_configuration",
     "signal_job_configurations_for_account",
+    "signal_job_configurations_by_uids",
     "signal_job_configurations_for_universe",
     "signal_uid_for_configuration",
     "set_asset_registration_step",

@@ -880,6 +880,17 @@ class ApiAppTests(unittest.TestCase):
                     if "preflight_endpoint" in action:
                         self.assertTrue(action["preflight_endpoint"].startswith("/"))
 
+    def test_bar_configuration_discovery_names_the_universe_asset_source(self) -> None:
+        response = self.client.get("/v1/market-data/bar-configurations/discovery")
+
+        self.assertEqual(response.status_code, 200)
+        filters = response.json()["list"]["controls"]["filters"]
+        asset_source = next(item for item in filters if item["key"] == "asset_source")
+        self.assertIn(
+            {"value": "universe", "label": "Universe assets"},
+            asset_source["options"],
+        )
+
     def test_asset_name_discovery_column_has_generic_renderer_metadata(self) -> None:
         response = self.client.get("/v1/assets/discovery")
 

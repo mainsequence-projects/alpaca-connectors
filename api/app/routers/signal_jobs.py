@@ -61,7 +61,7 @@ def signal_jobs_list(
 def signal_jobs_discovery() -> ResourceDiscoveryResponse:
     return resource_discovery(
         resource_id="alpaca-etf-signal-jobs",
-        label="ETF Signals",
+        label="ETF Weight Signals",
         item_label="signal Job",
         identity_fields=["uid"],
         searchable_fields=["name", "description"],

@@ -109,8 +109,10 @@ def portfolio_runtime_models(extra_models: list[type[Any]] | None = None) -> lis
     from msm_portfolios.bootstrap import resolve_portfolio_models
 
     from src.assets.alpaca_asset_details import project_asset_models
-    from src.market_data import project_storage_models
+    from src.market_data import project_configuration_models, project_storage_models
+    from src.operations import project_signal_job_models
     from src.portfolios import project_portfolio_configuration_models
+    from src.universes import project_universe_models
 
     return [
         *resolve_portfolio_models(None),
@@ -122,6 +124,9 @@ def portfolio_runtime_models(extra_models: list[type[Any]] | None = None) -> lis
         CalendarDateTable,
         CalendarSessionTable,
         *project_storage_models(),
+        *project_universe_models(),
+        *project_configuration_models(),
+        *project_signal_job_models(),
         *project_portfolio_configuration_models(),
         *(extra_models or []),
     ]
