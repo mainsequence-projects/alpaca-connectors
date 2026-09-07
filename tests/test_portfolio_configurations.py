@@ -401,7 +401,10 @@ def test_forward_fill_initial_run_reads_each_assets_latest_known_price() -> None
         oldest_latest_price,
     ]
     valuation_source = SimpleNamespace(update_statistics=statistics)
-    portfolio_node = SimpleNamespace(OFFSET_START=resolved.signal_start_time)
+    portfolio_node = SimpleNamespace(
+        OFFSET_START=resolved.signal_start_time,
+        set_valuation_read_start=Mock(),
+    )
 
     _set_initial_portfolio_price_lookback(
         resolved=resolved,
@@ -410,6 +413,7 @@ def test_forward_fill_initial_run_reads_each_assets_latest_known_price() -> None
     )
 
     assert portfolio_node.OFFSET_START == oldest_latest_price
+    portfolio_node.set_valuation_read_start.assert_called_once_with(oldest_latest_price)
     assert statistics.get_last_update_for_identity.call_count == 2
 
 
@@ -429,5 +433,8 @@ def test_forward_fill_rejects_required_asset_with_no_price_observation() -> None
         _set_initial_portfolio_price_lookback(
             resolved=resolved,
             valuation_source=SimpleNamespace(update_statistics=statistics),
-            portfolio_node=SimpleNamespace(OFFSET_START=resolved.signal_start_time),
+            portfolio_node=SimpleNamespace(
+                OFFSET_START=resolved.signal_start_time,
+                set_valuation_read_start=Mock(),
+            ),
         )

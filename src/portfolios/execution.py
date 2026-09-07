@@ -133,8 +133,9 @@ def build_portfolio_graph(resolved: ResolvedPortfolioConfiguration) -> tuple[Any
         PortfolioMarketsConfig,
         PriceAlignmentPolicy,
     )
-    from msm_portfolios.data_nodes import PortfoliosDataNode
     from msm_portfolios.rebalance_strategy.immediate_signal import ImmediateSignal
+
+    from src.portfolios.portfolio_node import AlpacaETFPortfolioDataNode
 
     configuration = resolved.configuration
     if resolved.rebalance_configuration.strategy != "immediate_signal":
@@ -199,7 +200,9 @@ def build_portfolio_graph(resolved: ResolvedPortfolioConfiguration) -> tuple[Any
         unique_identifier=unique_identifier,
         calendar_uid=calendar_row.uid,
     )
-    portfolio_node = PortfoliosDataNode(portfolio_configuration=portfolio_configuration)
+    portfolio_node = AlpacaETFPortfolioDataNode(
+        portfolio_configuration=portfolio_configuration
+    )
     portfolio_node.set_portfolio_configuration(
         portfolio_configuration,
         portfolio_description=description,
@@ -253,10 +256,12 @@ def _set_initial_portfolio_price_lookback(
         )
     usable_latest_prices = [value for value in latest_prices if value is not None]
     if usable_latest_prices:
+        valuation_read_start = min(usable_latest_prices)
         portfolio_node.OFFSET_START = min(
             resolved.signal_start_time,
-            *usable_latest_prices,
+            valuation_read_start,
         )
+        portfolio_node.set_valuation_read_start(valuation_read_start)
 
 
 def execute_portfolio_configuration(configuration_uid: Any) -> PortfolioExecutionResult:
