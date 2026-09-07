@@ -19,6 +19,7 @@ dependencies = [
     "uvicorn>=0.44.0",
     "httpx>=0.28.1",
     "etfhextractor",
+    "empyrical-reloaded>=0.5.12",
 ]
 
 [project.scripts]

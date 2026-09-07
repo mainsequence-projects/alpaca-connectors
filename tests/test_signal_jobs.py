@@ -46,6 +46,7 @@ def configuration(**overrides) -> AlpacaETFSignalJobConfiguration:
         "schedule_every": 1,
         "schedule_period": "days",
         "schedule_expression": None,
+        "schedule_timezone": None,
         "schedule_start_time": None,
         "cpu_request": "0.25",
         "memory_request": "0.5",
@@ -79,12 +80,16 @@ def test_schedule_validation_keeps_exactly_one_schedule_shape() -> None:
         "schedule_every": 2,
         "schedule_period": "hours",
         "schedule_expression": None,
+        "schedule_timezone": None,
         "schedule_start_time": None,
     }
-    assert normalize_schedule(
+    cron = normalize_schedule(
         schedule_type="crontab",
         schedule_expression="0 9 * * 1-5",
-    )["schedule_expression"] == "0 9 * * 1-5"
+        schedule_timezone="America/New_York",
+    )
+    assert cron["schedule_expression"] == "0 9 * * 1-5"
+    assert cron["schedule_timezone"] == "America/New_York"
     assert normalize_schedule(
         schedule_type="crontab",
         schedule_expression="  */15   9-16 * * 1-5 ",
@@ -95,6 +100,19 @@ def test_schedule_validation_keeps_exactly_one_schedule_shape() -> None:
         normalize_schedule(schedule_type="crontab", schedule_expression="60 9 * * 1-5")
     with pytest.raises(ValueError, match="Invalid crontab hour step"):
         normalize_schedule(schedule_type="crontab", schedule_expression="0 */0 * * 1-5")
+    with pytest.raises(ValueError, match="IANA timezone"):
+        normalize_schedule(
+            schedule_type="crontab",
+            schedule_expression="0 9 * * 1-5",
+            schedule_timezone="EST",
+        )
+    with pytest.raises(ValueError, match="only valid for crontab"):
+        normalize_schedule(
+            schedule_type="interval",
+            schedule_every=1,
+            schedule_period="days",
+            schedule_timezone="UTC",
+        )
 
 
 def test_signal_reference_validation_accepts_active_account_registration_mapping() -> None:
@@ -134,7 +152,7 @@ def test_platform_job_is_created_without_a_schedule_or_default_arguments() -> No
     row = configuration(job_uid=None, lifecycle_state="provisioning")
     created = SimpleNamespace(uid=JOB_UID)
 
-    with patch("mainsequence.client.Job.create", return_value=created) as create:
+    with patch("src.operations.platform_jobs.PlatformJob.create", return_value=created) as create:
         assert _create_platform_job(row) is created
 
     create.assert_called_once_with(
@@ -199,6 +217,7 @@ def test_platform_job_patch_maps_crontab_expression_to_sdk_8_1_fields() -> None:
         schedule_every=None,
         schedule_period=None,
         schedule_expression="15 9 * * 1-5",
+        schedule_timezone="America/New_York",
         schedule_start_time=starts_at,
     )
     job = Mock()
@@ -218,6 +237,7 @@ def test_platform_job_patch_maps_crontab_expression_to_sdk_8_1_fields() -> None:
         "day_of_month": "*",
         "month_of_year": "*",
         "day_of_week": "1-5",
+        "timezone": "America/New_York",
         "start_time": "2026-09-05T08:00:00+00:00",
         "one_off": False,
     }

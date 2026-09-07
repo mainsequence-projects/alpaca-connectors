@@ -263,7 +263,10 @@ class AlpacaStockBarsNode(AssetIndexedDataNode):
                     symbol_batch=chunk,
                     frequency_id=self.frequency_id,
                     start=request_start,
-                    end=now_utc,
+                    # Only request finalized periods. Asking through ``now`` is
+                    # both unnecessary (normalization drops the open period) and
+                    # can trigger Alpaca's recent-SIP entitlement restriction.
+                    end=period_cutoff,
                     feed=self.feed,
                     adjustment=self.adjustment,
                 )

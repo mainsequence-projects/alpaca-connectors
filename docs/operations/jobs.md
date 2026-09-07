@@ -13,9 +13,9 @@ alpaca-connectors signal create \
   --name "Daily S&P 500 observation" \
   --universe-uid <UNIVERSE_UID> \
   --account-uid <ACCOUNT_UID> \
-  --schedule-type interval \
-  --schedule-every 1 \
-  --schedule-period days
+  --schedule-type crontab \
+  --schedule-expression "0 9 * * 1-5" \
+  --schedule-timezone America/New_York
 
 alpaca-connectors signal list
 alpaca-connectors signal run <CONFIGURATION_UID>
@@ -44,8 +44,11 @@ signal details triggers this query; listing signals does not.
 The browser form generates calendar schedules from daily, weekday, weekly, or monthly controls and
 shows the resulting five-field expression. Advanced numeric expressions support wildcards, lists,
 ranges, and steps; the API validates both syntax and the legal range of every cron field before it
-stores desired state. The platform's current Job schedule contract does not expose a per-Job
-timezone.
+stores desired state. Every crontab may select an IANA timezone such as `America/New_York` or
+`Europe/Vienna`; abbreviations and fixed-offset `Etc/GMT` zones are rejected. The platform
+evaluates the local cron clock through daylight-saving transitions. New backend Jobs that omit the
+timezone default to UTC, while updates that omit it preserve the Job's current timezone. Interval
+schedules never carry a timezone.
 
 The Job schedule and the `TimeIndexTableUpdater` configuration are separate contracts. The schedule
 decides when the JobRun starts. `AlpacaETFHoldingsSignal` receives `universe_uid` and the runtime
@@ -78,9 +81,9 @@ alpaca-connectors portfolio create \
   --signal-configuration-uid <SIGNAL_CONFIGURATION_UID> \
   --bars-configuration-uid <BARS_CONFIGURATION_UID> \
   --rebalance-configuration-uid <REBALANCE_CONFIGURATION_UID> \
-  --schedule-type interval \
-  --schedule-every 1 \
-  --schedule-period days
+  --schedule-type crontab \
+  --schedule-expression "0 20 * * 1-5" \
+  --schedule-timezone America/New_York
 
 alpaca-connectors portfolio run <PORTFOLIO_CONFIGURATION_UID>
 alpaca-connectors portfolio runs <PORTFOLIO_CONFIGURATION_UID>
@@ -90,6 +93,11 @@ The Job is first created without a schedule, linked to the Portfolio Configurati
 patched with its schedule. Automatic deployment is always enabled. The launcher accepts no
 business arguments and resolves its definition through
 `JOB_RUN_UID -> Job.uid -> Portfolio Configuration.job_uid`.
+
+For crontab schedules, timezone is stored only on that Job. Portfolio API responses read the live
+Job and return both its IANA timezone and whether it was explicitly supplied; a backend-defaulted
+UTC schedule is therefore distinguishable from an explicit UTC choice. Portfolio Configuration
+rows do not duplicate either field.
 
 Execution reads an existing Signal observation, updates the configuration-derived persistent
 `InterpolatedPrices`, and calculates `PortfoliosDataNode` with dependency traversal disabled. It

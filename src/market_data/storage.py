@@ -76,7 +76,15 @@ class AlpacaStockBars1dSipAllStorage(MarketsTimeIndexMetaTableMixin, MarketsBase
     time_index: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
-        info={"label": "Time Index", "description": "UTC bar timestamp."},
+        info={"label": "Time Index", "description": "UTC bar close timestamp."},
+    )
+    open_time: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        info={
+            "label": "Open Time",
+            "description": "UTC timestamp at which the Alpaca bar interval opened.",
+        },
     )
     asset_identifier: Mapped[str] = mapped_column(
         String(255),
@@ -138,7 +146,15 @@ class AlpacaStockBars1dIexRawStorage(MarketsTimeIndexMetaTableMixin, MarketsBase
     time_index: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
-        info={"label": "Time Index", "description": "UTC bar timestamp."},
+        info={"label": "Time Index", "description": "UTC bar close timestamp."},
+    )
+    open_time: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        info={
+            "label": "Open Time",
+            "description": "UTC timestamp at which the Alpaca bar interval opened.",
+        },
     )
     asset_identifier: Mapped[str] = mapped_column(
         String(255),

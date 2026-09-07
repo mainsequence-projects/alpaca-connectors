@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 from api.app.main import app
 from api.app.schemas import (
+    PortfolioConfigurationDetailResponse,
     PortfolioConfigurationResponse,
     PortfolioJobResponse,
     PortfolioJobRunAcceptedResponse,
@@ -16,6 +17,11 @@ from api.app.services import portfolio_configurations as portfolio_service
 from fastapi.testclient import TestClient
 
 from src.portfolios import AlpacaETFPortfolioConfiguration, PortfolioRebalanceConfiguration
+from src.portfolios.portfolio_history import (
+    PortfolioHistory,
+    PortfolioPerformance,
+    PortfolioValueObservation,
+)
 
 CONFIGURATION_UID = "11111111-1111-4111-8111-111111111111"
 SIGNAL_CONFIGURATION_UID = "22222222-2222-4222-8222-222222222222"
@@ -23,6 +29,34 @@ BARS_CONFIGURATION_UID = "33333333-3333-4333-8333-333333333333"
 REBALANCE_CONFIGURATION_UID = "44444444-4444-4444-8444-444444444444"
 JOB_UID = "55555555-5555-4555-8555-555555555555"
 JOB_RUN_UID = "66666666-6666-4666-8666-666666666666"
+
+
+def performance_summary(
+    *,
+    observation_count: int,
+    period_start: dt.datetime | None = None,
+    period_end: dt.datetime | None = None,
+) -> PortfolioPerformance:
+    return PortfolioPerformance(
+        methodology="empyrical-reloaded",
+        frequency="daily",
+        annualization_factor=252,
+        risk_free_rate=0.0,
+        observation_count=observation_count,
+        return_observation_count=max(observation_count - 1, 0),
+        period_start=period_start,
+        period_end=period_end,
+        total_return=None,
+        annualized_return=None,
+        annualized_volatility=None,
+        sharpe_ratio=None,
+        sortino_ratio=None,
+        max_drawdown=None,
+        calmar_ratio=None,
+        best_period_return=None,
+        worst_period_return=None,
+        positive_period_ratio=None,
+    )
 
 
 def response() -> PortfolioConfigurationResponse:
@@ -51,6 +85,8 @@ def response() -> PortfolioConfigurationResponse:
             schedule_every=1,
             schedule_period="days",
             schedule_expression=None,
+            schedule_timezone=None,
+            schedule_timezone_explicit=None,
             schedule_start_time=None,
             cpu_request="0.25",
             memory_request="0.5",
@@ -85,12 +121,39 @@ def create_request() -> dict:
             "schedule_every": 1,
             "schedule_period": "days",
             "schedule_expression": None,
+            "schedule_timezone": None,
             "schedule_start_time": None,
             "cpu_request": "0.25",
             "memory_request": "0.5",
             "max_runtime_seconds": 3600,
             "spot": False,
         },
+    }
+
+
+def test_portfolio_job_response_preserves_backend_crontab_timezone() -> None:
+    payload = portfolio_service._schedule_payload(
+        SimpleNamespace(
+            task_schedule={
+                "schedule": {
+                    "type": "crontab",
+                    "expression": "0 20 * * 1-5",
+                    "start_time": None,
+                    "timezone": "UTC",
+                    "timezone_explicit": False,
+                }
+            }
+        )
+    )
+
+    assert payload == {
+        "schedule_type": "crontab",
+        "schedule_every": None,
+        "schedule_period": None,
+        "schedule_expression": "0 20 * * 1-5",
+        "schedule_timezone": "UTC",
+        "schedule_timezone_explicit": False,
+        "schedule_start_time": None,
     }
 
 
@@ -215,7 +278,6 @@ def test_portfolio_discovery_columns_are_renderable() -> None:
     assert [column["id"] for column in result.json()["list"]["columns"]] == [
         "name",
         "rebalance-strategy",
-        "portfolio-uid",
         "job-image-status",
         "latest-run-status",
         "latest-run-at",
@@ -225,7 +287,6 @@ def test_portfolio_discovery_columns_are_renderable() -> None:
         if column["id"] not in {
             "name",
             "rebalance-strategy",
-            "portfolio-uid",
             "latest-run-status",
         }:
             assert column.get("value_path") or column.get("data_type")
@@ -284,3 +345,175 @@ def test_portfolio_run_returns_jobrun_status_url_without_arguments() -> None:
     assert result.status_code == 202
     assert result.json()["status_url"] == f"/v1/operations/job-runs/{JOB_RUN_UID}"
     run.assert_called_once_with(CONFIGURATION_UID)
+
+
+def test_portfolio_detail_resolves_business_labels_and_value_history() -> None:
+    now = dt.datetime(2026, 9, 5, 12, tzinfo=dt.UTC)
+    signal = SimpleNamespace(
+        uid=uuid.UUID(SIGNAL_CONFIGURATION_UID),
+        name="Daily IVV observation",
+        description="Observe current IVV weights.",
+        enabled=True,
+        universe_uid=uuid.UUID("77777777-7777-4777-8777-777777777777"),
+        account_uid=uuid.UUID("88888888-8888-4888-8888-888888888888"),
+    )
+    bars = SimpleNamespace(
+        uid=uuid.UUID(BARS_CONFIGURATION_UID),
+        name="Daily IVV bars",
+        description="Daily SIP adjusted prices.",
+        enabled=True,
+        account_uid=signal.account_uid,
+        asset_source="universe",
+        universe_uid=signal.universe_uid,
+        asset_uids=[],
+        frequency_id="1d",
+        feed="sip",
+        adjustment="all",
+    )
+    history = PortfolioHistory(
+        materialized=True,
+        portfolio_identifier="ALPACA_ETF_PORTFOLIO__111",
+        description="Canonical portfolio metadata.",
+        calendar_name="US equities",
+        calendar_type="exchange",
+        calendar_timezone="America/New_York",
+        calendar_valid_from=dt.date(2018, 1, 1),
+        calendar_valid_to=dt.date(2027, 1, 1),
+        backtest_price_column="close",
+        observations=(
+            PortfolioValueObservation(
+                time_index=now,
+                close=103.25,
+                period_return=0.0125,
+                calculated_close=103.25,
+                close_time=now,
+            ),
+        ),
+        total_observation_count=1,
+        performance=performance_summary(
+            observation_count=1,
+            period_start=now,
+            period_end=now,
+        ),
+    )
+    account = {"account_name": "Paper account", "is_paper": True}
+    universe = {
+        "display_name": "S&P 500 holdings",
+        "symbol": "IVV",
+        "asset_count": 504,
+    }
+
+    with (
+        patch.object(portfolio_service, "get_portfolio_configuration", return_value=portfolio_row()),
+        patch.object(portfolio_service, "_responses", return_value=[response()]),
+        patch.object(
+            portfolio_service,
+            "signal_job_configurations_by_uids",
+            return_value={SIGNAL_CONFIGURATION_UID: signal},
+        ),
+        patch.object(
+            portfolio_service,
+            "get_rebalance_configuration",
+            return_value=rebalance_row(),
+        ),
+        patch("src.market_data.get_bar_configuration", return_value=bars),
+        patch("src.account.services.get_account_registration", return_value=account),
+        patch("src.universes.get_asset_universe_view", return_value=universe),
+        patch.object(portfolio_service, "read_portfolio_history", return_value=history),
+    ):
+        detail = portfolio_service.get_configuration_detail(
+            CONFIGURATION_UID,
+            observation_limit=100,
+        )
+
+    assert isinstance(detail, PortfolioConfigurationDetailResponse)
+    assert detail.linked_signal.name == "Daily IVV observation"
+    assert detail.linked_signal.universe_name == "S&P 500 holdings"
+    assert detail.linked_bars.asset_source_name == "S&P 500 holdings (IVV)"
+    assert detail.linked_bars.asset_count == 504
+    assert detail.linked_rebalance.name == "Immediate ETF observations"
+    assert detail.canonical_portfolio.observation_count == 1
+    assert detail.canonical_portfolio.latest_close == 103.25
+
+
+def test_portfolio_detail_route_loads_latest_100_observations() -> None:
+    detail = PortfolioConfigurationDetailResponse.model_validate(
+        {
+            **response().model_dump(mode="json"),
+            "linked_signal": {
+                "name": "Daily IVV observation",
+                "description": None,
+                "enabled": True,
+                "universe_name": "S&P 500 holdings",
+                "universe_symbol": "IVV",
+                "account_name": "Paper account",
+                "account_environment": "paper",
+            },
+            "linked_bars": {
+                "name": "Daily IVV bars",
+                "description": None,
+                "enabled": True,
+                "account_name": "Paper account",
+                "account_environment": "paper",
+                "asset_source": "universe",
+                "asset_source_name": "S&P 500 holdings (IVV)",
+                "asset_count": 504,
+                "frequency_id": "1d",
+                "feed": "sip",
+                "adjustment": "all",
+            },
+            "linked_rebalance": {
+                "name": "Immediate ETF observations",
+                "description": None,
+                "strategy": "immediate_signal",
+            },
+            "canonical_portfolio": {
+                "materialized": True,
+                "description": None,
+                "calendar_name": "US equities",
+                "calendar_type": "exchange",
+                "calendar_timezone": "America/New_York",
+                "calendar_valid_from": "2018-01-01",
+                "calendar_valid_to": "2027-01-01",
+                "backtest_price_column": "close",
+                "observation_count": 0,
+                "total_observation_count": 0,
+                "history_window_truncated": False,
+                "latest_observation_at": None,
+                "latest_close": None,
+                "latest_period_return": None,
+                "performance": {
+                    "methodology": "empyrical-reloaded",
+                    "frequency": "daily",
+                    "annualization_factor": 252,
+                    "risk_free_rate": 0.0,
+                    "observation_count": 0,
+                    "return_observation_count": 0,
+                    "period_start": None,
+                    "period_end": None,
+                    "total_return": None,
+                    "annualized_return": None,
+                    "annualized_volatility": None,
+                    "sharpe_ratio": None,
+                    "sortino_ratio": None,
+                    "max_drawdown": None,
+                    "calmar_ratio": None,
+                    "best_period_return": None,
+                    "worst_period_return": None,
+                    "positive_period_ratio": None,
+                },
+                "observations": [],
+            },
+        }
+    )
+    with patch(
+        "api.app.routers.portfolio_configurations.get_configuration_detail",
+        return_value=detail,
+    ) as get_detail:
+        result = TestClient(app).get(
+            f"/v1/portfolio-configurations/{CONFIGURATION_UID}?observation_limit=100"
+        )
+
+    assert result.status_code == 200
+    assert result.json()["linked_signal"]["name"] == "Daily IVV observation"
+    get_detail.assert_called_once_with(CONFIGURATION_UID, observation_limit=100)

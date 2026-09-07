@@ -32,8 +32,9 @@ def project_runtime_models() -> list[type[Any]]:
         AssetTypeTable,
         OpenFigiAssetDetailsTable,
     )
+    from msm_portfolios.data_nodes.portfolios.storage import PortfoliosStorage
     from msm_portfolios.data_nodes.signals.storage import SignalWeightsStorage
-    from msm_portfolios.models import SignalMetadataTable
+    from msm_portfolios.models import PortfolioMetadataTable, SignalMetadataTable
 
     from src.assets.alpaca_asset_details import project_asset_models
     from src.market_data import project_configuration_models, project_storage_models
@@ -51,6 +52,8 @@ def project_runtime_models() -> list[type[Any]]:
         AssetCategoryMembershipTable,
         SignalMetadataTable,
         SignalWeightsStorage,
+        PortfolioMetadataTable,
+        PortfoliosStorage,
         *project_storage_models(),
         *project_universe_models(),
         *project_configuration_models(),

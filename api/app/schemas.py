@@ -478,6 +478,7 @@ class SignalJobConfigurationCreateRequest(BaseModel):
     schedule_every: int | None = Field(default=None, gt=0)
     schedule_period: Literal["seconds", "minutes", "hours", "days"] | None = None
     schedule_expression: str | None = Field(default=None, max_length=128)
+    schedule_timezone: str | None = Field(default=None, min_length=1, max_length=64)
     schedule_start_time: dt.datetime | None = None
     cpu_request: str = "0.25"
     memory_request: str = "0.5"
@@ -491,6 +492,8 @@ class SignalJobConfigurationCreateRequest(BaseModel):
                 raise ValueError("interval schedule requires schedule_every and schedule_period.")
             if self.schedule_expression is not None:
                 raise ValueError("interval schedule forbids schedule_expression.")
+            if self.schedule_timezone is not None:
+                raise ValueError("interval schedule forbids schedule_timezone.")
         elif (
             not self.schedule_expression
             or self.schedule_every is not None
@@ -514,6 +517,7 @@ class SignalJobConfigurationUpdateRequest(BaseModel):
     schedule_every: int | None = Field(default=None, gt=0)
     schedule_period: Literal["seconds", "minutes", "hours", "days"] | None = None
     schedule_expression: str | None = Field(default=None, max_length=128)
+    schedule_timezone: str | None = Field(default=None, min_length=1, max_length=64)
     schedule_start_time: dt.datetime | None = None
     cpu_request: str | None = None
     memory_request: str | None = None
@@ -542,6 +546,7 @@ class SignalJobConfigurationResponse(BaseModel):
     schedule_every: int | None
     schedule_period: Literal["seconds", "minutes", "hours", "days"] | None
     schedule_expression: str | None
+    schedule_timezone: str | None
     schedule_start_time: dt.datetime | None
     cpu_request: str
     memory_request: str
@@ -648,6 +653,7 @@ class PortfolioJobSettingsRequest(BaseModel):
     schedule_every: int | None = Field(default=None, gt=0)
     schedule_period: Literal["seconds", "minutes", "hours", "days"] | None = None
     schedule_expression: str | None = Field(default=None, max_length=128)
+    schedule_timezone: str | None = Field(default=None, min_length=1, max_length=64)
     schedule_start_time: dt.datetime | None = None
     cpu_request: str = "0.25"
     memory_request: str = "0.5"
@@ -661,6 +667,8 @@ class PortfolioJobSettingsRequest(BaseModel):
                 raise ValueError("interval schedule requires schedule_every and schedule_period.")
             if self.schedule_expression is not None:
                 raise ValueError("interval schedule forbids schedule_expression.")
+            if self.schedule_timezone is not None:
+                raise ValueError("interval schedule forbids schedule_timezone.")
         elif (
             not self.schedule_expression
             or self.schedule_every is not None
@@ -722,6 +730,8 @@ class PortfolioJobResponse(BaseModel):
     schedule_every: int | None
     schedule_period: Literal["seconds", "minutes", "hours", "days"] | None
     schedule_expression: str | None
+    schedule_timezone: str | None
+    schedule_timezone_explicit: bool | None
     schedule_start_time: dt.datetime | None
     cpu_request: str | None
     memory_request: str | None
@@ -756,6 +766,109 @@ class PortfolioConfigurationResponse(BaseModel):
     latest_run_at: dt.datetime | None = None
     created_at: dt.datetime
     updated_at: dt.datetime
+
+
+class PortfolioLinkedSignalResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    description: str | None
+    enabled: bool
+    universe_name: str
+    universe_symbol: str
+    account_name: str
+    account_environment: Literal["paper", "live"]
+
+
+class PortfolioLinkedBarsResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    description: str | None
+    enabled: bool
+    account_name: str
+    account_environment: Literal["paper", "live"]
+    asset_source: Literal["assets", "universe", "account_holdings"]
+    asset_source_name: str
+    asset_count: int | None = Field(default=None, ge=0)
+    frequency_id: str
+    feed: str
+    adjustment: str
+
+
+class PortfolioLinkedRebalanceResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    description: str | None
+    strategy: Literal["immediate_signal"]
+
+
+class PortfolioValueObservationResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    time_index: dt.datetime
+    close: float | None
+    period_return: float | None
+    calculated_close: float | None
+    close_time: dt.datetime | None
+    cumulative_return: float | None
+    drawdown: float | None
+
+
+class PortfolioPerformanceResponse(BaseModel):
+    """Window-scoped return and risk statistics for one canonical Portfolio."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    methodology: Literal["empyrical-reloaded"]
+    frequency: Literal["daily"]
+    annualization_factor: int = Field(gt=0)
+    risk_free_rate: float
+    observation_count: int = Field(ge=0)
+    return_observation_count: int = Field(ge=0)
+    period_start: dt.datetime | None
+    period_end: dt.datetime | None
+    total_return: float | None
+    annualized_return: float | None
+    annualized_volatility: float | None
+    sharpe_ratio: float | None
+    sortino_ratio: float | None
+    max_drawdown: float | None
+    calmar_ratio: float | None
+    best_period_return: float | None
+    worst_period_return: float | None
+    positive_period_ratio: float | None
+
+
+class CanonicalPortfolioDetailResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    materialized: bool
+    description: str | None
+    calendar_name: str | None
+    calendar_type: str | None
+    calendar_timezone: str | None
+    calendar_valid_from: dt.date | None
+    calendar_valid_to: dt.date | None
+    backtest_price_column: str | None
+    observation_count: int = Field(ge=0)
+    total_observation_count: int = Field(ge=0)
+    history_window_truncated: bool
+    latest_observation_at: dt.datetime | None
+    latest_close: float | None
+    latest_period_return: float | None
+    performance: PortfolioPerformanceResponse
+    observations: list[PortfolioValueObservationResponse]
+
+
+class PortfolioConfigurationDetailResponse(PortfolioConfigurationResponse):
+    """Resolved detail projection used only after one portfolio is selected."""
+
+    linked_signal: PortfolioLinkedSignalResponse
+    linked_bars: PortfolioLinkedBarsResponse
+    linked_rebalance: PortfolioLinkedRebalanceResponse
+    canonical_portfolio: CanonicalPortfolioDetailResponse
 
 
 class PortfolioJobRunResponse(SignalJobRunResponse):

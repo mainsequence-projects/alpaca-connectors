@@ -8,6 +8,7 @@ import pandas as pd
 import pytest
 from msm_portfolios.data_nodes.constants import ASSET_IDENTIFIER
 from msm_portfolios.data_nodes.signals.storage import SignalWeightsStorage
+from msm_portfolios.data_nodes.signals.weights import SignalWeights
 
 from src.portfolios.alpaca_etf_signal import (
     AlpacaETFHoldingsSignal,
@@ -133,3 +134,28 @@ def test_prepared_plan_is_transient_and_consumed_by_the_next_update() -> None:
         plan=plan,
     )
     assert not hasattr(signal, "_prepared_universe_plan")
+
+
+def test_signal_read_includes_prior_valid_observation_for_session_close_alignment() -> None:
+    signal = build_signal()
+    valuation_time = pd.Timestamp("2026-09-04T20:00:00Z")
+    expected = pd.DataFrame({"signal_weight": [1.0]})
+
+    with patch.object(
+        SignalWeights,
+        "_get_signal_weights_between_dates",
+        return_value=expected,
+    ) as get_weights:
+        actual = signal._get_signal_weights_between_dates(
+            weights_source="canonical-signal-storage",
+            start_date=valuation_time,
+            end_date=valuation_time,
+        )
+
+    assert actual is expected
+    get_weights.assert_called_once_with(
+        weights_source="canonical-signal-storage",
+        start_date=valuation_time - dt.timedelta(days=90),
+        end_date=valuation_time,
+        dimension_range_map=None,
+    )

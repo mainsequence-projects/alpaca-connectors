@@ -46,7 +46,7 @@ only business and calculation inputs:
 
 The Portfolio Configuration must not copy:
 
-- interval or crontab schedule fields;
+- interval or crontab schedule fields, including crontab timezone;
 - CPU, memory, GPU, spot, or maximum-runtime fields;
 - automatic-deployment or image state;
 - Job lifecycle state or JobRun status;
@@ -61,7 +61,8 @@ a copy of the Job's operational configuration.
 The Main Sequence Job is the sole source of truth for:
 
 - execution path;
-- interval or crontab schedule;
+- interval or crontab schedule, including the crontab's IANA timezone and whether the backend
+  applied its UTC omission default;
 - CPU, memory, GPU, spot, and maximum runtime;
 - automatic deployment and image association; and
 - whether a schedule is currently attached.
@@ -74,6 +75,9 @@ each attribute is written to its owning resource only. Portfolio detail response
 Portfolio Configuration with a live Job read when operational information is requested. Updating
 a schedule or compute request patches the Job directly and does not update the Portfolio
 Configuration.
+
+Crontab timezone therefore remains a Job attribute. The Portfolio detail response may project it
+from the live Job, but the Portfolio Configuration MetaTable must not persist a duplicate.
 
 ### Phase-1 rebalance and backtest scope
 

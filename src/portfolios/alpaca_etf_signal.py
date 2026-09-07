@@ -70,6 +70,30 @@ class AlpacaETFHoldingsSignal(SignalWeights):
     def maximum_forward_fill(self) -> dt.timedelta:
         return dt.timedelta(days=self.SIGNAL_VALIDITY_DAYS)
 
+    def _get_signal_weights_between_dates(
+        self,
+        *,
+        weights_source,
+        start_date=None,
+        end_date=None,
+        dimension_range_map=None,
+    ) -> pd.DataFrame:
+        """Include the latest still-valid observation before a valuation timestamp.
+
+        Universe extractions retain their real observation time and therefore do not
+        necessarily land exactly on a market-session close. Expand the read window by
+        the declared validity period; ``SignalWeights.interpolate_index`` still returns
+        only the requested valuation index after forward filling.
+        """
+        if start_date is not None and dimension_range_map is None:
+            start_date = pd.Timestamp(start_date) - self.maximum_forward_fill()
+        return super()._get_signal_weights_between_dates(
+            weights_source=weights_source,
+            start_date=start_date,
+            end_date=end_date,
+            dimension_range_map=dimension_range_map,
+        )
+
     def dependencies(self) -> dict[str, Any]:
         return {}
 

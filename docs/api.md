@@ -131,6 +131,20 @@ updates persistent interpolation, and calculates the portfolio without rerunning
 Bars producers. Signal observation timestamps are observation times, so the ImmediateSignal result
 is an analytical reconstruction rather than guaranteed point-in-time ETF replication.
 
+The configuration detail `GET` accepts `observation_limit` from 1 through 5,000 (default 2,500). It
+returns resolved Signal, Universe, Alpaca account, Bars, Rebalance, Job, and canonical
+portfolio/calendar summaries plus the requested latest values from `PortfoliosStorage`. The history
+query is scoped by the canonical Portfolio unique identifier and runs only when a consumer opens
+that configuration; API consumers do not need to interpret or display related resource UIDs.
+
+The same response includes window-scoped performance statistics calculated from those canonical
+daily values with `empyrical-reloaded`: total and annualized return, annualized volatility, Sharpe,
+Sortino, maximum drawdown, Calmar, best/worst daily return, and the positive-period ratio. The
+response records the exact observation count, date window, 252-period annualization factor, and 0%
+risk-free-rate assumption. Alpha and beta are not reported because this workflow has no configured
+benchmark. If the requested window is shorter than the stored history, the response marks it as
+truncated rather than presenting the statistics as since-inception results.
+
 ## Observable Asset Registration
 
 Browser clients should start registration work through:

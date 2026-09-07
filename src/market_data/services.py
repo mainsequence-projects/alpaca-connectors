@@ -62,6 +62,56 @@ def _dataset_coverage(storage: type) -> tuple[int, dt.datetime | None, dt.dateti
     )
 
 
+def _physical_dataset_update_statistics(storage: type):
+    """Build updater progress from the rows that physically exist in one bars table.
+
+    A controlled bars-table rebuild can leave backend-cached updater statistics ahead of the
+    physical table. Reading the table by asset keeps a resumed refill incremental and prevents
+    stale metadata from skipping missing history.
+    """
+    from msm.repositories.base import compile_markets_statement, execute_markets_operation
+    from sqlalchemy import func, select
+
+    from mainsequence.client.metatables import UpdateStatistics
+    from src.runtime import start_markets_engine
+
+    runtime = start_markets_engine()
+    statement = (
+        select(
+            storage.asset_identifier.label("asset_identifier"),
+            func.min(storage.time_index).label("earliest_observation"),
+            func.max(storage.time_index).label("latest_observation"),
+        )
+        .group_by(storage.asset_identifier)
+        .order_by(storage.asset_identifier.asc())
+    )
+    operation = compile_markets_statement(
+        statement,
+        context=runtime.context,
+        operation="select",
+        models=[storage],
+        access="read",
+    )
+    rows = operation_result_rows(execute_markets_operation(operation, context=runtime.context))
+    if not rows:
+        return UpdateStatistics.return_empty()
+
+    index_min = {
+        str(row["asset_identifier"]): row["earliest_observation"] for row in rows
+    }
+    index_progress = {
+        str(row["asset_identifier"]): row["latest_observation"] for row in rows
+    }
+    return UpdateStatistics(
+        global_index_progress={
+            "min": min(index_min.values()),
+            "max": max(index_progress.values()),
+        },
+        index_progress=index_progress,
+        index_min=index_min,
+    )
+
+
 def _dataset_from_storage(triple: tuple[str, str, str], storage: type) -> MarketDataDataset:
     meta_table = storage.get_time_index_meta_table()
     frequency_id, feed, adjustment = triple
@@ -337,6 +387,7 @@ def execute_market_data_update(
     hash_namespace: str | None = None,
 ) -> dict[str, Any]:
     from src.account.services import get_account_registration
+    from src.market_data.storage import storage_for
 
     node, summary = build_market_data_update(
         configuration_uid=configuration_uid,
@@ -356,7 +407,19 @@ def execute_market_data_update(
         credentials=credentials,
         paper=bool(registration["is_paper"]),
     )
-    error_on_last_update, result = node.run()
+    configuration = summary["configuration"]
+    storage = storage_for(
+        configuration["frequency_id"],
+        configuration["feed"],
+        configuration["adjustment"],
+    )
+    # Physical rows are authoritative for resumable source ingestion. This matters after a
+    # deliberate schema rebuild: the platform can retain a previous successful TableUpdate's
+    # progress even though the rebuilt table is empty or only partially refilled.
+    override_update_stats = node.scope_update_statistics_to_assets(
+        _physical_dataset_update_statistics(storage)
+    )
+    error_on_last_update, result = node.run(override_update_stats=override_update_stats)
     if error_on_last_update:
         raise RuntimeError("Alpaca market-data update reported an error.")
     return {

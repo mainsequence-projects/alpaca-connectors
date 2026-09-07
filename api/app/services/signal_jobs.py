@@ -47,12 +47,13 @@ def _canonical_status(value: Any) -> str:
 
 def _runtime_by_job_uid(rows: list[Any]) -> tuple[dict[str, Any], dict[str, Any]]:
     """Load all related Jobs and latest JobRuns with two set-based platform requests."""
-    from mainsequence.client import Job, JobRun
+    from mainsequence.client import JobRun
+    from src.operations.platform_jobs import PlatformJob
 
     job_uids = list(dict.fromkeys(str(row.job_uid) for row in rows if row.job_uid is not None))
     if not job_uids:
         return {}, {}
-    jobs = list(Job.filter(uid__in=job_uids, timeout=60))
+    jobs = list(PlatformJob.filter(uid__in=job_uids, timeout=60))
     runs = list(JobRun.filter(job__uid__in=job_uids, timeout=60))
     jobs_by_uid = {str(job.uid): job for job in jobs}
     latest_by_job_uid: dict[str, Any] = {}

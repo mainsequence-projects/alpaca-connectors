@@ -91,6 +91,7 @@ alpaca-connectors portfolio create \
   --rebalance-configuration-uid <REBALANCE_CONFIGURATION_UID> \
   --schedule-type crontab \
   --schedule-expression "30 8 * * 1-5" \
+  --schedule-timezone America/New_York \
   --cpu-request 0.25 \
   --memory-request 0.5
 ```
@@ -137,6 +138,20 @@ The API exposes:
 
 Create requests nest schedule and compute values under `job`. Responses compose the durable row
 with a live Job projection. Schedule and compute updates patch only the Job.
+
+The configuration detail `GET` resolves the linked Signal, Universe, Alpaca accounts, Bars source,
+Rebalance policy, live Job settings, and canonical Portfolio metadata. With the optional
+`observation_limit` query parameter (default 2,500, maximum 5,000), it also returns the most recent
+portfolio values from shared `PortfoliosStorage`, ordered chronologically for presentation. The
+storage query is constrained by the canonical `PortfolioTable.unique_identifier`; it does not scan
+or combine values from other portfolios.
+
+The API calculates a quick historical-performance summary with `empyrical-reloaded` from the
+returned daily value window. It reports compounded and annualized return, annualized volatility,
+Sharpe, Sortino, maximum drawdown, Calmar, best/worst daily return, and positive-period ratio using
+252 periods per year and a 0% risk-free rate. It returns the full stored observation count and a
+truncation flag so a bounded window is never mislabeled as since-inception history. Alpha and beta
+remain absent until a benchmark is explicitly part of the Portfolio Configuration.
 
 ## Required Platform State
 

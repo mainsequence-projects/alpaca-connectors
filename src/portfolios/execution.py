@@ -21,7 +21,10 @@ from src.portfolios.etf_tracking import (
     build_alpaca_interpolated_prices,
     resolve_alpaca_bars_time_index_meta_table_uid,
 )
-from src.portfolios.signal_history import read_signal_observation_matrix
+from src.portfolios.signal_history import (
+    read_signal_observation_bounds,
+    read_signal_observation_matrix,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -31,6 +34,7 @@ class ResolvedPortfolioConfiguration:
     bars_configuration: Any
     rebalance_configuration: PortfolioRebalanceConfiguration
     signal_uid: str
+    signal_start_time: dt.datetime
     asset_identifiers: tuple[str, ...]
     source_time_index_meta_table_uid: str
 
@@ -41,6 +45,7 @@ class ResolvedPortfolioConfiguration:
             "bars_configuration_uid": str(self.bars_configuration.uid),
             "rebalance_configuration_uid": str(self.rebalance_configuration.uid),
             "signal_uid": self.signal_uid,
+            "signal_start_time": self.signal_start_time.isoformat(),
             "asset_count": len(self.asset_identifiers),
             "source_time_index_meta_table_uid": self.source_time_index_meta_table_uid,
             "rebalance_strategy": self.rebalance_configuration.strategy,
@@ -87,7 +92,13 @@ def resolve_portfolio_configuration(
     )
     signal_uid = signal_uid_for_configuration(signal_configuration)
     latest = read_signal_observation_matrix(signal_uid=signal_uid, observation_limit=1)
-    if not latest.time_indexes or not latest.assets:
+    bounds = read_signal_observation_bounds(signal_uid=signal_uid)
+    if (
+        not latest.time_indexes
+        or not latest.assets
+        or bounds.first_observation_at is None
+        or bounds.last_observation_at is None
+    ):
         raise ValueError(
             f"Signal {signal_uid} has no published observations. Run its Signal Job before "
             "running this portfolio."
@@ -104,6 +115,7 @@ def resolve_portfolio_configuration(
         bars_configuration=bars_configuration,
         rebalance_configuration=rebalance_configuration,
         signal_uid=signal_uid,
+        signal_start_time=bounds.first_observation_at,
         asset_identifiers=asset_identifiers,
         source_time_index_meta_table_uid=source_uid,
     )
@@ -139,7 +151,7 @@ def build_portfolio_graph(resolved: ResolvedPortfolioConfiguration) -> tuple[Any
         upsample_frequency_id=configuration.upsample_frequency_id,
         intraday_bar_interpolation_rule=configuration.intraday_bar_interpolation_rule,
     )
-    backtest_days = max((dt.date.today() - dt.date(2018, 1, 1)).days, 0)
+    backtest_days = max((dt.date.today() - resolved.signal_start_time.date()).days, 0)
     calendar_row = ensure_trading_calendar(
         US_EQUITY_CALENDAR_KEY,
         backtest_start_days=backtest_days,
@@ -194,7 +206,57 @@ def build_portfolio_graph(resolved: ResolvedPortfolioConfiguration) -> tuple[Any
     )
     portfolio_node.target_portfolio = portfolio_row
     portfolio_node._explicit_portfolio_identifier = unique_identifier
+    # An observation-time signal cannot support a portfolio before its first stored
+    # observation. Keep this runtime calculation boundary out of durable portfolio identity.
+    portfolio_node.OFFSET_START = resolved.signal_start_time
     return valuation_source, portfolio_node, portfolio_row
+
+
+def _set_initial_portfolio_price_lookback(
+    *,
+    resolved: ResolvedPortfolioConfiguration,
+    valuation_source: Any,
+    portfolio_node: Any,
+) -> None:
+    """Include every required asset's latest known price in a forward-fill run.
+
+    ms-markets extends the valuation index to now, but its local alignment read starts only
+    one portfolio period before the calculation boundary. For an inactive constituent, that
+    can exclude the exact prior observation that must be carried forward. Moving the initial
+    runtime read boundary does not backdate the signal or create synthetic stored prices;
+    signal interpolation still removes all output dates before the first observation.
+    """
+    if not resolved.configuration.forward_fill_to_now:
+        return
+
+    statistics = valuation_source.update_statistics
+    if statistics is None:
+        statistics = valuation_source.get_update_statistics()
+        valuation_source.update_statistics = statistics
+    latest_prices = [
+        statistics.get_last_update_for_identity(asset_identifier)
+        for asset_identifier in resolved.asset_identifiers
+    ]
+    missing_assets = [
+        asset_identifier
+        for asset_identifier, latest_price in zip(
+            resolved.asset_identifiers,
+            latest_prices,
+            strict=True,
+        )
+        if latest_price is None
+    ]
+    if missing_assets and resolved.configuration.fail_on_missing_prices:
+        raise ValueError(
+            "Portfolio valuation source has no usable observation for required signal assets: "
+            + ", ".join(missing_assets)
+        )
+    usable_latest_prices = [value for value in latest_prices if value is not None]
+    if usable_latest_prices:
+        portfolio_node.OFFSET_START = min(
+            resolved.signal_start_time,
+            *usable_latest_prices,
+        )
 
 
 def execute_portfolio_configuration(configuration_uid: Any) -> PortfolioExecutionResult:
@@ -202,6 +264,15 @@ def execute_portfolio_configuration(configuration_uid: Any) -> PortfolioExecutio
     resolved = resolve_portfolio_configuration(configuration_uid)
     valuation_source, portfolio_node, portfolio_row = build_portfolio_graph(resolved)
     interpolation_result = valuation_source.run(update_tree=False)
+    _set_initial_portfolio_price_lookback(
+        resolved=resolved,
+        valuation_source=valuation_source,
+        portfolio_node=portfolio_node,
+    )
+    signal_weights = portfolio_node.signal_weights
+    signal_statistics = signal_weights.get_update_statistics()
+    signal_statistics.filter_identity_level(level=1, filters=[resolved.signal_uid])
+    signal_weights.update_statistics = signal_statistics
     portfolio_result = portfolio_node.run(update_tree=False, update_pointers=True)
     persisted_portfolio = getattr(portfolio_node, "target_portfolio", None) or portfolio_row
     portfolio_uid = str(persisted_portfolio.uid)

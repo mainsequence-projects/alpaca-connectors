@@ -29,6 +29,7 @@ class PortfolioJobSettings:
     schedule_every: int | None
     schedule_period: str | None
     schedule_expression: str | None
+    schedule_timezone: str | None
     schedule_start_time: dt.datetime | None
     cpu_request: str
     memory_request: str
@@ -97,6 +98,7 @@ def normalize_portfolio_job_settings(
     schedule_every: int | None = None,
     schedule_period: str | None = None,
     schedule_expression: str | None = None,
+    schedule_timezone: str | None = None,
     schedule_start_time: dt.datetime | None = None,
     cpu_request: str | int | float = "0.25",
     memory_request: str | int | float = "0.5",
@@ -110,6 +112,7 @@ def normalize_portfolio_job_settings(
         schedule_every=schedule_every,
         schedule_period=schedule_period,
         schedule_expression=schedule_expression,
+        schedule_timezone=schedule_timezone,
         schedule_start_time=schedule_start_time,
     )
     compute = validate_and_normalize_compute_fields(
@@ -166,6 +169,8 @@ def _job_schedule_update(settings: PortfolioJobSettings) -> dict[str, Any]:
             "month_of_year": month_of_year,
             "day_of_week": day_of_week,
         }
+        if settings.schedule_timezone is not None:
+            schedule["timezone"] = settings.schedule_timezone
     if settings.schedule_start_time is not None:
         schedule["start_time"] = settings.schedule_start_time.isoformat()
     schedule["one_off"] = False
@@ -173,9 +178,9 @@ def _job_schedule_update(settings: PortfolioJobSettings) -> dict[str, Any]:
 
 
 def _get_job(job_uid: uuid.UUID | str) -> Any | None:
-    from mainsequence.client import Job
+    from src.operations.platform_jobs import PlatformJob
 
-    rows = list(Job.filter(uid=_canonical_uid(job_uid, label="Job UID"), timeout=60))
+    rows = list(PlatformJob.filter(uid=_canonical_uid(job_uid, label="Job UID"), timeout=60))
     if len(rows) > 1:
         raise RuntimeError(f"More than one Job resolved for UID {job_uid!s}.")
     return rows[0] if rows else None
@@ -204,9 +209,9 @@ def _create_platform_job(
     configuration: AlpacaETFPortfolioConfiguration,
     settings: PortfolioJobSettings,
 ) -> Any:
-    from mainsequence.client import Job
+    from src.operations.platform_jobs import PlatformJob
 
-    return Job.create(
+    return PlatformJob.create(
         name=_job_name(configuration),
         description=_job_description(configuration),
         execution_path=ALPACA_ETF_PORTFOLIO_EXECUTION_PATH,
@@ -274,6 +279,7 @@ def create_portfolio_job_configuration(
     schedule_every: int | None = None,
     schedule_period: str | None = None,
     schedule_expression: str | None = None,
+    schedule_timezone: str | None = None,
     schedule_start_time: dt.datetime | None = None,
     description: str | None = None,
     upsample_frequency_id: str = "1d",
@@ -293,6 +299,7 @@ def create_portfolio_job_configuration(
         schedule_every=schedule_every,
         schedule_period=schedule_period,
         schedule_expression=schedule_expression,
+        schedule_timezone=schedule_timezone,
         schedule_start_time=schedule_start_time,
         cpu_request=cpu_request,
         memory_request=memory_request,

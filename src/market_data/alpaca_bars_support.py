@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import uuid
 from collections import defaultdict
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -30,6 +31,7 @@ SUPPORTED_ALPACA_BAR_FREQUENCIES = (
 SUPPORTED_ALPACA_DATA_FEEDS = tuple(feed.value for feed in DataFeed)
 SUPPORTED_ALPACA_ADJUSTMENTS = tuple(adjustment.value for adjustment in Adjustment)
 DEFAULT_BAR_SYMBOL_BATCH_SIZE = 200
+ALPACA_ASSET_IDENTIFIER_PREFIX = "ALPACA::"
 
 
 @dataclass(frozen=True)
@@ -188,6 +190,17 @@ def build_alpaca_symbol_lookup(*, trading_client=None) -> dict[str, str]:
     return lookup
 
 
+def _is_canonical_alpaca_asset_identifier(unique_identifier: str) -> bool:
+    if not unique_identifier.startswith(ALPACA_ASSET_IDENTIFIER_PREFIX):
+        return False
+    provider_uid = unique_identifier.removeprefix(ALPACA_ASSET_IDENTIFIER_PREFIX)
+    try:
+        uuid.UUID(provider_uid)
+    except ValueError:
+        return False
+    return True
+
+
 def resolve_asset_bindings_from_category_assets(
     *,
     assets: Sequence[Any],
@@ -208,6 +221,16 @@ def resolve_asset_bindings_from_category_assets(
             resolved_symbol = symbol_lookup.get(candidate)
             if resolved_symbol is not None:
                 break
+
+        # The required AlpacaAssetDetails row is the durable provider identity
+        # mapping. A symbol can disappear from Alpaca's current catalog while its
+        # canonical Alpaca UUID and last known provider symbol remain valid for
+        # historical data. Reuse that stored symbol only for an exact canonical
+        # Alpaca identity; FIGI is never an identity fallback.
+        if resolved_symbol is None and _is_canonical_alpaca_asset_identifier(
+            str(asset.unique_identifier)
+        ):
+            resolved_symbol = str(ticker).strip().upper()
 
         if resolved_symbol is None:
             unresolved_assets.append(asset)
@@ -291,6 +314,14 @@ def normalize_stock_bars_frame(
     )
     if normalize_frequency_id(frequency_id) == "1d":
         session_date = normalized["bar_start_time"].dt.tz_convert(NEW_YORK).dt.date
+        session_open = [
+            dt.datetime.combine(
+                current_date,
+                dt.time(hour=9, minute=30),
+                tzinfo=NEW_YORK,
+            ).astimezone(UTC)
+            for current_date in session_date
+        ]
         session_close = [
             dt.datetime.combine(
                 current_date,
@@ -299,11 +330,15 @@ def normalize_stock_bars_frame(
             ).astimezone(UTC)
             for current_date in session_date
         ]
+        normalized["open_time"] = pd.to_datetime(session_open, utc=True).astype(
+            "datetime64[ns, UTC]"
+        )
         normalized["time_index"] = pd.to_datetime(session_close, utc=True).astype(
             "datetime64[ns, UTC]"
         )
     else:
         bar_interval = frequency_id_to_timedelta(frequency_id)
+        normalized["open_time"] = normalized["bar_start_time"]
         normalized["time_index"] = (
             normalized["bar_start_time"] + pd.Timedelta(bar_interval)
         ).astype("datetime64[ns, UTC]")
@@ -326,6 +361,7 @@ def normalize_stock_bars_frame(
         [
             "time_index",
             "asset_identifier",
+            "open_time",
             "open",
             "high",
             "low",

@@ -162,6 +162,7 @@ def _job_schedule_update(configuration: AlpacaETFSignalJobConfiguration) -> dict
             "day_of_month": day_of_month,
             "month_of_year": month_of_year,
             "day_of_week": day_of_week,
+            "timezone": configuration.schedule_timezone,
         }
     if configuration.schedule_start_time is not None:
         schedule["start_time"] = configuration.schedule_start_time.isoformat()
@@ -170,9 +171,9 @@ def _job_schedule_update(configuration: AlpacaETFSignalJobConfiguration) -> dict
 
 
 def _get_job(job_uid: uuid.UUID | str) -> Any | None:
-    from mainsequence.client import Job
+    from src.operations.platform_jobs import PlatformJob
 
-    rows = list(Job.filter(uid=_canonical_uid(job_uid, label="Job UID"), timeout=60))
+    rows = list(PlatformJob.filter(uid=_canonical_uid(job_uid, label="Job UID"), timeout=60))
     if len(rows) > 1:
         raise RuntimeError(f"More than one Job resolved for UID {job_uid!s}.")
     return rows[0] if rows else None
@@ -198,9 +199,9 @@ def _require_linked_job(configuration: AlpacaETFSignalJobConfiguration) -> Any:
 
 
 def _create_platform_job(configuration: AlpacaETFSignalJobConfiguration) -> Any:
-    from mainsequence.client import Job
+    from src.operations.platform_jobs import PlatformJob
 
-    return Job.create(
+    return PlatformJob.create(
         name=_job_name(configuration),
         description=_job_description(configuration),
         execution_path=ALPACA_ETF_SIGNAL_EXECUTION_PATH,
@@ -295,6 +296,7 @@ def create_signal_job_configuration(
     schedule_every: int | None = None,
     schedule_period: str | None = None,
     schedule_expression: str | None = None,
+    schedule_timezone: str | None = None,
     schedule_start_time: Any | None = None,
     description: str | None = None,
     enabled: bool = True,
@@ -317,6 +319,7 @@ def create_signal_job_configuration(
         schedule_every=schedule_every,
         schedule_period=schedule_period,
         schedule_expression=schedule_expression,
+        schedule_timezone=schedule_timezone,
         schedule_start_time=schedule_start_time,
         description=description,
         enabled=enabled,
@@ -340,6 +343,7 @@ def update_signal_job_configuration(
     schedule_every: int | None | object = _UNSET,
     schedule_period: str | None | object = _UNSET,
     schedule_expression: str | None | object = _UNSET,
+    schedule_timezone: str | None | object = _UNSET,
     schedule_start_time: Any | object = _UNSET,
     cpu_request: str | int | float | None = None,
     memory_request: str | int | float | None = None,
@@ -365,6 +369,16 @@ def update_signal_job_configuration(
                 "configuration in this Environment."
             )
     requested_schedule_type = schedule_type or current.schedule_type
+    if requested_schedule_type == "interval":
+        requested_schedule_timezone = (
+            None if schedule_timezone is _UNSET else schedule_timezone
+        )
+    else:
+        requested_schedule_timezone = (
+            (current.schedule_timezone or "UTC")
+            if schedule_timezone is _UNSET
+            else schedule_timezone
+        )
     schedule = normalize_schedule(
         schedule_type=requested_schedule_type,
         schedule_every=(
@@ -378,6 +392,7 @@ def update_signal_job_configuration(
             if schedule_expression is _UNSET
             else schedule_expression
         ),
+        schedule_timezone=requested_schedule_timezone,
         schedule_start_time=(
             current.schedule_start_time
             if schedule_start_time is _UNSET

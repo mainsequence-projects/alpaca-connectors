@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import pytest
 from msm.settings import ASSET_IDENTIFIER_DIMENSION
+from sqlalchemy import DateTime
 
 from src.market_data.storage import (
     AlpacaStockBars1dIexRawStorage,
@@ -49,6 +50,14 @@ def test_storage_has_all_ohlcv_value_columns_as_float():
     for column_name in OHLCV_COLUMNS:
         assert column_name in table.columns, f"missing {column_name}"
         assert "FLOAT" in str(table.columns[column_name].type).upper()
+
+
+def test_storage_has_required_open_time_column():
+    for storage in (AlpacaStockBars1dSipAllStorage, AlpacaStockBars1dIexRawStorage):
+        column = storage.__table__.columns["open_time"]
+        assert column.nullable is False
+        assert isinstance(column.type, DateTime)
+        assert column.type.timezone is True
 
 
 def test_asset_identifier_foreign_key_targets_asset_table():

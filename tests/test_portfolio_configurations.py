@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import datetime as dt
 import uuid
+from dataclasses import replace
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
@@ -23,10 +24,15 @@ from src.portfolios.configurations import (
 )
 from src.portfolios.execution import (
     ResolvedPortfolioConfiguration,
+    _set_initial_portfolio_price_lookback,
     execute_portfolio_configuration,
     resolve_portfolio_configuration,
 )
-from src.portfolios.signal_history import SignalObservationAsset, SignalObservationMatrix
+from src.portfolios.signal_history import (
+    SignalObservationAsset,
+    SignalObservationBounds,
+    SignalObservationMatrix,
+)
 
 CONFIGURATION_UID = uuid.UUID("11111111-1111-4111-8111-111111111111")
 SIGNAL_CONFIGURATION_UID = uuid.UUID("22222222-2222-4222-8222-222222222222")
@@ -94,6 +100,7 @@ def resolved_configuration() -> ResolvedPortfolioConfiguration:
         ),
         rebalance_configuration=rebalance_configuration(),
         signal_uid="signal-uid",
+        signal_start_time=dt.datetime(2026, 9, 4, 14, tzinfo=dt.UTC),
         asset_identifiers=("ALPACA::asset-a", "ALPACA::asset-b"),
         source_time_index_meta_table_uid="source-table-uid",
     )
@@ -107,6 +114,7 @@ def test_portfolio_configuration_owns_calculation_fields_only() -> None:
         "schedule_type",
         "schedule_every",
         "schedule_expression",
+        "schedule_timezone",
         "cpu_request",
         "memory_request",
         "spot",
@@ -138,12 +146,14 @@ def test_portfolio_job_settings_are_transient_and_use_sdk_schedule_validation() 
     settings = normalize_portfolio_job_settings(
         schedule_type="crontab",
         schedule_expression="0 8 * * 1-5",
+        schedule_timezone="Europe/Vienna",
         cpu_request="0.5",
         memory_request="1",
         max_runtime_seconds=7200,
     )
 
     assert settings.schedule_expression == "0 8 * * 1-5"
+    assert settings.schedule_timezone == "Europe/Vienna"
     assert settings.cpu_request == "0.5"
     assert settings.memory_request == "1"
     with pytest.raises(ValueError, match="five crontab fields"):
@@ -162,7 +172,7 @@ def test_portfolio_job_is_created_unscheduled_with_automatic_deployment() -> Non
     )
     created = SimpleNamespace(uid=JOB_UID)
 
-    with patch("mainsequence.client.Job.create", return_value=created) as create:
+    with patch("src.operations.platform_jobs.PlatformJob.create", return_value=created) as create:
         assert _create_platform_job(row, settings) is created
 
     assert create.call_args.kwargs == {
@@ -203,6 +213,33 @@ def test_portfolio_job_patch_writes_operational_settings_only_to_job() -> None:
         "one_off": False,
     }
     assert job.patch.call_args.kwargs["automatic_deployment"] is True
+
+
+def test_portfolio_job_patch_writes_crontab_timezone_only_to_job() -> None:
+    row = portfolio_configuration()
+    settings = normalize_portfolio_job_settings(
+        schedule_type="crontab",
+        schedule_expression="0 20 * * 1-5",
+        schedule_timezone="America/New_York",
+    )
+    job = Mock()
+    job.patch.return_value = SimpleNamespace(
+        uid=JOB_UID,
+        task_schedule={"schedule": {"type": "crontab"}},
+    )
+
+    _patch_platform_job(row, job, settings)
+
+    assert job.patch.call_args.kwargs["schedule"] == {
+        "schedule_type": "crontab",
+        "minute": "0",
+        "hour": "20",
+        "day_of_month": "*",
+        "month_of_year": "*",
+        "day_of_week": "1-5",
+        "timezone": "America/New_York",
+        "one_off": False,
+    }
 
 
 def test_manual_portfolio_run_passes_no_business_arguments() -> None:
@@ -268,6 +305,11 @@ def test_portfolio_resolution_uses_published_signal_and_selected_bars_profile() 
             SignalObservationAsset("ALPACA::asset-a", "A", None, (0.6,)),
         ),
     )
+    bounds = SignalObservationBounds(
+        signal_uid="signal-uid",
+        first_observation_at=dt.datetime(2026, 9, 3, 8, tzinfo=dt.UTC),
+        last_observation_at=dt.datetime(2026, 9, 5, 8, tzinfo=dt.UTC),
+    )
 
     with (
         patch("src.portfolios.execution.get_portfolio_configuration", return_value=row),
@@ -281,6 +323,10 @@ def test_portfolio_resolution_uses_published_signal_and_selected_bars_profile() 
             return_value=matrix,
         ) as read_signal,
         patch(
+            "src.portfolios.execution.read_signal_observation_bounds",
+            return_value=bounds,
+        ) as read_bounds,
+        patch(
             "src.portfolios.execution.resolve_alpaca_bars_time_index_meta_table_uid",
             return_value="source-table-uid",
         ) as resolve_bars,
@@ -288,7 +334,9 @@ def test_portfolio_resolution_uses_published_signal_and_selected_bars_profile() 
         resolved = resolve_portfolio_configuration(CONFIGURATION_UID)
 
     assert resolved.asset_identifiers == ("ALPACA::asset-a", "ALPACA::asset-b")
+    assert resolved.signal_start_time == bounds.first_observation_at
     read_signal.assert_called_once_with(signal_uid="signal-uid", observation_limit=1)
+    read_bounds.assert_called_once_with(signal_uid="signal-uid")
     resolve_bars.assert_called_once_with(frequency_id="1d", feed="sip", adjustment="all")
 
 
@@ -296,6 +344,8 @@ def test_execution_updates_persistent_interpolation_before_portfolio_without_tre
     resolved = resolved_configuration()
     valuation_source = Mock()
     portfolio_node = Mock()
+    signal_statistics = Mock()
+    portfolio_node.signal_weights.get_update_statistics.return_value = signal_statistics
     portfolio_node.target_portfolio = SimpleNamespace(
         uid=PORTFOLIO_UID,
         unique_identifier="ALPACA_ETF_PORTFOLIO__11111111111141118111111111111111",
@@ -325,8 +375,59 @@ def test_execution_updates_persistent_interpolation_before_portfolio_without_tre
         "update_tree": False,
         "update_pointers": True,
     }
+    portfolio_node.signal_weights.get_update_statistics.assert_called_once_with()
+    signal_statistics.filter_identity_level.assert_called_once_with(
+        level=1,
+        filters=["signal-uid"],
+    )
+    assert portfolio_node.signal_weights.update_statistics is signal_statistics
     update_row.assert_called_once_with(
         CONFIGURATION_UID,
         values={"portfolio_uid": PORTFOLIO_UID},
     )
     assert result.portfolio_uid == str(PORTFOLIO_UID)
+
+
+def test_forward_fill_initial_run_reads_each_assets_latest_known_price() -> None:
+    resolved = resolved_configuration()
+    resolved = replace(
+        resolved,
+        configuration=portfolio_configuration(forward_fill_to_now=True),
+    )
+    oldest_latest_price = dt.datetime(2026, 4, 6, 20, tzinfo=dt.UTC)
+    statistics = Mock()
+    statistics.get_last_update_for_identity.side_effect = [
+        dt.datetime(2026, 9, 4, 20, tzinfo=dt.UTC),
+        oldest_latest_price,
+    ]
+    valuation_source = SimpleNamespace(update_statistics=statistics)
+    portfolio_node = SimpleNamespace(OFFSET_START=resolved.signal_start_time)
+
+    _set_initial_portfolio_price_lookback(
+        resolved=resolved,
+        valuation_source=valuation_source,
+        portfolio_node=portfolio_node,
+    )
+
+    assert portfolio_node.OFFSET_START == oldest_latest_price
+    assert statistics.get_last_update_for_identity.call_count == 2
+
+
+def test_forward_fill_rejects_required_asset_with_no_price_observation() -> None:
+    resolved = resolved_configuration()
+    resolved = replace(
+        resolved,
+        configuration=portfolio_configuration(forward_fill_to_now=True),
+    )
+    statistics = Mock()
+    statistics.get_last_update_for_identity.side_effect = [
+        dt.datetime(2026, 9, 4, 20, tzinfo=dt.UTC),
+        None,
+    ]
+
+    with pytest.raises(ValueError, match="ALPACA::asset-b"):
+        _set_initial_portfolio_price_lookback(
+            resolved=resolved,
+            valuation_source=SimpleNamespace(update_statistics=statistics),
+            portfolio_node=SimpleNamespace(OFFSET_START=resolved.signal_start_time),
+        )

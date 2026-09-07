@@ -31,6 +31,15 @@ class SignalObservationMatrix:
     assets: tuple[SignalObservationAsset, ...]
 
 
+@dataclass(frozen=True, slots=True)
+class SignalObservationBounds:
+    """Exact stored observation-time range for one canonical signal."""
+
+    signal_uid: str
+    first_observation_at: dt.datetime | None
+    last_observation_at: dt.datetime | None
+
+
 def _normalize_signal_uid(value: str) -> str:
     normalized = str(value or "").strip()
     if not normalized:
@@ -225,9 +234,48 @@ def read_signal_observation_matrix(
     )
 
 
+def read_signal_observation_bounds(*, signal_uid: str) -> SignalObservationBounds:
+    """Return the exact first and last stored observation timestamps for one signal."""
+    from msm.api.base import operation_result_rows
+    from msm.repositories.base import compile_markets_statement, execute_markets_operation
+    from msm_portfolios.data_nodes.signals.storage import SignalWeightsStorage
+    from sqlalchemy import func, select
+
+    from src.runtime import start_markets_engine
+
+    normalized_signal_uid = _normalize_signal_uid(signal_uid)
+    runtime = start_markets_engine()
+    query_context = replace(
+        runtime.context,
+        limits={"max_rows": 1, "statement_timeout_ms": SIGNAL_OBSERVATION_QUERY_TIMEOUT_MS},
+    )
+    statement = select(
+        func.min(SignalWeightsStorage.time_index).label("first_observation_at"),
+        func.max(SignalWeightsStorage.time_index).label("last_observation_at"),
+    ).where(SignalWeightsStorage.signal_uid == normalized_signal_uid)
+    operation = compile_markets_statement(
+        statement,
+        context=query_context,
+        operation="select",
+        models=[SignalWeightsStorage],
+        access="read",
+    )
+    rows = operation_result_rows(execute_markets_operation(operation, context=query_context))
+    row = rows[0] if rows else {}
+    first = row.get("first_observation_at")
+    last = row.get("last_observation_at")
+    return SignalObservationBounds(
+        signal_uid=normalized_signal_uid,
+        first_observation_at=None if first is None else _normalize_time_index(first),
+        last_observation_at=None if last is None else _normalize_time_index(last),
+    )
+
+
 __all__ = [
     "MAX_SIGNAL_OBSERVATIONS",
+    "SignalObservationBounds",
     "SignalObservationAsset",
     "SignalObservationMatrix",
+    "read_signal_observation_bounds",
     "read_signal_observation_matrix",
 ]

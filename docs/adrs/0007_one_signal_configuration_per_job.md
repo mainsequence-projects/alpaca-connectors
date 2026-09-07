@@ -24,7 +24,7 @@ The project stores one `AlpacaETFSignalJobConfiguration` MetaTable row per signa
 
 - one active `AssetUniverse`;
 - one active registered Alpaca account used only at runtime;
-- an interval or five-field crontab schedule;
+- an interval schedule, or a five-field crontab plus its IANA timezone;
 - CPU, memory, maximum runtime, and spot preferences;
 - one linked Main Sequence Job UID and reconciliation state.
 
@@ -72,3 +72,6 @@ through `AlpacaETFHoldingsSignal`.
 - Deleting a configuration deletes its dedicated Job and row but retains published signal
   observations.
 - Account and Universe deletion are blocked while referenced by a signal Job configuration.
+- Crontab timezone is durable desired state for reconciliation. Existing crontab rows are migrated
+  to UTC; interval rows keep a null timezone. Timezone is operational and never contributes to
+  `signal_uid` or `SignalWeightsStorage`.

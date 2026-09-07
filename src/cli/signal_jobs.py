@@ -60,6 +60,10 @@ def _add_configuration_values(parser: argparse.ArgumentParser, *, required: bool
         choices=("seconds", "minutes", "hours", "days"),
     )
     parser.add_argument("--schedule-expression")
+    parser.add_argument(
+        "--schedule-timezone",
+        help="IANA timezone for crontab schedules, for example America/New_York or UTC.",
+    )
     parser.add_argument("--schedule-start-time")
     parser.add_argument("--cpu-request", default="0.25" if required else None)
     parser.add_argument("--memory-request", default="0.5" if required else None)
@@ -115,6 +119,7 @@ def _configuration_values(args: argparse.Namespace, *, exclude_none: bool) -> di
         "schedule_every": args.schedule_every,
         "schedule_period": args.schedule_period,
         "schedule_expression": args.schedule_expression,
+        "schedule_timezone": args.schedule_timezone,
         "schedule_start_time": _parse_datetime(args.schedule_start_time),
         "cpu_request": args.cpu_request,
         "memory_request": args.memory_request,

@@ -7,7 +7,10 @@ from unittest.mock import patch
 import pytest
 from msm.repositories.base import MarketsRepositoryContext
 
-from src.portfolios.signal_history import read_signal_observation_matrix
+from src.portfolios.signal_history import (
+    read_signal_observation_bounds,
+    read_signal_observation_matrix,
+)
 
 
 def test_signal_history_reads_all_assets_for_the_latest_distinct_observations_once() -> None:
@@ -107,6 +110,46 @@ def test_signal_history_refuses_a_truncated_constituent_result() -> None:
         pytest.raises(RuntimeError, match="100,000 rows"),
     ):
         read_signal_observation_matrix(signal_uid="signal-123")
+
+
+def test_signal_observation_bounds_use_one_aggregate_query() -> None:
+    first = dt.datetime(2026, 9, 3, 14, tzinfo=dt.UTC)
+    last = dt.datetime(2026, 9, 7, 8, tzinfo=dt.UTC)
+    context = MarketsRepositoryContext()
+    with (
+        patch(
+            "src.runtime.start_markets_engine",
+            return_value=SimpleNamespace(context=context),
+        ),
+        patch(
+            "msm.repositories.base.compile_markets_statement",
+            return_value="signal-bounds-query",
+        ) as compile_statement,
+        patch(
+            "msm.repositories.base.execute_markets_operation",
+            return_value={
+                "rows": [
+                    {
+                        "first_observation_at": first,
+                        "last_observation_at": last,
+                    }
+                ]
+            },
+        ) as execute_operation,
+    ):
+        bounds = read_signal_observation_bounds(signal_uid="signal-123")
+
+    assert bounds.first_observation_at == first
+    assert bounds.last_observation_at == last
+    statement = compile_statement.call_args.args[0]
+    assert "min(" in str(statement).lower()
+    assert "max(" in str(statement).lower()
+    query_context = compile_statement.call_args.kwargs["context"]
+    assert query_context.limits == {
+        "max_rows": 1,
+        "statement_timeout_ms": 30_000,
+    }
+    execute_operation.assert_called_once_with("signal-bounds-query", context=query_context)
 
 
 @pytest.mark.parametrize("limit", [0, 101, True])

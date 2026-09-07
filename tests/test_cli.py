@@ -317,6 +317,7 @@ class CliTests(unittest.TestCase):
             schedule_every=1,
             schedule_period="days",
             schedule_expression=None,
+            schedule_timezone=None,
             schedule_start_time=None,
             cpu_request="0.25",
             memory_request="0.5",

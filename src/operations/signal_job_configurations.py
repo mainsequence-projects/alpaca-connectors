@@ -10,6 +10,7 @@ import datetime as dt
 import uuid
 from collections.abc import Sequence
 from typing import Any, ClassVar, Literal
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from msm.api.base import MarketsMetaTableRow, operation_result_rows
 from msm.base import MarketsBase, markets_table_args, new_markets_uid
@@ -86,9 +87,10 @@ class AlpacaETFSignalJobConfigurationTable(
         CheckConstraint(
             "(schedule_type = 'interval' AND schedule_every IS NOT NULL "
             "AND schedule_every > 0 AND schedule_period IS NOT NULL "
-            "AND schedule_expression IS NULL) OR "
+            "AND schedule_expression IS NULL AND schedule_timezone IS NULL) OR "
             "(schedule_type = 'crontab' AND schedule_every IS NULL "
-            "AND schedule_period IS NULL AND schedule_expression IS NOT NULL)",
+            "AND schedule_period IS NULL AND schedule_expression IS NOT NULL "
+            "AND schedule_timezone IS NOT NULL)",
             name="ck_alpaca_etf_signal_job_schedule_shape",
         ),
         CheckConstraint(
@@ -181,6 +183,16 @@ class AlpacaETFSignalJobConfigurationTable(
         nullable=True,
         info={"label": "Cron Expression", "description": "Five-field crontab expression."},
     )
+    schedule_timezone: Mapped[str | None] = mapped_column(
+        String(64),
+        nullable=True,
+        info={
+            "label": "Schedule Timezone",
+            "description": (
+                "IANA timezone used to evaluate a crontab schedule; null for intervals."
+            ),
+        },
+    )
     schedule_start_time: Mapped[dt.datetime | None] = mapped_column(
         DateTime(timezone=True),
         nullable=True,
@@ -255,6 +267,7 @@ class AlpacaETFSignalJobConfiguration(MarketsMetaTableRow):
     schedule_every: int | None
     schedule_period: SchedulePeriod | None
     schedule_expression: str | None
+    schedule_timezone: str | None
     schedule_start_time: dt.datetime | None
     cpu_request: str
     memory_request: str
@@ -326,12 +339,32 @@ def _normalize_crontab_expression(value: str | None) -> str:
     return expression
 
 
+def normalize_schedule_timezone(value: str) -> str:
+    """Return the backend's canonical explicit IANA timezone shape."""
+    timezone_name = str(value).strip()
+    if not timezone_name:
+        raise ValueError("schedule_timezone must not be empty.")
+    if timezone_name != "UTC" and (
+        "/" not in timezone_name or timezone_name.startswith("Etc/GMT")
+    ):
+        raise ValueError(
+            "Use an IANA timezone such as Europe/Vienna or UTC; fixed offsets and "
+            "abbreviations are not supported."
+        )
+    try:
+        ZoneInfo(timezone_name)
+    except (ZoneInfoNotFoundError, ValueError) as exc:
+        raise ValueError(f"{timezone_name!r} is not a valid IANA timezone.") from exc
+    return timezone_name
+
+
 def normalize_schedule(
     *,
     schedule_type: str,
     schedule_every: int | None = None,
     schedule_period: str | None = None,
     schedule_expression: str | None = None,
+    schedule_timezone: str | None = None,
     schedule_start_time: dt.datetime | None = None,
 ) -> dict[str, Any]:
     """Validate the durable schedule shape using the same contract as Main Sequence Jobs."""
@@ -344,6 +377,8 @@ def normalize_schedule(
             raise ValueError("schedule_start_time must include a timezone.")
         start_time = start_time.astimezone(UTC)
     if normalized_type == "interval":
+        if schedule_timezone is not None:
+            raise ValueError("schedule_timezone is only valid for crontab schedules.")
         schedule = IntervalSchedule(
             every=schedule_every,
             period=str(schedule_period or "").strip().lower(),
@@ -354,16 +389,23 @@ def normalize_schedule(
             "schedule_every": schedule.every,
             "schedule_period": schedule.period,
             "schedule_expression": None,
+            "schedule_timezone": None,
             "schedule_start_time": schedule.start_time,
         }
     if normalized_type == "crontab":
         expression = _normalize_crontab_expression(schedule_expression)
+        timezone_name = (
+            normalize_schedule_timezone(schedule_timezone)
+            if schedule_timezone is not None
+            else None
+        )
         schedule = CrontabSchedule(expression=expression, start_time=start_time)
         return {
             "schedule_type": schedule.type,
             "schedule_every": None,
             "schedule_period": None,
             "schedule_expression": schedule.expression,
+            "schedule_timezone": timezone_name,
             "schedule_start_time": schedule.start_time,
         }
     raise ValueError(f"schedule_type must be one of {list(SCHEDULE_TYPES)!r}.")
@@ -398,6 +440,7 @@ def create_signal_job_configuration_row(
     schedule_every: int | None = None,
     schedule_period: str | None = None,
     schedule_expression: str | None = None,
+    schedule_timezone: str | None = None,
     schedule_start_time: dt.datetime | None = None,
     description: str | None = None,
     enabled: bool = True,
@@ -415,11 +458,15 @@ def create_signal_job_configuration_row(
 
     normalized_universe_uid = uuid.UUID(str(universe_uid))
     normalized_account_uid = uuid.UUID(str(account_uid))
+    requested_timezone = schedule_timezone
+    if str(schedule_type or "").strip().lower() == "crontab" and requested_timezone is None:
+        requested_timezone = "UTC"
     schedule = normalize_schedule(
         schedule_type=schedule_type,
         schedule_every=schedule_every,
         schedule_period=schedule_period,
         schedule_expression=schedule_expression,
+        schedule_timezone=requested_timezone,
         schedule_start_time=schedule_start_time,
     )
     if max_runtime_seconds <= 0:
@@ -666,6 +713,7 @@ __all__ = [
     "get_signal_job_configuration_by_job_uid",
     "list_signal_job_configurations",
     "normalize_schedule",
+    "normalize_schedule_timezone",
     "project_signal_job_models",
     "signal_job_configurations_for_account",
     "signal_job_configurations_for_universe",

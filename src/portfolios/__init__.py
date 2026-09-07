@@ -48,6 +48,14 @@ from src.portfolios.execution import (
     portfolio_unique_identifier,
     resolve_portfolio_configuration,
 )
+from src.portfolios.portfolio_history import (
+    MAX_PORTFOLIO_OBSERVATIONS,
+    PortfolioHistory,
+    PortfolioPerformance,
+    PortfolioValueObservation,
+    calculate_portfolio_performance,
+    read_portfolio_history,
+)
 from src.portfolios.signal_history import (
     MAX_SIGNAL_OBSERVATIONS,
     SignalObservationAsset,
@@ -64,8 +72,12 @@ __all__ = [
     "AlpacaEtfPortfolioPlan",
     "AlpacaEtfTrackingPortfolioConfig",
     "MAX_SIGNAL_OBSERVATIONS",
+    "MAX_PORTFOLIO_OBSERVATIONS",
+    "PortfolioHistory",
+    "PortfolioPerformance",
     "PortfolioRebalanceConfiguration",
     "PortfolioRebalanceConfigurationTable",
+    "PortfolioValueObservation",
     "PortfolioExecutionResult",
     "REBALANCE_STRATEGIES",
     "ResolvedEtfUniverse",
@@ -78,6 +90,7 @@ __all__ = [
     "build_alpaca_etf_tracking_portfolio_unique_identifier",
     "build_alpaca_interpolated_prices",
     "build_portfolio_graph",
+    "calculate_portfolio_performance",
     "create_portfolio_configuration_row",
     "create_rebalance_configuration",
     "delete_portfolio_configuration_row",
@@ -94,6 +107,7 @@ __all__ = [
     "project_portfolio_configuration_models",
     "rebalance_configurations_by_uids",
     "read_signal_observation_matrix",
+    "read_portfolio_history",
     "resolve_alpaca_bars_time_index_meta_table_uid",
     "resolve_portfolio_configuration",
     "update_portfolio_calculation_configuration",

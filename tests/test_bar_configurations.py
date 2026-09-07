@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from api.app.schemas import BarConfigurationCreateRequest, BarConfigurationUpdateRequest
@@ -29,7 +29,13 @@ from src.market_data.configurations import (
     project_configuration_models,
     validate_configuration_scope,
 )
-from src.market_data.services import MarketDataDataset, build_market_data_update
+from src.market_data.services import (
+    MarketDataDataset,
+    _physical_dataset_update_statistics,
+    build_market_data_update,
+    execute_market_data_update,
+)
+from src.market_data.storage import AlpacaStockBars1dSipAllStorage
 
 
 def _typed_configuration_row() -> AlpacaBarsConfiguration:
@@ -336,3 +342,90 @@ def test_review_resolution_never_resolves_secret_values() -> None:
     resolve_credentials.assert_not_called()
     assert summary["dataset"]["uid"] == dataset.uid
     assert summary["asset_identifiers"] == ["A"]
+
+
+def test_physical_dataset_statistics_are_grouped_by_asset() -> None:
+    storage = AlpacaStockBars1dSipAllStorage
+    rows = [
+        {
+            "asset_identifier": "ALPACA::A",
+            "earliest_observation": datetime(2020, 1, 2, tzinfo=UTC),
+            "latest_observation": datetime(2024, 1, 2, tzinfo=UTC),
+        },
+        {
+            "asset_identifier": "ALPACA::B",
+            "earliest_observation": datetime(2021, 1, 2, tzinfo=UTC),
+            "latest_observation": datetime(2023, 1, 2, tzinfo=UTC),
+        },
+    ]
+    runtime = SimpleNamespace(context=object())
+
+    with (
+        patch("src.runtime.start_markets_engine", return_value=runtime),
+        patch("msm.repositories.base.compile_markets_statement", return_value=object()),
+        patch("msm.repositories.base.execute_markets_operation", return_value=rows),
+    ):
+        statistics = _physical_dataset_update_statistics(storage)
+
+    assert statistics.index_min == {
+        "ALPACA::A": datetime(2020, 1, 2, tzinfo=UTC),
+        "ALPACA::B": datetime(2021, 1, 2, tzinfo=UTC),
+    }
+    assert statistics.index_progress == {
+        "ALPACA::A": datetime(2024, 1, 2, tzinfo=UTC),
+        "ALPACA::B": datetime(2023, 1, 2, tzinfo=UTC),
+    }
+    assert statistics.global_index_progress == {
+        "min": datetime(2020, 1, 2, tzinfo=UTC),
+        "max": datetime(2024, 1, 2, tzinfo=UTC),
+    }
+
+
+def test_execute_uses_physical_bar_progress_instead_of_cached_updater_statistics() -> None:
+    configuration_uid = uuid.uuid4()
+    account_uid = uuid.uuid4()
+    physical_statistics = object()
+    scoped_physical_statistics = object()
+    storage = object()
+    node = MagicMock()
+    node.scope_update_statistics_to_assets.return_value = scoped_physical_statistics
+    node.run.return_value = (False, [object(), object()])
+    summary = {
+        "account_uid": str(account_uid),
+        "dataset": {"row_count": 0},
+        "configuration": {
+            "frequency_id": "1d",
+            "feed": "sip",
+            "adjustment": "all",
+        },
+    }
+
+    with (
+        patch(
+            "src.market_data.services.build_market_data_update",
+            return_value=(node, summary),
+        ),
+        patch(
+            "src.account.services.get_account_registration",
+            return_value={
+                "account_uid": str(account_uid),
+                "api_key_secret_name": "alpaca-api-key",
+                "secret_key_secret_name": "alpaca-secret-key",
+                "is_paper": True,
+            },
+        ),
+        patch("src.market_data.services.resolve_alpaca_credentials", return_value=object()),
+        patch("src.market_data.services.build_alpaca_historical_data_client"),
+        patch("src.market_data.services.build_alpaca_trading_client"),
+        patch("src.market_data.storage.storage_for", return_value=storage),
+        patch(
+            "src.market_data.services._physical_dataset_update_statistics",
+            return_value=physical_statistics,
+        ) as physical_progress,
+    ):
+        result = execute_market_data_update(configuration_uid=configuration_uid)
+
+    physical_progress.assert_called_once_with(storage)
+    node.scope_update_statistics_to_assets.assert_called_once_with(physical_statistics)
+    node.run.assert_called_once_with(override_update_stats=scoped_physical_statistics)
+    assert result["rows_persisted"] == 2

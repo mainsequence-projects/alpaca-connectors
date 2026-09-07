@@ -7,6 +7,7 @@ from fastapi import APIRouter, Body, Query
 from ..errors import api_http_error, not_found
 from ..schemas import (
     PortfolioConfigurationCreateRequest,
+    PortfolioConfigurationDetailResponse,
     PortfolioConfigurationResponse,
     PortfolioConfigurationUpdateRequest,
     PortfolioJobRunAcceptedResponse,
@@ -24,7 +25,7 @@ from ..services.portfolio_configurations import (
     create_rebalance,
     delete_configuration,
     delete_rebalance,
-    get_configuration,
+    get_configuration_detail,
     get_rebalance,
     list_configurations,
     list_rebalances,
@@ -76,7 +77,6 @@ def portfolio_configurations_discovery() -> ResourceDiscoveryResponse:
         columns=[
             {"id": "name", "header": "Portfolio", "sortable_key": "name", "hideable": False},
             {"id": "rebalance_strategy", "header": "Rebalance"},
-            {"id": "portfolio_uid", "header": "Portfolio UID"},
             {
                 "id": "job_image_status",
                 "value_path": "job.image_status",
@@ -105,10 +105,19 @@ def portfolio_configuration_create(
 
 @router.get(
     "/v1/portfolio-configurations/{configuration_uid}",
-    response_model=PortfolioConfigurationResponse,
+    response_model=PortfolioConfigurationDetailResponse,
 )
-def portfolio_configuration_get(configuration_uid: str) -> PortfolioConfigurationResponse:
-    item = get_configuration(configuration_uid)
+def portfolio_configuration_get(
+    configuration_uid: str,
+    observation_limit: int = Query(default=2_500, ge=1, le=5_000),
+) -> PortfolioConfigurationDetailResponse:
+    try:
+        item = get_configuration_detail(
+            configuration_uid,
+            observation_limit=observation_limit,
+        )
+    except Exception as exc:
+        raise api_http_error(exc) from exc
     if item is None:
         raise not_found("Portfolio configuration not found.")
     return item
