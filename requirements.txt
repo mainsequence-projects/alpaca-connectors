@@ -21,6 +21,8 @@ babel==2.18.0
     # via mkdocs-material
 backrefs==7.0
     # via mkdocs-material
+bottleneck==1.6.0
+    # via empyrical-reloaded
 cachetools==7.1.4
     # via
     #   mainsequence
@@ -47,6 +49,8 @@ colorama==0.4.6
     #   typer
 concurrent-log-handler==0.9.29
     # via mainsequence
+empyrical-reloaded==0.5.12
+    # via alpaca-connectors
 etfhextractor @ git+https://github.com/mainsequence-projects/etfholdingextractor@036c8ba7f625f45dcb58e909ebf4eebbedbb5b97
     # via alpaca-connectors
 exchange-calendars==4.13.2
@@ -129,10 +133,13 @@ msgpack==1.2.0
     # via alpaca-py
 numpy==2.4.6
     # via
+    #   bottleneck
+    #   empyrical-reloaded
     #   exchange-calendars
     #   mainsequence
     #   ms-markets
     #   pandas
+    #   scipy
 opentelemetry-api==1.42.1
     # via
     #   mainsequence
@@ -171,6 +178,7 @@ paginate==0.5.7
 pandas==3.0.3
     # via
     #   alpaca-py
+    #   empyrical-reloaded
     #   exchange-calendars
     #   mainsequence
     #   ms-markets
@@ -179,6 +187,8 @@ pandas-market-calendars==5.4.0
     # via etfhextractor
 pathspec==1.1.1
     # via mkdocs
+peewee==3.17.3
+    # via empyrical-reloaded
 pip==26.1.2
     # via ms-markets
 platformdirs==4.10.0
@@ -247,6 +257,8 @@ requests==2.34.2
     #   opentelemetry-exporter-otlp-proto-http
 rich==15.0.0
     # via typer
+scipy==1.18.1
+    # via empyrical-reloaded
 shellingham==1.5.4
     # via typer
 six==1.17.0
