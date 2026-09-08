@@ -201,6 +201,9 @@ def rebalance_configurations_discovery() -> ResourceDiscoveryResponse:
         columns=[
             {"id": "name", "header": "Configuration", "hideable": False},
             {"id": "strategy", "header": "Strategy"},
+            {"id": "calendar_identifier", "header": "Calendar"},
+            {"id": "rebalance_event", "header": "Market Event"},
+            {"id": "rebalance_cadence", "header": "Cadence"},
             {"id": "updated_at", "header": "Updated", "data_type": "datetime"},
         ],
     )

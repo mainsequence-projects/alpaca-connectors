@@ -10,7 +10,7 @@ Current scope:
 - publish Alpaca stock bars through an ms-markets `AssetIndexedDataNode` (storage-first)
 - register Alpaca brokerage accounts by Secret names and capture holdings snapshots independently
 - build durable scheduled analytical portfolios from existing ETF Weight Signals, persistent
-  interpolated Alpaca bars, and reusable ImmediateSignal rebalance configurations
+  interpolated Alpaca bars, and reusable persisted-calendar rebalance configurations
 - expose plans, executions, validation outcomes, and existing invocation paths
 
 Market-domain behavior runs on **ms-markets** (`msm`) over `mainsequence`. See the migration

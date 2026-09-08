@@ -102,6 +102,7 @@ class AlpacaEtfPortfolioBuild:
     portfolio_row: Any
     signal: Any
     valuation_source: Any
+    calendar_events: Any
     portfolio_node: Any
     run_result: Any | None
 
@@ -112,6 +113,7 @@ class AlpacaEtfPortfolioBuild:
             "portfolio_uid": str(self.portfolio_row.uid),
             "signal_uid": self.signal.signal_uid,
             "valuation_source": type(self.valuation_source).__name__,
+            "calendar_events": type(self.calendar_events).__name__,
             "ran": self.run_result is not None,
             "run_result": _summarize_run_result(self.run_result),
         }
@@ -210,19 +212,30 @@ def build_alpaca_interpolated_prices(
     *,
     source_time_index_meta_table_uid: str,
     asset_identifiers: list[str],
+    calendar_identifier: str,
     upsample_frequency_id: str = "1d",
     intraday_bar_interpolation_rule: str = "ffill",
 ) -> Any:
-    """Build the InterpolatedPrices node sourced from registered Alpaca bars."""
+    """Build calendar-aware InterpolatedPrices sourced from registered Alpaca bars."""
     from msm_portfolios.contrib.prices.data_nodes import (
         InterpolatedPrices,
         InterpolatedPricesConfig,
     )
 
+    normalized_calendar_identifier = calendar_identifier.strip()
+    if not normalized_calendar_identifier:
+        raise ValueError("calendar_identifier must not be empty.")
+    asset_scope = [
+        {
+            "asset_identifier": asset_identifier,
+            "calendar": normalized_calendar_identifier,
+        }
+        for asset_identifier in sorted(set(asset_identifiers))
+    ]
     return InterpolatedPrices(
         interpolation_config=InterpolatedPricesConfig(
             source_time_index_meta_table_uid=source_time_index_meta_table_uid,
-            asset_list=sorted(set(asset_identifiers)),
+            asset_list=asset_scope,
             upsample_frequency_id=upsample_frequency_id,
             intraday_bar_interpolation_rule=intraday_bar_interpolation_rule,
         )
@@ -330,8 +343,12 @@ def build_alpaca_etf_tracking_portfolio(
         PortfolioExecutionConfiguration,
         PortfolioMarketsConfig,
     )
-    from msm_portfolios.data_nodes import PortfoliosDataNode
-    from msm_portfolios.rebalance_strategy.immediate_signal import ImmediateSignal
+    from msm_portfolios.data_nodes import (
+        PortfolioCalendarEvents,
+        PortfolioCalendarEventsConfiguration,
+        PortfoliosDataNode,
+    )
+    from msm_portfolios.rebalance_strategy import CalendarEventSignal
 
     plan = plan_alpaca_etf_tracking_portfolio(config, start_engine=False)
     signal = build_alpaca_etf_holdings_signal(
@@ -339,13 +356,21 @@ def build_alpaca_etf_tracking_portfolio(
         account_uid=config.account_uid,
         prepared_plan=plan.universe_run_plan,
     )
+    calendar_row = ensure_trading_calendar(config.calendar_key, backtest_start_days=0)
     valuation_source = build_alpaca_interpolated_prices(
         source_time_index_meta_table_uid=plan.source_time_index_meta_table_uid,
         asset_identifiers=plan.universe.asset_identifiers,
+        calendar_identifier=str(calendar_row.unique_identifier),
         upsample_frequency_id=config.upsample_frequency_id,
         intraday_bar_interpolation_rule=config.intraday_bar_interpolation_rule,
     )
-    calendar_row = ensure_trading_calendar(config.calendar_key, backtest_start_days=0)
+    calendar_events = PortfolioCalendarEvents(
+        config=PortfolioCalendarEventsConfiguration(
+            calendar_identifier=str(calendar_row.unique_identifier),
+            session_label="regular",
+            event_types=("market_close",),
+        )
+    )
     portfolio_name = config.portfolio_name or f"Alpaca ETF Tracker {plan.universe.etf_ticker}"
     description = config.description or (
         f"Tracks registered Asset Universe {config.universe_uid} using observed ETF holdings "
@@ -361,7 +386,12 @@ def build_alpaca_etf_tracking_portfolio(
                 commission_fee=config.commission_fee
             ),
             backtesting_weights_configuration=BacktestingWeightsConfig(
-                rebalance_strategy_instance=ImmediateSignal(calendar_key=config.calendar_key),
+                rebalance_strategy_instance=CalendarEventSignal(
+                    calendar_events_instance=calendar_events,
+                    calendar_identifier=str(calendar_row.unique_identifier),
+                    session_label="regular",
+                    rebalance_event="market_close",
+                ),
                 signal_weights_instance=signal,
             ),
         ),
@@ -370,7 +400,7 @@ def build_alpaca_etf_tracking_portfolio(
             front_end_details=FrontEndDetails(
                 description=description,
                 signal_name=f"{plan.universe.etf_ticker} observed holdings",
-                rebalance_strategy_name="ImmediateSignal",
+                rebalance_strategy_name="CalendarEventSignal",
             ),
         ),
     )
@@ -393,6 +423,7 @@ def build_alpaca_etf_tracking_portfolio(
         portfolio_row=portfolio_row,
         signal=signal,
         valuation_source=valuation_source,
+        calendar_events=calendar_events,
         portfolio_node=portfolio_node,
         run_result=run_result,
     )

@@ -4,8 +4,8 @@
 
 Build a durable ms-markets analytical portfolio from an existing ETF Weight Signal, an existing
 Alpaca Bars Configuration, persistent interpolated prices, and a reusable Rebalance Configuration.
-See [ADR 0008](../adrs/0008_portfolio_configuration_and_job_ownership.md) for the ownership and
-backtest decision.
+See [ADR 0008](../adrs/0008_portfolio_configuration_and_job_ownership.md) for Job ownership and
+[ADR 0009](../adrs/0009_calendar_event_portfolio_timing.md) for valuation and rebalance timing.
 
 The implementation lives in:
 
@@ -24,8 +24,8 @@ A Portfolio Configuration stores only calculation intent:
 - Bars Configuration reference
 - Rebalance Configuration reference
 - interpolation frequency and rule
-- valuation column and missing-price policy
-- portfolio output frequency and commission-fee assumption
+- valuation column, maximum permitted valuation staleness, and missing-price policy
+- commission-fee assumption
 - linked canonical `PortfolioTable.uid` after materialization
 - linked dedicated `Job.uid`
 
@@ -46,30 +46,44 @@ Signal Configuration ───────────────> published ET
 
 Bars Configuration ─> raw Bars ─> persistent InterpolatedPrices
 
-Rebalance Configuration ────────────> ImmediateSignal
+Rebalance Configuration ────────────> PortfolioCalendarEvents ─> CalendarEventSignal
 
-ETF Weight Signal + InterpolatedPrices + ImmediateSignal
-                                  └──> PortfoliosDataNode
-                                       ├──> PortfolioWeightsStorage
-                                       └──> PortfoliosStorage
+ETF Weight Signal + CalendarEventSignal ─> PortfolioRebalance
+                                         └> PortfolioWeights
+
+PortfolioWeights + InterpolatedPrices ──> PortfoliosDataNode ─> PortfoliosStorage
 ```
 
 The portfolio Job does not re-extract the ETF Universe and does not run the bars updater as a
-dependency. It requires an existing Signal observation, updates only the persistent interpolation
-node, then runs `PortfoliosDataNode` with `update_tree=False`. Signal and raw bars producers remain
-separate Jobs with their own schedules and execution histories.
+dependency. It requires an existing Signal observation, then explicitly updates persistent
+interpolation, persisted calendar events, rebalance decisions, executed weights, and portfolio
+valuation with `update_tree=False`. Signal and raw bars producers remain separate Jobs with their
+own schedules and execution histories.
 
-## Phase-1 Backtest Semantics
+## Rebalance And Valuation Semantics
 
-Phase 1 supports only `ImmediateSignal`. At every available signal observation, the analytical
-backtest assumes the portfolio immediately adopts those weights. It does not model execution
-latency, partial fills, volume participation, market impact, or slippage beyond the configured
-commission fee.
+The supported strategy is `CalendarEventSignal`. Its reusable Rebalance Configuration stores the
+persisted calendar identifier, session label, market-open or market-close event, offset, and
+every-session or weekly cadence. At each eligible real calendar event, it selects the latest signal
+observed at or before that event. A signal observed after the close is therefore first eligible at
+the next configured event. Early closes use their actual persisted close timestamps; they are not
+normalized to midnight or a nominal close.
 
 The ETF Weight Signal timestamp records when the connector observed the provider holdings. It does
 not guarantee the weights became economically effective at that exact instant. The resulting
-portfolio is therefore an observation-time reconstruction, not a perfect point-in-time ETF
-replication.
+portfolio is therefore a calendar-executed observation reconstruction, not a perfect point-in-time
+ETF replication. It does not model partial fills, volume participation, market impact, or slippage
+beyond the configured commission fee.
+
+`InterpolatedPrices` remains a persistent valuation dependency. Interpolation can provide a value
+at a real portfolio timestamp, while `valuation_maximum_staleness_seconds` bounds how old that
+selected price may be. The missing-price flag controls whether an incomplete valuation fails the
+run. Neither option invents daily timestamps, extends the calculation to the current time, or
+changes signal validity. `PortfoliosDataNode` writes only at valuation-source observations and
+`PortfolioWeights` writes only at rebalance execution events. The connector passes every asset to
+`InterpolatedPrices` with the Rebalance Configuration's calendar identifier, so daily valuation
+observations follow the configured exchange session instead of the ms-markets `24/7` default used
+for bare string asset identifiers.
 
 ## CLI
 
@@ -77,8 +91,13 @@ Create the reusable rebalance policy once:
 
 ```bash
 alpaca-connectors portfolio rebalance create \
-  --name "Immediate observed weights" \
-  --strategy immediate_signal
+  --name "NYSE close" \
+  --strategy calendar_event_signal \
+  --calendar-identifier NYSE \
+  --session-label regular \
+  --rebalance-event market_close \
+  --event-offset-seconds 0 \
+  --rebalance-cadence every_session
 ```
 
 Create a Portfolio Configuration and its dedicated Job together:
@@ -89,6 +108,7 @@ alpaca-connectors portfolio create \
   --signal-configuration-uid <SIGNAL_CONFIGURATION_UID> \
   --bars-configuration-uid <BARS_CONFIGURATION_UID> \
   --rebalance-configuration-uid <REBALANCE_CONFIGURATION_UID> \
+  --valuation-maximum-staleness-seconds 86400 \
   --schedule-type crontab \
   --schedule-expression "30 8 * * 1-5" \
   --schedule-timezone America/New_York \
@@ -155,11 +175,29 @@ remain absent until a benchmark is explicitly part of the Portfolio Configuratio
 
 ## Required Platform State
 
+!!! note "Duration hashing fix"
+    [MainSequenceMarkets issue
+    5](https://github.com/mainsequence-projects/MainSequenceMarkets/issues/5) was fixed in
+    ms-markets 1.0.8 together with Main Sequence SDK 8.1.7. This repository uses ms-markets 1.0.13
+    and Main Sequence SDK 8.1.8. Version 1.0.10 fixes the set-based seed-observation query used by
+    `PortfolioRebalance` when signal storage has both `signal_uid` and `asset_identifier`
+    dimensions. Version 1.0.11 normalizes published time-index and timestamp columns to nanosecond
+    UTC, including `open_time`. Version 1.0.12 keeps strict valuation for held assets and real
+    entries/exits but does not require a fresh price for a constituent whose previous and current
+    weights are both zero. Version 1.0.13 uses `asset_identifier` as the canonical interpolation
+    scope key and removes out-of-range seed weights before enforcing unique coordinates.
+    Calendar-event offsets and valuation-staleness durations serialize canonically as part of
+    updater identity, so the migrated graph can be constructed before the legacy timestamp repair
+    is applied.
+
 Before the first live execution:
 
-- revision `0010` must be applied for the Portfolio and Rebalance Configuration tables
-- built-in ms-markets Signal, Calendar, Portfolio, PortfolioWeights, and Portfolios tables must be
-  migrated and registered
+- project revision `0014` must be applied for calendar-event Rebalance Configuration fields and
+  bounded valuation alignment
+- the installed `ms-markets` release must be at least `1.0.13`, with its provider migrated through
+  revision `0016`
+- built-in ms-markets Signal, Calendar, calendar-event, rebalance-state, PortfolioWeights, and
+  Portfolios tables must be migrated and registered
 - the selected Signal Configuration must already have at least one published observation
 - the selected Bars Configuration must be enabled and its migrated raw bars table must contain the
   required assets
@@ -174,6 +212,9 @@ After a successful live JobRun, verify:
 
 - the JobRun resolved the configuration through its owning Job without command arguments
 - the persistent `InterpolatedPrices` table contains the selected assets
+- `PortfolioCalendarEvents` contains the configured actual session events
+- `PortfolioRebalanceStateStorage` and `PortfolioWeightsStorage` use those event timestamps rather
+  than midnight-normalized dates
 - the Portfolio Configuration stores the resulting canonical `Portfolio.uid`
 - `PortfolioWeightsStorage` and `PortfoliosStorage` contain output for that Portfolio
 - the Job remains the only source for schedule, compute, image, and automatic-deployment state

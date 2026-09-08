@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import datetime as dt
 import uuid
-from dataclasses import replace
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
@@ -23,8 +22,8 @@ from src.portfolios.configurations import (
     normalize_rebalance_strategy,
 )
 from src.portfolios.execution import (
+    PortfolioExecutionGraph,
     ResolvedPortfolioConfiguration,
-    _set_initial_portfolio_price_lookback,
     execute_portfolio_configuration,
     resolve_portfolio_configuration,
 )
@@ -49,7 +48,7 @@ def portfolio_configuration(**overrides) -> AlpacaETFPortfolioConfiguration:
     values = {
         "uid": CONFIGURATION_UID,
         "name": "Daily IVV analytical portfolio",
-        "description": "Immediate-signal observation-time backtest.",
+        "description": "NYSE-close ETF portfolio backtest.",
         "signal_configuration_uid": SIGNAL_CONFIGURATION_UID,
         "bars_configuration_uid": BARS_CONFIGURATION_UID,
         "rebalance_configuration_uid": REBALANCE_CONFIGURATION_UID,
@@ -58,8 +57,7 @@ def portfolio_configuration(**overrides) -> AlpacaETFPortfolioConfiguration:
         "upsample_frequency_id": "1d",
         "intraday_bar_interpolation_rule": "ffill",
         "valuation_column": "close",
-        "portfolio_prices_frequency": "1d",
-        "forward_fill_to_now": False,
+        "valuation_maximum_staleness_seconds": 86_400,
         "fail_on_missing_prices": True,
         "commission_fee": 0.00018,
         "created_at": now,
@@ -74,9 +72,15 @@ def rebalance_configuration() -> PortfolioRebalanceConfiguration:
     return PortfolioRebalanceConfiguration.model_validate(
         {
             "uid": REBALANCE_CONFIGURATION_UID,
-            "name": "Immediate signal",
-            "description": "Apply each observed signal immediately.",
-            "strategy": "immediate_signal",
+            "name": "NYSE close",
+            "description": "Use the latest observed signal at each NYSE close.",
+            "strategy": "calendar_event_signal",
+            "calendar_identifier": "NYSE",
+            "session_label": "regular",
+            "rebalance_event": "market_close",
+            "event_offset_seconds": 0,
+            "rebalance_cadence": "every_session",
+            "rebalance_weekday": 0,
             "created_at": now,
             "updated_at": now,
         }
@@ -136,9 +140,9 @@ def test_portfolio_configuration_owns_calculation_fields_only() -> None:
     )
 
 
-def test_phase_one_accepts_only_immediate_signal() -> None:
-    assert normalize_rebalance_strategy("IMMEDIATE_SIGNAL") == "immediate_signal"
-    with pytest.raises(ValueError, match="immediate_signal"):
+def test_rebalance_accepts_only_calendar_event_signal() -> None:
+    assert normalize_rebalance_strategy("CALENDAR_EVENT_SIGNAL") == "calendar_event_signal"
+    with pytest.raises(ValueError, match="calendar_event_signal"):
         normalize_rebalance_strategy("time_weighted")
 
 
@@ -178,7 +182,7 @@ def test_portfolio_job_is_created_unscheduled_with_automatic_deployment() -> Non
     assert create.call_args.kwargs == {
         "name": "Alpaca ETF Portfolio — Daily IVV analytical portfolio [11111111]",
         "description": (
-            "Immediate-signal observation-time backtest. Portfolio configuration "
+            "NYSE-close ETF portfolio backtest. Portfolio configuration "
             "11111111-1111-4111-8111-111111111111; signal configuration "
             "22222222-2222-4222-8222-222222222222; bars configuration "
             "33333333-3333-4333-8333-333333333333."
@@ -340,9 +344,12 @@ def test_portfolio_resolution_uses_published_signal_and_selected_bars_profile() 
     resolve_bars.assert_called_once_with(frequency_id="1d", feed="sip", adjustment="all")
 
 
-def test_execution_updates_persistent_interpolation_before_portfolio_without_tree_walk() -> None:
+def test_execution_updates_each_released_stage_without_tree_walk() -> None:
     resolved = resolved_configuration()
     valuation_source = Mock()
+    calendar_events = Mock()
+    portfolio_rebalance = Mock()
+    portfolio_weights = Mock()
     portfolio_node = Mock()
     signal_statistics = Mock()
     portfolio_node.signal_weights.get_update_statistics.return_value = signal_statistics
@@ -353,25 +360,43 @@ def test_execution_updates_persistent_interpolation_before_portfolio_without_tre
     portfolio_row = portfolio_node.target_portfolio
     manager = Mock()
     manager.attach_mock(valuation_source.run, "interpolation")
+    manager.attach_mock(calendar_events.run, "calendar_events")
+    manager.attach_mock(portfolio_rebalance.run, "rebalance")
+    manager.attach_mock(portfolio_weights.run, "portfolio_weights")
     manager.attach_mock(portfolio_node.run, "portfolio")
 
     with (
+        patch("src.runtime.start_portfolio_job_engine") as start_engine,
         patch(
             "src.portfolios.execution.resolve_portfolio_configuration",
             return_value=resolved,
         ),
         patch(
             "src.portfolios.execution.build_portfolio_graph",
-            return_value=(valuation_source, portfolio_node, portfolio_row),
+            return_value=PortfolioExecutionGraph(
+                valuation_source=valuation_source,
+                calendar_events=calendar_events,
+                portfolio_rebalance=portfolio_rebalance,
+                portfolio_weights=portfolio_weights,
+                portfolio_node=portfolio_node,
+                portfolio_row=portfolio_row,
+            ),
         ),
         patch("src.portfolios.execution.update_portfolio_configuration_row") as update_row,
     ):
         result = execute_portfolio_configuration(CONFIGURATION_UID)
 
+    start_engine.assert_called_once_with()
     assert manager.mock_calls[0].args == ()
     assert manager.mock_calls[0].kwargs == {"update_tree": False}
     assert manager.mock_calls[1].args == ()
-    assert manager.mock_calls[1].kwargs == {
+    assert manager.mock_calls[1].kwargs == {"update_tree": False}
+    assert manager.mock_calls[2].args == ()
+    assert manager.mock_calls[2].kwargs == {"update_tree": False}
+    assert manager.mock_calls[3].args == ()
+    assert manager.mock_calls[3].kwargs == {"update_tree": False}
+    assert manager.mock_calls[4].args == ()
+    assert manager.mock_calls[4].kwargs == {
         "update_tree": False,
         "update_pointers": True,
     }
@@ -386,55 +411,3 @@ def test_execution_updates_persistent_interpolation_before_portfolio_without_tre
         values={"portfolio_uid": PORTFOLIO_UID},
     )
     assert result.portfolio_uid == str(PORTFOLIO_UID)
-
-
-def test_forward_fill_initial_run_reads_each_assets_latest_known_price() -> None:
-    resolved = resolved_configuration()
-    resolved = replace(
-        resolved,
-        configuration=portfolio_configuration(forward_fill_to_now=True),
-    )
-    oldest_latest_price = dt.datetime(2026, 4, 6, 20, tzinfo=dt.UTC)
-    statistics = Mock()
-    statistics.get_last_update_for_identity.side_effect = [
-        dt.datetime(2026, 9, 4, 20, tzinfo=dt.UTC),
-        oldest_latest_price,
-    ]
-    valuation_source = SimpleNamespace(update_statistics=statistics)
-    portfolio_node = SimpleNamespace(
-        OFFSET_START=resolved.signal_start_time,
-        set_valuation_read_start=Mock(),
-    )
-
-    _set_initial_portfolio_price_lookback(
-        resolved=resolved,
-        valuation_source=valuation_source,
-        portfolio_node=portfolio_node,
-    )
-
-    assert portfolio_node.OFFSET_START == oldest_latest_price
-    portfolio_node.set_valuation_read_start.assert_called_once_with(oldest_latest_price)
-    assert statistics.get_last_update_for_identity.call_count == 2
-
-
-def test_forward_fill_rejects_required_asset_with_no_price_observation() -> None:
-    resolved = resolved_configuration()
-    resolved = replace(
-        resolved,
-        configuration=portfolio_configuration(forward_fill_to_now=True),
-    )
-    statistics = Mock()
-    statistics.get_last_update_for_identity.side_effect = [
-        dt.datetime(2026, 9, 4, 20, tzinfo=dt.UTC),
-        None,
-    ]
-
-    with pytest.raises(ValueError, match="ALPACA::asset-b"):
-        _set_initial_portfolio_price_lookback(
-            resolved=resolved,
-            valuation_source=SimpleNamespace(update_statistics=statistics),
-            portfolio_node=SimpleNamespace(
-                OFFSET_START=resolved.signal_start_time,
-                set_valuation_read_start=Mock(),
-            ),
-        )

@@ -7,7 +7,7 @@ import uuid
 from dataclasses import dataclass
 from typing import Any
 
-from etfhextractor.portfolio_publish import US_EQUITY_CALENDAR_KEY, ensure_trading_calendar
+from etfhextractor.portfolio_publish import ensure_trading_calendar
 
 from src.portfolios.alpaca_etf_signal import build_alpaca_etf_holdings_signal
 from src.portfolios.configurations import (
@@ -58,6 +58,9 @@ class PortfolioExecutionResult:
     portfolio_uid: str
     portfolio_unique_identifier: str
     interpolation_result: Any
+    calendar_events_result: Any
+    rebalance_result: Any
+    portfolio_weights_result: Any
     portfolio_result: Any
 
     def summary(self) -> dict[str, Any]:
@@ -66,8 +69,21 @@ class PortfolioExecutionResult:
             "portfolio_uid": self.portfolio_uid,
             "portfolio_unique_identifier": self.portfolio_unique_identifier,
             "interpolation": _summarize_run_result(self.interpolation_result),
+            "calendar_events": _summarize_run_result(self.calendar_events_result),
+            "rebalance": _summarize_run_result(self.rebalance_result),
+            "portfolio_weights": _summarize_run_result(self.portfolio_weights_result),
             "portfolio": _summarize_run_result(self.portfolio_result),
         }
+
+
+@dataclass(frozen=True, slots=True)
+class PortfolioExecutionGraph:
+    valuation_source: Any
+    calendar_events: Any
+    portfolio_rebalance: Any
+    portfolio_weights: Any
+    portfolio_node: Any
+    portfolio_row: Any
 
 
 def portfolio_unique_identifier(configuration_uid: Any) -> str:
@@ -121,8 +137,8 @@ def resolve_portfolio_configuration(
     )
 
 
-def build_portfolio_graph(resolved: ResolvedPortfolioConfiguration) -> tuple[Any, Any, Any]:
-    """Build the persistent interpolation and ImmediateSignal analytical portfolio graph."""
+def build_portfolio_graph(resolved: ResolvedPortfolioConfiguration) -> PortfolioExecutionGraph:
+    """Build the released ms-markets temporal portfolio graph."""
     from msm.api.portfolios import Portfolio
     from msm_portfolios.configuration import (
         BacktestingWeightsConfig,
@@ -131,15 +147,19 @@ def build_portfolio_graph(resolved: ResolvedPortfolioConfiguration) -> tuple[Any
         PortfolioConfiguration,
         PortfolioExecutionConfiguration,
         PortfolioMarketsConfig,
-        PriceAlignmentPolicy,
+        ValuationAlignmentPolicy,
     )
-    from msm_portfolios.rebalance_strategy.immediate_signal import ImmediateSignal
-
-    from src.portfolios.portfolio_node import AlpacaETFPortfolioDataNode
+    from msm_portfolios.data_nodes import (
+        PortfolioCalendarEvents,
+        PortfolioCalendarEventsConfiguration,
+        PortfoliosDataNode,
+    )
+    from msm_portfolios.rebalance_strategy import CalendarEventSignal
 
     configuration = resolved.configuration
-    if resolved.rebalance_configuration.strategy != "immediate_signal":
-        raise ValueError("Phase 1 portfolio execution supports ImmediateSignal only.")
+    rebalance = resolved.rebalance_configuration
+    if rebalance.strategy != "calendar_event_signal":
+        raise ValueError("Portfolio execution requires CalendarEventSignal.")
     signal = build_alpaca_etf_holdings_signal(
         universe_uid=str(resolved.signal_configuration.universe_uid),
         account_uid=str(resolved.signal_configuration.account_uid),
@@ -149,13 +169,26 @@ def build_portfolio_graph(resolved: ResolvedPortfolioConfiguration) -> tuple[Any
     valuation_source = build_alpaca_interpolated_prices(
         source_time_index_meta_table_uid=resolved.source_time_index_meta_table_uid,
         asset_identifiers=list(resolved.asset_identifiers),
+        calendar_identifier=rebalance.calendar_identifier,
         upsample_frequency_id=configuration.upsample_frequency_id,
         intraday_bar_interpolation_rule=configuration.intraday_bar_interpolation_rule,
     )
     backtest_days = max((dt.date.today() - resolved.signal_start_time.date()).days, 0)
     calendar_row = ensure_trading_calendar(
-        US_EQUITY_CALENDAR_KEY,
+        rebalance.calendar_identifier,
         backtest_start_days=backtest_days,
+    )
+    if str(calendar_row.unique_identifier) != rebalance.calendar_identifier:
+        raise RuntimeError(
+            "The materialized Portfolio calendar does not match the rebalance configuration."
+        )
+    calendar_events = PortfolioCalendarEvents(
+        config=PortfolioCalendarEventsConfiguration(
+            offset_start=resolved.signal_start_time,
+            calendar_identifier=rebalance.calendar_identifier,
+            session_label=rebalance.session_label,
+            event_types=(rebalance.rebalance_event,),
+        )
     )
     description = configuration.description or (
         "Analytical ETF portfolio using already-published observed holdings weights and "
@@ -166,16 +199,25 @@ def build_portfolio_graph(resolved: ResolvedPortfolioConfiguration) -> tuple[Any
         portfolio_build_configuration=PortfolioBuildConfiguration(
             valuation_source_instance=valuation_source,
             valuation_column=configuration.valuation_column,
-            price_alignment_policy=PriceAlignmentPolicy(
-                forward_fill_to_now=configuration.forward_fill_to_now,
-                fail_on_missing_prices=configuration.fail_on_missing_prices,
+            valuation_alignment_policy=ValuationAlignmentPolicy(
+                maximum_staleness=dt.timedelta(
+                    seconds=configuration.valuation_maximum_staleness_seconds
+                ),
+                fail_on_missing_values=configuration.fail_on_missing_prices,
             ),
-            portfolio_prices_frequency=configuration.portfolio_prices_frequency,
             execution_configuration=PortfolioExecutionConfiguration(
                 commission_fee=configuration.commission_fee
             ),
             backtesting_weights_configuration=BacktestingWeightsConfig(
-                rebalance_strategy_instance=ImmediateSignal(calendar_key=US_EQUITY_CALENDAR_KEY),
+                rebalance_strategy_instance=CalendarEventSignal(
+                    calendar_events_instance=calendar_events,
+                    calendar_identifier=rebalance.calendar_identifier,
+                    session_label=rebalance.session_label,
+                    rebalance_event=rebalance.rebalance_event,
+                    event_offset=dt.timedelta(seconds=rebalance.event_offset_seconds),
+                    rebalance_cadence=rebalance.rebalance_cadence,
+                    rebalance_weekday=rebalance.rebalance_weekday,
+                ),
                 signal_weights_instance=signal,
             ),
         ),
@@ -188,9 +230,10 @@ def build_portfolio_graph(resolved: ResolvedPortfolioConfiguration) -> tuple[Any
                     "Observed ETF component weights. Observation timestamps do not guarantee "
                     "exact economic effective times."
                 ),
-                rebalance_strategy_name="ImmediateSignal",
+                rebalance_strategy_name="CalendarEventSignal",
                 rebalance_strategy_description=(
-                    "Analytical backtest assumption: apply each observed signal immediately."
+                    "Select the latest signal observed at or before the configured persisted "
+                    f"{rebalance.calendar_identifier} {rebalance.rebalance_event} event."
                 ),
             ),
         ),
@@ -200,11 +243,8 @@ def build_portfolio_graph(resolved: ResolvedPortfolioConfiguration) -> tuple[Any
         unique_identifier=unique_identifier,
         calendar_uid=calendar_row.uid,
     )
-    portfolio_node = AlpacaETFPortfolioDataNode(
-        portfolio_configuration=portfolio_configuration
-    )
-    portfolio_node.set_portfolio_configuration(
-        portfolio_configuration,
+    portfolio_node = PortfoliosDataNode(
+        portfolio_configuration=portfolio_configuration,
         portfolio_description=description,
     )
     portfolio_node.target_portfolio = portfolio_row
@@ -212,74 +252,47 @@ def build_portfolio_graph(resolved: ResolvedPortfolioConfiguration) -> tuple[Any
     # An observation-time signal cannot support a portfolio before its first stored
     # observation. Keep this runtime calculation boundary out of durable portfolio identity.
     portfolio_node.OFFSET_START = resolved.signal_start_time
-    return valuation_source, portfolio_node, portfolio_row
-
-
-def _set_initial_portfolio_price_lookback(
-    *,
-    resolved: ResolvedPortfolioConfiguration,
-    valuation_source: Any,
-    portfolio_node: Any,
-) -> None:
-    """Include every required asset's latest known price in a forward-fill run.
-
-    ms-markets extends the valuation index to now, but its local alignment read starts only
-    one portfolio period before the calculation boundary. For an inactive constituent, that
-    can exclude the exact prior observation that must be carried forward. Moving the initial
-    runtime read boundary does not backdate the signal or create synthetic stored prices;
-    signal interpolation still removes all output dates before the first observation.
-    """
-    if not resolved.configuration.forward_fill_to_now:
-        return
-
-    statistics = valuation_source.update_statistics
-    if statistics is None:
-        statistics = valuation_source.get_update_statistics()
-        valuation_source.update_statistics = statistics
-    latest_prices = [
-        statistics.get_last_update_for_identity(asset_identifier)
-        for asset_identifier in resolved.asset_identifiers
-    ]
-    missing_assets = [
-        asset_identifier
-        for asset_identifier, latest_price in zip(
-            resolved.asset_identifiers,
-            latest_prices,
-            strict=True,
-        )
-        if latest_price is None
-    ]
-    if missing_assets and resolved.configuration.fail_on_missing_prices:
-        raise ValueError(
-            "Portfolio valuation source has no usable observation for required signal assets: "
-            + ", ".join(missing_assets)
-        )
-    usable_latest_prices = [value for value in latest_prices if value is not None]
-    if usable_latest_prices:
-        valuation_read_start = min(usable_latest_prices)
-        portfolio_node.OFFSET_START = min(
-            resolved.signal_start_time,
-            valuation_read_start,
-        )
-        portfolio_node.set_valuation_read_start(valuation_read_start)
+    portfolio_weights = portfolio_node.dependencies()["portfolio_weights"]
+    portfolio_rebalance = portfolio_weights.portfolio_rebalance
+    if portfolio_rebalance is None:
+        raise RuntimeError("ms-markets did not construct the PortfolioRebalance dependency.")
+    portfolio_rebalance.OFFSET_START = resolved.signal_start_time
+    portfolio_weights.OFFSET_START = resolved.signal_start_time
+    return PortfolioExecutionGraph(
+        valuation_source=valuation_source,
+        calendar_events=calendar_events,
+        portfolio_rebalance=portfolio_rebalance,
+        portfolio_weights=portfolio_weights,
+        portfolio_node=portfolio_node,
+        portfolio_row=portfolio_row,
+    )
 
 
 def execute_portfolio_configuration(configuration_uid: Any) -> PortfolioExecutionResult:
-    """Update persistent interpolation, then calculate without traversing dependencies."""
+    """Run stored inputs through the released temporal execution stages.
+
+    The linked Signal Job remains the signal producer. This execution updates every other
+    dependency explicitly so it does not trigger another ETF extraction as a side effect.
+    """
+    from src.runtime import start_portfolio_job_engine
+
+    # This service is reusable outside the repository Job entrypoint. Bootstrap the complete
+    # portfolio model set before configuration readers can initialize a smaller app runtime.
+    start_portfolio_job_engine()
     resolved = resolve_portfolio_configuration(configuration_uid)
-    valuation_source, portfolio_node, portfolio_row = build_portfolio_graph(resolved)
-    interpolation_result = valuation_source.run(update_tree=False)
-    _set_initial_portfolio_price_lookback(
-        resolved=resolved,
-        valuation_source=valuation_source,
-        portfolio_node=portfolio_node,
-    )
-    signal_weights = portfolio_node.signal_weights
+    graph = build_portfolio_graph(resolved)
+    interpolation_result = graph.valuation_source.run(update_tree=False)
+    calendar_events_result = graph.calendar_events.run(update_tree=False)
+    signal_weights = graph.portfolio_node.signal_weights
     signal_statistics = signal_weights.get_update_statistics()
     signal_statistics.filter_identity_level(level=1, filters=[resolved.signal_uid])
     signal_weights.update_statistics = signal_statistics
-    portfolio_result = portfolio_node.run(update_tree=False, update_pointers=True)
-    persisted_portfolio = getattr(portfolio_node, "target_portfolio", None) or portfolio_row
+    rebalance_result = graph.portfolio_rebalance.run(update_tree=False)
+    portfolio_weights_result = graph.portfolio_weights.run(update_tree=False)
+    portfolio_result = graph.portfolio_node.run(update_tree=False, update_pointers=True)
+    persisted_portfolio = (
+        getattr(graph.portfolio_node, "target_portfolio", None) or graph.portfolio_row
+    )
     portfolio_uid = str(persisted_portfolio.uid)
     if (
         resolved.configuration.portfolio_uid is None
@@ -294,6 +307,9 @@ def execute_portfolio_configuration(configuration_uid: Any) -> PortfolioExecutio
         portfolio_uid=portfolio_uid,
         portfolio_unique_identifier=str(persisted_portfolio.unique_identifier),
         interpolation_result=interpolation_result,
+        calendar_events_result=calendar_events_result,
+        rebalance_result=rebalance_result,
+        portfolio_weights_result=portfolio_weights_result,
         portfolio_result=portfolio_result,
     )
 
@@ -316,6 +332,7 @@ def _summarize_run_result(value: Any) -> Any:
 
 __all__ = [
     "PortfolioExecutionResult",
+    "PortfolioExecutionGraph",
     "ResolvedPortfolioConfiguration",
     "build_portfolio_graph",
     "execute_portfolio_configuration",

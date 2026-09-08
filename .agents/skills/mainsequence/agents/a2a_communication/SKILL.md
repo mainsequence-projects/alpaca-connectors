@@ -62,6 +62,15 @@ lease. Caller-session identity is not a model-visible tool argument. A human MCP
 Agent caller-session proof; Django creates or reuses a root target session for the authenticated
 User.
 
+The MCP catalog identifies protected operations with Tool `_meta`
+`mainsequence.ai/requires-caller-session-proof/v1: true`. A trusted host uses that marker to attach
+the proof under request `_meta` key `mainsequence.ai/caller-session-proof/v1`; it does not infer
+the behavior from a hard-coded tool name. This same host behavior applies to `a2a.send_message`
+and `agent.update_runtime`.
+
+`caller_session_proof_required` means the trusted runtime host failed to attach that private
+provenance. The protected operation has not reached its target authorization or deployment logic.
+
 When the selected discovery result has `runtime_update.state` equal to
 `update_required` or `update_failed`, confirm the destructive operation and
 call `agent.update_runtime` with exactly:

@@ -78,7 +78,7 @@ Portfolios owns analytical construction based on registered assets and market da
 - resolved component weights
 - price-source binding
 - persistent interpolated prices
-- reusable ImmediateSignal rebalance configurations
+- reusable calendar-event rebalance configurations
 - durable calculation configurations composed from existing Signal and Bars configurations
 - portfolio weights and valuation results
 - one dedicated scheduled Job per Portfolio Configuration

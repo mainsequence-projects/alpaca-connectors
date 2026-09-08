@@ -18,7 +18,7 @@ user-maintained universes, and analytical portfolios to Main Sequence and ms-mar
 - **Holdings:** capture Alpaca positions and cash as immutable ms-markets account snapshots.
 - **Portfolios:** publish scheduled Universe-backed ETF signals and create durable scheduled
   analytical ETF-tracking portfolios from existing signals, persistent interpolated Alpaca bars,
-  and reusable ImmediateSignal rebalance configurations.
+  and reusable persisted-calendar rebalance configurations.
 
 ETF extraction is supplied by `etfhextractor`; it is an input to Universes and Portfolios, not the
 project's top-level ontology.
@@ -136,13 +136,18 @@ Create a reusable rebalance policy and one durable Portfolio Configuration with 
 
 ```bash
 alpaca-connectors portfolio rebalance create \
-  --name "Immediate observed weights" \
-  --strategy immediate_signal
+  --name "NYSE close" \
+  --strategy calendar_event_signal \
+  --calendar-identifier NYSE \
+  --session-label regular \
+  --rebalance-event market_close \
+  --rebalance-cadence every_session
 alpaca-connectors portfolio create \
   --name "Daily IVV analytical portfolio" \
   --signal-configuration-uid <SIGNAL_CONFIGURATION_UID> \
   --bars-configuration-uid <BARS_CONFIGURATION_UID> \
   --rebalance-configuration-uid <REBALANCE_CONFIGURATION_UID> \
+  --valuation-maximum-staleness-seconds 86400 \
   --schedule-type interval \
   --schedule-every 1 \
   --schedule-period days
@@ -151,8 +156,9 @@ alpaca-connectors portfolio run <PORTFOLIO_CONFIGURATION_UID>
 
 The Portfolio Configuration stores calculation intent only. Schedule, compute, image, and
 automatic-deployment state remain on its Job. The JobRun has no business arguments and resolves
-the Portfolio Configuration from `JOB_RUN_UID` and the owning Job. Phase 1 is an ImmediateSignal
-observation-time backtest; it does not claim exact point-in-time ETF holdings or live execution.
+the Portfolio Configuration from `JOB_RUN_UID` and the owning Job. Rebalances use actual persisted
+market events and the latest signal observed at or before each event; signal observations still do
+not claim exact point-in-time ETF holdings or live execution.
 
 Exact asset registration remains independently available:
 

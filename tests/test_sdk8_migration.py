@@ -16,6 +16,7 @@ from src.portfolios.etf_tracking import (
     AlpacaEtfTrackingPortfolioConfig,
     ResolvedEtfUniverse,
     build_alpaca_etf_tracking_portfolio,
+    build_alpaca_interpolated_prices,
     resolve_alpaca_bars_time_index_meta_table_uid,
 )
 
@@ -104,6 +105,33 @@ def test_portfolio_price_source_resolves_the_migration_catalog_identity() -> Non
     )
 
 
+def test_interpolated_prices_receive_explicit_asset_calendar_scope() -> None:
+    node = object()
+
+    with patch(
+        "msm_portfolios.contrib.prices.data_nodes.InterpolatedPrices",
+        return_value=node,
+    ) as interpolated_prices:
+        result = build_alpaca_interpolated_prices(
+            source_time_index_meta_table_uid="source-table-uid",
+            asset_identifiers=["ALPACA::asset-b", "ALPACA::asset-a", "ALPACA::asset-a"],
+            calendar_identifier="NYSE",
+        )
+
+    assert result is node
+    interpolation_config = interpolated_prices.call_args.kwargs["interpolation_config"]
+    assert interpolation_config.asset_list == [
+        {
+            "asset_identifier": "ALPACA::asset-a",
+            "calendar": "NYSE",
+        },
+        {
+            "asset_identifier": "ALPACA::asset-b",
+            "calendar": "NYSE",
+        },
+    ]
+
+
 def test_alpaca_portfolio_uses_connector_owned_universe_signal() -> None:
     config = AlpacaEtfTrackingPortfolioConfig(
         universe_uid="universe-uid",
@@ -129,9 +157,10 @@ def test_alpaca_portfolio_uses_connector_owned_universe_signal() -> None:
         portfolio_unique_identifier="IVV_TRACKER__ALPACA",
     )
     valuation_source = object()
-    calendar_row = SimpleNamespace(uid="calendar-uid")
+    calendar_row = SimpleNamespace(uid="calendar-uid", unique_identifier="NYSE")
     portfolio_row = SimpleNamespace(uid="portfolio-uid")
     signal = SimpleNamespace(signal_uid="signal-uid")
+    calendar_events = Mock()
     portfolio_node = Mock()
 
     with (
@@ -143,7 +172,7 @@ def test_alpaca_portfolio_uses_connector_owned_universe_signal() -> None:
         patch(
             "src.portfolios.etf_tracking.build_alpaca_interpolated_prices",
             return_value=valuation_source,
-        ),
+        ) as build_prices,
         patch(
             "src.portfolios.etf_tracking.build_alpaca_etf_holdings_signal",
             return_value=signal,
@@ -162,7 +191,12 @@ def test_alpaca_portfolio_uses_connector_owned_universe_signal() -> None:
         patch("msm_portfolios.configuration.BacktestingWeightsConfig"),
         patch("msm_portfolios.configuration.PortfolioMarketsConfig"),
         patch("msm_portfolios.configuration.FrontEndDetails"),
-        patch("msm_portfolios.rebalance_strategy.immediate_signal.ImmediateSignal"),
+        patch("msm_portfolios.rebalance_strategy.CalendarEventSignal"),
+        patch(
+            "msm_portfolios.data_nodes.PortfolioCalendarEvents",
+            return_value=calendar_events,
+        ),
+        patch("msm_portfolios.data_nodes.PortfolioCalendarEventsConfiguration"),
         patch("msm_portfolios.data_nodes.PortfoliosDataNode", return_value=portfolio_node),
     ):
         result = build_alpaca_etf_tracking_portfolio(config, run=False)
@@ -173,7 +207,15 @@ def test_alpaca_portfolio_uses_connector_owned_universe_signal() -> None:
         account_uid="account-uid",
         prepared_plan=universe_run_plan,
     )
+    build_prices.assert_called_once_with(
+        source_time_index_meta_table_uid="source-table-uid",
+        asset_identifiers=["ALPACA::asset-uuid"],
+        calendar_identifier="NYSE",
+        upsample_frequency_id="1d",
+        intraday_bar_interpolation_rule="ffill",
+    )
     assert result.calendar_row is calendar_row
     assert result.portfolio_row is portfolio_row
     assert result.signal is signal
+    assert result.calendar_events is calendar_events
     assert result.portfolio_node is portfolio_node

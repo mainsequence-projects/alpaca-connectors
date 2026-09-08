@@ -329,6 +329,12 @@ def get_configuration_detail(
                 "name": rebalance_configuration.name,
                 "description": rebalance_configuration.description,
                 "strategy": rebalance_configuration.strategy,
+                "calendar_identifier": rebalance_configuration.calendar_identifier,
+                "session_label": rebalance_configuration.session_label,
+                "rebalance_event": rebalance_configuration.rebalance_event,
+                "event_offset_seconds": rebalance_configuration.event_offset_seconds,
+                "rebalance_cadence": rebalance_configuration.rebalance_cadence,
+                "rebalance_weekday": rebalance_configuration.rebalance_weekday,
             },
             "canonical_portfolio": {
                 "materialized": history.materialized,

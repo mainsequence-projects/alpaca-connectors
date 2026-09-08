@@ -23,7 +23,7 @@ wheels = [
 
 [[package]]
 name = "alpaca-connectors"
-version = "0.1.31"
+version = "0.1.32"
 source = { editable = "." }
 dependencies = [
     { name = "alpaca-py" },
@@ -52,10 +52,10 @@ requires-dist = [
     { name = "etfhextractor", git = "https://github.com/mainsequence-projects/etfholdingextractor" },
     { name = "fastapi", specifier = ">=0.135.3" },
     { name = "httpx", specifier = ">=0.28.1" },
-    { name = "mainsequence", specifier = ">=8.1.0" },
+    { name = "mainsequence", specifier = ">=8.1.8" },
     { name = "mkdocs", specifier = ">=1.6.1" },
     { name = "mkdocs-material", specifier = ">=9.7.6" },
-    { name = "ms-markets", specifier = ">=1.0.4" },
+    { name = "ms-markets", specifier = ">=1.0.13" },
     { name = "playwright" },
     { name = "uvicorn", specifier = ">=0.44.0" },
 ]
@@ -437,7 +437,7 @@ wheels = [
 
 [[package]]
 name = "mainsequence"
-version = "8.1.0"
+version = "8.1.8"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "alembic" },
@@ -463,9 +463,9 @@ dependencies = [
     { name = "typer" },
     { name = "urllib3" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/49/34/9415ab300c78772d0bfa89f5dd699faee939fa4062962ad40c00ac001762/mainsequence-8.1.0.tar.gz", hash = "sha256:e954a183fbc939775ce2ca3c731df33137a8f06428fa5d667a66ca607e839642", size = 535411, upload-time = "2026-09-04T16:58:12.68Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/8e/cc/56fe5dfd1169f9d8923d1bddf3f88abc932d56d939b5be507858c6c4696f/mainsequence-8.1.8.tar.gz", hash = "sha256:4ac49ce8331d94d3cf0db1c7bc39acd479aea02246d4e69427f11d3787b088d1", size = 539938, upload-time = "2026-09-08T11:55:40.57Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/94/05/a396c3438b59f7e941f2be4c57089977b84b8cce8fb35283eb4b1e7a6ceb/mainsequence-8.1.0-py3-none-any.whl", hash = "sha256:76c8481732058b1da8c102fb4b2808f5f229f89a1b67f0a7e175e976fe5e8cad", size = 410722, upload-time = "2026-09-04T16:58:11.198Z" },
+    { url = "https://files.pythonhosted.org/packages/94/7f/7acb3018c8a86ffebcf19ef79ed7524b58563eeb3e4c5ee4c7955eeeb0cc/mainsequence-8.1.8-py3-none-any.whl", hash = "sha256:10db0a0c3effb9ce8269b90e30619d581ef2a8bacc9e31ba0816ed281d300d49", size = 411676, upload-time = "2026-09-08T11:55:38.8Z" },
 ]
 
 [[package]]
@@ -620,7 +620,7 @@ wheels = [
 
 [[package]]
 name = "ms-markets"
-version = "1.0.4"
+version = "1.0.13"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "alembic" },
@@ -638,9 +638,9 @@ dependencies = [
     { name = "sqlalchemy" },
     { name = "uvicorn" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/11/b5/92b6194cb2111148c61ffcd8c8d4e316dc208c6e382d24070d4f0ed7c1e2/ms_markets-1.0.4.tar.gz", hash = "sha256:cd41533cc63a6d6ec8fee0e55480c6a4fdf5429fbf4de0566842bac91ff51d87", size = 2207622, upload-time = "2026-09-05T20:31:18.273Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/62/44/d508ae891f0b57796c69d9e8f0222c454f46674153a92d158cf82e068011/ms_markets-1.0.13.tar.gz", hash = "sha256:e218ca27b2ecb853a0bccf7eac5afab7ee9372900e1c61949a9f2f6b2796c5f4", size = 2265077, upload-time = "2026-09-08T22:00:26.193Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/c5/ea/b152839c96639ba8abbd89d38005babe406503397403325c9b016bad308e/ms_markets-1.0.4-py3-none-any.whl", hash = "sha256:2aeeae8324fcfa4010703d2a4b2a432080d01b4e63fa89511c0c3620661cec70", size = 642647, upload-time = "2026-09-05T20:31:16.091Z" },
+    { url = "https://files.pythonhosted.org/packages/1c/59/5bcef9443489fd422368e706c4909d296009633ad7ed2d6c0fb881721715/ms_markets-1.0.13-py3-none-any.whl", hash = "sha256:d6badbc17b8ec8ddc7fe0f72e98dafa47b4eed91345d81e221c748547d227742", size = 673882, upload-time = "2026-09-08T22:00:24.158Z" },
 ]
 
 [[package]]

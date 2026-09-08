@@ -477,7 +477,14 @@ Record:
 - `spot`;
 - positive `max_runtime_seconds`;
 - optional `task_schedule` using the existing interval or crontab schedule
-  shape, including start-time or one-off intent when needed.
+  shape, including start-time or one-off intent when needed;
+- for every crontab, the canonical IANA timezone in which its wall-clock fields
+  are evaluated; interval schedules have no timezone.
+
+Do not translate a calendar schedule to the designer's current UTC offset. The
+Job snapshots its chosen timezone and does not follow later Command Center
+preference changes. Treat an omitted legacy timezone as UTC-compatible but not
+as confirmed user intent; new designs should always state the zone.
 
 The canonical creation flow infers the Job type from `execution_path`. Do not
 declare an independent type or command contract in the Blueprint. A `.ipynb`

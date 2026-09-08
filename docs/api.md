@@ -37,7 +37,7 @@ authorization and Resource Release headers.
 | Universes | Create/list/get/update registered `AssetUniverse` rows; list linked category Assets at `GET /v1/universes/{universe_uid}/assets`; run, activate, deactivate, and confirmed delete actions under `/v1/universes` |
 | Market Data | configuration CRUD and resolve/update actions under `/v1/market-data/bar-configurations`; dataset list/get and bounded observations under `/v1/market-data/datasets` |
 | ETF Signals | dedicated Job configuration CRUD under `/v1/signal-jobs`; run, pause, resume, reconcile, and JobRun-history actions |
-| ETF Portfolios | calculation-only configuration CRUD under `/v1/portfolio-configurations`; reusable ImmediateSignal policies under `/v1/portfolio-rebalance-configurations`; run and JobRun-history actions |
+| ETF Portfolios | calculation-only configuration CRUD under `/v1/portfolio-configurations`; reusable calendar-event policies under `/v1/portfolio-rebalance-configurations`; run and JobRun-history actions |
 | Operations | poll an accepted Alpaca bars, ETF signal, or ETF portfolio JobRun under `GET /v1/operations/job-runs/{job_run_uid}` |
 
 Market-data writes are configuration-oriented. Create one stored definition with exactly one
@@ -107,8 +107,9 @@ is represented as zero while an explicit stored null remains null.
 
 `POST /v1/portfolio-configurations` creates one durable calculation definition and one dedicated
 Main Sequence Job. The calculation definition references an existing ETF Signal Configuration,
-Bars Configuration, and Rebalance Configuration. Phase 1 accepts only `ImmediateSignal`, daily
-persistent `InterpolatedPrices`, and forward-fill interpolation.
+Bars Configuration, and Rebalance Configuration. The supported strategy is
+`CalendarEventSignal`, backed by persisted market-session events; valuation uses daily persistent
+`InterpolatedPrices`, forward-fill interpolation, and a bounded staleness policy.
 
 Job settings are nested under `job` in create and update requests. They are written only to the
 Main Sequence Job; the Portfolio Configuration MetaTable does not duplicate schedule, compute,
@@ -127,9 +128,10 @@ GET|PATCH|DELETE /v1/portfolio-rebalance-configurations/{configuration_uid}
 
 There is no Environment request field. Manual and scheduled JobRuns contain no business
 arguments. The launcher resolves `JOB_RUN_UID -> Job.uid -> Portfolio Configuration.job_uid`,
-updates persistent interpolation, and calculates the portfolio without rerunning the Signal or raw
-Bars producers. Signal observation timestamps are observation times, so the ImmediateSignal result
-is an analytical reconstruction rather than guaranteed point-in-time ETF replication.
+updates persistent interpolation, calendar events, rebalance state, executed weights, and
+valuation without rerunning the Signal or raw Bars producers. Rebalance rows use actual configured
+market-event timestamps and select the latest signal observed at or before each event. The result
+is still an analytical reconstruction rather than guaranteed point-in-time ETF replication.
 
 The configuration detail `GET` accepts `observation_limit` from 1 through 5,000 (default 2,500). It
 returns resolved Signal, Universe, Alpaca account, Bars, Rebalance, Job, and canonical

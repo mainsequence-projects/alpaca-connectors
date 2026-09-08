@@ -73,8 +73,12 @@ spot, maximum runtime, automatic deployment, and image state remain exclusively 
 
 ```bash
 alpaca-connectors portfolio rebalance create \
-  --name "Immediate observed weights" \
-  --strategy immediate_signal
+  --name "NYSE close" \
+  --strategy calendar_event_signal \
+  --calendar-identifier NYSE \
+  --session-label regular \
+  --rebalance-event market_close \
+  --rebalance-cadence every_session
 
 alpaca-connectors portfolio create \
   --name "Daily IVV analytical portfolio" \

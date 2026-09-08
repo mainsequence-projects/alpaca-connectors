@@ -1,8 +1,9 @@
-# ADR: Portfolio Configuration, Immediate-Signal Backtests, And Job Ownership
+# ADR: Portfolio Configuration And Job Ownership
 
 ## Status
 
-Accepted
+Accepted. The Job-ownership decision remains authoritative; its ImmediateSignal timing decision is
+superseded by [ADR 0009](0009_calendar_event_portfolio_timing.md).
 
 ## Context
 

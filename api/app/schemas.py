@@ -616,7 +616,24 @@ class PortfolioRebalanceConfigurationCreateRequest(BaseModel):
 
     name: str = Field(min_length=1, max_length=255)
     description: str | None = None
-    strategy: Literal["immediate_signal"] = "immediate_signal"
+    strategy: Literal["calendar_event_signal"] = "calendar_event_signal"
+    calendar_identifier: str = Field(default="NYSE", min_length=1, max_length=255)
+    session_label: str = Field(default="regular", min_length=1, max_length=64)
+    rebalance_event: Literal["market_open", "market_close"] = "market_close"
+    event_offset_seconds: int = Field(
+        default=0,
+        description=(
+            "Offset from the persisted session event. Zero means the actual exchange event time; "
+            "negative values run before it and positive values after it."
+        ),
+    )
+    rebalance_cadence: Literal["every_session", "weekly"] = "every_session"
+    rebalance_weekday: int = Field(
+        default=0,
+        ge=0,
+        le=6,
+        description="Calendar-local weekday used only for weekly cadence; Monday is 0.",
+    )
 
 
 class PortfolioRebalanceConfigurationUpdateRequest(BaseModel):
@@ -624,7 +641,13 @@ class PortfolioRebalanceConfigurationUpdateRequest(BaseModel):
 
     name: str | None = Field(default=None, min_length=1, max_length=255)
     description: str | None = None
-    strategy: Literal["immediate_signal"] | None = None
+    strategy: Literal["calendar_event_signal"] | None = None
+    calendar_identifier: str | None = Field(default=None, min_length=1, max_length=255)
+    session_label: str | None = Field(default=None, min_length=1, max_length=64)
+    rebalance_event: Literal["market_open", "market_close"] | None = None
+    event_offset_seconds: int | None = None
+    rebalance_cadence: Literal["every_session", "weekly"] | None = None
+    rebalance_weekday: int | None = Field(default=None, ge=0, le=6)
 
     @model_validator(mode="after")
     def require_change(self) -> "PortfolioRebalanceConfigurationUpdateRequest":
@@ -639,7 +662,13 @@ class PortfolioRebalanceConfigurationResponse(BaseModel):
     uid: str
     name: str
     description: str | None
-    strategy: Literal["immediate_signal"]
+    strategy: Literal["calendar_event_signal"]
+    calendar_identifier: str
+    session_label: str
+    rebalance_event: Literal["market_open", "market_close"]
+    event_offset_seconds: int
+    rebalance_cadence: Literal["every_session", "weekly"]
+    rebalance_weekday: int
     created_at: dt.datetime
     updated_at: dt.datetime
 
@@ -691,8 +720,14 @@ class PortfolioConfigurationCreateRequest(BaseModel):
     upsample_frequency_id: Literal["1d"] = "1d"
     intraday_bar_interpolation_rule: Literal["ffill"] = "ffill"
     valuation_column: str = Field(default="close", min_length=1, max_length=64)
-    portfolio_prices_frequency: Literal["1d"] | None = "1d"
-    forward_fill_to_now: bool = False
+    valuation_maximum_staleness_seconds: int = Field(
+        default=86_400,
+        gt=0,
+        description=(
+            "Maximum age of the latest price that may be selected at a real valuation "
+            "timestamp. This does not create or extend timestamps."
+        ),
+    )
     fail_on_missing_prices: bool = True
     commission_fee: float = Field(default=0.00018, ge=0)
     job: PortfolioJobSettingsRequest
@@ -709,8 +744,7 @@ class PortfolioConfigurationUpdateRequest(BaseModel):
     upsample_frequency_id: Literal["1d"] | None = None
     intraday_bar_interpolation_rule: Literal["ffill"] | None = None
     valuation_column: str | None = Field(default=None, min_length=1, max_length=64)
-    portfolio_prices_frequency: Literal["1d"] | None = None
-    forward_fill_to_now: bool | None = None
+    valuation_maximum_staleness_seconds: int | None = Field(default=None, gt=0)
     fail_on_missing_prices: bool | None = None
     commission_fee: float | None = Field(default=None, ge=0)
     job: PortfolioJobSettingsRequest | None = None
@@ -751,14 +785,13 @@ class PortfolioConfigurationResponse(BaseModel):
     signal_uid: str
     bars_configuration_uid: str
     rebalance_configuration_uid: str
-    rebalance_strategy: Literal["immediate_signal"]
+    rebalance_strategy: Literal["calendar_event_signal"]
     portfolio_uid: str | None
     job_uid: str | None
     upsample_frequency_id: Literal["1d"]
     intraday_bar_interpolation_rule: Literal["ffill"]
     valuation_column: str
-    portfolio_prices_frequency: Literal["1d"] | None
-    forward_fill_to_now: bool
+    valuation_maximum_staleness_seconds: int
     fail_on_missing_prices: bool
     commission_fee: float
     job: PortfolioJobResponse | None
@@ -801,7 +834,13 @@ class PortfolioLinkedRebalanceResponse(BaseModel):
 
     name: str
     description: str | None
-    strategy: Literal["immediate_signal"]
+    strategy: Literal["calendar_event_signal"]
+    calendar_identifier: str
+    session_label: str
+    rebalance_event: Literal["market_open", "market_close"]
+    event_offset_seconds: int
+    rebalance_cadence: Literal["every_session", "weekly"]
+    rebalance_weekday: int
 
 
 class PortfolioValueObservationResponse(BaseModel):

@@ -1,7 +1,7 @@
 schema=1
 library_name=ms-markets
 namespace=ms_markets
-pinned_version=1.0.2
+pinned_version=1.0.13
 skills_path=/Users/jose/mainsequence-dev/main-sequence-workbench/projects/alpacaconnectors-945bfddd-5f1f-4541-a87a-faea3af6271f/.venv/lib/python3.13/site-packages/.agents/skills/ms_markets
-copied_at_utc=2026-09-02T11:31:55Z
+copied_at_utc=2026-09-08T22:04:36Z
 command=msm copy-msm-skills

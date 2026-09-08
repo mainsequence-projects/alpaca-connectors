@@ -64,19 +64,18 @@ def response() -> PortfolioConfigurationResponse:
     return PortfolioConfigurationResponse(
         uid=CONFIGURATION_UID,
         name="Daily IVV analytical portfolio",
-        description="Immediate-signal observation-time backtest.",
+        description="NYSE-close ETF portfolio backtest.",
         signal_configuration_uid=SIGNAL_CONFIGURATION_UID,
         signal_uid="signal-uid",
         bars_configuration_uid=BARS_CONFIGURATION_UID,
         rebalance_configuration_uid=REBALANCE_CONFIGURATION_UID,
-        rebalance_strategy="immediate_signal",
+        rebalance_strategy="calendar_event_signal",
         portfolio_uid=None,
         job_uid=JOB_UID,
         upsample_frequency_id="1d",
         intraday_bar_interpolation_rule="ffill",
         valuation_column="close",
-        portfolio_prices_frequency="1d",
-        forward_fill_to_now=False,
+        valuation_maximum_staleness_seconds=86_400,
         fail_on_missing_prices=True,
         commission_fee=0.00018,
         job=PortfolioJobResponse(
@@ -105,15 +104,14 @@ def response() -> PortfolioConfigurationResponse:
 def create_request() -> dict:
     return {
         "name": "Daily IVV analytical portfolio",
-        "description": "Immediate-signal observation-time backtest.",
+        "description": "NYSE-close ETF portfolio backtest.",
         "signal_configuration_uid": SIGNAL_CONFIGURATION_UID,
         "bars_configuration_uid": BARS_CONFIGURATION_UID,
         "rebalance_configuration_uid": REBALANCE_CONFIGURATION_UID,
         "upsample_frequency_id": "1d",
         "intraday_bar_interpolation_rule": "ffill",
         "valuation_column": "close",
-        "portfolio_prices_frequency": "1d",
-        "forward_fill_to_now": False,
+        "valuation_maximum_staleness_seconds": 86_400,
         "fail_on_missing_prices": True,
         "commission_fee": 0.00018,
         "job": {
@@ -162,9 +160,15 @@ def rebalance_row() -> PortfolioRebalanceConfiguration:
     return PortfolioRebalanceConfiguration.model_validate(
         {
             "uid": uuid.UUID(REBALANCE_CONFIGURATION_UID),
-            "name": "Immediate ETF observations",
-            "description": "Apply each observed ETF weight frame immediately.",
-            "strategy": "immediate_signal",
+            "name": "NYSE close",
+            "description": "Use the latest observed ETF weight frame at each NYSE close.",
+            "strategy": "calendar_event_signal",
+            "calendar_identifier": "NYSE",
+            "session_label": "regular",
+            "rebalance_event": "market_close",
+            "event_offset_seconds": 0,
+            "rebalance_cadence": "every_session",
+            "rebalance_weekday": 0,
             "created_at": now,
             "updated_at": now,
         }
@@ -177,7 +181,7 @@ def portfolio_row() -> AlpacaETFPortfolioConfiguration:
         {
             "uid": uuid.UUID(CONFIGURATION_UID),
             "name": "Daily IVV analytical portfolio",
-            "description": "Immediate-signal observation-time backtest.",
+            "description": "NYSE-close ETF portfolio backtest.",
             "signal_configuration_uid": uuid.UUID(SIGNAL_CONFIGURATION_UID),
             "bars_configuration_uid": uuid.UUID(BARS_CONFIGURATION_UID),
             "rebalance_configuration_uid": uuid.UUID(REBALANCE_CONFIGURATION_UID),
@@ -186,8 +190,7 @@ def portfolio_row() -> AlpacaETFPortfolioConfiguration:
             "upsample_frequency_id": "1d",
             "intraday_bar_interpolation_rule": "ffill",
             "valuation_column": "close",
-            "portfolio_prices_frequency": "1d",
-            "forward_fill_to_now": False,
+            "valuation_maximum_staleness_seconds": 86_400,
             "fail_on_missing_prices": True,
             "commission_fee": 0.00018,
             "created_at": now,
@@ -222,7 +225,7 @@ def test_portfolio_response_resolves_linked_metatables_with_bulk_uid_queries() -
         result = portfolio_service._responses([row])
 
     assert result[0].uid == CONFIGURATION_UID
-    assert result[0].rebalance_strategy == "immediate_signal"
+    assert result[0].rebalance_strategy == "calendar_event_signal"
     signals_by_uids.assert_called_once_with([SIGNAL_CONFIGURATION_UID])
     rebalances_by_uids.assert_called_once_with([REBALANCE_CONFIGURATION_UID])
 
@@ -233,6 +236,12 @@ def test_rebalance_crud_serializes_storage_domain_models() -> None:
         "name": row.name,
         "description": row.description,
         "strategy": row.strategy,
+        "calendar_identifier": row.calendar_identifier,
+        "session_label": row.session_label,
+        "rebalance_event": row.rebalance_event,
+        "event_offset_seconds": row.event_offset_seconds,
+        "rebalance_cadence": row.rebalance_cadence,
+        "rebalance_weekday": row.rebalance_weekday,
     }
     client = TestClient(app)
 
@@ -431,7 +440,7 @@ def test_portfolio_detail_resolves_business_labels_and_value_history() -> None:
     assert detail.linked_signal.universe_name == "S&P 500 holdings"
     assert detail.linked_bars.asset_source_name == "S&P 500 holdings (IVV)"
     assert detail.linked_bars.asset_count == 504
-    assert detail.linked_rebalance.name == "Immediate ETF observations"
+    assert detail.linked_rebalance.name == "NYSE close"
     assert detail.canonical_portfolio.observation_count == 1
     assert detail.canonical_portfolio.latest_close == 103.25
 
@@ -463,9 +472,15 @@ def test_portfolio_detail_route_loads_latest_100_observations() -> None:
                 "adjustment": "all",
             },
             "linked_rebalance": {
-                "name": "Immediate ETF observations",
+                "name": "NYSE close",
                 "description": None,
-                "strategy": "immediate_signal",
+                "strategy": "calendar_event_signal",
+                "calendar_identifier": "NYSE",
+                "session_label": "regular",
+                "rebalance_event": "market_close",
+                "event_offset_seconds": 0,
+                "rebalance_cadence": "every_session",
+                "rebalance_weekday": 0,
             },
             "canonical_portfolio": {
                 "materialized": True,

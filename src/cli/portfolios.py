@@ -68,7 +68,13 @@ def configure_create_parser(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--valuation-column", default="close")
     parser.add_argument("--commission-fee", type=float, default=0.00018)
     parser.add_argument(
-        "--forward-fill-to-now", action=argparse.BooleanOptionalAction, default=False
+        "--valuation-maximum-staleness-seconds",
+        type=int,
+        default=86_400,
+        help=(
+            "Maximum age of a price selected at a real valuation timestamp; this never "
+            "creates or extends timestamps."
+        ),
     )
     parser.add_argument(
         "--fail-on-missing-prices", action=argparse.BooleanOptionalAction, default=True
@@ -86,9 +92,7 @@ def configure_update_parser(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--rebalance-configuration-uid")
     parser.add_argument("--valuation-column")
     parser.add_argument("--commission-fee", type=float)
-    parser.add_argument(
-        "--forward-fill-to-now", action=argparse.BooleanOptionalAction, default=None
-    )
+    parser.add_argument("--valuation-maximum-staleness-seconds", type=int)
     parser.add_argument(
         "--fail-on-missing-prices", action=argparse.BooleanOptionalAction, default=None
     )
@@ -135,6 +139,25 @@ def configure_rebalance_get_parser(parser: argparse.ArgumentParser) -> None:
 def configure_rebalance_create_parser(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--name", required=True)
     parser.add_argument("--description")
+    parser.add_argument(
+        "--strategy",
+        choices=("calendar_event_signal",),
+        default="calendar_event_signal",
+    )
+    parser.add_argument("--calendar-identifier", default="NYSE")
+    parser.add_argument("--session-label", default="regular")
+    parser.add_argument(
+        "--rebalance-event",
+        choices=("market_open", "market_close"),
+        default="market_close",
+    )
+    parser.add_argument("--event-offset-seconds", type=int, default=0)
+    parser.add_argument(
+        "--rebalance-cadence",
+        choices=("every_session", "weekly"),
+        default="every_session",
+    )
+    parser.add_argument("--rebalance-weekday", type=int, choices=range(7), default=0)
     parser.set_defaults(handler=run_rebalance_create_command)
 
 
@@ -142,6 +165,13 @@ def configure_rebalance_update_parser(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("configuration_uid")
     parser.add_argument("--name")
     parser.add_argument("--description")
+    parser.add_argument("--strategy", choices=("calendar_event_signal",))
+    parser.add_argument("--calendar-identifier")
+    parser.add_argument("--session-label")
+    parser.add_argument("--rebalance-event", choices=("market_open", "market_close"))
+    parser.add_argument("--event-offset-seconds", type=int)
+    parser.add_argument("--rebalance-cadence", choices=("every_session", "weekly"))
+    parser.add_argument("--rebalance-weekday", type=int, choices=range(7))
     parser.set_defaults(handler=run_rebalance_update_command)
 
 
@@ -202,7 +232,7 @@ def run_create_command(args: argparse.Namespace) -> int:
         rebalance_configuration_uid=args.rebalance_configuration_uid,
         valuation_column=args.valuation_column,
         commission_fee=args.commission_fee,
-        forward_fill_to_now=args.forward_fill_to_now,
+        valuation_maximum_staleness_seconds=args.valuation_maximum_staleness_seconds,
         fail_on_missing_prices=args.fail_on_missing_prices,
         **_job_values(args),
     )
@@ -223,7 +253,9 @@ def run_update_command(args: argparse.Namespace) -> int:
             "rebalance_configuration_uid": args.rebalance_configuration_uid,
             "valuation_column": args.valuation_column,
             "commission_fee": args.commission_fee,
-            "forward_fill_to_now": args.forward_fill_to_now,
+            "valuation_maximum_staleness_seconds": (
+                args.valuation_maximum_staleness_seconds
+            ),
             "fail_on_missing_prices": args.fail_on_missing_prices,
         }.items()
         if value is not None
@@ -326,7 +358,19 @@ def run_rebalance_get_command(args: argparse.Namespace) -> int:
 def run_rebalance_create_command(args: argparse.Namespace) -> int:
     from src.portfolios import create_rebalance_configuration
 
-    _print(create_rebalance_configuration(name=args.name, description=args.description))
+    _print(
+        create_rebalance_configuration(
+            name=args.name,
+            description=args.description,
+            strategy=args.strategy,
+            calendar_identifier=args.calendar_identifier,
+            session_label=args.session_label,
+            rebalance_event=args.rebalance_event,
+            event_offset_seconds=args.event_offset_seconds,
+            rebalance_cadence=args.rebalance_cadence,
+            rebalance_weekday=args.rebalance_weekday,
+        )
+    )
     return 0
 
 
@@ -335,7 +379,17 @@ def run_rebalance_update_command(args: argparse.Namespace) -> int:
 
     values = {
         key: value
-        for key, value in {"name": args.name, "description": args.description}.items()
+        for key, value in {
+            "name": args.name,
+            "description": args.description,
+            "strategy": args.strategy,
+            "calendar_identifier": args.calendar_identifier,
+            "session_label": args.session_label,
+            "rebalance_event": args.rebalance_event,
+            "event_offset_seconds": args.event_offset_seconds,
+            "rebalance_cadence": args.rebalance_cadence,
+            "rebalance_weekday": args.rebalance_weekday,
+        }.items()
         if value is not None
     }
     if not values:

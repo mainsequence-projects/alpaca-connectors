@@ -16,15 +16,30 @@ from msm.api.base import MarketsMetaTableRow, operation_result_rows
 from msm.base import MarketsBase, markets_table_args, new_markets_uid
 from msm.models.portfolios import PortfolioTable
 from pydantic import ConfigDict
-from sqlalchemy import Boolean, CheckConstraint, DateTime, Float, ForeignKey, Index, String, Text
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    DateTime,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.types import Uuid
 
 from src.market_data.configurations import AlpacaBarsConfigurationTable
 from src.metatables import AlpacaMarketsMetaTableMixin, ProjectStorageNameMixin
 
-RebalanceStrategy = Literal["immediate_signal"]
-REBALANCE_STRATEGIES: tuple[RebalanceStrategy, ...] = ("immediate_signal",)
+RebalanceStrategy = Literal["calendar_event_signal"]
+RebalanceEvent = Literal["market_open", "market_close"]
+RebalanceCadence = Literal["every_session", "weekly"]
+REBALANCE_STRATEGIES: tuple[RebalanceStrategy, ...] = ("calendar_event_signal",)
+REBALANCE_EVENTS: tuple[RebalanceEvent, ...] = ("market_open", "market_close")
+REBALANCE_CADENCES: tuple[RebalanceCadence, ...] = ("every_session", "weekly")
+DEFAULT_PORTFOLIO_CALENDAR_IDENTIFIER = "NYSE"
 SIGNAL_JOB_CONFIGURATION_TABLE_NAME = "alpaca_connectors__etf_signal_job_configuration"
 UTC = dt.timezone.utc
 _UNSET = object()
@@ -44,16 +59,38 @@ class PortfolioRebalanceConfigurationTable(
     __project_storage_concept__ = "portfolio_rebalance_configuration"
     __markets_base_identifier__ = "PortfolioRebalanceConfiguration"
     __metatable_description__ = (
-        "Reusable portfolio rebalance configurations. Phase 1 supports ImmediateSignal only."
+        "Reusable persisted-calendar rebalance configurations. The strategy executes the "
+        "latest signal observed at or before an actual market session event."
     )
     __table_args__ = markets_table_args(
         "PortfolioRebalanceConfiguration",
         CheckConstraint(
-            "strategy = 'immediate_signal'",
+            "strategy = 'calendar_event_signal'",
             name="ck_portfolio_rebalance_configuration_strategy",
+        ),
+        CheckConstraint(
+            "length(trim(calendar_identifier)) > 0",
+            name="ck_portfolio_rebalance_calendar_identifier",
+        ),
+        CheckConstraint(
+            "length(trim(session_label)) > 0",
+            name="ck_portfolio_rebalance_session_label",
+        ),
+        CheckConstraint(
+            "rebalance_event IN ('market_open', 'market_close')",
+            name="ck_portfolio_rebalance_event",
+        ),
+        CheckConstraint(
+            "rebalance_cadence IN ('every_session', 'weekly')",
+            name="ck_portfolio_rebalance_cadence",
+        ),
+        CheckConstraint(
+            "rebalance_weekday >= 0 AND rebalance_weekday <= 6",
+            name="ck_portfolio_rebalance_weekday",
         ),
         Index(None, "name"),
         Index(None, "strategy"),
+        Index(None, "calendar_identifier"),
     )
 
     uid: Mapped[uuid.UUID] = mapped_column(
@@ -69,9 +106,32 @@ class PortfolioRebalanceConfigurationTable(
         nullable=False,
         info={
             "label": "Strategy",
-            "description": "ImmediateSignal in the initial analytical backtest release.",
+            "description": (
+                "CalendarEventSignal selects the latest signal observed at or before each "
+                "configured persisted-calendar event."
+            ),
         },
     )
+    calendar_identifier: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+        info={
+            "label": "Calendar",
+            "description": "Canonical persisted Calendar unique identifier.",
+        },
+    )
+    session_label: Mapped[str] = mapped_column(String(64), nullable=False)
+    rebalance_event: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        info={
+            "label": "Market Event",
+            "description": "Actual persisted session boundary used as the execution time.",
+        },
+    )
+    event_offset_seconds: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    rebalance_cadence: Mapped[str] = mapped_column(String(32), nullable=False)
+    rebalance_weekday: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     created_at: Mapped[dt.datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=utc_now
     )
@@ -118,8 +178,8 @@ class AlpacaETFPortfolioConfigurationTable(
             name="ck_etf_portfolio_phase_one_interpolation_rule",
         ),
         CheckConstraint(
-            "portfolio_prices_frequency IS NULL OR portfolio_prices_frequency = '1d'",
-            name="ck_etf_portfolio_phase_one_prices_frequency",
+            "valuation_maximum_staleness_seconds > 0",
+            name="ck_etf_portfolio_valuation_maximum_staleness",
         ),
         Index(None, "name"),
         Index(None, "signal_configuration_uid"),
@@ -186,8 +246,18 @@ class AlpacaETFPortfolioConfigurationTable(
     upsample_frequency_id: Mapped[str] = mapped_column(String(16), nullable=False)
     intraday_bar_interpolation_rule: Mapped[str] = mapped_column(String(16), nullable=False)
     valuation_column: Mapped[str] = mapped_column(String(64), nullable=False)
-    portfolio_prices_frequency: Mapped[str | None] = mapped_column(String(16), nullable=True)
-    forward_fill_to_now: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    valuation_maximum_staleness_seconds: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=86_400,
+        info={
+            "label": "Maximum Valuation Staleness",
+            "description": (
+                "Maximum age in seconds of the latest valuation selected at an actual "
+                "portfolio observation timestamp. Alignment never creates timestamps."
+            ),
+        },
+    )
     fail_on_missing_prices: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     commission_fee: Mapped[float] = mapped_column(Float, nullable=False, default=0.00018)
     created_at: Mapped[dt.datetime] = mapped_column(
@@ -209,6 +279,12 @@ class PortfolioRebalanceConfiguration(MarketsMetaTableRow):
     name: str
     description: str | None
     strategy: RebalanceStrategy
+    calendar_identifier: str
+    session_label: str
+    rebalance_event: RebalanceEvent
+    event_offset_seconds: int
+    rebalance_cadence: RebalanceCadence
+    rebalance_weekday: int
     created_at: dt.datetime
     updated_at: dt.datetime
 
@@ -236,8 +312,7 @@ class AlpacaETFPortfolioConfiguration(MarketsMetaTableRow):
     upsample_frequency_id: str
     intraday_bar_interpolation_rule: str
     valuation_column: str
-    portfolio_prices_frequency: str | None
-    forward_fill_to_now: bool
+    valuation_maximum_staleness_seconds: int
     fail_on_missing_prices: bool
     commission_fee: float
     created_at: dt.datetime
@@ -278,9 +353,37 @@ def normalize_rebalance_strategy(value: str) -> RebalanceStrategy:
     normalized = str(value or "").strip().lower()
     if normalized not in REBALANCE_STRATEGIES:
         raise ValueError(
-            "Phase 1 supports only the immediate_signal analytical rebalance strategy."
+            "This connector supports only the calendar_event_signal rebalance strategy."
         )
     return normalized  # type: ignore[return-value]
+
+
+def normalize_rebalance_event(value: str) -> RebalanceEvent:
+    normalized = str(value or "").strip().lower()
+    if normalized not in REBALANCE_EVENTS:
+        raise ValueError("rebalance_event must be market_open or market_close.")
+    return normalized  # type: ignore[return-value]
+
+
+def normalize_rebalance_cadence(value: str) -> RebalanceCadence:
+    normalized = str(value or "").strip().lower()
+    if normalized not in REBALANCE_CADENCES:
+        raise ValueError("rebalance_cadence must be every_session or weekly.")
+    return normalized  # type: ignore[return-value]
+
+
+def _rebalance_weekday(value: int) -> int:
+    normalized = int(value)
+    if normalized < 0 or normalized > 6:
+        raise ValueError("rebalance_weekday must be between 0 (Monday) and 6 (Sunday).")
+    return normalized
+
+
+def _positive_seconds(value: int, *, label: str) -> int:
+    normalized = int(value)
+    if normalized <= 0:
+        raise ValueError(f"{label} must be positive.")
+    return normalized
 
 
 def _start_runtime() -> None:
@@ -292,8 +395,14 @@ def _start_runtime() -> None:
 def create_rebalance_configuration(
     *,
     name: str,
-    strategy: str = "immediate_signal",
+    strategy: str = "calendar_event_signal",
     description: str | None = None,
+    calendar_identifier: str = DEFAULT_PORTFOLIO_CALENDAR_IDENTIFIER,
+    session_label: str = "regular",
+    rebalance_event: str = "market_close",
+    event_offset_seconds: int = 0,
+    rebalance_cadence: str = "every_session",
+    rebalance_weekday: int = 0,
     uid: uuid.UUID | str | None = None,
 ) -> PortfolioRebalanceConfiguration:
     from msm.bootstrap import resolve_runtime
@@ -313,6 +422,20 @@ def create_rebalance_configuration(
             "name": _name(name, label="Rebalance configuration name"),
             "description": _description(description),
             "strategy": normalize_rebalance_strategy(strategy),
+            "calendar_identifier": _nonempty(
+                calendar_identifier,
+                label="calendar_identifier",
+                maximum=255,
+            ),
+            "session_label": _nonempty(
+                session_label,
+                label="session_label",
+                maximum=64,
+            ),
+            "rebalance_event": normalize_rebalance_event(rebalance_event),
+            "event_offset_seconds": int(event_offset_seconds),
+            "rebalance_cadence": normalize_rebalance_cadence(rebalance_cadence),
+            "rebalance_weekday": _rebalance_weekday(rebalance_weekday),
             "created_at": now,
             "updated_at": now,
         },
@@ -432,6 +555,12 @@ def update_rebalance_configuration(
     name: str | None = None,
     description: str | None | object = _UNSET,
     strategy: str | None = None,
+    calendar_identifier: str | None = None,
+    session_label: str | None = None,
+    rebalance_event: str | None = None,
+    event_offset_seconds: int | None = None,
+    rebalance_cadence: str | None = None,
+    rebalance_weekday: int | None = None,
 ) -> PortfolioRebalanceConfiguration:
     current = get_rebalance_configuration(configuration_uid)
     if current is None:
@@ -443,6 +572,26 @@ def update_rebalance_configuration(
         values["description"] = _description(description if isinstance(description, str) else None)
     if strategy is not None:
         values["strategy"] = normalize_rebalance_strategy(strategy)
+    if calendar_identifier is not None:
+        values["calendar_identifier"] = _nonempty(
+            calendar_identifier,
+            label="calendar_identifier",
+            maximum=255,
+        )
+    if session_label is not None:
+        values["session_label"] = _nonempty(
+            session_label,
+            label="session_label",
+            maximum=64,
+        )
+    if rebalance_event is not None:
+        values["rebalance_event"] = normalize_rebalance_event(rebalance_event)
+    if event_offset_seconds is not None:
+        values["event_offset_seconds"] = int(event_offset_seconds)
+    if rebalance_cadence is not None:
+        values["rebalance_cadence"] = normalize_rebalance_cadence(rebalance_cadence)
+    if rebalance_weekday is not None:
+        values["rebalance_weekday"] = _rebalance_weekday(rebalance_weekday)
     return PortfolioRebalanceConfiguration.update(configuration_uid, values)
 
 
@@ -488,8 +637,7 @@ def create_portfolio_configuration_row(
     upsample_frequency_id: str = "1d",
     intraday_bar_interpolation_rule: str = "ffill",
     valuation_column: str = "close",
-    portfolio_prices_frequency: str | None = "1d",
-    forward_fill_to_now: bool = False,
+    valuation_maximum_staleness_seconds: int = 86_400,
     fail_on_missing_prices: bool = True,
     commission_fee: float = 0.00018,
     uid: uuid.UUID | str | None = None,
@@ -531,17 +679,10 @@ def create_portfolio_configuration_row(
             maximum=16,
         ),
         "valuation_column": _nonempty(valuation_column, label="valuation_column", maximum=64),
-        "portfolio_prices_frequency": (
-            _phase_one_value(
-                portfolio_prices_frequency,
-                label="portfolio_prices_frequency",
-                expected="1d",
-                maximum=16,
-            )
-            if portfolio_prices_frequency is not None
-            else None
+        "valuation_maximum_staleness_seconds": _positive_seconds(
+            valuation_maximum_staleness_seconds,
+            label="valuation_maximum_staleness_seconds",
         ),
-        "forward_fill_to_now": bool(forward_fill_to_now),
         "fail_on_missing_prices": bool(fail_on_missing_prices),
         "commission_fee": float(commission_fee),
         "created_at": now,
@@ -675,8 +816,7 @@ def update_portfolio_calculation_configuration(
     upsample_frequency_id: str | None = None,
     intraday_bar_interpolation_rule: str | None = None,
     valuation_column: str | None = None,
-    portfolio_prices_frequency: str | None | object = _UNSET,
-    forward_fill_to_now: bool | None = None,
+    valuation_maximum_staleness_seconds: int | None = None,
     fail_on_missing_prices: bool | None = None,
     commission_fee: float | None = None,
 ) -> AlpacaETFPortfolioConfiguration:
@@ -720,19 +860,11 @@ def update_portfolio_calculation_configuration(
         values["valuation_column"] = _nonempty(
             valuation_column, label="valuation_column", maximum=64
         )
-    if portfolio_prices_frequency is not _UNSET:
-        values["portfolio_prices_frequency"] = (
-            _phase_one_value(
-                portfolio_prices_frequency,
-                label="portfolio_prices_frequency",
-                expected="1d",
-                maximum=16,
-            )
-            if isinstance(portfolio_prices_frequency, str)
-            else None
+    if valuation_maximum_staleness_seconds is not None:
+        values["valuation_maximum_staleness_seconds"] = _positive_seconds(
+            valuation_maximum_staleness_seconds,
+            label="valuation_maximum_staleness_seconds",
         )
-    if forward_fill_to_now is not None:
-        values["forward_fill_to_now"] = bool(forward_fill_to_now)
     if fail_on_missing_prices is not None:
         values["fail_on_missing_prices"] = bool(fail_on_missing_prices)
     if commission_fee is not None:
@@ -757,6 +889,9 @@ __all__ = [
     "AlpacaETFPortfolioConfigurationTable",
     "PortfolioRebalanceConfiguration",
     "PortfolioRebalanceConfigurationTable",
+    "DEFAULT_PORTFOLIO_CALENDAR_IDENTIFIER",
+    "REBALANCE_CADENCES",
+    "REBALANCE_EVENTS",
     "REBALANCE_STRATEGIES",
     "create_portfolio_configuration_row",
     "create_rebalance_configuration",
@@ -767,6 +902,8 @@ __all__ = [
     "get_rebalance_configuration",
     "list_portfolio_configurations",
     "list_rebalance_configurations",
+    "normalize_rebalance_cadence",
+    "normalize_rebalance_event",
     "normalize_rebalance_strategy",
     "project_portfolio_configuration_models",
     "rebalance_configurations_by_uids",

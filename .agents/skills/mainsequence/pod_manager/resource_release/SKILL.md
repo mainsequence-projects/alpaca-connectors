@@ -456,6 +456,23 @@ a failure, later prevented steps are `skipped` with
 `outcome=run_terminated`. Inspect the failed step's `error` before the root
 error when explaining where execution stopped.
 
+Read image-lifecycle cost from the run's `billing` object. Its scope is exactly
+`image_lifecycle`: it may include an attributed image build, registry storage,
+and registry service, but it is not the release's runtime-compute total. A
+deployment that reuses an existing image has zero incremental image-build cost;
+do not copy the producer build's charge onto the consumer. `pending` with a
+null total means asynchronous pricing or persisted allocation is incomplete.
+Do not interpret a priced terminal zero as missing work, and do not infer or
+request internal provider, rate, allocation-evidence, or diagnostic fields.
+
+Read persisted Knative runtime attribution from `runtime_billing`, whose scope
+is exactly `knative_runtime`. Read the combined available amount from
+`cost_summary`; `is_complete=false` means an activation remains live or at
+least one constituent cost remains unpriced, so the total must not be presented
+as final. A priced live amount is the current persisted cost, not a forecast.
+Priced amounts are JSON numbers with up to six decimal places, while unresolved
+amounts are null. These reads never materialize or refresh billing state.
+
 The current MCP catalog exposes run list and detail but no log-read tool. A
 logs URL in the run projection does not authorize a generic endpoint call.
 

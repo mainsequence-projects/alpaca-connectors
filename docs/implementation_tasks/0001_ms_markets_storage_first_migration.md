@@ -1,7 +1,7 @@
 # 0001 - SDK 8 And ms-markets Storage-First Migration
 
 > **Status:** implemented locally and applied to the backend on 2026-09-02.
-> **Supported runtime:** Python 3.13, `mainsequence>=8.0.7`, `ms-markets>=1.0.3`.
+> **Supported runtime:** Python 3.13, `mainsequence>=8.1.8`, `ms-markets>=1.0.13`.
 > `pyproject.toml` intentionally uses compatible lower bounds; `uv.lock` and the exported
 > `requirements.txt` provide the reproducible resolution.
 
@@ -27,7 +27,7 @@ The migration is successful when:
 ## Dependency and packaging changes
 
 - Python moved to `>=3.13,<3.14`; `.python-version` is `3.13`.
-- `mainsequence>=8.0.7` and `ms-markets>=1.0.3` are lower bounds, not exact pins.
+- `mainsequence>=8.1.8` and `ms-markets>=1.0.13` are lower bounds, not exact pins.
 - `uv.lock` is the source of reproducible dependency resolution.
 - `requirements.txt` is exported from the lock for execution images.
 - The Docker base moved to the Python 3.13 Main Sequence image family.

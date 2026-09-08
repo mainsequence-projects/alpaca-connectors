@@ -4,13 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "alpaca-connectors"
-version = "0.1.31"
+version = "0.1.32"
 readme = "README.md"
 requires-python = ">=3.13,<3.14"
 dependencies = [
     # Keep lower bounds here and let uv.lock capture the reproducible environment.
-    "ms-markets>=1.0.4",
-    "mainsequence>=8.1.0",
+    "ms-markets>=1.0.13",
+    "mainsequence>=8.1.8",
     "alpaca-py",
     "playwright",
     "mkdocs>=1.6.1",
