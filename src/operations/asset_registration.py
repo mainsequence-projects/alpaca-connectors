@@ -12,6 +12,8 @@ import uuid
 from typing import Any, ClassVar, Literal
 
 from msm.api.base import MarketsMetaTableRow, operation_result_rows
+from msm.api.http import OperationError, OperationStatus, OperationStep
+from msm.api.http import OperationStepStatus as StepStatus
 from msm.base import MarketsBase, markets_table_args, new_markets_uid
 from pydantic import ConfigDict
 from sqlalchemy import JSON, DateTime, Index, String
@@ -21,8 +23,6 @@ from sqlalchemy.types import Uuid
 from src.metatables import AlpacaMarketsMetaTableMixin, ProjectStorageNameMixin
 
 OperationAction = Literal["plan", "execute"]
-OperationStatus = Literal["queued", "running", "succeeded", "failed"]
-StepStatus = Literal["pending", "running", "succeeded", "failed", "skipped"]
 
 UTC = dt.timezone.utc
 
@@ -49,14 +49,7 @@ def utc_now() -> dt.datetime:
 
 def registration_steps(action: OperationAction) -> list[dict[str, Any]]:
     return [
-        {
-            "key": key,
-            "label": label,
-            "status": "pending",
-            "message": None,
-            "started_at": None,
-            "completed_at": None,
-        }
+        OperationStep(key=key, label=label).model_dump(mode="json")
         for key, label in (*_COMMON_STEPS, *_FINAL_STEPS[action])
     ]
 
@@ -210,10 +203,10 @@ class AssetRegistrationOperation(MarketsMetaTableRow):
     action: OperationAction
     status: OperationStatus
     current_step: str | None
-    steps: list[dict[str, Any]]
+    steps: list[OperationStep]
     request: dict[str, Any]
     result: dict[str, Any] | None
-    error: dict[str, Any] | None
+    error: OperationError | None
     created_at: dt.datetime
     started_at: dt.datetime | None
     updated_at: dt.datetime
@@ -279,7 +272,7 @@ def _updated_steps(
     found = False
     updated: list[dict[str, Any]] = []
     for step in operation.steps:
-        item = dict(step)
+        item = OperationStep.model_validate(step).model_dump(mode="json")
         if item["key"] == step_key:
             found = True
             item["status"] = status
@@ -354,11 +347,12 @@ def fail_asset_registration_operation(
     if operation is None:
         raise LookupError(f"Asset registration operation {operation_uid!s} does not exist.")
     now = utc_now()
+    validated_error = OperationError.model_validate(error)
     failed_steps = _updated_steps(
         operation,
         step_key=step_key,
         status="failed",
-        message=str(error["message"]),
+        message=validated_error.message,
     )
     for step in failed_steps:
         if step["status"] == "pending":
@@ -371,7 +365,7 @@ def fail_asset_registration_operation(
             "status": "failed",
             "current_step": step_key,
             "steps": failed_steps,
-            "error": error,
+            "error": validated_error.model_dump(mode="json"),
             "updated_at": now,
             "completed_at": now,
         },

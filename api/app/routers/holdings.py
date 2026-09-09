@@ -6,6 +6,7 @@ import datetime as dt
 from typing import Any
 
 from fastapi import APIRouter, Body, Query
+from msm.api.http import BulkActionPreflightResponse
 
 from ..errors import api_http_error, not_found
 from ..schemas import (
@@ -108,7 +109,7 @@ def holdings_latest_discovery(account_uid: str) -> ResourceDiscoveryResponse:
     return _holdings_discovery(latest=True)
 
 
-@router.post("/actions/capture/preflight", response_model=dict[str, Any])
+@router.post("/actions/capture/preflight", response_model=BulkActionPreflightResponse)
 def holdings_capture_preflight(account_uid: str) -> dict[str, Any]:
     try:
         return preflight_holdings(account_uid)

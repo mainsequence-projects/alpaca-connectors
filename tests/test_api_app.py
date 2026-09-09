@@ -13,13 +13,24 @@ from api.app.schemas import (
     AssetRegistrationRequest,
     AssetUniverseResponse,
     BarConfigurationUpdateAcceptedResponse,
+    BulkActionRequest,
     JobRunStatusResponse,
     ProjectConfigurationResponse,
+    ResourceCollection,
+    ResourceDiscoveryResponse,
 )
 from api.app.services.universes import preview_universe_run as preview_universe_service
 from etfhextractor.exceptions import WorkbookParseError
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
+from msm.api.http import (
+    BulkActionExecutionRequest,
+    BulkActionPreflightResponse,
+    ObservableOperation,
+    ResourceDiscovery,
+)
+from msm.api.http import ResourceCollection as MarketsResourceCollection
+from msm.api.http import api_http_error as markets_api_http_error
 
 from src.holdings.services import AccountHoldingsRegistryError
 from src.platform_secrets import PlatformSecretAccessError
@@ -81,6 +92,33 @@ class ApiAppTests(unittest.TestCase):
         ]
 
         self.assertEqual(missing_response_models, [])
+
+    def test_http_contract_machinery_comes_from_ms_markets(self) -> None:
+        from api.app import errors
+
+        self.assertTrue(issubclass(ResourceCollection, MarketsResourceCollection))
+        self.assertTrue(issubclass(ResourceDiscoveryResponse, ResourceDiscovery))
+        self.assertTrue(issubclass(BulkActionRequest, BulkActionExecutionRequest))
+        self.assertTrue(issubclass(AssetRegistrationOperationResponse, ObservableOperation))
+        self.assertIs(errors.markets_api_http_error, markets_api_http_error)
+
+        shared_preflight_paths = {
+            route.path
+            for route in app.routes
+            if isinstance(route, APIRoute) and route.response_model is BulkActionPreflightResponse
+        }
+        self.assertEqual(
+            shared_preflight_paths,
+            {
+                "/v1/accounts/actions/remove/preflight",
+                "/v1/accounts/actions/capture-holdings/preflight",
+                "/v1/accounts/{account_uid}/holdings/actions/capture/preflight",
+                "/v1/universes/actions/run/preflight",
+                "/v1/universes/actions/activate/preflight",
+                "/v1/universes/actions/deactivate/preflight",
+                "/v1/universes/actions/remove/preflight",
+            },
+        )
 
     def test_api_is_organized_by_current_capabilities(self) -> None:
         visible_paths = {
@@ -571,6 +609,7 @@ class ApiAppTests(unittest.TestCase):
         )
         self.assertIn("authorization", response.headers["vary"].lower())
         self.assertTrue(response.headers["etag"].startswith('"'))
+        ResourceDiscovery.model_validate(payload)
 
     def test_universe_discovery_advertises_lifecycle_and_delete_actions(self) -> None:
         response = self.client.get("/v1/universes/discovery")

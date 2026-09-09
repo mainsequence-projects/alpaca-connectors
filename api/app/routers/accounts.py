@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, Body, HTTPException, Query
+from msm.api.http import BulkActionPreflightResponse
 
 from ..errors import api_http_error, bad_request, not_found
 from ..schemas import (
@@ -142,7 +143,7 @@ def account_create(request: AccountRegistrationRequest = Body(...)) -> AccountRe
         raise api_http_error(exc) from exc
 
 
-@router.post("/actions/remove/preflight", response_model=dict[str, Any])
+@router.post("/actions/remove/preflight", response_model=BulkActionPreflightResponse)
 def accounts_remove_preflight(request: BulkActionRequest = Body(...)) -> dict[str, Any]:
     try:
         missing = [uid for uid in request.selection.uids if get_account(uid) is None]
@@ -182,7 +183,10 @@ def accounts_remove(request: BulkActionRequest = Body(...)) -> dict[str, Any]:
         raise api_http_error(exc) from exc
 
 
-@router.post("/actions/capture-holdings/preflight", response_model=dict[str, Any])
+@router.post(
+    "/actions/capture-holdings/preflight",
+    response_model=BulkActionPreflightResponse,
+)
 def accounts_capture_holdings_preflight(
     request: BulkActionRequest = Body(...),
 ) -> dict[str, Any]:

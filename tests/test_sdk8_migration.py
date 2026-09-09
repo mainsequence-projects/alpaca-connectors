@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
+from importlib.metadata import version
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
@@ -19,6 +20,11 @@ from src.portfolios.etf_tracking import (
     build_alpaca_interpolated_prices,
     resolve_alpaca_bars_time_index_meta_table_uid,
 )
+
+
+def test_runtime_dependency_versions_include_shared_http_toolkit() -> None:
+    assert version("mainsequence") == "8.1.8"
+    assert version("ms-markets") == "1.0.14"
 
 
 def test_alpaca_bars_node_declares_sdk8_output_table() -> None:

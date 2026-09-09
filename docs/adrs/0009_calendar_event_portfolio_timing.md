@@ -18,7 +18,7 @@ portfolio history.
 
 ## Decision
 
-The connector requires `ms-markets>=1.0.13` and `mainsequence>=8.1.8`, and uses the released
+The connector requires `ms-markets>=1.0.14` and `mainsequence>=8.1.8`, and uses the released
 pipeline directly:
 
 ```text

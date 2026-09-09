@@ -5,7 +5,22 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from ..schemas import PageInfo, ResourceCollection, ResourceDiscoveryResponse
+from msm.api.http import (
+    BulkActionDefinition,
+    ResourceBooleanFilter,
+    ResourceColumn,
+    ResourceDescriptor,
+    ResourceFilterOption,
+    ResourceIdentity,
+    ResourceListControls,
+    ResourceListDiscovery,
+    ResourceSearchControl,
+    ResourceSelectFilter,
+    ResourceTextFilter,
+    build_resource_collection,
+)
+
+from ..schemas import ResourceCollection, ResourceDiscoveryResponse
 
 
 def validate_page_window(*, limit: int, offset: int) -> None:
@@ -97,17 +112,13 @@ def collection_response(
         json_safe(item.model_dump(mode="json") if hasattr(item, "model_dump") else item)
         for item in items
     ]
-    page_index = offset // limit if limit else 0
-    return ResourceCollection(
+    response = build_resource_collection(
         items=serialized,
-        pageInfo=PageInfo(
-            pageIndex=page_index,
-            pageSize=limit,
-            totalItems=total,
-            hasNextPage=offset + len(serialized) < total,
-            hasPreviousPage=offset > 0,
-        ),
+        limit=limit,
+        offset=offset,
+        total_items=total,
     )
+    return ResourceCollection.model_validate(response.model_dump(by_alias=True))
 
 
 def resource_discovery(
@@ -125,59 +136,67 @@ def resource_discovery(
     orderable_fields: list[str] | None = None,
 ) -> ResourceDiscoveryResponse:
     """Build the installed Command Center SDK's canonical discovery envelope."""
-    normalized_columns = []
+    normalized_columns: list[ResourceColumn] = []
     for column in columns:
         raw_id = str(column["id"])
         normalized_column = {**column, "id": raw_id.replace("_", "-")}
         normalized_column.setdefault("value_path", raw_id.replace("-", "_"))
         normalized_column.setdefault("data_type", "text")
         normalized_columns.append(
-            {
-                "default_visible": True,
-                "hideable": True,
-                **normalized_column,
-            }
+            ResourceColumn.model_validate(
+                {
+                    "default_visible": True,
+                    "hideable": True,
+                    **normalized_column,
+                }
+            )
         )
+
+    filters = []
+    for field in filterable_fields or []:
+        filter_label = field.replace("_", " ").title()
+        if field in (filter_options or {}):
+            filters.append(
+                ResourceSelectFilter(
+                    key=field,
+                    label=filter_label,
+                    options=[
+                        ResourceFilterOption.model_validate(option)
+                        for option in (filter_options or {})[field]
+                    ],
+                )
+            )
+        elif (filter_types or {}).get(field, "text") == "boolean":
+            filters.append(ResourceBooleanFilter(key=field, label=filter_label))
+        elif (filter_types or {}).get(field, "text") == "text":
+            filters.append(ResourceTextFilter(key=field, label=filter_label))
+        else:
+            filter_type = (filter_types or {})[field]
+            raise ValueError(f"Unsupported resource discovery filter type {filter_type!r}.")
+
     return ResourceDiscoveryResponse(
-        contract="command-center.resource_discovery@v1",
-        resource={
-            "id": resource_id,
-            "label": label,
-            "item_label": item_label,
-            "identity": {"fields": identity_fields},
-        },
-        list={
-            "controls": {
-                "search": (
-                    {
-                        "placeholder": f"Search {label.lower()}",
-                        "fields": searchable_fields,
-                    }
+        resource=ResourceDescriptor(
+            id=resource_id,
+            label=label,
+            item_label=item_label,
+            identity=ResourceIdentity(fields=identity_fields),
+        ),
+        list=ResourceListDiscovery(
+            controls=ResourceListControls(
+                search=(
+                    ResourceSearchControl(
+                        placeholder=f"Search {label.lower()}",
+                        fields=searchable_fields,
+                    )
                     if searchable_fields
                     else None
                 ),
-                "filters": [
-                    {
-                        "key": field,
-                        "label": field.replace("_", " ").title(),
-                        "type": (
-                            "select"
-                            if field in (filter_options or {})
-                            else (filter_types or {}).get(field, "text")
-                        ),
-                        **(
-                            {"options": (filter_options or {})[field]}
-                            if field in (filter_options or {})
-                            else {}
-                        ),
-                    }
-                    for field in (filterable_fields or [])
-                ],
-                "ordering": orderable_fields or [],
-            },
-            "columns": normalized_columns,
-        },
-        bulk_actions=actions or [],
+                filters=filters,
+                ordering=orderable_fields or [],
+            ),
+            columns=normalized_columns,
+        ),
+        bulk_actions=[BulkActionDefinition.model_validate(action) for action in actions or []],
     )
 
 

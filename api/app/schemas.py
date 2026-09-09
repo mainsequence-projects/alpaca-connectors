@@ -3,6 +3,16 @@ from __future__ import annotations
 import datetime as dt
 from typing import Any, Literal
 
+from msm.api.http import (
+    BulkActionExecutionRequest,
+    BulkActionExplicitSelection,
+    ObservableOperation,
+    OperationError,
+    OperationStep,
+    ResourceDiscovery,
+    ResourcePageInfo,
+)
+from msm.api.http import ResourceCollection as MarketsResourceCollection
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
@@ -109,67 +119,34 @@ class AssetRegistrationOperationStartRequest(BaseModel):
     request: AssetRegistrationRequest
 
 
-class AssetRegistrationStepResponse(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    key: str
-    label: str
-    status: Literal["pending", "running", "succeeded", "failed", "skipped"]
-    message: str | None = None
-    started_at: dt.datetime | None = None
-    completed_at: dt.datetime | None = None
+class AssetRegistrationStepResponse(OperationStep):
+    """Alpaca schema name for the shared observable-operation step."""
 
 
-class AssetRegistrationOperationError(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    code: str
-    message: str
-    retryable: bool
+class AssetRegistrationOperationError(OperationError):
+    """Alpaca schema name for the shared observable-operation error."""
 
 
-class AssetRegistrationOperationResponse(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    operation_uid: str
+class AssetRegistrationOperationResponse(
+    ObservableOperation[AssetRegistrationRequest, dict[str, Any]]
+):
     action: Literal["plan", "execute"]
-    status: Literal["queued", "running", "succeeded", "failed"]
-    current_step: str | None
     steps: list[AssetRegistrationStepResponse]
-    request: AssetRegistrationRequest
-    result: dict[str, Any] | None
-    error: AssetRegistrationOperationError | None
-    created_at: dt.datetime
-    started_at: dt.datetime | None
-    updated_at: dt.datetime
-    completed_at: dt.datetime | None
-    poll_after_ms: int = 500
+    error: AssetRegistrationOperationError | None = None
 
 
-class PageInfo(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    pageIndex: int
-    pageSize: int
-    totalItems: int
-    hasNextPage: bool
-    hasPreviousPage: bool
+class PageInfo(ResourcePageInfo):
+    """Alpaca schema name for the shared collection page contract."""
 
 
-class ResourceCollection(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+class ResourceCollection(MarketsResourceCollection[dict[str, Any]]):
+    """Alpaca schema name for the shared resource collection contract."""
 
-    items: list[dict[str, Any]]
-    pageInfo: PageInfo
+    page_info: PageInfo = Field(alias="pageInfo")
 
 
-class ResourceDiscoveryResponse(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    contract: Literal["command-center.resource_discovery@v1"]
-    resource: dict[str, Any]
-    list: dict[str, Any]
-    bulk_actions: list[dict[str, Any]]
+class ResourceDiscoveryResponse(ResourceDiscovery):
+    """Alpaca schema name for the shared resource discovery contract."""
 
 
 class AccountRegistrationRequest(BaseModel):
@@ -223,39 +200,19 @@ class SecretReferenceResponse(BaseModel):
     name: str
 
 
-class SecretReferenceCollectionResponse(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+class SecretReferenceCollectionResponse(MarketsResourceCollection[SecretReferenceResponse]):
+    """Typed Secret-name collection over the shared pagination contract."""
 
-    items: list[SecretReferenceResponse]
-    pageInfo: PageInfo
-
-
-class ActionPreflightResponse(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    allowed: bool
-    detail: str
-    matched_count: int = 1
-    blockers: list[str] = Field(default_factory=list)
-    warnings: list[str] = Field(default_factory=list)
+    page_info: PageInfo = Field(alias="pageInfo")
 
 
-class BulkSelection(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+class BulkSelection(BulkActionExplicitSelection):
+    """Alpaca actions currently support explicit string UID selection only."""
 
-    mode: Literal["explicit"]
     uids: list[str] = Field(min_length=1)
 
-    @model_validator(mode="after")
-    def require_unique_uids(self) -> "BulkSelection":
-        if len(self.uids) != len(set(self.uids)):
-            raise ValueError("selection.uids must not contain duplicates.")
-        return self
 
-
-class BulkActionRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
+class BulkActionRequest(BulkActionExecutionRequest):
     selection: BulkSelection
     options: dict[str, Any] = Field(default_factory=dict)
 

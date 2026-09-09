@@ -178,7 +178,7 @@ remain absent until a benchmark is explicitly part of the Portfolio Configuratio
 !!! note "Duration hashing fix"
     [MainSequenceMarkets issue
     5](https://github.com/mainsequence-projects/MainSequenceMarkets/issues/5) was fixed in
-    ms-markets 1.0.8 together with Main Sequence SDK 8.1.7. This repository uses ms-markets 1.0.13
+    ms-markets 1.0.8 together with Main Sequence SDK 8.1.7. This repository uses ms-markets 1.0.14
     and Main Sequence SDK 8.1.8. Version 1.0.10 fixes the set-based seed-observation query used by
     `PortfolioRebalance` when signal storage has both `signal_uid` and `asset_identifier`
     dimensions. Version 1.0.11 normalizes published time-index and timestamp columns to nanosecond
@@ -194,7 +194,7 @@ Before the first live execution:
 
 - project revision `0014` must be applied for calendar-event Rebalance Configuration fields and
   bounded valuation alignment
-- the installed `ms-markets` release must be at least `1.0.13`, with its provider migrated through
+- the installed `ms-markets` release must be at least `1.0.14`, with its provider migrated through
   revision `0016`
 - built-in ms-markets Signal, Calendar, calendar-event, rebalance-state, PortfolioWeights, and
   Portfolios tables must be migrated and registered

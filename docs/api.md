@@ -25,6 +25,13 @@ Selectable collections expose a separate `/discovery` response compatible with t
 resource adapter contract. Discovery responses are private, revalidated, and vary on delegated
 authorization and Resource Release headers.
 
+The provider-neutral HTTP contracts come from `msm.api.http` in `ms-markets>=1.0.14`:
+collection pagination, resource discovery, bulk-action execution and preflight, sanitized generic
+errors, and observable-operation wire models. Alpaca-specific resource declarations, option
+parsing, provider-error classification, and business services remain in this repository. Asset
+registration operation rows also remain in the project-owned MetaTable so polling survives API
+process restarts; the shared in-memory operation repository is intentionally not used.
+
 ## Resources
 
 | Resource | Main endpoints |

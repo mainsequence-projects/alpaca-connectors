@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, Body, HTTPException, Query
+from msm.api.http import BulkActionPreflightResponse
 
 from ..errors import api_http_error, not_found
 from ..schemas import (
@@ -132,7 +133,7 @@ def universes_discovery() -> ResourceDiscoveryResponse:
     )
 
 
-@router.post("/actions/run/preflight", response_model=dict[str, Any])
+@router.post("/actions/run/preflight", response_model=BulkActionPreflightResponse)
 def universes_run_preflight(request: BulkActionRequest = Body(...)) -> dict[str, Any]:
     timeout = positive_float_option(request.options, "timeout", default=30.0, maximum=300.0)
     account_uid = required_string_option(request.options, "account_uid")
@@ -223,7 +224,7 @@ def _universes_status_preflight(
     }
 
 
-@router.post("/actions/activate/preflight", response_model=dict[str, Any])
+@router.post("/actions/activate/preflight", response_model=BulkActionPreflightResponse)
 def universes_activate_preflight(request: BulkActionRequest = Body(...)) -> dict[str, Any]:
     try:
         return _universes_status_preflight(request, is_active=True)
@@ -247,7 +248,7 @@ def universes_activate(request: BulkActionRequest = Body(...)) -> dict[str, Any]
         raise api_http_error(exc) from exc
 
 
-@router.post("/actions/deactivate/preflight", response_model=dict[str, Any])
+@router.post("/actions/deactivate/preflight", response_model=BulkActionPreflightResponse)
 def universes_deactivate_preflight(request: BulkActionRequest = Body(...)) -> dict[str, Any]:
     try:
         return _universes_status_preflight(request, is_active=False)
@@ -271,7 +272,7 @@ def universes_deactivate(request: BulkActionRequest = Body(...)) -> dict[str, An
         raise api_http_error(exc) from exc
 
 
-@router.post("/actions/remove/preflight", response_model=dict[str, Any])
+@router.post("/actions/remove/preflight", response_model=BulkActionPreflightResponse)
 def universes_remove_preflight(request: BulkActionRequest = Body(...)) -> dict[str, Any]:
     try:
         universes = {uid: get_universe(uid) for uid in request.selection.uids}
