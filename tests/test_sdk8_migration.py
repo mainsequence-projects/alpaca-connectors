@@ -23,7 +23,7 @@ from src.portfolios.etf_tracking import (
 
 
 def test_runtime_dependency_versions_include_shared_http_toolkit() -> None:
-    assert version("mainsequence") == "8.1.9"
+    assert version("mainsequence") == "8.1.14"
     assert version("ms-markets") == "1.0.14"
 
 

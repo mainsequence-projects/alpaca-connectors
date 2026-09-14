@@ -1,6 +1,6 @@
 ---
 name: resource-release
-description: Create, configure, deploy, inspect, and delete Main Sequence ResourceReleases through the canonical MCP operations, including FastAPI browser-origin preflight and the platform static-site wildcard default. Use for runtime, static-site, or fixed-profile widget-extension release discovery, creation, deployment, DeploymentRun observation, and explicit cleanup.
+description: Create, configure, deploy, inspect, and delete Main Sequence ResourceReleases through the canonical MCP operations, including combined REST/WebSocket FastAPI applications, browser-origin preflight, and the platform static-site wildcard default. Use for runtime or static-site release discovery, creation, deployment, DeploymentRun observation, and explicit cleanup.
 ---
 
 # Main Sequence Resource Release
@@ -36,13 +36,12 @@ unchanged. DeploymentRuns remain separate attempts.
 Set `revision_retention_count` through the existing release create/update
 operation when a different rollback history is required. The value is a
 positive integer, defaults to `3`, and belongs to the release, not
-`automatic_redeployment_policy`. Existing widget, workspace, active, desired,
-and live-run references remain protected. Revision candidate discovery is
+`automatic_redeployment_policy`. Active, desired, and live-run references
+remain protected. Revision candidate discovery is
 asynchronous: successful runtime activation and a retention edit enqueue
 backend reconciliation after commit, and a periodic database sweep recovers
 lost Celery wake-ups. Editing the count does not synchronously delete provider
-artifacts. Static-site and widget-extension cleanup remain blocked until their
-target adapters exist.
+artifacts. Static-site cleanup remains target-specific.
 
 Every retained runtime revision pins its exact `CodeRepositoryJobImage`, not
 only the active or desired revision. Before deleting an apparently unused
@@ -75,8 +74,7 @@ The public release kinds are:
 
 - `agent`, meaning a runtime ResourceRelease and not a CodeRepository Coding Agent;
 - `fastapi`; and
-- `static_site`; and
-- `widget_extension`.
+- `static_site`.
 
 Main Sequence-managed Streamlit dashboard deployment is retired. Stop if a
 request or repository workflow declares `streamlit_dashboard`; do not translate
@@ -101,7 +99,7 @@ search. The response is the canonical paginated collection with `count`,
 
 Use `resource_release.get` with `resource_release_uid` before configuration or
 deployment. Detail is discriminated by `release_kind`; do not assume runtime
-fields exist on a static site or widget extension, or that static configuration
+fields exist on a static site, or that static configuration
 exists on a runtime release.
 
 Collection `actions` describe authenticated DRF collection actions for user
@@ -145,6 +143,97 @@ Do not use numeric resource or image identifiers. Do not retry an ambiguous
 image creation or release creation automatically; inspect the returned image
 and canonical DeploymentRun until that same durable attempt is terminal.
 
+## Deploy One FastAPI App With REST And WebSockets
+
+A single FastAPI application factory may return one `FastAPI` instance that
+contains both ordinary HTTP/REST routes and FastAPI/Starlette WebSocket routes:
+
+```python
+from fastapi import FastAPI, WebSocket
+
+
+app = FastAPI()
+
+
+@app.get("/orders/{order_id}")
+async def get_order(order_id: str) -> dict[str, str]:
+    return {"order_id": order_id}
+
+
+@app.websocket("/ws/orders")
+async def orders(websocket: WebSocket) -> None:
+    await websocket.accept()
+    await websocket.send_json({"status": "connected"})
+    await websocket.close()
+```
+
+Deploy that application as one existing `fastapi` ResourceRelease. Both route
+types use the same `resource_uid`, image, immutable release revision, stable
+release URL, Knative Service, and Uvicorn process. Do not create a second
+ResourceRelease, release kind, hostname, namespace, Job, image, or workflow
+resource only for WebSockets. Bare Starlette application factories are not
+supported by this release contract.
+
+For direct MCP creation, follow `Prepare Runtime Release Inputs` and call the
+same `resource_release.create` operation with `release_kind: fastapi`; the
+selected ready image already contains both route types. For repository-managed
+automatic deployment, use one `resource_release` declaration from the
+`code-repository-workflows` skill. Its `resource_uid` must identify the indexed
+source that loads the combined FastAPI instance. Effective automatic
+deployment derives the one exact event image, creates the existing
+`resource_release.fastapi.build_and_deploy` run, and promotes both transports
+atomically behind the stable release URL. Later eligible commits redeploy the
+whole application. There is no `websocket_enabled` workflow field and no
+WebSocket-specific DeploymentRun, pipeline, step, operation, or MCP tool.
+
+WebSocket runtime compatibility is platform-owned and is part of every standard
+FastAPI runtime. Django projects the reserved connection policy after project
+`env_vars`; Pod Deployment Orchestrator validates the approved runtime and
+always starts Uvicorn with the supported `websockets-sansio` adapter;
+infrastructure controls public upgrade forwarding on the shared FastAPI
+gateway. Configuring the adapter does not create a latent WebSocket connection;
+per-connection state exists only after an incoming upgrade attempt. Do not put
+enablement, protocol-adapter, ping, message-size, compression, ticket-store, or reserved
+authentication-subprotocol settings in workflow `env_vars`. The platform
+compatibility guarantee applies to the approved base runtime; dependency
+overrides in CodeRepository images remain user-owned and can fail candidate
+readiness without replacing the current active revision.
+
+REST requests continue to use the existing FastAPI Bearer flow. A non-browser
+WebSocket client that can set handshake headers may use that same UID-bound
+Bearer credential. A browser obtains a fresh one-time, target/origin/path-bound
+ticket through the canonical application route:
+
+```text
+POST /api/v1/resource-releases/{resource_release_uid}/websocket-ticket/
+body: {"origin": "https://app.example.com", "path": "/ws/orders"}
+```
+
+The no-store response supplies `websocket_url`, expiry, and the reserved
+`mainsequence.ws-ticket.<ticket>` subprotocol. The browser sends that value
+first in `Sec-WebSocket-Protocol`, the fixed non-secret
+`mainsequence.ws-bridge.v1` acknowledgement second, and any application
+subprotocols after them. The acknowledgement is hard-coded in the browser SDK,
+gateway, and runtime; it is not a Django response or storage field. The gateway
+removes both platform values before the request reaches the application. On a
+successful upgrade, `socket.protocol` is the upstream-selected offered
+application protocol, or the bridge acknowledgement when the application
+selects none.
+
+Ticket acquisition is application runtime behavior, not a deployment-time MCP
+operation; no browser-ticket MCP tool exists, and an MCP agent must not invoke
+the unregistered route through a generic proxy. Django mints and validates the
+ticket before the upgrade. After `101 Switching Protocols`, frames flow gateway
+to Knative to the pod without passing through Django.
+
+After deployment, observe the one returned DeploymentRun to terminal success,
+then verify at least one authenticated REST request and one authenticated
+WebSocket upgrade/message/close cycle against the stable release URL. A
+successful deployment does not by itself prove that the shared gateway has
+been enabled for public WebSocket upgrades. Existing connections may drain or
+disconnect during revision promotion; clients reconnect to the stable URL and
+browsers obtain a new ticket for each connection.
+
 ## Prepare Static-Site Inputs
 
 For `static_site`, read the separate static-site skill and call
@@ -152,27 +241,6 @@ For `static_site`, read the separate static-site skill and call
 creation or static configuration changes. That live DRF response owns supported
 fields, defaults, choices, conditions, and constraints. The installed Command
 Center SDK skills own frontend implementation.
-
-## Prepare Widget-Extension Inputs
-
-For `widget_extension`, supply only `code_repository_branch_uid`, `name`, required `entrypoint`, and optional
-repository-relative `root_directory`. Do not supply `extension_id`, a
-CodeRepositoryResource or image UID, build/runtime settings, environment, secrets,
-publication version, or an automatic-deployment policy. Automatic deployment
-is forced on.
-
-The release UID identifies the backend release. Manifest `id` and SemVer are
-validated immutable build outputs, not release fields. Every build attempt uses
-the existing `ResourceReleaseRun`; successful publications are historical
-versions, not deployment attempts or a second deployment model.
-
-Widget consumers use the canonical DRF revision/dependency and nested publication
-bundle routes documented in `docs/command_center/widgets.md`. Pin exact registered
-revision UIDs; a release's active pointer or latest version is not a workspace
-dependency. Bundle access rechecks current release and Environment visibility and
-verifies the entire Artifact hash, including conditional reads. Public links pin
-their own protected snapshot and dependency plan. Do not invent a parallel MCP
-widget registry or new MCP tool names for these DRF-only consumption actions.
 
 ## Configure Automatic Redeployment
 
@@ -207,9 +275,7 @@ Call `resource_release.create` once with the exact discriminated request:
 
 - runtime kinds use `resource_uid` and `related_image_uid`;
 - `static_site` uses `code_repository_branch_uid`, `name`, and only currently
-  advertised static configuration; or
-- `widget_extension` uses `code_repository_branch_uid`, `name`, required `entrypoint`, and optional
-  `root_directory`.
+  advertised static configuration.
 
 Creation uses the canonical authorization, credit, validation, persistence,
 and asynchronous initial-deployment behavior. A successful create response
@@ -226,7 +292,6 @@ determine the image requirement:
 | Workflow declaration for a runtime release | Enabled | `related_image_uid` is not needed. If present for compatibility, the backend ignores it before UUID parsing or image lookup. Initial application owns one `source=create`, `operation=build_and_deploy` run and may wait for image verification. |
 | Workflow declaration for a runtime release | Disabled | `related_image_uid` is required and selects the explicit verified code-repository image. |
 | Static-site release | Either | No caller-supplied runtime image UID is needed. The backend owns the static-site build. |
-| Widget-extension release | Forced enabled | No caller-supplied runtime image or CodeRepositoryResource UID is accepted. The fixed SDK workload adapter owns the build output. |
 
 Runtime releases are `fastapi` and runtime `agent` ResourceReleases. For the
 workflow path, effective automatic deployment is
@@ -241,7 +306,6 @@ a present list replaces the mapping. This workflow-only adapter does not add a
 direct `resource_release.create` or `resource_release.update` field.
 
 Static sites reject `env_vars` and continue to use `build_environment`.
-Widget extensions reject both `env_vars` and `build_environment`.
 Workflow environment values never create, resolve, or mutate platform Secrets,
 Constants, or Organization Environments, and never enter the
 code-repository-image build. Deployment context contains only names, count, and a keyed
@@ -409,10 +473,6 @@ Static sites additionally accept the canonical static configuration fields
 advertised by `resource_release.static_site_capabilities`, including the
 complete write-only `build_environment` map.
 
-Widget-extension source, rename, root directory, automatic-deployment switch,
-and manifest identity remain immutable through ordinary update. Its shared
-`revision_retention_count` is the one editable release lifecycle policy.
-
 An update replaces the submitted configuration values and returns the canonical
 release detail. It does not deploy the release. Re-read the release after an
 ambiguous result before deciding whether another update is necessary.
@@ -432,11 +492,6 @@ or MCP idempotency key.
 The operation requires canonical edit access, may perform build or provider
 work, is non-idempotent, and returns the unified DeploymentRun projection. Do
 not automatically retry an ambiguous response.
-
-For `widget_extension`, this action queues the same fixed SDK build/publication
-pipeline used by automatic repository events. If the deployment does not have
-that adapter installed, the canonical run becomes blocked; it is never routed
-to the runtime/Knative deployer.
 
 A runtime ResourceRelease receives a backend-derived public CodeRepositoryBranch
 context during runtime-credential exchange. The deployed SDK uses that
@@ -491,8 +546,9 @@ as final. A priced live amount is the current persisted cost, not a forecast.
 Priced amounts are JSON numbers with up to six decimal places, while unresolved
 amounts are null. These reads never materialize or refresh billing state.
 
-The current MCP catalog exposes run list and detail but no log-read tool. A
-logs URL in the run projection does not authorize a generic endpoint call.
+Use `mainsequence://platform/skills/log-exploration` for authorized
+ResourceRelease application logs and DeploymentRun build/orchestration logs.
+Do not fetch a logs URL generically or reproduce the log-query contract here.
 
 ## Delete Releases And Images
 

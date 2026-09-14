@@ -1,65 +1,53 @@
 ---
 name: alpaca-holdings-category
-description: Use this skill when the task is about creating or running registered holdings-backed Main Sequence Asset Universes through the supported project surfaces.
+description: Manage user-defined ETF extraction sources and registered Asset Universes, then extract components into linked AssetCategories and observed ETF weight signals.
 ---
 
 # Holdings-Backed Asset Universes
 
-## Overview
+Use this skill for Universe source CRUD, registered Universe CRUD, linked AssetCategory membership,
+and component extraction. In a CodeRepository Executor session, use `alpaca_query_universes` and
+`alpaca_manage_universe`. In a shell, use the installed `alpaca-connectors` command.
 
-Use this skill for ETF constituent universes and holdings-backed `AssetCategory` membership.
+## Model
 
-The canonical operator surface is:
+- `UniverseSource` stores one user-maintained ETF extraction target: name, symbol, URL, and enabled
+  state.
+- `AssetUniverse` links one explicit source to one explicit `AssetCategory` through durable foreign
+  keys. Creation performs no extraction.
+- A registered Alpaca account is required only when extracting components so its Secret names can
+  resolve Alpaca and missing constituents can be registered. Never persist or infer that Account on
+  the Universe.
+- The linked category owns current membership. It does not own source configuration.
+- Every successful extraction publishes that exact observed weight frame through the stable
+  Universe-backed `AlpacaETFHoldingsSignal`. Observation time does not guarantee exact economic
+  effective time.
 
-- `alpaca-connectors universe run <UNIVERSE_UID>`
+## Workflow
 
-A registered `AssetUniverse` is the lifecycle resource for one ETF holdings source and its
-materialized Asset membership. It has a required `source_uid` foreign key to one explicit `UniverseSource`
-and a required `asset_category_uid` foreign key to the category it materializes. An Alpaca account
-is selected as Run execution context only and is never stored or inferred on the Universe. Category
-metadata is never universe configuration.
+1. Read or maintain explicit sources through the `list_sources`, `get_source`, `create_source`,
+   `update_source`, and `delete_source` operations.
+2. Create a registered Universe from explicit name, symbol, and source URL. Do not extract during
+   creation.
+3. Preview with `alpaca_query_universes` operation `preview_extraction`, supplying `universe_uid`
+   and runtime `account_uid`.
+4. When authorized, call `alpaca_manage_universe` operation `extract_components` with the same UIDs.
+5. Verify one complete bulk category replacement, one batched signal observation, and the linked
+   category members via operation `members`.
 
-## This Skill Can Do
+Shell equivalents:
 
-- explain or update explicit Asset Universe registration and Run behavior
-- change the local orchestration adapter in `src/universes/`
-- rely on `etfhextractor` for provider extraction
-- keep source-based extraction and linked category membership aligned
-- keep API, CLI, and docs aligned with strict membership validation
+```shell
+alpaca-connectors universe-source list
+alpaca-connectors universe-source preview <SOURCE_UID>
+alpaca-connectors universe list
+alpaca-connectors universe run --universe-uid <UNIVERSE_UID> --account-uid <ACCOUNT_UID>
+alpaca-connectors universe run --universe-uid <UNIVERSE_UID> --account-uid <ACCOUNT_UID> --execute
+```
 
-## This Skill Must Not Claim
+Use `AssetCategory.replace_memberships` for the complete desired set. Resolve and register missing
+Alpaca constituents in bulk before replacing membership. If any symbol cannot resolve to one
+canonical Alpaca Asset, stop and preserve the existing category and signal state.
 
-- that a source preview creates, infers, or runs an Asset Universe
-- that a ticker, provider, source, or category may be inferred
-- that missing registered symbols block Run; they are registration work owned by Run
-- that ambiguous Main Sequence ticker matches are acceptable
-- ownership of Alpaca asset registration or stock-bar publishing itself
-
-## Working Rules
-
-- universe creation always receives an explicit name, symbol, and source URL
-- creation stores real source and category relationships and performs no extraction
-- source preview is read-only
-- Run accepts `AssetUniverse.uid`; dry run is the default
-- dry-run planning requires an explicit account UID, extracts holdings, and plans provider-native
-  Alpaca registration through that execution account
-- execute registers missing Alpaca-backed constituents before replacing membership
-- symbols Alpaca cannot resolve block the Run and leave membership unchanged
-- Run writes only to the category linked by `asset_category_uid`
-- Run delegates category replacement to the `ms-markets>=1.0.3`
-  `AssetCategory.replace_memberships` API, which bulk-upserts the desired memberships and removes
-  stale rows in one delete; it never executes one membership operation per constituent
-- Universe Run does not persist extracted weights; `AssetCategoryMembership` records membership
-  only, and any weights published by the separate ETF portfolio signal workflow are not Universe
-  state
-- a referenced source cannot be deleted and its symbol cannot be changed
-- a universe referenced by a bar configuration cannot be deleted
-
-## Examples
-
-- `alpaca-connectors universe-source list`
-- `alpaca-connectors universe-source preview <SOURCE_UID>`
-- `alpaca-connectors universe list`
-- `alpaca-connectors universe get <UNIVERSE_UID>`
-- `alpaca-connectors universe run <UNIVERSE_UID>`
-- `alpaca-connectors universe run <UNIVERSE_UID> --execute`
+Deletion through the Tau tool requires exact `DELETE <uid>` confirmation and must stop when bar or
+signal configurations reference the Universe.

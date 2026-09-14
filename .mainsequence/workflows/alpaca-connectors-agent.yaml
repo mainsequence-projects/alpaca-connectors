@@ -1,0 +1,19 @@
+api_version: 2.3.0
+name: alpaca-connectors-agent
+resources:
+  - key: alpaca-connectors-agent
+    kind: code_repository_coding_agent
+    spec:
+      llm_provider: openai
+      llm_model: gpt-5.4
+      llm_thinking: medium
+      cpu_request: 250m
+      cpu_limit: "1"
+      memory_request: 512Mi
+      memory_limit: 2Gi
+      automatic_deployment: true
+      automatic_redeployment_policy:
+        tag_regex: null
+      command_center_icon:
+        path: .agents/alpaca-command-center-icon.png
+        rendering: color

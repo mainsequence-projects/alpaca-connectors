@@ -2,7 +2,7 @@
 
 - [Overview](index.md)
 - [Capability Model](capabilities/index.md)
-- [Agentic Capabilities](agent.md)
+- [Alpaca Connectors Agent](agent.md)
 - [API](api.md)
 - Assets
   - [Registration Flow](assets/registration.md)

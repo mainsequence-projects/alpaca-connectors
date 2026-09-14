@@ -75,7 +75,7 @@ The strict normalization implementation is deployed in Django source: the canoni
 DRF relation, shared resolver contract, direct/derived/projected/snapshot model
 roles, exact-environment query boundaries, and deterministic data migrations
 are present. Public Secret, Constant, MetaTable, Namespace, Agent,
-capability, Workspace, widget-group, Bucket, and branch-owned paths now require
+capability, Bucket, and branch-owned paths now require
 or derive one exact Environment. After deterministic resolution, ambiguous
 legacy operational rows are retired and every stored Environment FK is
 database-enforced `NOT NULL`. This catalog migration moves no physical table
@@ -152,7 +152,7 @@ ts_manager
     their mandatory MetaTable/update-graph parent
 
 agents
-├── Agent, AgentCapability, CodingAgentDeploymentDefault -> direct Environment
+├── Agent and CodingAgentDeploymentDefault -> direct Environment
 ├── UserOrchestratorAgentService -> derives through its required Agent; exactly
 │   one independently deployed Astro Agent/service per responsible User and
 │   Environment pair
@@ -160,11 +160,6 @@ agents
     or snapshot from their Pod Manager parent
 └── sessions, tasks, messages, handles, and bindings -> derive and must match
 
-command_center
-├── Workspace and SavedWidgetGroup -> direct Environment
-├── workspace/widget/navigation/publication descendants -> derive and match
-└── ConnectionInstance and ConnectionHealthCheck -> Organization control-plane,
-    not a Secret fallback and not singular to one Environment
 ```
 
 Every relation connecting two environment-related objects must resolve the
@@ -204,9 +199,8 @@ Organization
 │   ├── Constant
 │   ├── Namespace and TableUpdateNode
 │   ├── Bucket and PVCDisk
-│   ├── Agent and AgentCapability
-│   ├── UserOrchestratorAgentService through its Environment-owned Agent
-│   └── Workspace and SavedWidgetGroup
+│   ├── Agent
+│   └── UserOrchestratorAgentService through its Environment-owned Agent
 └── CodeRepository
     ├── GitHubRepositoryBinding
     └── CodeRepositoryBranch ──> OrganizationEnvironment
@@ -543,6 +537,13 @@ must converge on one `(code_repository, repository_branch)` row.
 
 The deployed lifecycle has no manual repository `import-branch` action or
 manual branch-creation helper. Read-only provider branch discovery remains.
+
+Human branch removal is scoped to one exact Organization Environment and
+requires edit authority on the parent CodeRepository. Provider repositories
+and provider Git branches are always preserved. If the selected branch set
+exhausts a logical CodeRepository, Django removes that aggregate and its local
+GitHubRepositoryBinding registry row in the same transaction. Direct logical
+CodeRepository deletion remains a separate Organization-admin operation.
 
 ### 5. CodeRepository Executor Deployment And Runtime
 

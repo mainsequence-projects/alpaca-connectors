@@ -1,53 +1,46 @@
 ---
 name: alpaca-stock-bars
-description: Use this skill when the task is about planning or running the repository's supported Alpaca stock-bar update workflows through the CLI and reusable DataNode modules.
+description: Create, inspect, and run stored Alpaca bar configurations for explicit Assets, Universe members, or recent Account holdings, and query their migrated price datasets.
 ---
 
 # Alpaca Stock Bars
 
-## Overview
+Use this skill for durable Alpaca bar configurations, bounded bar queries, and configuration-backed
+updates. In a CodeRepository Executor session, use `alpaca_query_bar_configurations` and
+`alpaca_manage_bar_configuration`. In a shell, use the installed `alpaca-connectors` command.
 
-Use this skill when the task is about planning or executing stock-bar updates.
+## Configuration Contract
 
-Supported operator surfaces:
+Each stored configuration selects:
 
-- `alpaca-connectors market-data update`
-- `alpaca-connectors market-data bar-configuration`
-- `alpaca-connectors asset <ticker> update_prices <period>`
+- one registered Account whose Secret names resolve Alpaca access;
+- one migrated frequency, feed, and adjustment profile; and
+- exactly one asset source: explicit registered Assets, one active Universe, or the latest Account
+  holdings inside the inclusive trailing 30-day window.
 
-These flows build and run the reusable `AlpacaStockBarsNode`.
+The configuration resolver derives the Asset set and output dataset. Never accept a runtime dataset
+UID, Account override, bar-profile override, or asset-scope override. Resolving recent Account
+holdings is read-only and never captures a new snapshot.
 
-## This Skill Can Do
+## Workflow
 
-- explain or update the CLI orchestration around stock-bar runs
-- use `src.market_data` as the public capability boundary and change its underlying reusable
-  storage or DataNode implementation only when required
-- keep the single-asset shorthand and stored-configuration runner aligned with current project
-  validation rules
-- keep scheduled-job entrypoints aligned with the supported runners
+1. List migrated datasets and stored configurations with `alpaca_query_bar_configurations`.
+2. Create or update one configuration with `alpaca_manage_bar_configuration`.
+3. Resolve it with query operation `resolve`; inspect the derived Asset identities and dataset.
+4. When authorized, submit operation `run`. This creates a JobRun rather than running a large
+   update inline in the agent session.
+5. Poll `alpaca_get_job_run_status`, then query bounded observations using dataset operation
+   `observations`.
 
-## This Skill Must Not Claim
+Shell equivalents:
 
-- that unregistered Main Sequence assets can be updated directly
-- that an update can execute without a registered Account whose stored Secret names resolve
-- ownership of asset registration or holdings-category extraction behavior
+```shell
+alpaca-connectors market-data bar-configuration list
+alpaca-connectors market-data update --configuration-uid <CONFIGURATION_UID>
+alpaca-connectors market-data update --configuration-uid <CONFIGURATION_UID> --execute
+alpaca-connectors market-data prices --dataset-uid <DATASET_UID> --limit 100
+```
 
-## Working Rules
-
-- create and review a stored configuration before an update
-- exactly one source is valid: explicit assets, an active universe, or recent account holdings
-- account-holdings resolution uses the newest stored snapshot inside the inclusive trailing 30-day
-  window and never captures a snapshot as a side effect
-- frequency/feed/adjustment resolve one migrated output dataset and schema
-- dry run is the default; use `--execute` only when a write is intended
-- require a stored configuration UID; never accept a dataset UID or runtime scope override
-- keep the shared table identity keyed by `frequency_id`, `feed`, and `adjustment`
-- load Asset identity/provider details with set-based governed queries and fetch bars in symbol
-  batches; never issue one Main Sequence lookup or Alpaca bars request per Asset
-
-## Examples
-
-- `alpaca-connectors market-data bar-configuration create --name "Daily account holdings" --account-uid <ACCOUNT_UID> --asset-source account_holdings --frequency 1d --feed sip --adjustment all`
-- `alpaca-connectors market-data update --configuration-uid <CONFIGURATION_UID>`
-- `alpaca-connectors market-data update --configuration-uid <CONFIGURATION_UID> --execute`
-- `alpaca-connectors asset IVV update_prices daily --configuration-uid <CONFIGURATION_UID>`
+Use set-based Asset/detail queries and batched Alpaca bar requests. Stop on missing or ambiguous
+Alpaca identities instead of dropping Assets or issuing per-Asset fallback requests. Tau deletion
+requires exact `DELETE <configuration_uid>` confirmation.

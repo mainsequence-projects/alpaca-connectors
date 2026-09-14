@@ -1,72 +1,106 @@
 {
-  "name": "Alpaca Connectors",
-  "description": "Agent-ready project card for the Alpaca Connectors repository. The repository is organized around Assets, Universes, Market Data, Accounts, Holdings, Portfolios, and Operations; its current agent skills expose the supported CLI workflows without treating providers as a separate Connection domain.",
-  "version": "0.1.32",
-  "supportedInterfaces": [
-    {
-      "protocolBinding": "HTTP+JSON",
-      "protocolVersion": "1.0"
-    }
-  ],
-
+  "name": "Alpaca Connectors Operator",
+  "description": "Operates this repository's supported Alpaca asset, account, holdings, Universe, market-data, ETF weight signal, rebalance, and analytical ETF portfolio workflows through verified project tools.",
+  "version": "0.1.34",
   "capabilities": {
-    "streaming": false,
-    "pushNotifications": false,
-    "extendedAgentCard": false
+    "extensions": [
+      {
+        "uri": "https://mainsequence.ai/a2a/extensions/response-kind/v1",
+        "description": "Select whether message:send returns a completed message or an asynchronous task.",
+        "required": false,
+        "params": {
+          "supportedResponseKinds": [
+            "message"
+          ],
+          "defaultResponseKind": "message"
+        }
+      }
+    ]
   },
-  "securitySchemes": {},
-  "securityRequirements": [],
-  "defaultInputModes": [
-    "application/json"
-  ],
-  "defaultOutputModes": [
-    "application/json"
-  ],
   "skills": [
     {
-      "id": "asset_registration",
-      "name": "Asset Registration",
-      "description": "Plan or execute the repository's strict asset-registration workflow through `alpaca-connectors asset register`, including exact Alpaca symbol registration and ETF-seed expansion through a supported component provider, with OpenFIGI resolution required before assets are written.",
-      "tags": [],
+      "id": "asset-registration",
+      "name": "Alpaca Asset Registration",
+      "description": "Inspect canonical Alpaca-backed Assets and plan or execute exact-symbol registration using a registered Account's Secret references.",
+      "tags": [
+        "alpaca",
+        "assets",
+        "registration"
+      ],
       "examples": [
-        "Register NVDA and AAPL through the supported asset registration flow."
+        "Plan registration for AAPL and NVDA through my registered Alpaca account."
       ],
-      "inputModes": [
-        "application/json"
-      ],
-      "outputModes": [
-        "application/json"
-      ]
+      "path": ".agents/skills/asset_registration/SKILL.md"
     },
     {
-      "id": "holdings_category",
-      "name": "Holdings Category",
-      "description": "Manage durable UniverseSource rows and plan or execute source-UID-backed synchronization, materializing an AssetCategory only when extracted constituents resolve cleanly to registered assets.",
-      "tags": [],
+      "id": "account-workflow",
+      "name": "Alpaca Accounts And Holdings",
+      "description": "Register and maintain Alpaca Accounts by Secret name, then inspect or capture their ms-markets holdings snapshots.",
+      "tags": [
+        "alpaca",
+        "accounts",
+        "holdings"
+      ],
       "examples": [
-        "Create or refresh a holdings-backed universe after confirming all extracted holdings are registered."
+        "Register a paper account from these two Main Sequence Secret names and show its initial holdings."
       ],
-      "inputModes": [
-        "application/json"
-      ],
-      "outputModes": [
-        "application/json"
-      ]
+      "path": ".agents/skills/account_workflow/SKILL.md"
     },
     {
-      "id": "stock_bars",
-      "name": "Stock Bars",
-      "description": "Maintain reusable Alpaca bar configurations, resolve explicit Assets, active universes, or recent account holdings, query migrated price datasets, and execute updates through the reusable AlpacaStockBarsNode without accepting an output dataset UID.",
-      "tags": [],
+      "id": "holdings-category",
+      "name": "ETF Universes",
+      "description": "Maintain ETF extraction sources and registered Universes, then bulk materialize linked AssetCategory members and one observed weight frame.",
+      "tags": [
+        "etf",
+        "universes",
+        "asset-categories"
+      ],
       "examples": [
-        "Resolve a stored daily bar configuration without running the node."
+        "Preview and extract the components for this registered ETF Universe using my selected account."
       ],
-      "inputModes": [
-        "application/json"
+      "path": ".agents/skills/holdings_category/SKILL.md"
+    },
+    {
+      "id": "stock-bars",
+      "name": "Alpaca Stock Bars",
+      "description": "Manage stored Alpaca bar configurations, resolve their configured Asset scope and migrated dataset, run updates, and query observations.",
+      "tags": [
+        "alpaca",
+        "market-data",
+        "bars"
       ],
-      "outputModes": [
-        "application/json"
-      ]
+      "examples": [
+        "Resolve this daily Universe-backed bars configuration and run its update Job."
+      ],
+      "path": ".agents/skills/stock_bars/SKILL.md"
+    },
+    {
+      "id": "etf-weight-signals",
+      "name": "ETF Weight Signals",
+      "description": "Create, inspect, schedule, and run Universe-backed ETF weight signal configurations with one durable Job per configuration.",
+      "tags": [
+        "etf",
+        "signals",
+        "jobs"
+      ],
+      "examples": [
+        "Create a daily ETF weight signal for this Universe and account, then run it once."
+      ],
+      "path": ".agents/skills/etf_weight_signals/SKILL.md"
+    },
+    {
+      "id": "etf-portfolios",
+      "name": "Analytical ETF Portfolios",
+      "description": "Manage calendar-event rebalance rules and analytical ETF portfolios built from stored weight signals and Alpaca bars, including history and statistics.",
+      "tags": [
+        "etf",
+        "portfolios",
+        "rebalancing"
+      ],
+      "examples": [
+        "Build and run an analytical ETF portfolio from this signal, bars configuration, and market-close rebalance rule."
+      ],
+      "path": ".agents/skills/etf_portfolios/SKILL.md"
     }
   ]
 }

@@ -1,6 +1,6 @@
 ---
 name: code-repository-workflows
-description: Create and validate backend-managed API 2.2.0 deployment declarations under .mainsequence/workflows, including explicit IANA-timezone Job crontabs, target-owned environment variables, FastAPI browser origins, and authenticated-repository-action-authorized Static Site navigation placement with repository-backed icons.
+description: Create and validate backend-managed API 2.2.0 deployment declarations under .mainsequence/workflows, including scheduled Job argument vectors and IANA-timezone crontabs, combined REST/WebSocket FastAPI releases, target-owned environment variables, FastAPI browser origins, and authenticated-repository-action-authorized Static Site navigation placement with repository-backed icons.
 ---
 
 # Main Sequence CodeRepository Workflows
@@ -77,14 +77,14 @@ same DeploymentRun; do not call image creation again.
 - Every file is independent and requires `api_version`, `name`, and
   `resources`.
 - Version `2.2.0` is current; `2.1.0` and `2.0.0` remain supported. All support `job`,
-  `resource_release`, including `widget_extension`, and
+  `resource_release`, and
   `code_repository_coding_agent`. Runtime targets may use target-owned `env_vars`.
   Versions `2.1.0` and `2.2.0` accept approved Static Site
   `navigation_link` placement; `2.2.0` adds repository-backed
   `navigation_link.icon_mask_path`. Pre-`2.0.0` versions are rejected.
 - Each resource has a stable `key`, a supported `kind`, and a typed `spec`.
 - `spec` fields follow the canonical backend create/update endpoint contract.
-- Every runtime, static-site, or widget-extension `resource_release` spec may
+- Every runtime or static-site `resource_release` spec may
   set positive `revision_retention_count`; omission defaults to `3`. Keep it
   beside `automatic_redeployment`, never inside the tag-promotion policy.
 - The validation endpoint is read-only and uses the same validator as
@@ -129,8 +129,7 @@ env_vars:
 `code_repository_coding_agent`. Omission preserves an existing target mapping, an
 empty list clears it, and a present non-empty list replaces it. Static sites
 reject this field because `build_environment` is their separate build-time
-contract. Widget extensions reject both fields because their SDK build profile
-is fixed.
+contract.
 
 These are non-secret literals committed to Git. Never place passwords, API
 keys, access tokens, private keys, provider credentials, or signing material
@@ -229,7 +228,6 @@ whether the declaration needs an image:
 | --- | --- | --- |
 | Job | Either | The workflow never accepts an image or commit selector. The backend creates or reuses the exact image identity for the immutable repository-event commit and keeps the Job non-runnable until it is verified and digest-pinned. |
 | Static site | Either | No runtime image UID is needed. The backend owns the static-site build. Optional `navigation_link.icon_mask_path` is a bounded monochrome presentation asset, not a runtime image selector. |
-| Widget extension | Always enabled | No runtime image or CodeRepositoryResource UID is accepted. The backend invokes the fixed SDK widget build through the existing ResourceReleaseRun pipeline. |
 | CodeRepository Coding Agent | Either | No code-repository-image or CodeRepository Executor image UID is needed. The backend builds the verified image chain. |
 | Runtime ResourceRelease (`fastapi` or runtime `agent`) | Enabled | `related_image_uid` is not needed. If present for compatibility, the backend ignores it. |
 | Runtime ResourceRelease (`fastapi` or runtime `agent`) | Disabled | `related_image_uid` is required and selects the explicit verified code repository image. |
@@ -256,6 +254,9 @@ Every workflow Job declaration must include explicit future-promotion intent:
     cpu_request: "1"
     memory_request: "2"
     max_runtime_seconds: 3600
+    scheduled_command_args:
+      - sync
+      - --scheduled
     automatic_redeployment:
       enabled: true
       tag_regex: null
@@ -268,6 +269,18 @@ launch format and workflow validation rejects it without conversion.
 `description` is optional human-readable metadata. Omission preserves an
 existing Job description during reconciliation, and an explicit empty string
 clears it. It never affects runtime or deployment identity.
+
+`scheduled_command_args` is optional persisted Job configuration. Omission
+preserves the existing list, an explicit empty list clears it, and a non-empty
+list replaces it. Every item is one exact string argument. Do not trim,
+deduplicate, split, merge, or parse the values; empty and whitespace-only
+strings, repeated flags, leading hyphens, and embedded spaces are preserved.
+Raw strings, null, and non-string items are invalid.
+
+Each scheduler-created JobRun snapshots the current list into its own
+`command_args`; later workflow changes affect only future scheduled runs.
+Manual starts do not inherit this list. Their omitted `command_args` remain
+empty and an explicit manual list remains authoritative for that run.
 
 During the one-way lean-Python ABI cutover, the backend maintenance lock may
 temporarily reject workflow-owned Python image preparation or deployment. Do
@@ -332,33 +345,6 @@ code-repository-image UID, a CodeRepository Executor image UID, or a prebuilt im
 deployment service builds the verified code-repository-image and executor-image chain,
 so `code_repository_image.create` is not a prerequisite.
 
-## Widget Extensions
-
-Declare every Command Center widget implementation, including first-party
-widgets, through the ordinary `resource_release` workflow kind:
-
-```yaml
-- key: command-center-widgets
-  kind: resource_release
-  spec:
-    release_kind: widget_extension
-    name: command-center-widgets
-    entrypoint: src/extensions/table.ts
-```
-
-This spec accepts exactly `release_kind`, `name`, required `entrypoint`, and optional
-`root_directory`. Do not add `extension_id`, `resource_uid`,
-`related_image_uid`, build commands, output paths, environment, secrets,
-`automatic_deployment`, or `automatic_redeployment`. Automatic deployment is
-forced on and first application queues the canonical exact-commit
-`ResourceReleaseRun`; later repository events reuse the same resource-release
-policy, idempotency, queue, and run history.
-
-The manifest `id` and SemVer are validated outputs of the fixed SDK workload
-build and are retained in immutable publications. They are not workflow or
-release fields. A run with no installed fixed workload adapter blocks
-explicitly; it never falls through to a Knative runtime deployment.
-
 For Job `task_schedule` declarations, include `schedule.timezone` on every
 crontab using a canonical IANA identifier such as `UTC` or `Europe/Vienna`.
 Cron fields are wall-clock values in that zone; do not pre-convert them to a
@@ -388,6 +374,48 @@ from that artifact; a retry never re-reads branch HEAD or asks the workflow
 author for a bucket, URI, credential, or image selector.
 
 ## ResourceRelease Automatic Redeployment
+
+A FastAPI application may expose ordinary HTTP/REST routes and
+FastAPI/Starlette WebSocket routes from the same application factory. Declare
+that combined application once as one `resource_release` with
+`release_kind: fastapi`. The indexed `resource_uid` identifies the source that
+loads the one FastAPI instance; both transports use the same exact-event image,
+immutable release revision, stable release URL, Knative Service, Uvicorn
+process, and DeploymentRun.
+
+Do not add another resource, release kind, `websocket_enabled` field, gateway
+field, protocol-adapter field, ping/message/compression fields, or ticket
+settings. WebSocket protocol support is an unconditional property of the
+standard FastAPI runtime; Django, Pod Deployment Orchestrator, and
+infrastructure own its connection policy and gateway rollout.
+`automatic_redeployment.enabled`
+and `tag_regex` decide whether later exact repository events promote the whole
+FastAPI application; they do not enable WebSocket transport.
+
+One automatic declaration therefore looks the same whether it contains only
+REST routes, only WebSocket routes, or both:
+
+```yaml
+- key: orders-api
+  kind: resource_release
+  spec:
+    release_kind: fastapi
+    resource_uid: "00000000-0000-4000-8000-000000000002"
+    automatic_redeployment:
+      enabled: true
+      tag_regex: null
+    cors_allowed_origins:
+      - "https://*.site-dev.main-sequence.app"
+```
+
+The first eligible application creates the existing `source=create`,
+`operation=build_and_deploy` run; later eligible commits create the existing
+`source=repository_event` run. Both reuse the public
+`resource_release.fastapi.build_and_deploy` pipeline and deploy the combined
+application atomically. A failed candidate leaves the previous active
+revision serving. Revision promotion may drain or disconnect existing sockets;
+clients reconnect through the stable release URL, and browser clients obtain a
+new one-time ticket for every connection.
 
 Use the file-only `automatic_redeployment` block when future repository events
 should redeploy a ResourceRelease:

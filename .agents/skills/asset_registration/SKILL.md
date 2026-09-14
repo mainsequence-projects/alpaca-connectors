@@ -1,76 +1,47 @@
 ---
 name: alpaca-asset-registration
-description: Use this skill when the task is about the repository's supported asset-registration workflow. This skill owns provider-native Alpaca UUID registration with optional OpenFIGI enrichment through `alpaca-connectors asset register`.
+description: Register exact Alpaca US equity symbols as canonical Main Sequence Assets, using a registered Account's Secret names and optional OpenFIGI enrichment.
 ---
 
 # Alpaca Asset Registration
 
-## Overview
+Use this skill to inspect registered Alpaca-backed Assets or to plan and execute exact-symbol
+registration. In a CodeRepository Executor session, use `alpaca_query_assets` and
+`alpaca_register_assets`. In a shell, use the installed `alpaca-connectors` command.
 
-Use this skill when the task is about registering Alpaca US equity assets into Main Sequence.
+## Identity And Inputs
 
-The supported operator surface is:
+- Require a registered `account_uid`; its stored Main Sequence Secret names resolve provider
+  credentials at runtime. Never request or accept API-key values.
+- Require explicit symbols. Asset registration never expands ETF seeds or extracts components.
+- Treat Alpaca's immutable asset UUID as authoritative:
+  `Asset.unique_identifier = ALPACA::<alpaca_asset_uuid>`.
+- Require one connector-owned `AlpacaAssetDetails` row for each Alpaca Asset.
+- Preserve Alpaca `status` and `tradable` as facts, not eligibility gates.
+- Treat OpenFIGI as optional enrichment. Missing FIGI data or an OpenFIGI outage never blocks an
+  otherwise valid Alpaca registration.
 
-- `alpaca-connectors asset register`
+For Universe-sized work, resolve the all-status Alpaca catalog once, use bulk MetaTable writes,
+and publish all `AssetSnapshot` rows through one updater execution. Never issue one provider or
+Main Sequence request per symbol.
 
-This workflow has one authoritative identity contract:
+## Workflow
 
-- the caller selects a registered Alpaca account by `--account-uid`
-- provider credentials resolve only from the Main Sequence Secret names stored on that account
-- the symbol must exist in Alpaca
-- Alpaca must provide an immutable asset UUID
-- `Asset.unique_identifier` is `ALPACA::<alpaca_asset_uuid>`
-- every connector-owned Asset has a required `AlpacaAssetDetails` row keyed by `Asset.uid`
-- OpenFIGI details are optional enrichment and never block registration
-- symbols missing from Alpaca are reported and not registered
+1. Query existing assets with `alpaca_query_assets` operation `list` or `get` when needed.
+2. Call `alpaca_register_assets` with operation `plan` and a request containing `account_uid`,
+   `symbols`, and optional `timeout`.
+3. Report missing Alpaca symbols and OpenFIGI warnings separately.
+4. Execute only when the user requested registration, using the identical request with operation
+   `execute`.
+5. Verify returned canonical Asset UIDs and any symbols that were not registered.
 
-## This Skill Can Do
+Shell equivalents:
 
-- explain or update the asset-registration CLI flow
-- keep the registration behavior thinly orchestrated through `src/cli/asset.py`
-- change the reusable registration logic under `src/assets/alpaca_us_equities.py`
-- maintain the project-owned `AlpacaAssetDetails` schema and migration wiring
-- keep CLI, API, application progress, tests, and docs aligned with provider-native identity
+```shell
+alpaca-connectors asset register --account-uid <ACCOUNT_UID> --symbols NVDA,AAPL
+alpaca-connectors asset register --account-uid <ACCOUNT_UID> --symbols NVDA,AAPL --execute
+```
 
-## This Skill Must Not Claim
-
-- custom-asset fallback registration behavior
-- that missing Alpaca symbols can be forced through the workflow
-- that a FIGI is required or that FIGI is the canonical Asset identifier
-- ownership of ETF category membership refresh or stock-bar publishing
-- that the Assets workflow expands ETF seeds; provider-derived constituents belong to Universe Run
-
-## Identity And Enrichment
-
-Registration must:
-
-1. resolve the input symbol against Alpaca;
-2. validate Alpaca's asset UUID;
-3. resolve or upsert `Asset(unique_identifier="ALPACA::<uuid>")`;
-4. upsert required `AlpacaAssetDetails` from the Alpaca response;
-5. optionally upsert the existing ms-markets `OpenFigiDetails` row when enrichment succeeds.
-
-Universe-sized registration must use the ms-markets bulk MetaTable upsert operation for each row
-type and publish all AssetSnapshot rows through one `AssetSnapshot.set_snapshots([...]).run(...)`
-execution. Never launch one TimeIndexTableUpdater run per constituent.
-
-OpenFIGI timeouts, connectivity failures, invalid responses, and unmatched symbols are explicit
-warnings. They must not set `can_register=false`, omit the Alpaca asset, or fail execution.
-
-## Supported Inputs
-
-- a required registered Alpaca account via `--account-uid`
-- required exact symbols via `--symbols`
-- Alpaca lifecycle fields such as `status` and `tradable` are persisted provider facts, never
-  registration eligibility gates; exact symbol sets resolve through one all-status bulk catalog
-  request, never one provider request per symbol
-- dry run by default; `--execute` for writes
-
-## Examples
-
-- `alpaca-connectors asset register --account-uid <ACCOUNT_UID> --symbols NVDA,AAPL`
-- `alpaca-connectors asset register --account-uid <ACCOUNT_UID> --symbols BRKB --execute`
-
-For provider-derived constituents, configure an `AssetUniverse` and Run it. That workflow calls the
-same registration service with the extracted explicit symbols and the account selected for that
-Run. The account is not stored on the Universe.
+Stop if the account does not exist, its Secret references cannot resolve, Alpaca supplies no
+immutable asset UUID, or a symbol has neither one current-catalog identity nor one unique stored
+Alpaca identity.

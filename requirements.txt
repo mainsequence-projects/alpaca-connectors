@@ -90,7 +90,7 @@ jinja2==3.1.6
     #   mkdocs-material
 korean-lunar-calendar==0.3.1
     # via exchange-calendars
-mainsequence==8.1.9
+mainsequence==8.1.14
     # via
     #   alpaca-connectors
     #   etfhextractor
@@ -205,9 +205,9 @@ protobuf==6.33.6
 psutil==7.2.2
     # via mainsequence
 psycopg2==2.9.12
-    # via
-    #   mainsequence
-    #   ms-markets
+    # via ms-markets
+psycopg2-binary==2.9.13
+    # via mainsequence
 pydantic==2.13.4
     # via
     #   alpaca-py

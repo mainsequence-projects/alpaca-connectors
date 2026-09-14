@@ -1,10 +1,10 @@
 # AGENTS.md
 
-You are a dual-mandate agent. Follow the project-specific instructions in this file and the
+You are a dual-mandate agent. Follow the CodeRepository-specific instructions in this file and the
 relevant skills, while also keeping in mind that application surfaces, data, and implementation
 operate within the Main Sequence platform and must follow Main Sequence platform instructions.
 
-## Project-Specific Instructions
+## CodeRepository-Specific Instructions
 
 This repository is the Alpaca connector project for Main Sequence.
 
@@ -18,13 +18,15 @@ Primary project capabilities:
 - publish Alpaca stock-market data for one asset or a reusable asset universe
 - build ETF-tracking ms-markets portfolios from ETF holdings signals and interpolated Alpaca bars
 - create and operate one dedicated scheduled Job per Universe-backed Alpaca ETF signal
-- expose thin FastAPI endpoints that wrap existing Project State, Assets, and Universes behavior
+- expose thin FastAPI endpoints for the supported project state, Asset, Account, holdings,
+  Universe, bars, ETF signal, rebalance, portfolio, and JobRun operations
 
 Supported operator surfaces:
 
 - installed CLI: `alpaca-connectors`
 - reusable implementation modules under `src/`
 - thin FastAPI surface under `api/`
+- structured Tau project tools under `.tau/extensions/alpaca_connectors/`
 - repository-local scheduled-job entrypoints under `src/jobs/`
 
 Repository rules:
@@ -132,17 +134,28 @@ FastAPI surface:
 
 Project-to-agent boundary:
 
-- this repository is being prepared for agentic capabilities through project metadata and skills,
-  not by introducing a separate local runtime under `agents/`
-- do not assume an `agent.py` entrypoint exists or is required for this project unless the user
-  explicitly asks for one
+- this repository exposes one CodeRepository Coding Agent through `.agents/agent_card.json`, six
+  repository-owned skills, and the structured tools registered by
+  `.tau/extensions/alpaca_connectors/extension.py`; do not introduce a separate `agents/` runtime
+- use Tau tools in deployed CodeRepository Executor or A2A sessions and use the installed
+  `alpaca-connectors` CLI in shell workflows; both must reuse the same project services
+- load read-only query tools in parallel and execute mutations sequentially
+- never expose an Organization Environment selector; the deployed CodeRepositoryBranch resolves it
+  automatically
+- never accept Alpaca credential values; Account operations accept visible Main Sequence Secret
+  names only
+- destructive Tau operations require exact `DELETE <uid>` confirmation
+- long-running bars, signal, and portfolio updates must submit their existing Main Sequence Jobs
+  and return a JobRun UID; inspect them with `alpaca_get_job_run_status`
 - agent-facing descriptions must stay within supported local project behavior: asset registration,
-  explicit Asset Universe registration and Run, account registration, market-data planning and updates, analytical portfolio
-  construction, Universe-backed signal Job lifecycle, and the existing API support surface
-- do not invent trading, portfolio-management, or platform-release capabilities that are not
-  represented in the local repo
-- when documenting agent capabilities, treat the existing CLI and reusable modules as the action
-  surface
+  explicit Asset Universe registration and component extraction, Account registration and holdings,
+  stored market-data updates, Universe-backed ETF signal Jobs, rebalance configuration, and
+  analytical ETF portfolio construction
+- do not invent trading, order submission, brokerage portfolio management, arbitrary SQL or shell,
+  or generic platform-release capabilities
+- route specialized work through the repository-owned `alpaca-asset-registration`,
+  `alpaca-account-workflow`, `alpaca-holdings-category`, `alpaca-stock-bars`,
+  `alpaca-etf-weight-signals`, and `alpaca-etf-portfolios` skills
 
 Operational notes:
 

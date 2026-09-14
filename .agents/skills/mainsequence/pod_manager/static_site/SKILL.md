@@ -52,7 +52,7 @@ This skill does not own:
 
 - frontend architecture or source layout;
 - framework-specific application scaffolding;
-- resource views, actions, widgets, workspaces, themes, or embeds;
+- application UI resources, actions, themes, or embeds;
 - Command Center SDK contracts or public entrypoints;
 - package selection, dependency versions, or package-manager behavior;
 - CodeRepository API design or browser authentication; or
@@ -131,8 +131,8 @@ Before implementing or changing the frontend:
 
 6. Start with the installed `use-command-center-sdk` skill and use the
    applicable installed skills for surface selection, resources, views,
-   actions, widgets, workspaces, themes, embeds, SDK extension, contract
-   evolution, and verification.
+   actions, themes, embeds, SDK extension, contract evolution, and
+   verification.
 
 The installed SDK version is authoritative for frontend behavior. Do not use
 this MCP skill as a substitute for those skills, summarize their contracts
@@ -262,6 +262,12 @@ map and never put secret material in it.
 Follow the general Resource Release skill for explicit deployment, ambiguous
 result handling, and `deployment_run.list/get` observation. Static deployment
 history uses `target_type=static_site`.
+
+When run state alone does not explain a failed build or activation, use
+`mainsequence://platform/skills/log-exploration` with the exact
+`deployment_run.logs` tool or a bounded `deployment_run.search_logs` query in
+the release's exact Organization Environment. Do not query build providers or
+storage directly, and do not copy transient log rows into static-site design.
 
 Static build attempts expose the complete declared build pipeline under
 `pipeline.steps`; explicit activation/rollback attempts use the shorter

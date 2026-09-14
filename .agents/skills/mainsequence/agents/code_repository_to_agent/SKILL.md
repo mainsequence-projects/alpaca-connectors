@@ -18,14 +18,14 @@ CodeRepository itself into a coding agent.
 
 ## Preserve The Boundary
 
-A code-repository-backed coding agent operates on the capabilities and instructions of
+A code-repository-backed coding agent operates on the verified behavior and instructions of
 its code repository. Preparing that surface does not require creating an
 `agents/` directory or an `agent.py` implementation.
 
 Do not:
 
-- invent capabilities that the repository does not implement or document;
-- describe managed Main Sequence scaffold skills as repository capabilities;
+- invent behavior that the repository does not implement or document;
+- describe managed Main Sequence scaffold skills as repository-owned skills;
 - create or modify a deployed platform `Agent` as part of repository
   preparation;
 - put runtime endpoints, credentials, or deployment configuration in the
@@ -105,21 +105,31 @@ AGENTS.md
 └── skills/
     └── <repository-skill>/
         └── SKILL.md
+.tau/
+└── extensions/
+    └── <tool-package>/
+        ├── extension.py
+        └── <tool-helper>.py
 ```
 
 The managed `.agents/skills/mainsequence/` tree contains platform and
-SDK guidance. Never list that managed tree as a capability of the code repository
+SDK guidance. Never list that managed tree as a repository-owned skill of the code repository
 agent. Only repository-owned skills outside that tree belong in the source card.
+Tau extension tools are discovered by the deployed Tau runtime from
+`.tau/extensions`; they are not listed as source-card skills.
 
 ## Workflow
 
 1. Inspect the repository purpose, documentation, implemented behavior, and
    existing agent artifacts.
 2. State the intended agent role and an observable definition of success.
-3. Verify every capability that the agent will claim.
+3. Verify every behavior that the agent will claim, including any CLI
+   commands or Tau project tools that repository-owned skills reference.
 4. Create or update the exact `## CodeRepository-Specific Instructions` section in
    `AGENTS.md`.
 5. Create or update focused repository-owned skills under `.agents/skills/`.
+   When a skill should use a structured Tau project tool, create or update the
+   tool adapter under `.tau/extensions/<tool-package>/extension.py`.
 6. Create or update `.agents/agent_card.json` from the verified repository
    state.
 7. Validate the instructions, skill files, source card, and all referenced
@@ -132,6 +142,11 @@ agent. Only repository-owned skills outside that tree belong in the source card.
    template for their exact shape. Those literals configure only the service
    backing Job and cannot create platform Secrets/Constants or select branch,
    environment, harness, image, or runtime credentials.
+9. If deployment or runtime availability is failed or inconclusive, use
+   `mainsequence://platform/skills/log-exploration` for the exact
+   DeploymentRun or for a bounded Agent/AgentSession search in its exact
+   Organization Environment. Keep returned log evidence out of repository
+   instructions, source cards, and repository-owned skills.
 
 When the user asks only for a plan, stop after presenting the plan.
 
@@ -150,9 +165,22 @@ Main Sequence instructions surrounding that section.
 
 ## Repository-Owned Skills
 
-Each repository skill must correspond to a real, verified repository capability.
+Each repository skill must correspond to real, verified repository behavior.
 Give it a narrow trigger, explicit inputs and outputs, concrete validation, and
 clear stop conditions.
+
+A repository-owned skill may route work to installed console scripts, Tau
+project tools, or both. It must name the executable evidence truthfully. When a
+skill references a Tau project tool, verify that the repository contains the
+extension package under `.tau/extensions` and that the tool name, inputs,
+outputs, and side effects match the skill's workflow.
+
+Choose the execution surface that matches the current context. In durable
+CodeRepository Executor or A2A execution, use structured repository Tau tools
+when the repository exposes an appropriate tool. In shell, terminal, or manual
+workflows, use the repository CLI. Do not invoke both surfaces in one answer
+unless the requested workflow genuinely spans both surfaces or requires
+cross-verification.
 
 CodeRepository Executor images already contain the prepared code repository environment.
 Runtime command examples in repository-owned skills must invoke the installed
@@ -171,6 +199,56 @@ Python environment. This validation is static and does not execute the command.
 Do not create a skill merely to make the agent appear more capable. If the
 underlying behavior is missing, report the gap and implement it only when the
 user authorizes that repository work.
+
+## Repository Tau Extension Tools
+
+Use Tau extension tools for narrow project actions that benefit from structured
+arguments, structured results, native cancellation, progress updates, execution
+modes, Tau hooks, and semantic tool-call observability.
+
+Place each repository-owned Tau extension package under:
+
+```text
+.tau/extensions/<tool-package>/
+```
+
+The package must contain `extension.py`. Helper modules used only by the tool
+adapter should live beside it and use normal package-relative imports:
+
+```python
+from .formatting import render_summary
+```
+
+Keep reusable business logic in the repository's application package, preferably
+under `src/<project_package>/...` for Python repositories. The Tau adapter
+imports that implementation by package name:
+
+```python
+from project_coder.portfolios import calculate_portfolio
+```
+
+Do not mutate `sys.path` in a Tau extension and do not hard-code absolute local
+paths. The CodeRepository Executor ABI owns the effective import path:
+
+```text
+PYTHONPATH=/workspace/src:/workspace
+```
+
+A CLI adapter and a Tau `AgentTool` adapter may call the same shared Python
+service. Do not duplicate business logic merely to expose both surfaces.
+
+The source card does not list Tau project-tool schemas, extension diagnostics,
+tool-catalog digests, or loaded-tool counts. Those are runtime-owned Tau
+diagnostics after a durable session loads.
+
+Repository Tau tools may expose repository-owned structured behavior and
+repository-authored reference retrieval. They must not replace canonical SDK,
+MCP, or DRF-backed surfaces for live platform state, authorization-sensitive
+reads, resource discovery, deployment state, or persisted platform object state.
+They run with the deployed CodeRepository Executor's existing runtime identity,
+session context, filesystem, environment, and permissions. They do not grant
+new platform access, select another Organization Environment, impersonate
+another User, or bypass SDK, MCP, or DRF authorization.
 
 ## Repository Source Card
 
@@ -194,7 +272,7 @@ Use this source shape:
 ```json
 {
   "name": "Portfolio Risk Analyst",
-  "description": "Reviews portfolio risk using the verified capabilities of this repository.",
+  "description": "Reviews portfolio risk using the verified behavior of this repository.",
   "version": "1.0.0",
   "capabilities": {
     "extensions": [
@@ -228,7 +306,7 @@ Source-card rules:
 
 - Use a short, stable, kebab-case `id` for every skill.
 - Make skill IDs unique within the card.
-- Use non-empty, factual tags that aid capability discovery.
+- Use non-empty, factual tags that aid Agent discovery.
 - Keep every `path` repository-relative and point it to an existing Markdown
   skill file.
 - Do not reference `.agents/skills/mainsequence/`.
@@ -272,10 +350,13 @@ Before claiming the repository is prepared:
 - require non-empty `id`, `name`, `description`, and `tags` for every skill;
 - verify every skill ID is unique;
 - verify every referenced skill path exists inside the repository;
+- verify any skill-referenced Tau project tool has a corresponding
+  `.tau/extensions/<tool-package>/extension.py` package and does not mutate
+  `sys.path`;
 - verify the card does not reference the managed Main Sequence skill tree;
 - verify runtime shell examples invoke installed console scripts directly and
   do not bootstrap or mutate a Python environment;
-- compare every capability claim with actual repository behavior and
+- compare every behavior claim with actual repository behavior and
   documentation;
 - verify `AGENTS.md` routes work consistently with the source card; and
 - report that deployment and runtime availability remain separate steps.
@@ -284,9 +365,9 @@ Before claiming the repository is prepared:
 
 Report:
 
-1. the verified purpose and capabilities of the code repository agent;
+1. the verified purpose and behavior of the code repository agent;
 2. the repository-owned files created or changed;
 3. the validation performed;
-4. unsupported or unresolved capability claims; and
+4. unsupported or unresolved behavior claims; and
 5. the separate `code_repository_coding_agent` workflow deployment and its observed
    deployment-run state, when applicable.

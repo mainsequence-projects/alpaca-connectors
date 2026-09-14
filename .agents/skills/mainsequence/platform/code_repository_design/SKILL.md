@@ -1,6 +1,6 @@
 ---
 name: code-repository-design
-description: Design, explain, review, and maintain a Main Sequence CodeRepository architecture and its connected CodeRepository Blueprint. Use for initial CodeRepository design, organization-environment architecture, architectural changes, ontology maintenance, Blueprint review or reconciliation, and implementation handoff across MetaTables, TimeIndexMetaTables, TimeIndexTableUpdaters, jobs, APIs, CLI commands, code-repository-to-agent skills, and static sites including repository-backed navigation-mask intent.
+description: Design, explain, review, and maintain a Main Sequence CodeRepository architecture and its connected CodeRepository Blueprint. Use for initial CodeRepository design, organization-environment architecture, architectural changes, ontology maintenance, Blueprint review or reconciliation, and implementation handoff across MetaTables, TimeIndexMetaTables, TimeIndexTableUpdaters, jobs, combined REST/WebSocket FastAPI APIs, CLI commands, Tau project tools, code-repository-to-agent skills, and static sites including repository-backed navigation-mask intent.
 ---
 
 # Main Sequence CodeRepository Design
@@ -167,20 +167,9 @@ Keep these distinctions:
   policy evaluation and use `source=repository_event` runs. Direct
   ResourceRelease creation remains a separate ready-image-backed
   `source=create`, `operation=deploy` contract.
-- A widget extension is a `resource_release` deployment specialization, not a
-  new Blueprint design domain. Handoff uses `release_kind: widget_extension`
-  with `name`, required `entrypoint`, optional `root_directory`, and optional release-owned
-  `revision_retention_count`; automatic deployment and the
-  fixed SDK workload build are backend-owned. Never design an `extension_id`,
-  image selector, build command, environment, active deployment, or a second
-  publication-attempt system.
-  Consumption pins exact registered revisions through an environment-bound
-  workspace dependency plan, never the release's latest version. Public links
-  freeze a protected historical snapshot and recheck publisher release access;
-  ordinary workspace edits do not change the link's code dependencies.
 - Workflow APIs `2.0.0`, `2.1.0`, and `2.2.0` can carry non-secret target-owned `env_vars` for Jobs,
   runtime ResourceReleases, and CodeRepository Coding Agents. Static sites use
-  `build_environment`; widget extensions accept neither. These literals configure only the declared target or
+  `build_environment`. These literals configure only the declared target or
   its backing Job: they do not create or resolve platform Secrets/Constants,
   select an Organization Environment, write branch-wide configuration, or
   enter code-repository-image builds.
@@ -214,11 +203,18 @@ Keep these distinctions:
   context activation mechanism. Local Git selection remains repository
   navigation; the SDK derives and inserts any required local wire context
   internally.
-- An API is a consumer and composition surface, not hidden producer logic.
+- An API is a consumer and composition surface, not hidden producer logic. One
+  FastAPI API may own both ordinary HTTP/REST routes and
+  FastAPI/Starlette WebSocket routes when they share one application factory
+  and deployment lifecycle. They deploy as one existing `fastapi`
+  ResourceRelease, image, revision, stable URL, Knative Service, and Uvicorn
+  process; WebSocket is not a separate release kind or deployment target.
 - A CodeRepository CLI command is an executable CodeRepository interface, not the platform
   permission authority.
-- `code_repository_to_agent` exposes verified CodeRepository CLI workflows as truthful
-  CodeRepository-agent skills; it is not generic Agent administration.
+- `code_repository_to_agent` exposes verified CodeRepository behavior as truthful
+  CodeRepository-agent skills. A skill may be backed by CLI commands, Tau
+  project tools registered from `.tau/extensions`, or both; it is not generic
+  Agent administration.
 - `AutomaticRedeploymentPolicy` is target-owned and CodeRepositoryBranch-scoped. It
   refines the automatic-deployment master switch for one standalone Job,
   ResourceRelease, or CodeRepository Coding Agent; it is never a shared
@@ -493,6 +489,8 @@ Record:
 - optional `gpu_request` and `gpu_type`;
 - `spot`;
 - positive `max_runtime_seconds`;
+- optional `scheduled_command_args`, with one exact string per argument for
+  future scheduler-created JobRuns;
 - optional `task_schedule` using the existing interval or crontab schedule
   shape, including start-time or one-off intent when needed;
 - for every crontab, the canonical IANA timezone in which its wall-clock fields
@@ -502,6 +500,13 @@ Do not translate a calendar schedule to the designer's current UTC offset. The
 Job snapshots its chosen timezone and does not follow later Command Center
 preference changes. Treat an omitted legacy timezone as UTC-compatible but not
 as confirmed user intent; new designs should always state the zone.
+
+When scheduled execution needs arguments, record an exact ordered
+`scheduled_command_args` list. Do not collapse it into a shell string or trim,
+deduplicate, split, or otherwise normalize its items. The backend snapshots the
+current Job list into each future scheduler-created JobRun. Manual Job starts
+remain independent: omission still means an empty per-run list and an explicit
+manual `command_args` list is never merged with the scheduled configuration.
 
 The canonical creation flow infers the Job type from `execution_path`. Do not
 declare an independent type or command contract in the Blueprint. A `.ipynb`
@@ -532,6 +537,12 @@ JobRun whose existing runtime status is observed separately. The Blueprint's
 cross-component references and acceptance criteria do not become Job model
 fields.
 
+When implementation verification or diagnosis needs execution evidence, hand
+off to `mainsequence://platform/skills/log-exploration`: use the exact JobRun
+tool when its UID is known or bounded `job_run.search_logs` in one exact
+Organization Environment. Log filters, cursors, retention state, and returned
+rows are operational evidence and never Blueprint fields.
+
 ## Design APIs
 
 Use an API as a typed CodeRepository interface over accepted business behavior and
@@ -549,23 +560,39 @@ Record:
 - deployment/release expectation;
 - acceptance criteria.
 
+When one FastAPI application serves both HTTP/REST and WebSocket routes, keep
+them in one `apis[]` component unless the accepted architecture requires an
+independent lifecycle, scaling, security, or failure-isolation boundary. In
+the existing operations/routes contract:
+
+- describe HTTP method, path, request, response, and side effects for REST;
+- describe WebSocket path/upgrade intent, browser versus non-browser consumer,
+  handshake authentication, client/server message shapes and direction,
+  application subprotocols, close/error behavior, and reconnect expectations;
+- record one shared FastAPI release expectation and acceptance tests for both
+  transports.
+
+Do not add a WebSocket Blueprint domain, release kind, deployment target,
+workflow resource, or parallel application merely because one route upgrades
+the connection.
+
 Do not rebuild producer logic in an API. Reference the TimeIndexTableUpdater or MetaTable
 that owns the data.
 
-When implementation produces a deployable FastAPI, agent-runtime, static-site,
-or widget-extension target, hand the accepted release intent to the
+When implementation produces a deployable FastAPI, agent-runtime, or static-site
+target, hand the accepted release intent to the
 `resource-release` execution skill. Do not copy the live ResourceRelease
 serializer into the Blueprint.
 
+API acceptance criteria may require observable runtime behavior, but
+implementation diagnosis belongs to
+`mainsequence://platform/skills/log-exploration`. Use bounded
+`resource_release.search_logs` or the exact release/deployment-run log tool;
+do not copy the public log query vocabulary, cursors, or transient rows into
+the Blueprint.
+
 Managed Streamlit deployment is not a supported implementation handoff. Record
 the requirement as unresolved until the design chooses a supported target.
-
-For a widget-extension deliverable, record only why the CodeRepository needs the
-extension and the repository-relative source ownership needed for
-implementation handoff. Do not add a `widgets` top-level Blueprint domain or
-copy SDK manifest/instance contracts into CodeRepository design. The installed
-Command Center SDK skill bundle owns the manifest and executable module; the
-`code-repository-workflows` and `resource-release` skills own deployment.
 
 For a browser-called FastAPI, record the intended exact or wildcard browser
 origins as API deployment intent when the platform default is not sufficient.
@@ -597,6 +624,16 @@ If the accepted runtime release is implemented as an automatically managed
 repository workflow, also use `code-repository-workflows`: record source and promotion
 intent, but do not design, prebuild, or select `related_image_uid`. The backend
 owns image resolution after policy eligibility.
+
+For that combined FastAPI application, hand off exactly one workflow
+`resource_release` declaration with `release_kind: fastapi` and the indexed
+`resource_uid` that loads the FastAPI instance containing both route types.
+`automatic_redeployment` promotes the complete exact-commit application; it
+does not enable WebSockets. The standard FastAPI runtime always supports the
+transport and creates connection state only for an incoming upgrade attempt.
+Do not add `websocket_enabled`, Uvicorn adapter, ping, ticket, gateway, or
+second-resource fields. Django, the Pod Deployment Orchestrator, and
+infrastructure own connection policy and gateway rollout under ADR-059.
 
 ## Design The CodeRepository CLI
 
@@ -637,17 +674,20 @@ Record:
 For every CodeRepository-agent skill, record:
 
 - key, name, factual description, and rationale;
-- one or more exact `cli` command references;
+- one or more verified executable references through `cli_commands[]`,
+  `tau_tools[]`, or both;
 - when-to-use guidance and workflow;
 - inputs, outputs, constraints, examples, and acceptance criteria.
 
-Require every skill to reference at least one declared CLI command. A skill may
-compose several commands into a user workflow, but it must not duplicate the
-command contract, hide a mutation, or invent CodeRepository behavior.
+Require every skill to reference at least one declared CLI command or one
+declared Tau project tool. A skill may compose several executable references
+into a user workflow, but it must not duplicate the executable contract, hide a
+mutation, or invent CodeRepository behavior.
 
 Use the separate `code-repository-to-agent` platform skill to prepare repository
-instructions, CodeRepository-owned skill files, and the source card after the
-Blueprint is accepted and the referenced CLI behavior exists.
+instructions, CodeRepository-owned skill files, optional Tau extension tool
+adapters, and the source card after the Blueprint is accepted and the
+referenced executable behavior exists.
 
 CodeRepository Coding Agent deployment intent never includes a caller-built CodeRepository
 image or Code Repository Executor image. The backend owns both builds; its server-side
@@ -775,8 +815,11 @@ Before handoff, verify:
 - indexes cite concrete access patterns;
 - every TimeIndexTableUpdater output and grain agree with its MetaTable;
 - API data dependencies resolve;
+- a combined HTTP/WebSocket FastAPI API has one release/deployment expectation
+  unless an independent isolation decision is recorded;
 - every CLI command maps to real components and declares side effects;
-- every CodeRepository-agent skill references at least one compatible CLI command;
+- every CodeRepository-agent skill references at least one compatible CLI
+  command or Tau project tool;
 - every static-site dependency and consumer reference resolves;
 - every delegated static-site-to-FastAPI composition records exact deployed
   source and target release identity resolution, whether the platform CORS
@@ -837,6 +880,15 @@ This Git-driven lifecycle is deployed. A persisted signed push creates a
 missing CodeRepositoryBranch only when the Organization already owns the exact
 matching Environment. Otherwise the push is ignored and creates no branch. Do
 not design manual branch creation/import as an alternative lifecycle.
+
+Branch removal is scoped to one exact Organization Environment and requires
+edit authority on the parent CodeRepository. It always preserves the provider
+repository and provider Git branches. When a detail or bulk selection removes
+the final remaining CodeRepositoryBranch, Django atomically removes the
+exhausted logical CodeRepository and its local GitHubRepositoryBinding registry
+row as lifecycle cleanup under that branch operation. Directly selecting a
+logical CodeRepository for deletion remains a separate Organization-admin
+operation.
 
 Choose the public `code_repository_type` deliberately when the design establishes the
 primary CodeRepository scaffold: `python` or `vite_react`. The immutable value belongs
