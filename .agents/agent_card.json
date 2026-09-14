@@ -1,7 +1,7 @@
 {
-  "name": "Alpaca Connectors Operator",
+  "name": "Alpaca Agent",
   "description": "Operates this repository's supported Alpaca asset, account, holdings, Universe, market-data, ETF weight signal, rebalance, and analytical ETF portfolio workflows through verified project tools.",
-  "version": "0.1.38",
+  "version": "0.1.39",
   "capabilities": {
     "extensions": [
       {

@@ -47,7 +47,7 @@ class AgentArtifactsTests(unittest.TestCase):
         card = json.loads(AGENT_CARD_PATH.read_text(encoding="utf-8"))
         pyproject = tomllib.loads(PYPROJECT_PATH.read_text(encoding="utf-8"))
 
-        self.assertEqual(card["name"], "Alpaca Connectors Operator")
+        self.assertEqual(card["name"], "Alpaca Agent")
         self.assertEqual(card["version"], pyproject["project"]["version"])
         for runtime_field in (
             "supportedInterfaces",

@@ -1,4 +1,4 @@
-# Alpaca Connectors Agent
+# Alpaca Agent
 
 The repository exposes its existing operational capabilities as one Main Sequence CodeRepository
 Coding Agent. The agent is an additional project surface over the same reusable services used by
