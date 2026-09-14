@@ -67,6 +67,9 @@ The API `2.3.0` workflow enables automatic deployment and accepts every synchron
 and CodeRepository Executor image from the immutable repository event; the workflow contains no
 image, branch, Environment, or harness selector.
 
+The project keeps Uvicorn on the platform-executor-compatible `0.52` line with a non-exact
+`>=0.52.4,<0.53` project range; `uv.lock` records the reproducible installed version.
+
 The workflow declares:
 
 ```yaml
