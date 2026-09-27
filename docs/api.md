@@ -25,6 +25,11 @@ Selectable collections expose a separate `/discovery` response compatible with t
 resource adapter contract. Discovery responses are private, revalidated, and vary on delegated
 authorization and Resource Release headers.
 
+Bulk actions advertised by discovery use full app-relative `endpoint` and `preflight_endpoint`
+paths, such as `/v1/accounts/actions/remove`. The resource adapter sends both requests to those
+exact paths with the action's `method`; it does not resolve them against the collection path. The
+offline API tests require every advertised path and method to match a registered route.
+
 The provider-neutral HTTP contracts come from `msm.api.http` in `ms-markets>=1.0.14`:
 collection pagination, resource discovery, bulk-action execution and preflight, sanitized generic
 errors, and observable-operation wire models. Alpaca-specific resource declarations, option

@@ -31,6 +31,7 @@ from msm.api.http import (
 )
 from msm.api.http import ResourceCollection as MarketsResourceCollection
 from msm.api.http import api_http_error as markets_api_http_error
+from starlette.routing import Match
 
 from src.holdings.services import AccountHoldingsRegistryError
 from src.platform_secrets import PlatformSecretAccessError
@@ -66,6 +67,23 @@ def _asset_universe_response(
         created_at=now,
         updated_at=now,
     )
+
+
+def _discovery_paths() -> list[str]:
+    """GET path for every discovery route, with placeholder path parameters."""
+    return [
+        route.path_format.format(
+            **{name: name.replace("_", "-") for name in route.param_convertors}
+        )
+        for route in app.routes
+        if isinstance(route, APIRoute) and route.path.endswith("/discovery")
+    ]
+
+
+def _matches_registered_route(method: str, path: str) -> bool:
+    """Whether the app would dispatch ``method path`` to one of its registered routes."""
+    scope = {"type": "http", "method": method, "path": path}
+    return any(route.matches(scope)[0] is Match.FULL for route in app.routes)
 
 
 class ApiAppTests(unittest.TestCase):
@@ -884,17 +902,7 @@ class ApiAppTests(unittest.TestCase):
         self.assertEqual(response.json()["blockers"], [blocker])
 
     def test_every_discovery_payload_obeys_manifest_column_and_action_constraints(self) -> None:
-        paths = [
-            "/v1/assets/discovery",
-            "/v1/accounts/discovery",
-            "/v1/accounts/account-uid/holdings/discovery",
-            "/v1/universe-sources/discovery",
-            "/v1/universes/discovery",
-            "/v1/market-data/bar-configurations/discovery",
-            "/v1/market-data/datasets/discovery",
-            "/v1/market-data/datasets/dataset-uid/observations/discovery",
-        ]
-        for path in paths:
+        for path in _discovery_paths():
             with self.subTest(path=path):
                 response = self.client.get(path)
                 self.assertEqual(response.status_code, 200)
@@ -914,10 +922,16 @@ class ApiAppTests(unittest.TestCase):
                         self.assertIn(column["sortable_key"], ordering_keys)
                     if "filter_key" in column:
                         self.assertIn(column["filter_key"], filter_keys)
-                for action in payload["bulk_actions"]:
-                    self.assertTrue(action["endpoint"].startswith("/"))
-                    if "preflight_endpoint" in action:
-                        self.assertTrue(action["preflight_endpoint"].startswith("/"))
+                # Command Center sends execute and preflight requests to these exact paths
+                # with the action method; they are not resolved against the discovery path.
+                unrouted_endpoints = [
+                    f"{action['method']} {endpoint}"
+                    for action in payload["bulk_actions"]
+                    for endpoint in (action["endpoint"], action.get("preflight_endpoint"))
+                    if endpoint is not None
+                    and not _matches_registered_route(action["method"], endpoint)
+                ]
+                self.assertEqual(unrouted_endpoints, [])
 
     def test_bar_configuration_discovery_names_the_universe_asset_source(self) -> None:
         response = self.client.get("/v1/market-data/bar-configurations/discovery")
