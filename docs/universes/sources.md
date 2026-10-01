@@ -21,7 +21,7 @@ blocked once an Asset Universe references the source, preserving the registered 
 ## Migration And Seed
 
 ```bash
-mainsequence migrations upgrade --provider src.migrations:migration head
+metatables migrations upgrade --provider src.migrations:migration head
 alpaca-connectors universe-source seed-defaults
 ```
 

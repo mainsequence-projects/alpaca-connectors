@@ -42,7 +42,7 @@ range.
 Apply project-owned schemas before running an update:
 
 ```bash
-mainsequence migrations upgrade --provider src.migrations:migration head
+metatables migrations upgrade --provider src.migrations:migration head
 ```
 
 Processes attach to those existing tables through `src.runtime.start_markets_engine()`; runtime

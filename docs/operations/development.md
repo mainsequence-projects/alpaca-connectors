@@ -4,11 +4,15 @@
 
 ```bash
 uv sync
-mainsequence code-repository refresh-token --path .
+mainsequence refresh-token
 mainsequence code-repository current --debug --json
-mainsequence migrations current --provider src.migrations:migration
-mainsequence migrations upgrade --provider src.migrations:migration head
+metatables migrations current --provider src.migrations:migration
+metatables migrations upgrade --provider src.migrations:migration head
 ```
+
+`mainsequence refresh-token` renews the saved session; the SDK keeps credentials in the operating
+system credential store, not in the CodeRepository `.env`. MetaTables schema commands come from the
+`metatables` CLI installed by `mainsequence-metatable`.
 
 Python 3.13 is required. `pyproject.toml` declares compatible ranges and intentionally does not pin
 exact dependency versions; `uv.lock` is the reproducible resolution.

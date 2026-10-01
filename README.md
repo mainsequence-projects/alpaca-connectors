@@ -43,12 +43,13 @@ contracts without moving business logic into the frontend.
 ## Install And Migrate
 
 Python 3.13 is required. Dependency ranges remain unlocked in `pyproject.toml`; `uv.lock` records
-the reproducible resolution.
+the reproducible resolution. The project runs on Main Sequence SDK 9, ms-markets 2, and the
+`mainsequence-metatable` client, which provides the `metatables` package and migration CLI.
 
 ```bash
 uv sync
-mainsequence code-repository refresh-token --path .
-mainsequence migrations upgrade --provider src.migrations:migration head
+mainsequence refresh-token
+metatables migrations upgrade --provider src.migrations:migration head
 alpaca-connectors portfolio prepare-interpolated-prices
 alpaca-connectors universe-source seed-defaults
 ```

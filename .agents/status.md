@@ -4,7 +4,9 @@
 
 - The repository resolves to CodeRepository `c4980dd0-db33-420c-9a3f-050815a03512`, branch
   `main`, CodeRepositoryBranch `945bfddd-5f1f-4541-a87a-faea3af6271f`.
-- Runtime versions are Python 3.13.11, Main Sequence SDK 8.0.7, and ms-markets 1.0.2.
+- `pyproject.toml` targets Python 3.13, Main Sequence SDK `>=9.0.1,<10`,
+  `mainsequence-metatable>=0.1.5,<0.2`, and ms-markets `>=2,<3`. The committed `uv.lock` and
+  `requirements.txt` are regenerated at release, once ms-markets 2 is published.
 - `pyproject.toml` uses compatible lower bounds and does not exactly pin Main Sequence packages
   or the `etfhextractor` Git dependency.
 - The project capability boundaries are Project State, Assets, Universes, Market Data, Accounts,

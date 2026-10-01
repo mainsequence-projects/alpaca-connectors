@@ -21,8 +21,9 @@
 - CodeRepositoryBranch UID: `945bfddd-5f1f-4541-a87a-faea3af6271f`
 - Branch: `main`
 - Python: `3.13.11`
-- Main Sequence SDK: `8.0.7`
-- ms-markets: `1.0.2`
+- Main Sequence SDK: `>=9.0.1,<10`
+- MetaTables client: `mainsequence-metatable>=0.1.5,<0.2` (imported as `metatables`)
+- ms-markets: `>=2,<3`
 - Migration namespace: `alpaca-connectors`
 - Alembic registry table: `alpaca_connectors__alembic_version`
 - Alembic head: `0001`
@@ -42,14 +43,14 @@ Core assets, accounts, holdings, calendars, and portfolio models remain owned by
 
 ```bash
 mainsequence login
-mainsequence code-repository refresh-token --path .
+mainsequence refresh-token
 mainsequence code-repository current --debug
 mainsequence code-repository update-sdk --path .
 mainsequence code-repository update AGENTS.md --path .
 mainsequence code-repository update-agent-skills --path .
-mainsequence migrations current --provider src.migrations:migration
-mainsequence migrations revision --provider src.migrations:migration -m "describe change"
-mainsequence migrations upgrade --provider src.migrations:migration head
+metatables migrations current --provider src.migrations:migration
+metatables migrations revision --provider src.migrations:migration -m "describe change"
+metatables migrations upgrade --provider src.migrations:migration head
 mainsequence code-repository jobs list --path .
 alpaca-connectors asset register --help
 alpaca-connectors holdings-category create --help

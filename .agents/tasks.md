@@ -54,6 +54,7 @@
 
 ### Preserve earlier SDK, ms-markets, and etfhextractor migrations
 
-- SDK 8.0.7 and ms-markets 1.0.2 remain current.
+- Main Sequence SDK 9, `mainsequence-metatable` 0.1, and ms-markets 2 are the current targets;
+  MetaTables imports and migration commands use `metatables`.
 - `etfhextractor 0.4.1` remains an external, unpinned-in-pyproject Git dependency.
 - The existing reviewed daily price job remains the only scheduled job.

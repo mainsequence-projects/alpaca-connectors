@@ -159,9 +159,10 @@ Project-to-agent boundary:
 
 Operational notes:
 
-- source `.env` and export `MAINSEQUENCE_AUTH_MODE=jwt` before live `mainsequence` or
-  `alpaca-connectors` runs that need authenticated platform access
-- before live platform checks, run `mainsequence code-repository refresh-token --path .`
+- source `.env` and export `MAINSEQUENCE_AUTH_MODE=jwt` before live `mainsequence`, `metatables`,
+  or `alpaca-connectors` runs that need authenticated platform access; the SDK keeps the session
+  in the operating-system credential store, never in `.env`
+- before live platform checks, run `mainsequence refresh-token`
 - account registration records the names of the Main Sequence Secrets containing Alpaca
   credentials; live holdings and price updates resolve those stored names at execution time
 - account registration and holdings capture resolve the whole position set from one Alpaca catalog
@@ -171,8 +172,11 @@ Operational notes:
 - if `mainsequence code-repository current --debug` reports that the local SDK is behind the
   latest GitHub version, prefer `mainsequence code-repository update-sdk --path .` before changing
   CLI behavior or troubleshooting scaffold commands
+- MetaTables come from the `mainsequence-metatable` client, not from the SDK: import table,
+  migration, and updater interfaces from `metatables` and follow the copied
+  `.agents/skills/metatables/` skills
 - apply project-owned MetaTable schema changes through
-  `mainsequence migrations upgrade --provider src.migrations:migration head`
+  `metatables migrations upgrade --provider src.migrations:migration head`
 
 Do not remove the `<!-- mainsequence-agent-scaffold:start schema=1 source=agent_scaffold -->`
 or `<!-- mainsequence-agent-scaffold:end -->` markers.
