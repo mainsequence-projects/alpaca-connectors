@@ -21,8 +21,8 @@
 - CodeRepositoryBranch UID: `945bfddd-5f1f-4541-a87a-faea3af6271f`
 - Branch: `main`
 - Python: `3.13.11`
-- Main Sequence SDK: `>=9.0.1,<10`
-- MetaTables client: `mainsequence-metatable>=0.1.5,<0.2` (imported as `metatables`)
+- Main Sequence SDK: `>=9.0.2,<10`
+- MetaTables client: `mainsequence-metatable>=0.1.6,<0.2` (imported as `metatables`)
 - ms-markets: `>=2,<3`
 - Migration namespace: `alpaca-connectors`
 - Alembic registry table: `alpaca_connectors__alembic_version`

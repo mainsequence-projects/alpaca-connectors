@@ -12,8 +12,8 @@ requires-python = ">=3.13,<3.14"
 dependencies = [
     # Keep compatible ranges here and let uv.lock capture the reproducible environment.
     "ms-markets>=2,<3",
-    "mainsequence>=9.0.1,<10",
-    "mainsequence-metatable>=0.1.5,<0.2",
+    "mainsequence>=9.0.2,<10",
+    "mainsequence-metatable>=0.1.6,<0.2",
     "alpaca-py",
     "playwright",
     "mkdocs>=1.6.1",
@@ -86,11 +86,6 @@ ignore = ["E203", "E501"]
 [tool.ruff.lint.isort]
 # Treat these as your own packages so they sort as "first-party".
 known-first-party = ["mainsequence","metatables","src","agents"]
-
-[tool.pytest.ini_options]
-# Import this repository's top-level `api` package from the repository root before
-# site-packages: mainsequence-metatable 0.1.5 also installs an unrelated top-level `api`.
-pythonpath = ["."]
 
 [tool.uv.sources]
 etfhextractor = { git = "https://github.com/mainsequence-projects/etfholdingextractor" }

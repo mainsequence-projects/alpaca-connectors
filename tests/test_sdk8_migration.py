@@ -24,8 +24,8 @@ from src.portfolios.etf_tracking import (
 
 
 def test_runtime_dependency_versions_match_the_sdk9_metatables_stack() -> None:
-    assert version("mainsequence") in SpecifierSet(">=9.0.1,<10")
-    assert version("mainsequence-metatable") in SpecifierSet(">=0.1.5,<0.2")
+    assert version("mainsequence") in SpecifierSet(">=9.0.2,<10")
+    assert version("mainsequence-metatable") in SpecifierSet(">=0.1.6,<0.2")
     assert version("ms-markets") in SpecifierSet(">=2,<3")
 
 
