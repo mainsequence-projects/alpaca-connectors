@@ -7,10 +7,7 @@ from unittest.mock import Mock, call, patch
 
 import pandas as pd
 import pytest
-from msm.models.assets.categories import (
-    AssetCategoryMembershipTable,
-    AssetCategoryTable,
-)
+from msm.models.assets.categories import AssetCategoryMembershipTable
 
 from src.assets import RegisteredAlpacaAssetReference
 from src.assets.alpaca_asset_details import build_alpaca_unique_identifier
@@ -28,7 +25,6 @@ from src.universes.services import (
     run_asset_universe,
 )
 from src.universes.sources import (
-    UniverseSourceTable,
     delete_universe_source,
     update_universe_source,
 )
@@ -120,7 +116,7 @@ def test_creation_persists_distinct_universe_source_and_category_uids_without_me
     )
 
 
-def test_list_query_scopes_governed_operations_with_metatable_models() -> None:
+def test_list_query_compiles_governed_page_and_count_operations() -> None:
     page_row = {
         "uid": "universe-uid",
         "source_uid": "source-uid",
@@ -154,16 +150,8 @@ def test_list_query_scopes_governed_operations_with_metatable_models() -> None:
 
     assert items == [page_row]
     assert total == 1
-    expected_models = [
-        UniverseSourceTable,
-        AssetCategoryTable,
-        AssetCategoryMembershipTable,
-        AssetUniverseTable,
-    ]
     assert compile_statement.call_count == 2
-    assert all(
-        call.kwargs["models"] == expected_models for call in compile_statement.call_args_list
-    )
+    assert all(call.kwargs["operation"] == "select" for call in compile_statement.call_args_list)
 
 
 def test_universe_detail_returns_linked_category_without_loading_member_assets() -> None:

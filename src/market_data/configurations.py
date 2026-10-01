@@ -335,8 +335,6 @@ def _configuration_asset_uids_by_configuration(
         statement,
         context=runtime.context,
         operation="select",
-        models=[AlpacaBarsConfigurationAssetTable],
-        access="read",
     )
     rows = operation_result_rows(execute_markets_operation(operation, context=runtime.context))
     memberships = {
@@ -411,8 +409,6 @@ def _replace_memberships(
         stale_memberships,
         context=runtime.context,
         operation="delete",
-        models=[AlpacaBarsConfigurationAssetTable],
-        access="write",
     )
     execute_markets_operation(delete_operation, context=runtime.context)
 
@@ -552,15 +548,11 @@ def list_bar_configurations(
         statement.limit(limit).offset(offset),
         context=runtime.context,
         operation="select",
-        models=[AlpacaBarsConfigurationTable],
-        access="read",
     )
     count_operation = compile_markets_statement(
         count_statement,
         context=runtime.context,
         operation="select",
-        models=[AlpacaBarsConfigurationTable],
-        access="read",
     )
     rows = [
         AlpacaBarsConfiguration.model_validate(row)

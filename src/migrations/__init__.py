@@ -5,7 +5,7 @@ from msm.models.assets.categories import AssetCategoryTable
 from msm.models.assets.core import AssetTable
 from msm_portfolios.models import SignalMetadataTable
 
-from mainsequence.meta_tables.migrations import (
+from metatables.migrations import (
     build_alembic_version_metatable,
     build_metatable_migration_provider,
     metadata_for_models,

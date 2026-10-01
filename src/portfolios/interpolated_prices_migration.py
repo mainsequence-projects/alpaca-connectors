@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from msm.models import AssetTable
 
-from mainsequence.meta_tables.migrations import (
+from metatables.migrations import (
     build_metatable_migration_provider,
     metadata_for_models,
 )

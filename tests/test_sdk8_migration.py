@@ -8,6 +8,7 @@ from unittest.mock import Mock, patch
 from etfhextractor.portfolio_publish import required_calendar_window
 from etfhextractor.portfolio_signal import ETFHoldingsSignal, ETFHoldingsSignalConfig
 from msm_portfolios.data_nodes.signals.storage import SignalWeightsStorage
+from packaging.specifiers import SpecifierSet
 
 from src.market_data.alpaca_bars import AlpacaStockBarsNode
 from src.market_data.storage import AlpacaStockBars1dSipAllStorage
@@ -22,9 +23,10 @@ from src.portfolios.etf_tracking import (
 )
 
 
-def test_runtime_dependency_versions_include_shared_http_toolkit() -> None:
-    assert version("mainsequence") == "8.1.14"
-    assert version("ms-markets") == "1.0.14"
+def test_runtime_dependency_versions_match_the_sdk9_metatables_stack() -> None:
+    assert version("mainsequence") in SpecifierSet(">=9.0.1,<10")
+    assert version("mainsequence-metatable") in SpecifierSet(">=0.1.5,<0.2")
+    assert version("ms-markets") in SpecifierSet(">=2,<3")
 
 
 def test_alpaca_bars_node_declares_sdk8_output_table() -> None:
@@ -97,7 +99,7 @@ def test_portfolio_price_source_resolves_the_migration_catalog_identity() -> Non
     )
 
     with patch(
-        "mainsequence.client.TimeIndexMetaTable.filter_by_body",
+        "metatables.TimeIndexMetaTable.filter_by_body",
         return_value=[output_table],
     ) as filter_by_body:
         table_uid = resolve_alpaca_bars_time_index_meta_table_uid()

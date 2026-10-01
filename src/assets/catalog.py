@@ -83,13 +83,11 @@ def list_assets(
             OpenFigiAssetDetailsTable.asset_uid == AssetTable.uid,
         )
     )
-    models = [AssetTable, AlpacaAssetDetailsTable, OpenFigiAssetDetailsTable]
     if category_uid is not None:
         statement = statement.join(
             AssetCategoryMembershipTable,
             AssetCategoryMembershipTable.asset_uid == AssetTable.uid,
         ).where(AssetCategoryMembershipTable.category_uid == uuid.UUID(str(category_uid)))
-        models.append(AssetCategoryMembershipTable)
     if search:
         pattern = f"%{search.strip()}%"
         statement = statement.where(
@@ -117,15 +115,11 @@ def list_assets(
         page_statement,
         context=runtime.context,
         operation="select",
-        models=models,
-        access="read",
     )
     count_operation = compile_markets_statement(
         count_statement,
         context=runtime.context,
         operation="select",
-        models=models,
-        access="read",
     )
     items = operation_result_rows(
         execute_markets_operation(page_operation, context=runtime.context)

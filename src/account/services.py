@@ -717,15 +717,11 @@ def list_account_registrations(
         page_statement,
         context=runtime.context,
         operation="select",
-        models=[AlpacaAccountDetails, account_model],
-        access="read",
     )
     count_operation = compile_markets_statement(
         count_statement,
         context=runtime.context,
         operation="select",
-        models=[AlpacaAccountDetails, account_model],
-        access="read",
     )
     registrations = operation_result_rows(
         execute_markets_operation(page_operation, context=runtime.context)

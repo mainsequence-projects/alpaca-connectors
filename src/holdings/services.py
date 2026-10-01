@@ -145,7 +145,6 @@ def resolve_recent_account_holdings_assets(
     so simultaneous newer captures cannot mix positions into this resolution.
     """
     from msm.data_nodes.accounts.storage import AccountHoldingsStorage
-    from msm.models.accounts.core import AccountHoldingsSetTable
     from msm.repositories.base import compile_markets_statement, execute_markets_operation
     from sqlalchemy import select
 
@@ -167,8 +166,6 @@ def resolve_recent_account_holdings_assets(
         set_statement,
         context=runtime.context,
         operation="select",
-        models=[AccountHoldingsSetTable],
-        access="read",
     )
     set_rows = operation_result_rows(
         execute_markets_operation(set_operation, context=runtime.context)
@@ -192,8 +189,6 @@ def resolve_recent_account_holdings_assets(
         holdings_statement,
         context=runtime.context,
         operation="select",
-        models=[AccountHoldingsStorage],
-        access="read",
     )
     holdings_rows = operation_result_rows(
         execute_markets_operation(holdings_operation, context=runtime.context)
@@ -449,15 +444,11 @@ def list_account_holdings(
         statement.limit(limit).offset(offset),
         context=runtime.context,
         operation="select",
-        models=[AccountHoldingsStorage],
-        access="read",
     )
     count_operation = compile_markets_statement(
         count_statement,
         context=runtime.context,
         operation="select",
-        models=[AccountHoldingsStorage],
-        access="read",
     )
     rows = operation_result_rows(execute_markets_operation(page_operation, context=runtime.context))
     count_rows = operation_result_rows(

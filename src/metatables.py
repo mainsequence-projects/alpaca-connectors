@@ -22,7 +22,7 @@ from msm.base import MarketsMetaTableMixin, MarketsTimeIndexMetaTableMixin
 from msm.settings import markets_auto_register_namespace
 from sqlalchemy.orm import declared_attr
 
-from mainsequence.meta_tables import schema_table_name
+from metatables import schema_table_name
 from src.settings import PROJECT_NAMESPACE_SLUG
 
 # Physical-table app segment for this project's MetaTables.

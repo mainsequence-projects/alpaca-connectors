@@ -215,15 +215,11 @@ def list_universe_sources(
         statement.limit(limit).offset(offset),
         context=runtime.context,
         operation="select",
-        models=[UniverseSourceTable],
-        access="read",
     )
     count_operation = compile_markets_statement(
         count_statement,
         context=runtime.context,
         operation="select",
-        models=[UniverseSourceTable],
-        access="read",
     )
     rows = [
         UniverseSource.model_validate(row)

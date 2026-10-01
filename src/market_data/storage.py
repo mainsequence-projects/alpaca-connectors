@@ -24,8 +24,8 @@ from msm.settings import ASSET_IDENTIFIER_DIMENSION
 from sqlalchemy import DateTime, Float, ForeignKey, MetaData, String
 from sqlalchemy.orm import Mapped, mapped_column
 
-from mainsequence.meta_tables import schema_table_name
-from mainsequence.meta_tables.migrations import metadata_for_models
+from metatables import schema_table_name
+from metatables.migrations import metadata_for_models
 
 # Project-owned SQLAlchemy table-name segment so physical tables are namespaced to this project
 # instead of the library default ``ms_markets``. This only affects physical table names; the

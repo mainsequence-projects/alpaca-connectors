@@ -550,8 +550,6 @@ def signal_job_configurations_by_uids(
         ),
         context=runtime.context,
         operation="select",
-        models=[AlpacaETFSignalJobConfigurationTable],
-        access="read",
     )
     rows = [
         AlpacaETFSignalJobConfiguration.model_validate(row)
@@ -652,15 +650,11 @@ def list_signal_job_configurations(
         statement.limit(limit).offset(offset),
         context=runtime.context,
         operation="select",
-        models=[AlpacaETFSignalJobConfigurationTable],
-        access="read",
     )
     count_operation = compile_markets_statement(
         count_statement,
         context=runtime.context,
         operation="select",
-        models=[AlpacaETFSignalJobConfigurationTable],
-        access="read",
     )
     rows = [
         AlpacaETFSignalJobConfiguration.model_validate(row)

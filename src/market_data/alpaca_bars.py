@@ -161,7 +161,7 @@ class AlpacaStockBarsNode(AssetIndexedDataNode):
         if self.config.asset_source == "account_holdings":
             from msm.data_nodes.accounts.storage import AccountHoldingsStorage
 
-            from mainsequence.meta_tables import TimeIndexTableRef
+            from metatables import TimeIndexTableRef
 
             return {
                 "account_holdings": TimeIndexTableRef.from_meta_table(

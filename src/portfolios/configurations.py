@@ -477,8 +477,6 @@ def rebalance_configurations_by_uids(
         ),
         context=runtime.context,
         operation="select",
-        models=[PortfolioRebalanceConfigurationTable],
-        access="read",
     )
     rows = [
         PortfolioRebalanceConfiguration.model_validate(row)
@@ -531,15 +529,11 @@ def list_rebalance_configurations(
         statement.limit(limit).offset(offset),
         context=runtime.context,
         operation="select",
-        models=[PortfolioRebalanceConfigurationTable],
-        access="read",
     )
     count = compile_markets_statement(
         count_statement,
         context=runtime.context,
         operation="select",
-        models=[PortfolioRebalanceConfigurationTable],
-        access="read",
     )
     rows = [
         PortfolioRebalanceConfiguration.model_validate(row)
@@ -774,15 +768,11 @@ def list_portfolio_configurations(
         statement.limit(limit).offset(offset),
         context=runtime.context,
         operation="select",
-        models=[AlpacaETFPortfolioConfigurationTable],
-        access="read",
     )
     count = compile_markets_statement(
         count_statement,
         context=runtime.context,
         operation="select",
-        models=[AlpacaETFPortfolioConfigurationTable],
-        access="read",
     )
     rows = [
         AlpacaETFPortfolioConfiguration.model_validate(row)

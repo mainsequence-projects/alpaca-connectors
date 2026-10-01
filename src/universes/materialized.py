@@ -52,12 +52,6 @@ def get_asset_universe_view(universe_uid: uuid.UUID | str) -> dict[str, Any] | N
     from src.universes.sources import UniverseSourceTable
 
     runtime = start_markets_engine()
-    models = [
-        UniverseSourceTable,
-        AssetCategoryTable,
-        AssetCategoryMembershipTable,
-        AssetUniverseTable,
-    ]
     statement = (
         select(
             AssetUniverseTable.uid.label("uid"),
@@ -95,8 +89,6 @@ def get_asset_universe_view(universe_uid: uuid.UUID | str) -> dict[str, Any] | N
         statement,
         context=runtime.context,
         operation="select",
-        models=models,
-        access="read",
     )
     rows = operation_result_rows(execute_markets_operation(operation, context=runtime.context))
     if not rows:
@@ -205,25 +197,15 @@ def list_asset_universes(
     ordering_column = ordering_columns[ordering_key]
     ordering_expression = ordering_column.desc() if descending else ordering_column.asc()
     statement = statement.order_by(ordering_expression, AssetUniverseTable.uid.asc())
-    models = [
-        UniverseSourceTable,
-        AssetCategoryTable,
-        AssetCategoryMembershipTable,
-        AssetUniverseTable,
-    ]
     page_operation = compile_markets_statement(
         statement.limit(limit).offset(offset),
         context=runtime.context,
         operation="select",
-        models=models,
-        access="read",
     )
     count_operation = compile_markets_statement(
         count_statement,
         context=runtime.context,
         operation="select",
-        models=models,
-        access="read",
     )
     rows = operation_result_rows(execute_markets_operation(page_operation, context=runtime.context))
     count_rows = operation_result_rows(

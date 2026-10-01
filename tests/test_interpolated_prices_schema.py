@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -8,6 +9,7 @@ import pytest
 
 from src.portfolios.interpolated_prices_schema import (
     DYNAMIC_INTERPOLATED_PRICES_SOURCES_ENV,
+    DYNAMIC_MIGRATION_PROVIDER,
     InterpolatedPricesStorageSpec,
     dynamic_provider_env,
     dynamic_storage_models_from_env,
@@ -53,7 +55,7 @@ def test_resolve_interpolation_specs_queries_all_bar_profiles_once() -> None:
 
     with (
         patch("src.market_data.ALPACA_STOCK_BARS_STORAGE_BY_TRIPLE", profiles),
-        patch("mainsequence.client.TimeIndexMetaTable.filter_by_body", return_value=rows) as query,
+        patch("metatables.TimeIndexMetaTable.filter_by_body", return_value=rows) as query,
         patch(
             "src.portfolios.interpolated_prices_schema.configured_alpaca_interpolated_prices_storage",
             side_effect=[output_storage("interp_iex"), output_storage("interp_sip")],
@@ -126,9 +128,61 @@ def test_check_only_requires_both_revision_and_registered_table() -> None:
             "src.portfolios.interpolated_prices_schema.registered_interpolated_prices_by_table_name",
             return_value={"interp_sip": SimpleNamespace(uid="storage-uid")},
         ),
-        patch("src.portfolios.interpolated_prices_schema._run_mainsequence") as run,
+        patch("src.portfolios.interpolated_prices_schema._run_metatables") as run,
     ):
         result = prepare_interpolated_prices_schema(check_only=True)
 
     run.assert_not_called()
+    assert result["storages"][0]["time_index_meta_table_uid"] == "storage-uid"
+
+
+def test_prepare_runs_the_metatables_migration_cli_for_the_dynamic_provider() -> None:
+    spec = InterpolatedPricesStorageSpec(
+        frequency_id="1d",
+        feed="sip",
+        adjustment="all",
+        source_time_index_meta_table_uid="11111111-1111-4111-8111-111111111111",
+        source_cadence="1d",
+        output_table_name="interp_sip",
+        output_identifier="InterpolatedPricesTS.sip",
+    )
+    with (
+        patch(
+            "src.portfolios.interpolated_prices_schema.resolve_interpolated_prices_storage_specs",
+            return_value=[spec],
+        ),
+        patch(
+            "src.portfolios.interpolated_prices_schema._revision_contains_table",
+            side_effect=[False, True],
+        ),
+        patch(
+            "src.portfolios.interpolated_prices_schema.registered_interpolated_prices_by_table_name",
+            side_effect=[{}, {"interp_sip": SimpleNamespace(uid="storage-uid")}],
+        ),
+        patch("src.portfolios.interpolated_prices_schema.subprocess.run") as run,
+    ):
+        result = prepare_interpolated_prices_schema(revision_message="add interpolation")
+
+    cli = [sys.executable, "-m", "metatables.cli.app", "migrations"]
+    assert [call.args[0] for call in run.call_args_list] == [
+        [
+            *cli,
+            "revision",
+            "--provider",
+            DYNAMIC_MIGRATION_PROVIDER,
+            "--autogenerate",
+            "-m",
+            "add interpolation",
+        ],
+        [*cli, "upgrade", "--provider", DYNAMIC_MIGRATION_PROVIDER, "head"],
+    ]
+    for call in run.call_args_list:
+        assert call.kwargs["check"] is True
+        assert json.loads(call.kwargs["env"][DYNAMIC_INTERPOLATED_PRICES_SOURCES_ENV]) == [
+            {
+                "source_cadence": "1d",
+                "source_time_index_meta_table_uid": "11111111-1111-4111-8111-111111111111",
+            }
+        ]
+    assert result["created_revision"] is True
     assert result["storages"][0]["time_index_meta_table_uid"] == "storage-uid"

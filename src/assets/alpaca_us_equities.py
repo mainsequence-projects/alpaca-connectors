@@ -735,8 +735,6 @@ def _query_existing_assets_by_alpaca_id(
         statement,
         context=runtime.context,
         operation="select",
-        models=[AssetTable, AlpacaAssetDetailsTable],
-        access="read",
     )
     rows = operation_result_rows(execute_markets_operation(operation, context=runtime.context))
     existing_assets: dict[str, Any] = {}
@@ -806,8 +804,6 @@ def _query_registered_assets_by_symbols(
         statement,
         context=runtime.context,
         operation="select",
-        models=[AssetTable, AlpacaAssetDetailsTable],
-        access="read",
     )
     rows = operation_result_rows(execute_markets_operation(operation, context=runtime.context))
     references_by_symbol: dict[str, list[RegisteredAlpacaAssetReference]] = {}

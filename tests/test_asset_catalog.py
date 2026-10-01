@@ -4,13 +4,6 @@ import uuid
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from msm.models import (
-    AssetCategoryMembershipTable,
-    AssetTable,
-    OpenFigiAssetDetailsTable,
-)
-
-from src.assets.alpaca_asset_details import AlpacaAssetDetailsTable
 from src.assets.catalog import list_assets
 
 
@@ -58,15 +51,6 @@ def test_asset_list_scopes_to_category_with_set_based_paginated_queries() -> Non
     assert total == 1
     assert compile_statement.call_count == 2
     assert execute_operation.call_count == 2
-    expected_models = [
-        AssetTable,
-        AlpacaAssetDetailsTable,
-        OpenFigiAssetDetailsTable,
-        AssetCategoryMembershipTable,
-    ]
-    assert all(
-        call.kwargs["models"] == expected_models for call in compile_statement.call_args_list
-    )
     page_statement = compile_statement.call_args_list[0].args[0]
     sql = str(page_statement.compile(compile_kwargs={"literal_binds": True}))
     assert "ms_markets__assetcategorymembership" in sql

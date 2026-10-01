@@ -219,8 +219,6 @@ def read_signal_observation_matrix(
         statement,
         context=query_context,
         operation="select",
-        models=[SignalWeightsStorage, AssetTable, AlpacaAssetDetailsTable],
-        access="read",
     )
     result = execute_markets_operation(operation, context=query_context)
     if bool(result.get("truncated")):
@@ -257,8 +255,6 @@ def read_signal_observation_bounds(*, signal_uid: str) -> SignalObservationBound
         statement,
         context=query_context,
         operation="select",
-        models=[SignalWeightsStorage],
-        access="read",
     )
     rows = operation_result_rows(execute_markets_operation(operation, context=query_context))
     row = rows[0] if rows else {}

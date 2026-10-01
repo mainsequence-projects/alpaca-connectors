@@ -50,8 +50,6 @@ def _dataset_coverage(storage: type) -> tuple[int, dt.datetime | None, dt.dateti
         statement,
         context=runtime.context,
         operation="select",
-        models=[storage],
-        access="read",
     )
     rows = operation_result_rows(execute_markets_operation(operation, context=runtime.context))
     row = rows[0] if rows else {}
@@ -72,7 +70,7 @@ def _physical_dataset_update_statistics(storage: type):
     from msm.repositories.base import compile_markets_statement, execute_markets_operation
     from sqlalchemy import func, select
 
-    from mainsequence.client.metatables import UpdateStatistics
+    from metatables.models import UpdateStatistics
     from src.runtime import start_markets_engine
 
     runtime = start_markets_engine()
@@ -89,8 +87,6 @@ def _physical_dataset_update_statistics(storage: type):
         statement,
         context=runtime.context,
         operation="select",
-        models=[storage],
-        access="read",
     )
     rows = operation_result_rows(execute_markets_operation(operation, context=runtime.context))
     if not rows:
@@ -209,15 +205,11 @@ def query_price_observations(
         statement.limit(limit).offset(offset),
         context=runtime.context,
         operation="select",
-        models=[storage],
-        access="read",
     )
     count_operation = compile_markets_statement(
         count_statement,
         context=runtime.context,
         operation="select",
-        models=[storage],
-        access="read",
     )
     rows = operation_result_rows(execute_markets_operation(page_operation, context=runtime.context))
     count_rows = operation_result_rows(

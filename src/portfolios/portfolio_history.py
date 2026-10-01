@@ -377,13 +377,6 @@ def read_portfolio_history(
         statement,
         context=runtime.context,
         operation="select",
-        models=[
-            PortfolioTable,
-            PortfolioMetadataTable,
-            CalendarTable,
-            PortfoliosStorage,
-        ],
-        access="read",
     )
     result = execute_markets_operation(operation, context=runtime.context)
     return _history_from_rows(

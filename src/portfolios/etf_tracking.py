@@ -160,7 +160,7 @@ def resolve_alpaca_bars_time_index_meta_table_uid(
     adjustment: str = "all",
 ) -> str:
     """Resolve the registered Alpaca bars table UID for one migrated storage profile."""
-    from mainsequence.client import TimeIndexMetaTable
+    from metatables import TimeIndexMetaTable
 
     storage = storage_for(frequency_id, feed, adjustment)
     catalog_identifier = storage.__table__.name

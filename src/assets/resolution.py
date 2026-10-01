@@ -40,8 +40,6 @@ def assets_by_uids(asset_uids: Sequence[Any]) -> dict[str, Any]:
         select(AssetTable).where(AssetTable.uid.in_(normalized_uids)),
         context=runtime.context,
         operation="select",
-        models=[AssetTable],
-        access="read",
     )
     assets = [
         Asset.model_validate(row)
@@ -72,8 +70,6 @@ def assets_by_unique_identifiers(unique_identifiers: Sequence[str]) -> dict[str,
         select(AssetTable).where(AssetTable.unique_identifier.in_(normalized_identifiers)),
         context=runtime.context,
         operation="select",
-        models=[AssetTable],
-        access="read",
     )
     assets = [
         Asset.model_validate(row)
@@ -139,8 +135,6 @@ def ticker_and_optional_figi_by_unique_identifiers(
         statement,
         context=runtime.context,
         operation="select",
-        models=[AssetTable, AlpacaAssetDetailsTable, OpenFigiAssetDetailsTable],
-        access="read",
     )
     rows = operation_result_rows(execute_markets_operation(operation, context=runtime.context))
     return {str(row["unique_identifier"]): (row.get("ticker"), row.get("figi")) for row in rows}
@@ -178,8 +172,6 @@ def asset_unique_identifiers_for_category(category_unique_identifier: str) -> li
         statement,
         context=runtime.context,
         operation="select",
-        models=[AssetCategoryMembershipTable, AssetTable],
-        access="read",
     )
     rows = operation_result_rows(execute_markets_operation(operation, context=runtime.context))
     return [str(row["unique_identifier"]) for row in rows]
@@ -216,8 +208,6 @@ def assets_for_ticker(ticker: str) -> list[Any]:
         statement,
         context=runtime.context,
         operation="select",
-        models=[AlpacaAssetDetailsTable, AssetTable],
-        access="read",
     )
     return [
         Asset.model_validate(row)

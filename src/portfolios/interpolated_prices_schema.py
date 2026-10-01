@@ -11,7 +11,7 @@ from importlib import resources
 from pathlib import Path
 from typing import Any
 
-from mainsequence.meta_tables.migrations import namespace_version_location
+from metatables.migrations import namespace_version_location
 
 DYNAMIC_INTERPOLATED_PRICES_SOURCES_ENV = (
     "ALPACA_CONNECTORS_INTERPOLATED_PRICES_SOURCES"
@@ -53,7 +53,7 @@ def configured_alpaca_interpolated_prices_storage(
 
 def resolve_interpolated_prices_storage_specs() -> list[InterpolatedPricesStorageSpec]:
     """Resolve every migrated Alpaca bars profile with one catalog request."""
-    from mainsequence.client import TimeIndexMetaTable
+    from metatables import TimeIndexMetaTable
     from src.market_data import ALPACA_STOCK_BARS_STORAGE_BY_TRIPLE
 
     sources = []
@@ -169,7 +169,7 @@ def dynamic_storage_models_from_env() -> list[type[Any]]:
 def registered_interpolated_prices_by_table_name(
     table_names: list[str],
 ) -> dict[str, Any]:
-    from mainsequence.client import TimeIndexMetaTable
+    from metatables import TimeIndexMetaTable
 
     if not table_names:
         return {}
@@ -225,7 +225,7 @@ def prepare_interpolated_prices_schema(
     created_revision = False
     if missing_revisions:
         created_revision = True
-        _run_mainsequence(
+        _run_metatables(
             [
                 "migrations",
                 "revision",
@@ -242,7 +242,7 @@ def prepare_interpolated_prices_schema(
             raise RuntimeError(
                 "The generated dynamic migration does not create: " + ", ".join(still_missing)
             )
-    _run_mainsequence(
+    _run_metatables(
         [
             "migrations",
             "upgrade",
@@ -303,9 +303,10 @@ def _revision_contains_table(table_name: str) -> bool:
     return False
 
 
-def _run_mainsequence(args: list[str], *, env: dict[str, str]) -> None:
+def _run_metatables(args: list[str], *, env: dict[str, str]) -> None:
+    """Run the ``metatables`` CLI app with this interpreter and the dynamic provider environment."""
     subprocess.run(
-        [sys.executable, "-m", "mainsequence", *args],
+        [sys.executable, "-m", "metatables.cli.app", *args],
         env={**os.environ, **env},
         check=True,
     )
