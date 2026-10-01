@@ -26,6 +26,7 @@ def project_skill_paths() -> list[str]:
         if relative.startswith(
             (
                 ".agents/skills/mainsequence/",
+                ".agents/skills/metatables/",
                 ".agents/skills/ms_markets/",
             )
         ):

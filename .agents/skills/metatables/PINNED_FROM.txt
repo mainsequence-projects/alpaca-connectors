@@ -1,0 +1,7 @@
+schema=1
+library_name=mainsequence-metatable
+namespace=metatables
+pinned_version=0.1.5
+skills_path=metatables/_client_skills
+copied_at_utc=2026-10-01T12:57:58Z
+command=metatables copy-metatables-skills

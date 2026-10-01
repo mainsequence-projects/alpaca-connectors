@@ -1,6 +1,6 @@
 ---
 name: mainsequence-markets-portfolio-workflow
-description: Use this skill when creating, extending, reviewing, or documenting msm_portfolios workflows, including portfolio TimeIndexTableUpdaters, portfolio metadata, portfolio construction examples, contributed price/signal nodes, and portfolio calculations that depend on core PortfolioTable identity.
+description: Use this skill when creating, extending, reviewing, or documenting msm_portfolios workflows, including portfolio TimeIndexTableUpdaters, portfolio metadata, signals and rebalancing, position-aware accounting, lifecycle cash flows, price/FX valuation, canonical ledgers, and portfolio calculations that depend on core PortfolioTable identity.
 ---
 
 # Main Sequence Markets Portfolio Workflow
@@ -27,6 +27,13 @@ Before changing portfolio workflow code, inspect:
 5. `src/msm_portfolios/data_nodes/portfolios/__init__.py`
 6. `docs/knowledge/msm_portfolios/portfolios/index.md`
 7. `docs/knowledge/msm/accounts/index.md`
+
+For position-aware accounting, lifecycle cash flows, or portfolio valuation,
+also read:
+
+8. `docs/knowledge/msm_portfolios/portfolios/accounting.md`
+9. `docs/ADR/0042-position-cash-flow-portfolio-accounting.md`
+10. [references/position_accounting.md](references/position_accounting.md)
 
 ## Account Target Exposure Boundary
 
@@ -304,6 +311,43 @@ The legacy `get_interpolated_prices_timeseries(...)` helper may remain as a
 non-core transition/helper path in the contributed price package. Do not use it
 from portfolio core or contributed signals.
 
+## Position-Aware Accounting
+
+Use `PortfolioEngine` only when the portfolio needs instrument quantities,
+currency balances, obligations, or position-driven lifecycle events. Preserve
+`PortfoliosDataNode` as the unchanged default when accounting configuration is
+omitted or explicitly `None`.
+
+A Portfolio is a backtest model. It has no Account and must not ingest broker
+orders, trades, fills, account holdings, custody balances, or actual account
+cash. The configured signal and `RebalanceStrategy` are the only source of
+simulated portfolio executions. The strategy emits internal execution facts to
+`PortfolioAccounting`; do not expose an external execution-fact input lane or a
+compatibility fallback for one.
+
+For the built-in position-aware path, configure a `TargetWeightExecutionModel`
+on that existing strategy and provide an explicit `InstrumentExecutionSpec` for
+every simulated Asset. Keep fill-time `ExecutionCostModel`s on the strategy and
+holding-period funding/dividend/coupon economics in `LifecycleEventModel`s.
+Variation-margin instruments change quantity without a full-notional cash leg;
+their valuation model must implement the corresponding instrument-value
+semantics.
+
+`PortfolioEventLedgerStorage` is the sole authoritative position-accounting
+output. `PortfolioAccounting` is the pure reducer, not a MetaTable or updater.
+State, cash-flow, weights, values, and analytics are ledger-derived read models.
+Do not introduce a second authoritative checkpoint or claim a cross-table
+transaction requirement.
+
+All accounting implementation work belongs to `msm_portfolios`. The existing
+`TimeIndexTableUpdater`, `PlatformTimeIndexMetaTable`, and MetaTables-managed migration
+contracts are sufficient; ADR 0042 has no `mainsequence-sdk` blocker.
+
+Read [references/position_accounting.md](references/position_accounting.md)
+before changing the accounting engine, lifecycle-model boundary, valuation/FX
+contract, canonical ledger, projections, restart behavior, accounting examples,
+or the ADR.
+
 ## Write Pattern
 
 ```python
@@ -373,6 +417,16 @@ For explicit portfolio valuation-source changes, run:
 uv run --extra portfolios --extra dev ruff check src/msm_portfolios/configuration.py src/msm_portfolios/data_nodes/portfolios src/msm_portfolios/contrib/signals examples/msm_portfolios tests/msm_portfolios/data_nodes/test_portfolio_contracts.py
 uv run --extra portfolios --extra dev pytest tests/msm_portfolios/data_nodes/test_portfolio_contracts.py tests/msm_portfolios/examples/test_equal_weight_portfolio_schema.py tests/msm_portfolios/configuration/test_prices_configuration.py
 uv run --extra portfolios --extra dev mkdocs build --strict --site-dir /private/tmp/msmarkets-docs-site
+```
+
+For position-aware accounting changes, also run:
+
+```bash
+uv run --extra portfolios --extra dev ruff check src/msm_portfolios/accounting src/msm_portfolios/data_nodes/portfolios examples/msm_portfolios tests/msm_portfolios/accounting
+uv run --extra portfolios --extra dev pytest tests/msm_portfolios/accounting/test_accounting.py
+uv run --extra portfolios python examples/msm_portfolios/portfolio_cashflows_and_fx_valuation_example.py
+uv run --extra portfolios python examples/msm_portfolios/portfolio_custom_cashflow_model_example.py
+uv run --extra portfolios python examples/msm_portfolios/portfolio_perpetual_funding_example.py
 ```
 
 For portfolio target-position changes, run:
