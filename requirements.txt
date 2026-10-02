@@ -3,7 +3,7 @@
 -e .
 alembic==1.18.4
     # via
-    #   mainsequence
+    #   mainsequence-metatable
     #   ms-markets
 alpaca-py==0.43.4
     # via alpaca-connectors
@@ -26,6 +26,7 @@ bottleneck==1.6.0
 cachetools==7.1.4
     # via
     #   mainsequence
+    #   mainsequence-metatable
     #   ms-markets
 certifi==2026.5.20
     # via
@@ -33,6 +34,8 @@ certifi==2026.5.20
     #   httpcore
     #   httpx
     #   requests
+cffi==2.1.1 ; platform_python_implementation != 'PyPy'
+    # via cryptography
 charset-normalizer==3.4.7
     # via requests
 click==8.4.1
@@ -49,15 +52,21 @@ colorama==0.4.6
     #   typer
 concurrent-log-handler==0.9.29
     # via mainsequence
+cryptography==50.0.2
+    # via
+    #   mainsequence-metatable
+    #   pyjwt
+    #   secretstorage
 empyrical-reloaded==0.5.12
     # via alpaca-connectors
-etfhextractor @ git+https://github.com/mainsequence-projects/etfholdingextractor@036c8ba7f625f45dcb58e909ebf4eebbedbb5b97
+etfhextractor @ git+https://github.com/mainsequence-projects/etfholdingextractor@5254ab890234be0fe90d6a2d2e80e0e855b9f1bf
     # via alpaca-connectors
 exchange-calendars==4.13.2
     # via pandas-market-calendars
 fastapi==0.136.3
     # via
     #   alpaca-connectors
+    #   mainsequence-metatable
     #   ms-markets
 ghp-import==2.1.0
     # via mkdocs
@@ -66,9 +75,7 @@ googleapis-common-protos==1.75.0
     #   opentelemetry-exporter-otlp-proto-grpc
     #   opentelemetry-exporter-otlp-proto-http
 greenlet==3.5.1
-    # via
-    #   playwright
-    #   sqlalchemy
+    # via playwright
 grpcio==1.81.1
     # via opentelemetry-exporter-otlp-proto-grpc
 h11==0.16.0
@@ -78,19 +85,41 @@ h11==0.16.0
 httpcore==1.0.9
     # via httpx
 httpx==0.28.1
-    # via alpaca-connectors
+    # via
+    #   alpaca-connectors
+    #   mainsequence-metatable
 idna==3.18
     # via
     #   anyio
     #   httpx
     #   requests
+jaraco-classes==3.4.0
+    # via keyring
+jaraco-context==6.1.2
+    # via keyring
+jaraco-functools==4.6.0
+    # via keyring
+jeepney==0.9.0 ; sys_platform == 'linux'
+    # via
+    #   keyring
+    #   secretstorage
 jinja2==3.1.6
     # via
     #   mkdocs
     #   mkdocs-material
+keyring==25.7.0
+    # via
+    #   mainsequence
+    #   mainsequence-metatable
 korean-lunar-calendar==0.3.1
     # via exchange-calendars
-mainsequence==8.1.14
+mainsequence==9.0.3
+    # via
+    #   alpaca-connectors
+    #   etfhextractor
+    #   mainsequence-metatable
+    #   ms-markets
+mainsequence-metatable==0.1.6
     # via
     #   alpaca-connectors
     #   etfhextractor
@@ -125,7 +154,11 @@ mkdocs-material==9.7.6
     # via alpaca-connectors
 mkdocs-material-extensions==1.3.1
     # via mkdocs-material
-ms-markets==1.0.14
+more-itertools==11.1.0
+    # via
+    #   jaraco-classes
+    #   jaraco-functools
+ms-markets==2.0.1
     # via
     #   alpaca-connectors
     #   etfhextractor
@@ -136,19 +169,22 @@ numpy==2.4.6
     #   bottleneck
     #   empyrical-reloaded
     #   exchange-calendars
-    #   mainsequence
+    #   mainsequence-metatable
     #   ms-markets
     #   pandas
     #   scipy
 opentelemetry-api==1.42.1
     # via
     #   mainsequence
+    #   mainsequence-metatable
     #   opentelemetry-exporter-otlp-proto-grpc
     #   opentelemetry-exporter-otlp-proto-http
     #   opentelemetry-sdk
     #   opentelemetry-semantic-conventions
 opentelemetry-exporter-otlp==1.42.1
-    # via mainsequence
+    # via
+    #   mainsequence
+    #   mainsequence-metatable
 opentelemetry-exporter-otlp-proto-common==1.42.1
     # via
     #   opentelemetry-exporter-otlp-proto-grpc
@@ -165,6 +201,7 @@ opentelemetry-proto==1.42.1
 opentelemetry-sdk==1.42.1
     # via
     #   mainsequence
+    #   mainsequence-metatable
     #   opentelemetry-exporter-otlp-proto-grpc
     #   opentelemetry-exporter-otlp-proto-http
 opentelemetry-semantic-conventions==0.63b1
@@ -180,7 +217,7 @@ pandas==3.0.3
     #   alpaca-py
     #   empyrical-reloaded
     #   exchange-calendars
-    #   mainsequence
+    #   mainsequence-metatable
     #   ms-markets
     #   pandas-market-calendars
 pandas-market-calendars==5.4.0
@@ -192,7 +229,9 @@ peewee==3.17.3
 pip==26.1.2
     # via ms-markets
 platformdirs==4.10.0
-    # via mkdocs-get-deps
+    # via
+    #   mainsequence-metatable
+    #   mkdocs-get-deps
 playwright==1.60.0
     # via alpaca-connectors
 portalocker==3.2.0
@@ -203,16 +242,25 @@ protobuf==6.33.6
     #   mainsequence
     #   opentelemetry-proto
 psutil==7.2.2
-    # via mainsequence
+    # via
+    #   mainsequence
+    #   mainsequence-metatable
+psycopg==3.3.6
+    # via mainsequence-metatable
+psycopg-binary==3.3.6 ; implementation_name != 'pypy'
+    # via psycopg
 psycopg2==2.9.12
     # via ms-markets
 psycopg2-binary==2.9.13
-    # via mainsequence
+    # via mainsequence-metatable
+pycparser==3.0 ; implementation_name != 'PyPy' and platform_python_implementation != 'PyPy'
+    # via cffi
 pydantic==2.13.4
     # via
     #   alpaca-py
     #   fastapi
     #   mainsequence
+    #   mainsequence-metatable
     #   ms-markets
 pydantic-core==2.46.4
     # via pydantic
@@ -223,10 +271,14 @@ pygments==2.20.0
     #   mainsequence
     #   mkdocs-material
     #   rich
+pyjwt==2.15.1
+    # via mainsequence
 pyluach==2.3.0
     # via exchange-calendars
 pymdown-extensions==10.21.3
     # via mkdocs-material
+pyodbc==5.3.0
+    # via mainsequence-metatable
 python-dateutil==2.9.0.post0
     # via
     #   ghp-import
@@ -237,9 +289,12 @@ pytz==2026.2
     #   ms-markets
 pywin32==312 ; sys_platform == 'win32'
     # via portalocker
+pywin32-ctypes==0.2.3 ; sys_platform == 'win32'
+    # via keyring
 pyyaml==6.0.3
     # via
     #   mainsequence
+    #   mainsequence-metatable
     #   mkdocs
     #   mkdocs-get-deps
     #   pymdown-extensions
@@ -252,6 +307,7 @@ requests==2.34.2
     # via
     #   alpaca-py
     #   mainsequence
+    #   mainsequence-metatable
     #   mkdocs-material
     #   ms-markets
     #   opentelemetry-exporter-otlp-proto-http
@@ -259,27 +315,33 @@ rich==15.0.0
     # via typer
 scipy==1.18.1
     # via empyrical-reloaded
+secretstorage==3.5.0 ; sys_platform == 'linux'
+    # via keyring
 shellingham==1.5.4
     # via typer
 six==1.17.0
     # via python-dateutil
-sqlalchemy==2.0.50
+sqlalchemy==2.1.2
     # via
     #   alembic
-    #   mainsequence
+    #   mainsequence-metatable
     #   ms-markets
 sseclient-py==1.9.0
     # via alpaca-py
 starlette==1.3.1
     # via fastapi
 structlog==26.1.0
-    # via mainsequence
+    # via
+    #   mainsequence
+    #   mainsequence-metatable
 toolz==1.1.0
     # via exchange-calendars
 tqdm==4.68.2
-    # via mainsequence
+    # via mainsequence-metatable
 typer==0.26.7
-    # via mainsequence
+    # via
+    #   mainsequence
+    #   mainsequence-metatable
 typing-extensions==4.15.0
     # via
     #   alembic
@@ -303,13 +365,16 @@ tzdata==2026.2
     # via
     #   exchange-calendars
     #   pandas
+    #   psycopg
 urllib3==2.7.0
     # via
     #   mainsequence
+    #   mainsequence-metatable
     #   requests
 uvicorn==0.52.4
     # via
     #   alpaca-connectors
+    #   mainsequence-metatable
     #   ms-markets
 watchdog==6.0.0
     # via mkdocs
