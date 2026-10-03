@@ -7,11 +7,11 @@ from unittest.mock import Mock, patch
 
 from requests import Timeout as RequestsTimeout
 
-from src.assets.alpaca_asset_details import (
+from alpaca_connectors.assets.alpaca_asset_details import (
     asset_type_from_alpaca_class,
     build_alpaca_unique_identifier,
 )
-from src.assets.alpaca_us_equities import (
+from alpaca_connectors.assets.alpaca_us_equities import (
     AlpacaAssetRecord,
     AlpacaEquityClassificationPass,
     OpenFigiMatch,
@@ -62,7 +62,7 @@ class AlpacaAssetRegistrationTests(unittest.TestCase):
     ) -> None:
         from msm.models import AssetTable, AssetTypeTable
 
-        from src.assets.alpaca_asset_details import AlpacaAssetDetailsTable
+        from alpaca_connectors.assets.alpaca_asset_details import AlpacaAssetDetailsTable
 
         assets = [alpaca_asset("AAPL", AAPL_ID), alpaca_asset("SPY", SPY_ID)]
         asset_uids = {
@@ -130,7 +130,7 @@ class AlpacaAssetRegistrationTests(unittest.TestCase):
         )
 
         with patch(
-            "src.assets.alpaca_us_equities._register_alpaca_assets_batch",
+            "alpaca_connectors.assets.alpaca_us_equities._register_alpaca_assets_batch",
             return_value={"AAPL": existing_uid, "SPY": created_uid},
         ) as register_batch:
             result = register_alpaca_us_equity_assets(registration_resolution=resolution)
@@ -200,7 +200,7 @@ class AlpacaAssetRegistrationTests(unittest.TestCase):
     def test_bulk_identity_lookup_reuses_application_runtime(self) -> None:
         runtime = SimpleNamespace(context=object())
         with (
-            patch("src.runtime.start_markets_engine", return_value=runtime) as start_engine,
+            patch("alpaca_connectors.runtime.start_markets_engine", return_value=runtime) as start_engine,
             patch(
                 "msm.repositories.base.compile_markets_statement",
                 return_value="compiled-operation",
@@ -225,11 +225,11 @@ class AlpacaAssetRegistrationTests(unittest.TestCase):
         client = Mock()
         with (
             patch(
-                "src.account.services.get_account_registration",
+                "alpaca_connectors.account.services.get_account_registration",
                 return_value=registration,
             ) as get_registration,
             patch(
-                "src.account.services.build_registered_account_client",
+                "alpaca_connectors.account.services.build_registered_account_client",
                 return_value=client,
             ) as build_client,
         ):
@@ -241,7 +241,7 @@ class AlpacaAssetRegistrationTests(unittest.TestCase):
 
     def test_registration_client_rejects_unknown_account(self) -> None:
         with (
-            patch("src.account.services.get_account_registration", return_value=None),
+            patch("alpaca_connectors.account.services.get_account_registration", return_value=None),
             self.assertRaisesRegex(LookupError, "account registration account-uid does not exist"),
         ):
             build_alpaca_us_equity_trading_client(account_uid="account-uid")
@@ -337,7 +337,7 @@ class AlpacaAssetRegistrationTests(unittest.TestCase):
             patch("msm.api.assets.AssetType.upsert") as asset_type_upsert,
             patch("msm.api.assets.Asset.upsert", return_value=registered) as asset_upsert,
             patch(
-                "src.assets.alpaca_asset_details.upsert_alpaca_asset_details"
+                "alpaca_connectors.assets.alpaca_asset_details.upsert_alpaca_asset_details"
             ) as alpaca_details_upsert,
             patch("msm.api.assets.OpenFigiDetails.upsert") as figi_details_upsert,
             patch("msm.data_nodes.assets.AssetSnapshot", return_value=snapshot),
@@ -371,7 +371,7 @@ class AlpacaAssetRegistrationTests(unittest.TestCase):
         )
         asset_uid = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
         with patch(
-            "src.assets.alpaca_us_equities._register_alpaca_assets_batch",
+            "alpaca_connectors.assets.alpaca_us_equities._register_alpaca_assets_batch",
             return_value={"AAPL": asset_uid},
         ) as register_batch:
             result = register_alpaca_us_equity_assets(registration_resolution=resolution)
@@ -391,7 +391,7 @@ class AlpacaAssetRegistrationTests(unittest.TestCase):
             query_existing_assets_fn=lambda *_args, **_kwargs: {},
             query_registered_symbols_fn=lambda *_args, **_kwargs: {},
         )
-        with patch("src.assets.alpaca_us_equities._register_alpaca_assets_batch") as register_batch:
+        with patch("alpaca_connectors.assets.alpaca_us_equities._register_alpaca_assets_batch") as register_batch:
             with self.assertRaisesRegex(
                 ValueError,
                 "Alpaca did not resolve these symbols: UNKNOWN",
@@ -429,7 +429,7 @@ class AlpacaAssetRegistrationTests(unittest.TestCase):
         query_registered.assert_called_once_with(["HOLX"], timeout=None)
 
         with patch(
-            "src.assets.alpaca_us_equities._register_alpaca_assets_batch",
+            "alpaca_connectors.assets.alpaca_us_equities._register_alpaca_assets_batch",
             return_value={"AAPL": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"},
         ):
             result = register_alpaca_us_equity_assets(registration_resolution=resolution)

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from src.operations.platform_jobs import PlatformJob, TimezoneAwareCrontabSchedule
+from alpaca_connectors.operations.platform_jobs import PlatformJob, TimezoneAwareCrontabSchedule
 
 
 def test_platform_job_preserves_backend_crontab_timezone_fields() -> None:

@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 import pandas as pd
 
-from src.market_data.alpaca_bars_support import (
+from alpaca_connectors.market_data.alpaca_bars_support import (
     current_period_start,
     normalize_frequency_id,
     normalize_stock_bars_frame,
@@ -104,7 +104,7 @@ class AlpacaBarsSupportTests(unittest.TestCase):
                 self.current_snapshot = None
 
         with patch(
-            "src.market_data.alpaca_bars_support.build_alpaca_symbol_lookup",
+            "alpaca_connectors.market_data.alpaca_bars_support.build_alpaca_symbol_lookup",
             return_value={"FISV": "FISV"},
         ):
             bindings = resolve_asset_bindings_from_category_assets(assets=[StubAsset()])
@@ -123,7 +123,7 @@ class AlpacaBarsSupportTests(unittest.TestCase):
             ticker = "FI"
 
         with patch(
-            "src.market_data.alpaca_bars_support.build_alpaca_symbol_lookup",
+            "alpaca_connectors.market_data.alpaca_bars_support.build_alpaca_symbol_lookup",
             return_value={"FISV": "FISV"},
         ):
             with self.assertRaisesRegex(ValueError, "could not be resolved to Alpaca symbols"):

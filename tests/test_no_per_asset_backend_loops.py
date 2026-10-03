@@ -78,7 +78,7 @@ def _per_iteration_nodes(node: ast.AST) -> list[ast.AST]:
 
 def test_collection_loops_do_not_issue_backend_operations_per_item() -> None:
     violations: list[str] = []
-    for source_root in (PROJECT_ROOT / "src", PROJECT_ROOT / "api"):
+    for source_root in (PROJECT_ROOT / "src",):
         for path in sorted(source_root.rglob("*.py")):
             tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
             for node in ast.walk(tree):

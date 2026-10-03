@@ -1,0 +1,200 @@
+"""ms-markets runtime bootstrap for the Alpaca connector project.
+
+Storage-first ms-markets requires a one-time ``msm.start_engine(...)`` per process **before**
+any MetaTable-backed row, repository, service, or DataNode operation. It attaches the runtime to
+the already-migrated/registered MetaTables; it does not create schema (that is the migration
+provider's job). ``msm.start_engine`` is idempotent and cached per configuration, so calling
+``start_markets_engine()`` more than once in a process is safe.
+
+Call this once at every process entrypoint (CLI ``main()``, each job ``main()``, FastAPI
+startup). Never call it from the SDK-free ETF extractor import graph.
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+
+def project_runtime_models() -> list[type[Any]]:
+    """MetaTable models this project attaches at runtime, in rough dependency order.
+
+    Includes the ms-markets asset graph the business logic touches (assets, asset types,
+    optional OpenFIGI enrichment, asset snapshots, categories + memberships) plus the
+    project-owned Alpaca identity and bars storage classes. ``msm.start_engine`` re-orders by
+    foreign-key dependencies and
+    auto-includes referenced built-in tables (e.g. ``AssetTable``).
+    """
+    from msm.data_nodes.assets.storage import AssetSnapshotsStorage
+    from msm.models import (
+        AssetCategoryMembershipTable,
+        AssetCategoryTable,
+        AssetTable,
+        AssetTypeTable,
+        OpenFigiAssetDetailsTable,
+    )
+    from msm_portfolios.data_nodes.portfolios.storage import PortfoliosStorage
+    from msm_portfolios.data_nodes.signals.storage import SignalWeightsStorage
+    from msm_portfolios.models import PortfolioMetadataTable, SignalMetadataTable
+
+    from alpaca_connectors.assets.alpaca_asset_details import project_asset_models
+    from alpaca_connectors.market_data import project_configuration_models, project_storage_models
+    from alpaca_connectors.operations import project_operation_models
+    from alpaca_connectors.portfolios import project_portfolio_configuration_models
+    from alpaca_connectors.universes import project_universe_models
+
+    return [
+        AssetTypeTable,
+        AssetTable,
+        *project_asset_models(),
+        OpenFigiAssetDetailsTable,
+        AssetSnapshotsStorage,
+        AssetCategoryTable,
+        AssetCategoryMembershipTable,
+        SignalMetadataTable,
+        SignalWeightsStorage,
+        PortfolioMetadataTable,
+        PortfoliosStorage,
+        *project_storage_models(),
+        *project_universe_models(),
+        *project_configuration_models(),
+        *project_operation_models(),
+        *project_portfolio_configuration_models(),
+    ]
+
+
+def account_runtime_models() -> list[type[Any]]:
+    """Runtime models for the account-registration flow.
+
+    The base asset/bars graph (registration resolves/registers held assets) plus the ms-markets
+    account graph (`AccountGroupTable`, `AccountTable`, `AccountHoldingsSetTable`,
+    `AccountHoldingsStorage`) and the project-owned Alpaca account tables. ``msm.start_engine``
+    re-orders by FK dependency, so the leaves are enough but the full set is listed for clarity.
+
+    Use this only in the ``account`` entrypoint; ``start_engine`` rejects a second *differing*
+    model set in one process, but each CLI command is its own process.
+    """
+    from msm.data_nodes.accounts.storage import AccountHoldingsStorage
+    from msm.models.accounts.core import AccountHoldingsSetTable, AccountTable
+    from msm.models.accounts.groups import AccountGroupTable
+
+    from alpaca_connectors.account.alpaca_account_details import project_account_models
+
+    return [
+        *project_runtime_models(),
+        AccountGroupTable,
+        AccountTable,
+        AccountHoldingsSetTable,
+        AccountHoldingsStorage,
+        *project_account_models(),
+    ]
+
+
+def application_runtime_models() -> list[type[Any]]:
+    """Complete model set used by long-lived API processes and shared services."""
+    return account_runtime_models()
+
+
+def portfolio_runtime_models(extra_models: list[type[Any]] | None = None) -> list[type[Any]]:
+    """Runtime models for ETF-holdings portfolio construction.
+
+    This is a strict superset of the application runtime because shared configuration readers
+    resolve that runtime after the portfolio process has bootstrapped. Configured
+    interpolated-price storage classes are dynamic and should be prepared/migrated before normal
+    portfolio execution; keep them out of this static runtime list.
+    """
+    from msm.models import CalendarDateTable, CalendarSessionTable
+    from msm_portfolios.bootstrap import resolve_portfolio_models
+
+    return [
+        *resolve_portfolio_models(None),
+        *application_runtime_models(),
+        CalendarDateTable,
+        CalendarSessionTable,
+        *(extra_models or []),
+    ]
+
+
+def start_portfolio_markets_engine(
+    *,
+    extra_models: list[type[Any]] | None = None,
+    timeout: int | float | tuple[float, float] | None = None,
+) -> Any:
+    """Attach the portfolio-capable markets runtime once for this process."""
+    import msm_portfolios
+    from msm.bootstrap import resolve_runtime
+
+    models = portfolio_runtime_models(extra_models=extra_models)
+    try:
+        return resolve_runtime(models=models, row_model_name="alpaca_connectors.runtime")
+    except RuntimeError:
+        return msm_portfolios.start_engine(models=models, timeout=timeout)
+
+
+def portfolio_job_runtime_models() -> list[type[Any]]:
+    """Resolve every phase-one persistent interpolation table before process bootstrap.
+
+    The interpolation table identity includes the registered source TimeIndexMetaTable UID.
+    Jobs therefore discover each deliberately migrated Alpaca bars profile before the one allowed
+    ``msm.start_engine`` call and attach all phase-one interpolation outputs in the same runtime.
+    """
+    from alpaca_connectors.portfolios.interpolated_prices_schema import (
+        assert_interpolated_prices_registered,
+        configured_alpaca_interpolated_prices_storage,
+        resolve_interpolated_prices_storage_specs,
+    )
+
+    specs = resolve_interpolated_prices_storage_specs()
+    assert_interpolated_prices_registered(specs)
+    dynamic_models = [
+        configured_alpaca_interpolated_prices_storage(
+            source_time_index_meta_table_uid=spec.source_time_index_meta_table_uid,
+            source_cadence=spec.source_cadence,
+        )
+        for spec in specs
+    ]
+    return portfolio_runtime_models(extra_models=dynamic_models)
+
+
+def start_portfolio_job_engine(
+    *,
+    timeout: int | float | tuple[float, float] | None = None,
+) -> Any:
+    """Attach the complete phase-one portfolio runtime in one process bootstrap."""
+    import msm_portfolios
+
+    return msm_portfolios.start_engine(models=portfolio_job_runtime_models(), timeout=timeout)
+
+
+def start_markets_engine(
+    *,
+    models: list[type[Any]] | None = None,
+    timeout: int | float | tuple[float, float] | None = None,
+) -> Any:
+    """Attach the markets runtime once for this process. Returns the ``MarketsRuntime``.
+
+    Pass ``models`` to attach a specific set (e.g. ``account_runtime_models()``); defaults to
+    ``project_runtime_models()``. Idempotent: ``msm.start_engine`` caches per configuration. Raises
+    if the platform backend is unreachable or a required MetaTable has not been migrated yet.
+    """
+    import msm
+    from msm.bootstrap import resolve_runtime
+
+    resolved_models = models if models is not None else application_runtime_models()
+    try:
+        return resolve_runtime(models=resolved_models, row_model_name="alpaca_connectors.runtime")
+    except RuntimeError as exc:
+        if "requires an initialized markets runtime" not in str(exc):
+            raise
+    return msm.start_engine(models=resolved_models, timeout=timeout)
+
+
+__all__ = [
+    "account_runtime_models",
+    "application_runtime_models",
+    "portfolio_runtime_models",
+    "portfolio_job_runtime_models",
+    "project_runtime_models",
+    "start_markets_engine",
+    "start_portfolio_markets_engine",
+    "start_portfolio_job_engine",
+]

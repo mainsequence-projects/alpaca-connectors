@@ -6,22 +6,25 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
-from api.app.schemas import BarConfigurationCreateRequest, BarConfigurationUpdateRequest
-from api.app.services.bar_configurations import (
-    create_configuration as create_api_configuration,
-)
-from api.app.services.bar_configurations import (
-    get_configuration as get_api_configuration,
-)
-from api.app.services.bar_configurations import (
-    update_configuration as update_api_configuration,
-)
 from pydantic import ValidationError
 
-from src.holdings import held_asset_identifiers_from_snapshot_rows
-from src.holdings.services import _recent_holdings_set_statement
-from src.market_data.alpaca_bars import AlpacaStockBarsConfig
-from src.market_data.configurations import (
+from alpaca_connectors.api.app.schemas import (
+    BarConfigurationCreateRequest,
+    BarConfigurationUpdateRequest,
+)
+from alpaca_connectors.api.app.services.bar_configurations import (
+    create_configuration as create_api_configuration,
+)
+from alpaca_connectors.api.app.services.bar_configurations import (
+    get_configuration as get_api_configuration,
+)
+from alpaca_connectors.api.app.services.bar_configurations import (
+    update_configuration as update_api_configuration,
+)
+from alpaca_connectors.holdings import held_asset_identifiers_from_snapshot_rows
+from alpaca_connectors.holdings.services import _recent_holdings_set_statement
+from alpaca_connectors.market_data.alpaca_bars import AlpacaStockBarsConfig
+from alpaca_connectors.market_data.configurations import (
     AlpacaBarsConfiguration,
     AlpacaBarsConfigurationAssetTable,
     AlpacaBarsConfigurationTable,
@@ -29,13 +32,13 @@ from src.market_data.configurations import (
     project_configuration_models,
     validate_configuration_scope,
 )
-from src.market_data.services import (
+from alpaca_connectors.market_data.services import (
     MarketDataDataset,
     _physical_dataset_update_statistics,
     build_market_data_update,
     execute_market_data_update,
 )
-from src.market_data.storage import AlpacaStockBars1dSipAllStorage
+from alpaca_connectors.market_data.storage import AlpacaStockBars1dSipAllStorage
 
 
 def _typed_configuration_row() -> AlpacaBarsConfiguration:
@@ -73,15 +76,15 @@ def test_api_service_projects_typed_configuration_rows_for_create_get_and_update
 
     with (
         patch(
-            "api.app.services.bar_configurations.create_bar_configuration",
+            "alpaca_connectors.api.app.services.bar_configurations.create_bar_configuration",
             return_value=row,
         ),
         patch(
-            "api.app.services.bar_configurations.get_bar_configuration",
+            "alpaca_connectors.api.app.services.bar_configurations.get_bar_configuration",
             return_value=row,
         ),
         patch(
-            "api.app.services.bar_configurations.update_bar_configuration",
+            "alpaca_connectors.api.app.services.bar_configurations.update_bar_configuration",
             return_value=row,
         ),
     ):
@@ -320,22 +323,22 @@ def test_review_resolution_never_resolves_secret_values() -> None:
             self.update_hash = "resolved-update-hash"
 
     with (
-        patch("src.runtime.account_runtime_models", return_value=[]),
-        patch("src.runtime.start_markets_engine"),
+        patch("alpaca_connectors.runtime.account_runtime_models", return_value=[]),
+        patch("alpaca_connectors.runtime.start_markets_engine"),
         patch(
-            "src.market_data.configurations.get_bar_configuration",
+            "alpaca_connectors.market_data.configurations.get_bar_configuration",
             return_value=configuration,
         ),
         patch(
-            "src.account.services.get_account_registration",
+            "alpaca_connectors.account.services.get_account_registration",
             return_value={"account_uid": str(account_uid)},
         ),
-        patch("src.market_data.services.storage_for", create=True),
-        patch("src.market_data.storage.storage_for", return_value=object()),
-        patch("src.market_data.services._dataset_from_storage", return_value=dataset),
-        patch("src.market_data.services._asset_identifiers_from_uids", return_value=["A"]),
-        patch("src.market_data.alpaca_bars.AlpacaStockBarsNode", FakeNode),
-        patch("src.market_data.services.resolve_registered_alpaca_credentials") as resolve_credentials,
+        patch("alpaca_connectors.market_data.services.storage_for", create=True),
+        patch("alpaca_connectors.market_data.storage.storage_for", return_value=object()),
+        patch("alpaca_connectors.market_data.services._dataset_from_storage", return_value=dataset),
+        patch("alpaca_connectors.market_data.services._asset_identifiers_from_uids", return_value=["A"]),
+        patch("alpaca_connectors.market_data.alpaca_bars.AlpacaStockBarsNode", FakeNode),
+        patch("alpaca_connectors.market_data.services.resolve_registered_alpaca_credentials") as resolve_credentials,
     ):
         _, summary = build_market_data_update(configuration_uid=configuration_uid)
 
@@ -361,7 +364,7 @@ def test_physical_dataset_statistics_are_grouped_by_asset() -> None:
     runtime = SimpleNamespace(context=object())
 
     with (
-        patch("src.runtime.start_markets_engine", return_value=runtime),
+        patch("alpaca_connectors.runtime.start_markets_engine", return_value=runtime),
         patch("msm.repositories.base.compile_markets_statement", return_value=object()),
         patch("msm.repositories.base.execute_markets_operation", return_value=rows),
     ):
@@ -402,11 +405,11 @@ def test_execute_uses_physical_bar_progress_instead_of_cached_updater_statistics
 
     with (
         patch(
-            "src.market_data.services.build_market_data_update",
+            "alpaca_connectors.market_data.services.build_market_data_update",
             return_value=(node, summary),
         ),
         patch(
-            "src.account.services.get_account_registration",
+            "alpaca_connectors.account.services.get_account_registration",
             return_value={
                 "account_uid": str(account_uid),
                 "api_key_secret_name": "alpaca-api-key",
@@ -414,12 +417,12 @@ def test_execute_uses_physical_bar_progress_instead_of_cached_updater_statistics
                 "is_paper": True,
             },
         ),
-        patch("src.market_data.services.resolve_registered_alpaca_credentials", return_value=object()),
-        patch("src.market_data.services.build_alpaca_historical_data_client"),
-        patch("src.market_data.services.build_alpaca_trading_client"),
-        patch("src.market_data.storage.storage_for", return_value=storage),
+        patch("alpaca_connectors.market_data.services.resolve_registered_alpaca_credentials", return_value=object()),
+        patch("alpaca_connectors.market_data.services.build_alpaca_historical_data_client"),
+        patch("alpaca_connectors.market_data.services.build_alpaca_trading_client"),
+        patch("alpaca_connectors.market_data.storage.storage_for", return_value=storage),
         patch(
-            "src.market_data.services._physical_dataset_update_statistics",
+            "alpaca_connectors.market_data.services._physical_dataset_update_statistics",
             return_value=physical_statistics,
         ) as physical_progress,
     ):

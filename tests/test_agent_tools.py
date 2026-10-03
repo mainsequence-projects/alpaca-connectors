@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from src.agent_tools import PROJECT_AGENT_TOOL_NAMES, PROJECT_AGENT_TOOLS
+from alpaca_connectors.agent_tools import PROJECT_AGENT_TOOL_NAMES, PROJECT_AGENT_TOOLS
 
 EXPECTED_TOOL_NAMES = (
     "alpaca_project_state",

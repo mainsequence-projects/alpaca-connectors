@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from api.app.capabilities import CAPABILITIES, capability_summaries
+from alpaca_connectors.api.app.capabilities import CAPABILITIES, capability_summaries
 
 
 def test_capability_catalog_keys_are_unique_and_in_navigation_order() -> None:

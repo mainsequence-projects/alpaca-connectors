@@ -9,22 +9,22 @@ import pandas as pd
 import pytest
 from msm.models.assets.categories import AssetCategoryMembershipTable
 
-from src.assets import RegisteredAlpacaAssetReference
-from src.assets.alpaca_asset_details import build_alpaca_unique_identifier
-from src.universes import AssetUniverseTable
-from src.universes.materialized import (
+from alpaca_connectors.assets import RegisteredAlpacaAssetReference
+from alpaca_connectors.assets.alpaca_asset_details import build_alpaca_unique_identifier
+from alpaca_connectors.universes import AssetUniverseTable
+from alpaca_connectors.universes.materialized import (
     create_asset_universe_configuration,
     get_asset_universe_view,
     list_asset_universes,
     update_asset_universe,
 )
-from src.universes.services import (
+from alpaca_connectors.universes.services import (
     AssetUniverseRunResult,
     materialize_asset_universe,
     preview_asset_universe,
     run_asset_universe,
 )
-from src.universes.sources import (
+from alpaca_connectors.universes.sources import (
     delete_universe_source,
     update_universe_source,
 )
@@ -75,11 +75,11 @@ def test_creation_persists_distinct_universe_source_and_category_uids_without_me
         },
     }
     with (
-        patch("src.runtime.start_markets_engine"),
+        patch("alpaca_connectors.runtime.start_markets_engine"),
         patch("msm.api.assets.AssetCategory.get_by_unique_identifier", return_value=None),
-        patch("src.universes.sources.list_universe_sources", return_value=([source], 1)),
+        patch("alpaca_connectors.universes.sources.list_universe_sources", return_value=([source], 1)),
         patch(
-            "src.universes.materialized.get_asset_universe_by_source_uid",
+            "alpaca_connectors.universes.materialized.get_asset_universe_by_source_uid",
             return_value=None,
         ),
         patch(
@@ -87,11 +87,11 @@ def test_creation_persists_distinct_universe_source_and_category_uids_without_me
             return_value=category,
         ) as create_category,
         patch(
-            "src.universes.materialized.create_asset_universe",
+            "alpaca_connectors.universes.materialized.create_asset_universe",
             return_value=registered_universe,
         ) as create_universe,
         patch(
-            "src.universes.materialized.get_asset_universe_view",
+            "alpaca_connectors.universes.materialized.get_asset_universe_view",
             return_value=created,
         ),
     ):
@@ -131,7 +131,7 @@ def test_list_query_compiles_governed_page_and_count_operations() -> None:
         "asset_count": 1,
     }
     with (
-        patch("src.runtime.start_markets_engine"),
+        patch("alpaca_connectors.runtime.start_markets_engine"),
         patch(
             "msm.bootstrap.resolve_runtime",
             return_value=SimpleNamespace(context=object()),
@@ -174,7 +174,7 @@ def test_universe_detail_returns_linked_category_without_loading_member_assets()
     }
     with (
         patch(
-            "src.runtime.start_markets_engine",
+            "alpaca_connectors.runtime.start_markets_engine",
             return_value=SimpleNamespace(context=object()),
         ),
         patch(
@@ -224,11 +224,11 @@ def test_update_stores_lifecycle_on_asset_universe_not_category_metadata() -> No
 
     with (
         patch(
-            "src.universes.materialized.get_asset_universe_view",
+            "alpaca_connectors.universes.materialized.get_asset_universe_view",
             side_effect=[existing, updated],
         ),
         patch("msm.api.assets.AssetCategory.update") as update_category,
-        patch("src.universes.materialized.update_asset_universe_state") as update_state,
+        patch("alpaca_connectors.universes.materialized.update_asset_universe_state") as update_state,
     ):
         result = update_asset_universe("universe-uid", is_active=False)
 
@@ -241,12 +241,12 @@ def test_linked_source_cannot_be_deleted() -> None:
     source = SimpleNamespace(uid="source-uid")
     universe = SimpleNamespace(uid="universe-uid")
     with (
-        patch("src.universes.sources.get_universe_source", return_value=source),
+        patch("alpaca_connectors.universes.sources.get_universe_source", return_value=source),
         patch(
-            "src.universes.registry.get_asset_universe_by_source_uid",
+            "alpaca_connectors.universes.registry.get_asset_universe_by_source_uid",
             return_value=universe,
         ),
-        patch("src.universes.sources.UniverseSource.delete") as delete,
+        patch("alpaca_connectors.universes.sources.UniverseSource.delete") as delete,
     ):
         with pytest.raises(ValueError, match="linked to Asset Universe universe-uid"):
             delete_universe_source("source-uid")
@@ -264,12 +264,12 @@ def test_linked_source_symbol_cannot_change() -> None:
     )
     universe = SimpleNamespace(uid="universe-uid")
     with (
-        patch("src.universes.sources.get_universe_source", return_value=source),
+        patch("alpaca_connectors.universes.sources.get_universe_source", return_value=source),
         patch(
-            "src.universes.registry.get_asset_universe_by_source_uid",
+            "alpaca_connectors.universes.registry.get_asset_universe_by_source_uid",
             return_value=universe,
         ),
-        patch("src.universes.sources.UniverseSource.update") as update,
+        patch("alpaca_connectors.universes.sources.UniverseSource.update") as update,
     ):
         with pytest.raises(ValueError, match="recreate the universe"):
             update_universe_source("source-uid", symbol="SPY")
@@ -303,11 +303,11 @@ def test_universe_preview_uses_the_selected_run_account_for_constituent_registra
 
     with (
         patch(
-            "src.universes.services.require_asset_universe_links",
+            "alpaca_connectors.universes.services.require_asset_universe_links",
             return_value=(universe, source, SimpleNamespace(uid="category-uid")),
         ),
         patch(
-            "src.universes.services.build_holdings_asset_category_plan",
+            "alpaca_connectors.universes.services.build_holdings_asset_category_plan",
             return_value=holdings_plan,
         ) as extract,
         patch(
@@ -315,11 +315,11 @@ def test_universe_preview_uses_the_selected_run_account_for_constituent_registra
             return_value={"AAPL": 60.0, "MSFT": 40.0},
         ),
         patch(
-            "src.universes.services.build_alpaca_us_equity_registration_plan",
+            "alpaca_connectors.universes.services.build_alpaca_us_equity_registration_plan",
             return_value=registration_plan,
         ) as build_registration,
         patch(
-            "src.universes.services.resolve_alpaca_us_equity_registration_plan",
+            "alpaca_connectors.universes.services.resolve_alpaca_us_equity_registration_plan",
             return_value=registration_resolution,
         ) as resolve_registration,
     ):
@@ -380,11 +380,11 @@ def test_materialization_writes_only_the_category_linked_by_the_selected_univers
     )
     with (
         patch(
-            "src.universes.services.require_asset_universe_links",
+            "alpaca_connectors.universes.services.require_asset_universe_links",
             return_value=(universe, source, category),
         ),
         patch(
-            "src.universes.services.register_alpaca_us_equity_assets",
+            "alpaca_connectors.universes.services.register_alpaca_us_equity_assets",
             return_value={
                 "assets": {"AAPL": str(asset_uid)},
                 "existing_assets": {},
@@ -452,11 +452,11 @@ def test_materialization_keeps_an_exact_registered_off_catalog_constituent() -> 
     )
     with (
         patch(
-            "src.universes.services.require_asset_universe_links",
+            "alpaca_connectors.universes.services.require_asset_universe_links",
             return_value=(universe, SimpleNamespace(), category),
         ),
         patch(
-            "src.universes.services.register_alpaca_us_equity_assets",
+            "alpaca_connectors.universes.services.register_alpaca_us_equity_assets",
             return_value={
                 "assets": {"HOLX": str(asset_uid)},
                 "existing_assets": {"HOLX": str(asset_uid)},
@@ -502,9 +502,9 @@ def test_run_publishes_the_prepared_universe_through_the_signal() -> None:
     signal.run.return_value = (False, frame)
 
     with (
-        patch("src.universes.services.preview_asset_universe", return_value=plan) as preview,
+        patch("alpaca_connectors.universes.services.preview_asset_universe", return_value=plan) as preview,
         patch(
-            "src.portfolios.alpaca_etf_signal.build_alpaca_etf_holdings_signal",
+            "alpaca_connectors.portfolios.alpaca_etf_signal.build_alpaca_etf_holdings_signal",
             return_value=signal,
         ) as build_signal,
     ):
@@ -577,7 +577,7 @@ def test_membership_replacement_bulk_upserts_then_deletes_stale_rows_once() -> N
 
 
 def test_market_data_rejects_inactive_asset_universe() -> None:
-    from src.market_data.services import _asset_identifiers_from_universe_uid
+    from alpaca_connectors.market_data.services import _asset_identifiers_from_universe_uid
 
     universe = SimpleNamespace(is_active=False)
     category = SimpleNamespace(
@@ -585,7 +585,7 @@ def test_market_data_rejects_inactive_asset_universe() -> None:
         unique_identifier="HOLDINGS__IVV",
     )
     with patch(
-        "src.universes.require_asset_universe_links",
+        "alpaca_connectors.universes.require_asset_universe_links",
         return_value=(universe, SimpleNamespace(), category),
     ):
         try:

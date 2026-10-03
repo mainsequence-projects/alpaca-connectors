@@ -9,12 +9,12 @@ See [ADR 0008](../adrs/0008_portfolio_configuration_and_job_ownership.md) for Jo
 
 The implementation lives in:
 
-- `src/portfolios/configurations.py`: calculation-only Portfolio and Rebalance MetaTables
-- `src/portfolios/execution.py`: reference resolution and portfolio graph execution
-- `src/operations/portfolio_jobs.py`: one dedicated Main Sequence Job per Portfolio Configuration
+- `src/alpaca_connectors/portfolios/configurations.py`: calculation-only Portfolio and Rebalance MetaTables
+- `src/alpaca_connectors/portfolios/execution.py`: reference resolution and portfolio graph execution
+- `src/alpaca_connectors/operations/portfolio_jobs.py`: one dedicated Main Sequence Job per Portfolio Configuration
 - `src/jobs/run_alpaca_etf_portfolio.py`: repository-local scheduled launcher
-- `api/app/routers/portfolio_configurations.py`: thin HTTP CRUD and run surface
-- `src/cli/portfolios.py`: thin CLI CRUD and run surface
+- `src/alpaca_connectors/api/app/routers/portfolio_configurations.py`: thin HTTP CRUD and run surface
+- `src/alpaca_connectors/cli/portfolios.py`: thin CLI CRUD and run surface
 
 ## Durable Ownership
 

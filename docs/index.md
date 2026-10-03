@@ -19,17 +19,17 @@ record at `docs/implementation_tasks/0001_ms_markets_storage_first_migration.md`
 
 ## Repository Areas
 
-- `api/app/capabilities.py`: API-facing capability catalog
-- `src/assets/`: asset registration, FIGI resolution, Alpaca universe checks
-- `src/universes/`: source CRUD and Asset Universe execution across extraction, bulk registration,
+- `src/alpaca_connectors/api/app/capabilities.py`: API-facing capability catalog
+- `src/alpaca_connectors/assets/`: asset registration, FIGI resolution, Alpaca universe checks
+- `src/alpaca_connectors/universes/`: source CRUD and Asset Universe execution across extraction, bulk registration,
   category membership, and observed signal weights
-- `src/market_data/`: Alpaca bar storage, update logic, and supporting functions
-- `src/account/`: Alpaca account registration and project-owned account details
-- `src/holdings/`: public account-holdings capability boundary
-- `src/cli/`: thin capability command adapters
+- `src/alpaca_connectors/market_data/`: Alpaca bar storage, update logic, and supporting functions
+- `src/alpaca_connectors/account/`: Alpaca account registration and project-owned account details
+- `src/alpaca_connectors/holdings/`: public account-holdings capability boundary
+- `src/alpaca_connectors/cli/`: thin capability command adapters
 - `src/jobs/`: repository-local launchers for platform-managed execution
-- `src/operations/`: durable workflow state and one-configuration-per-Job reconciliation
-- `src/portfolios/`: ETF holdings portfolio construction with `msm_portfolios`
+- `src/alpaca_connectors/operations/`: durable workflow state and one-configuration-per-Job reconciliation
+- `src/alpaca_connectors/portfolios/`: ETF holdings portfolio construction with `msm_portfolios`
 
 See [Capability Model](capabilities/index.md) before the workflow-specific pages.
 
@@ -56,7 +56,7 @@ Use that page first when the question is about:
   changes membership only after the complete constituent set is available, and publishes that same
   extraction through `AlpacaETFHoldingsSignal`. Universes do not own accounts.
 - Alpaca daily bars share one storage table per `frequency_id`, `feed`, and `adjustment`
-  (`src/market_data/storage.py`); the table identifier preserves the legacy
+  (`src/alpaca_connectors/market_data/storage.py`); the table identifier preserves the legacy
   `alpaca_stock_bars_<freq>_<feed>_<adjustment>` string. Physical table names include the triple
   concept, for example `bars_1d_iex_raw`; cadence carries the frequency and extra storage identity
   components carry only the non-cadence variant fields (`feed` and `adjustment`).

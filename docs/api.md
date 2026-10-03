@@ -230,5 +230,5 @@ automatic deployment, revision retention, and the platform-provided static-site 
 workflow is validated through the branch-owned backend validator.
 
 ```bash
-uv run uvicorn api.app.main:app --reload
+uv run uvicorn alpaca_connectors.api.app.main:app --reload
 ```

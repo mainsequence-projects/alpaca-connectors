@@ -86,7 +86,7 @@ class AgentArtifactsTests(unittest.TestCase):
         tree = ast.parse(source)
 
         self.assertNotIn("sys.path", source)
-        self.assertIn("from src.agent_tools import PROJECT_AGENT_TOOLS", source)
+        self.assertIn("from alpaca_connectors.agent_tools import PROJECT_AGENT_TOOLS", source)
         setup = next(
             node
             for node in tree.body

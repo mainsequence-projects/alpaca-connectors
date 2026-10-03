@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from src.account.alpaca_account_details import (
+from alpaca_connectors.account.alpaca_account_details import (
     ACCOUNT_BALANCE_NUMERIC_COLUMNS,
     AlpacaAccountDetails,
     project_account_models,
@@ -53,7 +53,7 @@ class AccountStorageTests(unittest.TestCase):
         self.assertEqual([m.__name__ for m in project_account_models()], ["AlpacaAccountDetails"])
 
     def test_no_bespoke_balances_storage_table_exists(self) -> None:
-        import src.account.alpaca_account_details as module
+        import alpaca_connectors.account.alpaca_account_details as module
 
         self.assertFalse(hasattr(module, "AlpacaAccountBalancesStorage"))
         self.assertFalse(hasattr(module, "AlpacaAccountBalancesNode"))

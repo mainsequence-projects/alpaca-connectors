@@ -5,19 +5,22 @@ import uuid
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from api.app.main import app
-from api.app.schemas import (
+from fastapi.testclient import TestClient
+
+from alpaca_connectors.api.app.main import app
+from alpaca_connectors.api.app.schemas import (
     PortfolioConfigurationDetailResponse,
     PortfolioConfigurationResponse,
     PortfolioJobResponse,
     PortfolioJobRunAcceptedResponse,
     PortfolioRebalanceConfigurationResponse,
 )
-from api.app.services import portfolio_configurations as portfolio_service
-from fastapi.testclient import TestClient
-
-from src.portfolios import AlpacaETFPortfolioConfiguration, PortfolioRebalanceConfiguration
-from src.portfolios.portfolio_history import (
+from alpaca_connectors.api.app.services import portfolio_configurations as portfolio_service
+from alpaca_connectors.portfolios import (
+    AlpacaETFPortfolioConfiguration,
+    PortfolioRebalanceConfiguration,
+)
+from alpaca_connectors.portfolios.portfolio_history import (
     PortfolioHistory,
     PortfolioPerformance,
     PortfolioValueObservation,
@@ -246,24 +249,24 @@ def test_rebalance_crud_serializes_storage_domain_models() -> None:
     client = TestClient(app)
 
     with patch(
-        "api.app.services.portfolio_configurations.list_rebalance_configurations",
+        "alpaca_connectors.api.app.services.portfolio_configurations.list_rebalance_configurations",
         return_value=([row], 1),
     ):
         listed = client.get("/v1/portfolio-rebalance-configurations")
     with patch(
-        "api.app.services.portfolio_configurations.create_rebalance_configuration",
+        "alpaca_connectors.api.app.services.portfolio_configurations.create_rebalance_configuration",
         return_value=row,
     ):
         created = client.post("/v1/portfolio-rebalance-configurations", json=request)
     with patch(
-        "api.app.services.portfolio_configurations.get_rebalance_configuration",
+        "alpaca_connectors.api.app.services.portfolio_configurations.get_rebalance_configuration",
         return_value=row,
     ):
         retrieved = client.get(
             f"/v1/portfolio-rebalance-configurations/{REBALANCE_CONFIGURATION_UID}"
         )
     with patch(
-        "api.app.services.portfolio_configurations.update_rebalance_configuration",
+        "alpaca_connectors.api.app.services.portfolio_configurations.update_rebalance_configuration",
         return_value=row,
     ):
         updated = client.patch(
@@ -303,7 +306,7 @@ def test_portfolio_discovery_columns_are_renderable() -> None:
 
 def test_portfolio_create_nests_job_settings_and_rejects_environment() -> None:
     with patch(
-        "api.app.routers.portfolio_configurations.create_configuration",
+        "alpaca_connectors.api.app.routers.portfolio_configurations.create_configuration",
         return_value=response(),
     ) as create:
         result = TestClient(app).post("/v1/portfolio-configurations", json=create_request())
@@ -344,7 +347,7 @@ def test_portfolio_run_returns_jobrun_status_url_without_arguments() -> None:
         status_url=f"/v1/operations/job-runs/{JOB_RUN_UID}",
     )
     with patch(
-        "api.app.routers.portfolio_configurations.run_configuration",
+        "alpaca_connectors.api.app.routers.portfolio_configurations.run_configuration",
         return_value=accepted,
     ) as run:
         result = TestClient(app).post(
@@ -425,9 +428,9 @@ def test_portfolio_detail_resolves_business_labels_and_value_history() -> None:
             "get_rebalance_configuration",
             return_value=rebalance_row(),
         ),
-        patch("src.market_data.get_bar_configuration", return_value=bars),
-        patch("src.account.services.get_account_registration", return_value=account),
-        patch("src.universes.get_asset_universe_view", return_value=universe),
+        patch("alpaca_connectors.market_data.get_bar_configuration", return_value=bars),
+        patch("alpaca_connectors.account.services.get_account_registration", return_value=account),
+        patch("alpaca_connectors.universes.get_asset_universe_view", return_value=universe),
         patch.object(portfolio_service, "read_portfolio_history", return_value=history),
     ):
         detail = portfolio_service.get_configuration_detail(
@@ -522,7 +525,7 @@ def test_portfolio_detail_route_loads_latest_100_observations() -> None:
         }
     )
     with patch(
-        "api.app.routers.portfolio_configurations.get_configuration_detail",
+        "alpaca_connectors.api.app.routers.portfolio_configurations.get_configuration_detail",
         return_value=detail,
     ) as get_detail:
         result = TestClient(app).get(

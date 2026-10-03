@@ -4,7 +4,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-from src.account.credentials import (
+from alpaca_connectors.account.credentials import (
     CREDENTIAL_SOURCE_EXTERNAL,
     CREDENTIAL_SOURCE_MANAGED,
     AccountSecretReferenceError,
@@ -22,7 +22,7 @@ from src.account.credentials import (
     store_managed_alpaca_credentials,
     submitted_alpaca_credentials,
 )
-from src.platform_secrets import PlatformSecretAccessError
+from alpaca_connectors.platform_secrets import PlatformSecretAccessError
 
 RAW_API_KEY = "PKRAWVALUE123"
 RAW_SECRET_KEY = "SKRAWVALUE456"

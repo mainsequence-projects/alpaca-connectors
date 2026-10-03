@@ -6,8 +6,8 @@
 uv sync
 mainsequence refresh-token
 mainsequence code-repository current --debug --json
-metatables migrations current --provider src.migrations:migration
-metatables migrations upgrade --provider src.migrations:migration head
+metatables migrations current --provider alpaca_connectors.migrations:migration
+metatables migrations upgrade --provider alpaca_connectors.migrations:migration head
 ```
 
 `mainsequence refresh-token` renews the saved session; the SDK keeps credentials in the operating
@@ -39,7 +39,7 @@ alpaca-connectors universe-source seed-defaults
 alpaca-connectors universe-source list
 alpaca-connectors account list
 alpaca-connectors market-data dataset list
-uv run uvicorn api.app.main:app --reload
+uv run uvicorn alpaca_connectors.api.app.main:app --reload
 ```
 
 Mutating account and market-data operations use a registered Account UID. CLI account registration

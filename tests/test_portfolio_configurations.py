@@ -7,7 +7,7 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from src.operations.portfolio_jobs import (
+from alpaca_connectors.operations.portfolio_jobs import (
     ALPACA_ETF_PORTFOLIO_EXECUTION_PATH,
     _create_platform_job,
     _patch_platform_job,
@@ -15,19 +15,19 @@ from src.operations.portfolio_jobs import (
     normalize_portfolio_job_settings,
     resolve_current_portfolio_job_configuration,
 )
-from src.portfolios.configurations import (
+from alpaca_connectors.portfolios.configurations import (
     AlpacaETFPortfolioConfiguration,
     AlpacaETFPortfolioConfigurationTable,
     PortfolioRebalanceConfiguration,
     normalize_rebalance_strategy,
 )
-from src.portfolios.execution import (
+from alpaca_connectors.portfolios.execution import (
     PortfolioExecutionGraph,
     ResolvedPortfolioConfiguration,
     execute_portfolio_configuration,
     resolve_portfolio_configuration,
 )
-from src.portfolios.signal_history import (
+from alpaca_connectors.portfolios.signal_history import (
     SignalObservationAsset,
     SignalObservationBounds,
     SignalObservationMatrix,
@@ -176,7 +176,7 @@ def test_portfolio_job_is_created_unscheduled_with_automatic_deployment() -> Non
     )
     created = SimpleNamespace(uid=JOB_UID)
 
-    with patch("src.operations.platform_jobs.PlatformJob.create", return_value=created) as create:
+    with patch("alpaca_connectors.operations.platform_jobs.PlatformJob.create", return_value=created) as create:
         assert _create_platform_job(row, settings) is created
 
     assert create.call_args.kwargs == {
@@ -252,10 +252,10 @@ def test_manual_portfolio_run_passes_no_business_arguments() -> None:
     job.run_job.return_value = {"uid": str(JOB_RUN_UID), "status": "PENDING"}
 
     with (
-        patch("src.operations.portfolio_jobs._current_environment_uid"),
-        patch("src.operations.portfolio_jobs.get_portfolio_configuration", return_value=row),
-        patch("src.operations.portfolio_jobs._require_linked_job", return_value=job),
-        patch("src.operations.portfolio_jobs.list_portfolio_job_runs", return_value=[]),
+        patch("alpaca_connectors.operations.portfolio_jobs._current_environment_uid"),
+        patch("alpaca_connectors.operations.portfolio_jobs.get_portfolio_configuration", return_value=row),
+        patch("alpaca_connectors.operations.portfolio_jobs._require_linked_job", return_value=job),
+        patch("alpaca_connectors.operations.portfolio_jobs.list_portfolio_job_runs", return_value=[]),
     ):
         result = launch_portfolio_job(CONFIGURATION_UID)
 
@@ -274,11 +274,11 @@ def test_runtime_resolves_portfolio_configuration_from_owning_job() -> None:
     with (
         patch("mainsequence.client.JobRun.filter", return_value=[run]),
         patch(
-            "src.operations.portfolio_jobs.get_portfolio_configuration_by_job_uid",
+            "alpaca_connectors.operations.portfolio_jobs.get_portfolio_configuration_by_job_uid",
             return_value=row,
         ) as get_by_job,
         patch(
-            "src.operations.portfolio_jobs._current_environment_uid",
+            "alpaca_connectors.operations.portfolio_jobs._current_environment_uid",
             return_value=ENVIRONMENT_UID,
         ),
     ):
@@ -316,22 +316,22 @@ def test_portfolio_resolution_uses_published_signal_and_selected_bars_profile() 
     )
 
     with (
-        patch("src.portfolios.execution.get_portfolio_configuration", return_value=row),
+        patch("alpaca_connectors.portfolios.execution.get_portfolio_configuration", return_value=row),
         patch(
-            "src.portfolios.execution.validate_portfolio_references",
+            "alpaca_connectors.portfolios.execution.validate_portfolio_references",
             return_value=(signal_configuration, bars_configuration, rebalance),
         ),
-        patch("src.operations.signal_uid_for_configuration", return_value="signal-uid"),
+        patch("alpaca_connectors.operations.signal_uid_for_configuration", return_value="signal-uid"),
         patch(
-            "src.portfolios.execution.read_signal_observation_matrix",
+            "alpaca_connectors.portfolios.execution.read_signal_observation_matrix",
             return_value=matrix,
         ) as read_signal,
         patch(
-            "src.portfolios.execution.read_signal_observation_bounds",
+            "alpaca_connectors.portfolios.execution.read_signal_observation_bounds",
             return_value=bounds,
         ) as read_bounds,
         patch(
-            "src.portfolios.execution.resolve_alpaca_bars_time_index_meta_table_uid",
+            "alpaca_connectors.portfolios.execution.resolve_alpaca_bars_time_index_meta_table_uid",
             return_value="source-table-uid",
         ) as resolve_bars,
     ):
@@ -366,13 +366,13 @@ def test_execution_updates_each_released_stage_without_tree_walk() -> None:
     manager.attach_mock(portfolio_node.run, "portfolio")
 
     with (
-        patch("src.runtime.start_portfolio_job_engine") as start_engine,
+        patch("alpaca_connectors.runtime.start_portfolio_job_engine") as start_engine,
         patch(
-            "src.portfolios.execution.resolve_portfolio_configuration",
+            "alpaca_connectors.portfolios.execution.resolve_portfolio_configuration",
             return_value=resolved,
         ),
         patch(
-            "src.portfolios.execution.build_portfolio_graph",
+            "alpaca_connectors.portfolios.execution.build_portfolio_graph",
             return_value=PortfolioExecutionGraph(
                 valuation_source=valuation_source,
                 calendar_events=calendar_events,
@@ -382,7 +382,7 @@ def test_execution_updates_each_released_stage_without_tree_walk() -> None:
                 portfolio_row=portfolio_row,
             ),
         ),
-        patch("src.portfolios.execution.update_portfolio_configuration_row") as update_row,
+        patch("alpaca_connectors.portfolios.execution.update_portfolio_configuration_row") as update_row,
     ):
         result = execute_portfolio_configuration(CONFIGURATION_UID)
 

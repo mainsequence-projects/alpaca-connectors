@@ -5,14 +5,17 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from api.app.schemas import AssetRegistrationDiscoveryResponse, AssetRegistrationRequest
-from api.app.services.assets import (
+from requests import ConnectionError as RequestsConnectionError
+
+from alpaca_connectors.api.app.schemas import (
+    AssetRegistrationDiscoveryResponse,
+    AssetRegistrationRequest,
+)
+from alpaca_connectors.api.app.services.assets import (
     build_asset_registration_discovery,
     run_asset_registration_operation,
 )
-from requests import ConnectionError as RequestsConnectionError
-
-from src.operations.asset_registration import (
+from alpaca_connectors.operations.asset_registration import (
     fail_asset_registration_operation,
     registration_steps,
 )
@@ -77,11 +80,11 @@ class AssetRegistrationOperationTests(unittest.TestCase):
 
         with (
             patch(
-                "api.app.services.assets.build_alpaca_us_equity_registration_plan",
+                "alpaca_connectors.api.app.services.assets.build_alpaca_us_equity_registration_plan",
                 side_effect=build_plan,
             ),
             patch(
-                "api.app.services.assets.resolve_alpaca_us_equity_registration_plan",
+                "alpaca_connectors.api.app.services.assets.resolve_alpaca_us_equity_registration_plan",
                 return_value=resolution,
             ),
         ):
@@ -127,11 +130,11 @@ class AssetRegistrationOperationTests(unittest.TestCase):
 
         with (
             patch(
-                "api.app.services.assets.build_asset_registration_discovery",
+                "alpaca_connectors.api.app.services.assets.build_asset_registration_discovery",
                 side_effect=fail_loading_catalog,
             ),
-            patch("api.app.services.assets.set_asset_registration_step"),
-            patch("api.app.services.assets.fail_asset_registration_operation") as fail_operation,
+            patch("alpaca_connectors.api.app.services.assets.set_asset_registration_step"),
+            patch("alpaca_connectors.api.app.services.assets.fail_asset_registration_operation") as fail_operation,
         ):
             run_asset_registration_operation(
                 "11111111-1111-4111-8111-111111111111",
@@ -157,11 +160,11 @@ class AssetRegistrationOperationTests(unittest.TestCase):
         operation = SimpleNamespace(steps=registration_steps("execute"))
         with (
             patch(
-                "src.operations.asset_registration.get_asset_registration_operation",
+                "alpaca_connectors.operations.asset_registration.get_asset_registration_operation",
                 return_value=operation,
             ),
             patch(
-                "src.operations.asset_registration.AssetRegistrationOperation.update",
+                "alpaca_connectors.operations.asset_registration.AssetRegistrationOperation.update",
                 return_value=operation,
             ) as update_operation,
         ):

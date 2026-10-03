@@ -8,11 +8,11 @@ runs. The user never selects an output dataset UID for an update.
 
 Main modules:
 
-- `src/market_data/storage.py`: migrated table contracts
-- `src/market_data/configurations.py`: stored configuration and explicit-asset membership tables
-- `src/market_data/alpaca_bars.py`: `AssetIndexedDataNode` producer
-- `src/market_data/services.py`: configuration resolution, dataset catalog, reads, and execution
-- `src/cli/bars.py`: thin CLI adapter
+- `src/alpaca_connectors/market_data/storage.py`: migrated table contracts
+- `src/alpaca_connectors/market_data/configurations.py`: stored configuration and explicit-asset membership tables
+- `src/alpaca_connectors/market_data/alpaca_bars.py`: `AssetIndexedDataNode` producer
+- `src/alpaca_connectors/market_data/services.py`: configuration resolution, dataset catalog, reads, and execution
+- `src/alpaca_connectors/cli/bars.py`: thin CLI adapter
 
 ## Data contract
 
@@ -42,10 +42,10 @@ range.
 Apply project-owned schemas before running an update:
 
 ```bash
-metatables migrations upgrade --provider src.migrations:migration head
+metatables migrations upgrade --provider alpaca_connectors.migrations:migration head
 ```
 
-Processes attach to those existing tables through `src.runtime.start_markets_engine()`; runtime
+Processes attach to those existing tables through `alpaca_connectors.runtime.start_markets_engine()`; runtime
 startup never creates a schema.
 
 Register an Alpaca account by Main Sequence Secret names before updating prices:
@@ -173,4 +173,4 @@ GET /v1/operations/job-runs/{job_run_uid}
 
 The Job launcher is `src/jobs/run_alpaca_bars_update.py` and its only argument is
 `--configuration-uid <UUID>`. Configuration resolution and Alpaca execution remain in
-`src.market_data.execute_market_data_update`; the launcher and API do not duplicate that logic.
+`alpaca_connectors.market_data.execute_market_data_update`; the launcher and API do not duplicate that logic.

@@ -7,7 +7,7 @@ from unittest.mock import patch
 import pytest
 from msm.repositories.base import MarketsRepositoryContext
 
-from src.portfolios.portfolio_history import (
+from alpaca_connectors.portfolios.portfolio_history import (
     PortfolioValueObservation,
     calculate_portfolio_performance,
     read_portfolio_history,
@@ -53,11 +53,11 @@ def test_portfolio_history_reads_metadata_and_latest_values_in_one_query() -> No
 
     with (
         patch(
-            "src.runtime.start_markets_engine",
+            "alpaca_connectors.runtime.start_markets_engine",
             return_value=SimpleNamespace(context=context),
         ),
         patch(
-            "src.portfolios.execution.portfolio_unique_identifier",
+            "alpaca_connectors.portfolios.execution.portfolio_unique_identifier",
             return_value="ALPACA_ETF_PORTFOLIO__ABC",
         ),
         patch(
@@ -95,11 +95,11 @@ def test_portfolio_history_reports_an_unmaterialized_portfolio() -> None:
     context = MarketsRepositoryContext()
     with (
         patch(
-            "src.runtime.start_markets_engine",
+            "alpaca_connectors.runtime.start_markets_engine",
             return_value=SimpleNamespace(context=context),
         ),
         patch(
-            "src.portfolios.execution.portfolio_unique_identifier",
+            "alpaca_connectors.portfolios.execution.portfolio_unique_identifier",
             return_value="ALPACA_ETF_PORTFOLIO__ABC",
         ),
         patch(

@@ -10,10 +10,10 @@ from etfhextractor.portfolio_signal import ETFHoldingsSignal, ETFHoldingsSignalC
 from msm_portfolios.data_nodes.signals.storage import SignalWeightsStorage
 from packaging.specifiers import SpecifierSet
 
-from src.market_data.alpaca_bars import AlpacaStockBarsNode
-from src.market_data.storage import AlpacaStockBars1dSipAllStorage
-from src.migrations import METADATA, PROJECT_TABLE_NAMES, migration
-from src.portfolios.etf_tracking import (
+from alpaca_connectors.market_data.alpaca_bars import AlpacaStockBarsNode
+from alpaca_connectors.market_data.storage import AlpacaStockBars1dSipAllStorage
+from alpaca_connectors.migrations import METADATA, PROJECT_TABLE_NAMES, migration
+from alpaca_connectors.portfolios.etf_tracking import (
     AlpacaEtfPortfolioPlan,
     AlpacaEtfTrackingPortfolioConfig,
     ResolvedEtfUniverse,
@@ -172,21 +172,21 @@ def test_alpaca_portfolio_uses_connector_owned_universe_signal() -> None:
     portfolio_node = Mock()
 
     with (
-        patch("src.runtime.start_portfolio_markets_engine") as start_engine,
+        patch("alpaca_connectors.runtime.start_portfolio_markets_engine") as start_engine,
         patch(
-            "src.portfolios.etf_tracking.plan_alpaca_etf_tracking_portfolio",
+            "alpaca_connectors.portfolios.etf_tracking.plan_alpaca_etf_tracking_portfolio",
             return_value=plan,
         ),
         patch(
-            "src.portfolios.etf_tracking.build_alpaca_interpolated_prices",
+            "alpaca_connectors.portfolios.etf_tracking.build_alpaca_interpolated_prices",
             return_value=valuation_source,
         ) as build_prices,
         patch(
-            "src.portfolios.etf_tracking.build_alpaca_etf_holdings_signal",
+            "alpaca_connectors.portfolios.etf_tracking.build_alpaca_etf_holdings_signal",
             return_value=signal,
         ) as build_signal,
         patch(
-            "src.portfolios.etf_tracking.ensure_trading_calendar",
+            "alpaca_connectors.portfolios.etf_tracking.ensure_trading_calendar",
             return_value=calendar_row,
         ),
         patch("msm.api.portfolios.Portfolio.upsert", return_value=portfolio_row),

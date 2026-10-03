@@ -7,13 +7,13 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from src.operations.signal_job_configurations import (
+from alpaca_connectors.operations.signal_job_configurations import (
     AlpacaETFSignalJobConfiguration,
     AlpacaETFSignalJobConfigurationTable,
     normalize_schedule,
     validate_signal_job_references,
 )
-from src.operations.signal_jobs import (
+from alpaca_connectors.operations.signal_jobs import (
     ALPACA_ETF_SIGNAL_EXECUTION_PATH,
     _create_platform_job,
     _ensure_signal_metadata,
@@ -119,9 +119,9 @@ def test_signal_reference_validation_accepts_active_account_registration_mapping
     universe = SimpleNamespace(is_active=True)
 
     with (
-        patch("src.universes.get_asset_universe", return_value=universe),
+        patch("alpaca_connectors.universes.get_asset_universe", return_value=universe),
         patch(
-            "src.account.services.get_account_registration",
+            "alpaca_connectors.account.services.get_account_registration",
             return_value={"account_is_active": True},
         ),
     ):
@@ -135,9 +135,9 @@ def test_signal_reference_validation_rejects_inactive_account_registration_mappi
     universe = SimpleNamespace(is_active=True)
 
     with (
-        patch("src.universes.get_asset_universe", return_value=universe),
+        patch("alpaca_connectors.universes.get_asset_universe", return_value=universe),
         patch(
-            "src.account.services.get_account_registration",
+            "alpaca_connectors.account.services.get_account_registration",
             return_value={"account_is_active": False},
         ),
         pytest.raises(ValueError, match="is inactive"),
@@ -152,7 +152,7 @@ def test_platform_job_is_created_without_a_schedule_or_default_arguments() -> No
     row = configuration(job_uid=None, lifecycle_state="provisioning")
     created = SimpleNamespace(uid=JOB_UID)
 
-    with patch("src.operations.platform_jobs.PlatformJob.create", return_value=created) as create:
+    with patch("alpaca_connectors.operations.platform_jobs.PlatformJob.create", return_value=created) as create:
         assert _create_platform_job(row) is created
 
     create.assert_called_once_with(
@@ -269,7 +269,7 @@ def test_signal_metadata_is_materialized_without_publishing_weights() -> None:
 
     with (
         patch(
-            "src.portfolios.build_alpaca_etf_holdings_signal",
+            "alpaca_connectors.portfolios.build_alpaca_etf_holdings_signal",
             return_value=signal,
         ) as build_signal,
         patch("msm_portfolios.api.market_metadata.SignalMetadata.upsert") as upsert,
@@ -295,13 +295,13 @@ def test_reconciliation_links_the_job_before_activating_its_schedule() -> None:
     job = SimpleNamespace(uid=JOB_UID)
 
     with (
-        patch("src.operations.signal_jobs._current_environment_uid"),
-        patch("src.operations.signal_jobs._ensure_signal_metadata") as ensure_signal,
-        patch("src.operations.signal_jobs.get_signal_job_configuration", return_value=desired),
-        patch("src.operations.signal_jobs._create_platform_job", return_value=job) as create,
-        patch("src.operations.signal_jobs._patch_platform_job", return_value=job) as patch_job,
+        patch("alpaca_connectors.operations.signal_jobs._current_environment_uid"),
+        patch("alpaca_connectors.operations.signal_jobs._ensure_signal_metadata") as ensure_signal,
+        patch("alpaca_connectors.operations.signal_jobs.get_signal_job_configuration", return_value=desired),
+        patch("alpaca_connectors.operations.signal_jobs._create_platform_job", return_value=job) as create,
+        patch("alpaca_connectors.operations.signal_jobs._patch_platform_job", return_value=job) as patch_job,
         patch(
-            "src.operations.signal_jobs.update_signal_job_configuration_row",
+            "alpaca_connectors.operations.signal_jobs.update_signal_job_configuration_row",
             side_effect=[linked, ready],
         ) as update_row,
     ):
@@ -321,11 +321,11 @@ def test_manual_run_passes_no_business_arguments_to_job_run() -> None:
     job.run_job.return_value = {"uid": str(JOB_RUN_UID), "status": "PENDING"}
 
     with (
-        patch("src.operations.signal_jobs._current_environment_uid"),
-        patch("src.operations.signal_jobs.get_signal_job_configuration", return_value=row),
-        patch("src.operations.signal_jobs.validate_signal_job_references"),
-        patch("src.operations.signal_jobs._require_linked_job", return_value=job),
-        patch("src.operations.signal_jobs.list_signal_job_runs", return_value=[]),
+        patch("alpaca_connectors.operations.signal_jobs._current_environment_uid"),
+        patch("alpaca_connectors.operations.signal_jobs.get_signal_job_configuration", return_value=row),
+        patch("alpaca_connectors.operations.signal_jobs.validate_signal_job_references"),
+        patch("alpaca_connectors.operations.signal_jobs._require_linked_job", return_value=job),
+        patch("alpaca_connectors.operations.signal_jobs.list_signal_job_runs", return_value=[]),
     ):
         result = launch_signal_job(CONFIGURATION_UID)
 
@@ -344,11 +344,11 @@ def test_runtime_resolves_configuration_from_job_run_and_job_uid() -> None:
     with (
         patch("mainsequence.client.JobRun.filter", return_value=[run]) as filter_runs,
         patch(
-            "src.operations.signal_jobs.get_signal_job_configuration_by_job_uid",
+            "alpaca_connectors.operations.signal_jobs.get_signal_job_configuration_by_job_uid",
             return_value=row,
         ) as get_by_job,
         patch(
-            "src.operations.signal_jobs._current_environment_uid",
+            "alpaca_connectors.operations.signal_jobs._current_environment_uid",
             return_value=ENVIRONMENT_UID,
         ),
     ):
@@ -374,10 +374,10 @@ def test_job_executes_one_universe_signal_update() -> None:
 
     with (
         patch(
-            "src.operations.signal_jobs.resolve_current_signal_job_configuration",
+            "alpaca_connectors.operations.signal_jobs.resolve_current_signal_job_configuration",
             return_value=(row, run),
         ),
-        patch("src.universes.run_asset_universe", return_value=materialization) as run_universe,
+        patch("alpaca_connectors.universes.run_asset_universe", return_value=materialization) as run_universe,
     ):
         result = execute_current_signal_job(job_run_uid=JOB_RUN_UID)
 

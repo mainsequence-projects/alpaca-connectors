@@ -7,11 +7,11 @@ OpenFIGI metadata is optional enrichment and never an identity prerequisite.
 
 Main module:
 
-- `src/assets/alpaca_us_equities.py`
+- `src/alpaca_connectors/assets/alpaca_us_equities.py`
 
 Primary CLI:
 
-- `src/cli/`
+- `src/alpaca_connectors/cli/`
 
 ## Asset model (ms-markets)
 
@@ -28,7 +28,7 @@ Assets are written through the typed ms-markets API (`msm.api.assets`), not the 
   bulk-upserts `OpenFigiDetails` only when enrichment succeeds
 - all display snapshots for one registration request are published through one batched
   `AssetSnapshot` update rather than one TimeIndexTableUpdater run per asset
-- the runtime must be attached first via `src.runtime.start_markets_engine()` (the CLI does this)
+- the runtime must be attached first via `alpaca_connectors.runtime.start_markets_engine()` (the CLI does this)
 
 ## Registration Contract
 
@@ -70,7 +70,7 @@ Optional enrichment classifies Alpaca symbols through ordered FIGI passes:
 2. `ETP`
 3. `REIT`
 
-The FIGI market-sector and security-type constants are local string literals in `src/settings.py`
+The FIGI market-sector and security-type constants are local string literals in `src/alpaca_connectors/settings.py`
 (`"Equity"`, `"Common Stock"`, `"ETP"`, `"REIT"`). They previously came from
 `mainsequence.client.MARKETS_CONSTANTS`, which was removed in SDK 4.x.
 

@@ -7,7 +7,7 @@ from unittest.mock import patch
 import pytest
 from msm.repositories.base import MarketsRepositoryContext
 
-from src.portfolios.signal_history import (
+from alpaca_connectors.portfolios.signal_history import (
     read_signal_observation_bounds,
     read_signal_observation_matrix,
 )
@@ -50,7 +50,7 @@ def test_signal_history_reads_all_assets_for_the_latest_distinct_observations_on
 
     with (
         patch(
-            "src.runtime.start_markets_engine",
+            "alpaca_connectors.runtime.start_markets_engine",
             return_value=SimpleNamespace(context=context),
         ),
         patch(
@@ -96,7 +96,7 @@ def test_signal_history_refuses_a_truncated_constituent_result() -> None:
     context = MarketsRepositoryContext()
     with (
         patch(
-            "src.runtime.start_markets_engine",
+            "alpaca_connectors.runtime.start_markets_engine",
             return_value=SimpleNamespace(context=context),
         ),
         patch(
@@ -118,7 +118,7 @@ def test_signal_observation_bounds_use_one_aggregate_query() -> None:
     context = MarketsRepositoryContext()
     with (
         patch(
-            "src.runtime.start_markets_engine",
+            "alpaca_connectors.runtime.start_markets_engine",
             return_value=SimpleNamespace(context=context),
         ),
         patch(

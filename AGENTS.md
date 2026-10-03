@@ -24,26 +24,35 @@ Primary project capabilities:
 Supported operator surfaces:
 
 - installed CLI: `alpaca-connectors`
-- reusable implementation modules under `src/`
-- thin FastAPI surface under `api/`
+- the installable `alpaca_connectors` package under `src/alpaca_connectors/`; the wheel ships
+  only this top-level package
+- thin FastAPI surface in `alpaca_connectors.api` (`src/alpaca_connectors/api/`); `api/app/main.py`
+  is only the deployed resource's path-stable entry point and is not part of the wheel
 - structured Tau project tools under `.tau/extensions/alpaca_connectors/`
-- repository-local scheduled-job entrypoints under `src/jobs/`
+- repository-local scheduled-job entrypoints under `src/jobs/`: scripts executed by path, not
+  package modules; their paths are bound to live platform Jobs, so do not move them
 
 Repository rules:
 
 - treat Assets, Universes, Market Data, Accounts, Holdings, Portfolios, and Operations as the
   business capability boundaries; providers are supporting dependencies, not a `Connection`
   domain
-- keep API-only capability descriptions under `api/app`; `src/` is reserved for reusable backend
-  behavior
-- use `src.universes`, `src.market_data`, `src.account`, `src.holdings`, and `src.portfolios` as
-  the public capability import paths
-- keep reusable planning, registration, holdings orchestration, and stock-bar logic under `src/`;
+- keep API-only capability descriptions under `alpaca_connectors.api.app`; the rest of
+  `alpaca_connectors` is reserved for reusable backend behavior
+- use `alpaca_connectors.universes`, `alpaca_connectors.market_data`, `alpaca_connectors.account`,
+  `alpaca_connectors.holdings`, and `alpaca_connectors.portfolios` as the public capability import
+  paths; never reintroduce a generic top-level package such as `src`, `api`, or `migrations`
+- the migration provider is `alpaca_connectors.migrations:migration`; its catalog key stays
+  `package="src"` because the MetaTables catalog binds the existing tables to it
+- `AlpacaETFHoldingsSignal` hashes the frozen `SIGNAL_IDENTITY_CLASS_IMPORT_PATH`
+  (`src.portfolios.alpaca_etf_signal`) so existing signal UIDs survive module moves; never change it
+- keep reusable planning, registration, holdings orchestration, and stock-bar logic in
+  `alpaca_connectors`;
   ETF provider extraction itself comes from the `etfhextractor` dependency; do not reintroduce
   one-off workflow scripts for the main operations
 - keep CLI-facing behavior thin; CLI commands should orchestrate reusable modules, not duplicate
   business logic
-- keep durable signal Job desired state and reconciliation under `src/operations/`; JobRuns are
+- keep durable signal Job desired state and reconciliation under `src/alpaca_connectors/operations/`; JobRuns are
   execution history and never own signal configuration
 - if a scheduled job still needs a repository-local launcher, keep that launcher under `src/jobs/`
   and declare the reviewed schedule under `.mainsequence/workflows/`
@@ -125,7 +134,8 @@ Price updates from Alpaca:
 
 FastAPI surface:
 
-- the API is intentionally thin and should call the reusable logic already implemented under `src/`
+- the API is intentionally thin and should call the reusable logic already implemented in
+  `alpaca_connectors`
   and the external `etfhextractor` dependency through the local adapter
 - keep route handlers contract-driven and avoid rebuilding the producer logic inside route bodies
 - canonical routes are grouped under `/v1/project-state`, `/v1/assets`, `/v1/accounts`,
@@ -182,7 +192,7 @@ Operational notes:
   migration, and updater interfaces from `metatables` and follow the copied
   `.agents/skills/metatables/` skills
 - apply project-owned MetaTable schema changes through
-  `metatables migrations upgrade --provider src.migrations:migration head`
+  `metatables migrations upgrade --provider alpaca_connectors.migrations:migration head`
 
 Do not remove the `<!-- mainsequence-agent-scaffold:start schema=1 source=agent_scaffold -->`
 or `<!-- mainsequence-agent-scaffold:end -->` markers.

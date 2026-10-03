@@ -4,7 +4,7 @@ import uuid
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from src.assets.resolution import (
+from alpaca_connectors.assets.resolution import (
     assets_by_uids,
     ticker_and_optional_figi_by_unique_identifiers,
 )
@@ -24,7 +24,7 @@ def test_asset_uid_resolution_executes_once_for_503_assets() -> None:
 
     with (
         patch(
-            "src.runtime.start_markets_engine",
+            "alpaca_connectors.runtime.start_markets_engine",
             return_value=SimpleNamespace(context=context),
         ),
         patch(
@@ -57,7 +57,7 @@ def test_bar_identity_details_execute_once_for_503_assets() -> None:
 
     with (
         patch(
-            "src.runtime.start_markets_engine",
+            "alpaca_connectors.runtime.start_markets_engine",
             return_value=SimpleNamespace(context=context),
         ),
         patch(

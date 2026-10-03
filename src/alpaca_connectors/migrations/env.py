@@ -1,0 +1,6 @@
+from __future__ import annotations
+
+from alpaca_connectors.migrations import migration
+from metatables.migrations.env import run_mainsequence_alembic_env
+
+run_mainsequence_alembic_env(default_provider=migration)

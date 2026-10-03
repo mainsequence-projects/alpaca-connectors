@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from src.account import (
+from alpaca_connectors.account import (
     api_key_fingerprint,
     build_account_unique_identifier,
     environment_for_is_paper,

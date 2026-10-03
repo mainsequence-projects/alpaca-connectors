@@ -20,7 +20,7 @@ They do not register assets, create categories, or publish DataNodes.
 
 Local integration point:
 
-- `src/universes/etf_holdings.py`
+- `src/alpaca_connectors/universes/etf_holdings.py`
 
 ## Supported Providers
 

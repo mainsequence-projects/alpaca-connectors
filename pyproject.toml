@@ -26,14 +26,16 @@ dependencies = [
 ]
 
 [project.scripts]
-alpaca-connectors = "src.cli:main"
+alpaca-connectors = "alpaca_connectors.cli:main"
 
 [tool.setuptools.packages.find]
-where = ["."]
-include = ["src*", "agents*", "api*"]
+# Ship exactly one top-level import package. `src/jobs/` launchers and the `api/` deployment
+# entry point are executed from the checkout by path and are not part of the wheel.
+where = ["src"]
+include = ["alpaca_connectors*"]
 
 [tool.setuptools.package-data]
-"src.universes" = ["fixtures/*.json"]
+"alpaca_connectors.universes" = ["fixtures/*.json"]
 
 [tool.ruff]
 line-length = 100                 # Max line length for Ruff/Black.
@@ -85,7 +87,7 @@ ignore = ["E203", "E501"]
 
 [tool.ruff.lint.isort]
 # Treat these as your own packages so they sort as "first-party".
-known-first-party = ["mainsequence","metatables","src","agents"]
+known-first-party = ["mainsequence","metatables","alpaca_connectors"]
 
 [tool.uv.sources]
 etfhextractor = { git = "https://github.com/mainsequence-projects/etfholdingextractor" }

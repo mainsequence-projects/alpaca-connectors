@@ -22,7 +22,7 @@ from tau_agent.tools import (
 )
 from tau_agent.types import JSONValue
 
-from src.agent_tools import PROJECT_AGENT_TOOLS, ProjectAgentTool
+from alpaca_connectors.agent_tools import PROJECT_AGENT_TOOLS, ProjectAgentTool
 
 
 def _json_value(value: Any) -> JSONValue:
@@ -55,7 +55,7 @@ def _public_error(exc: Exception) -> dict[str, JSONValue]:
             "retryable": False,
         }
 
-    from api.app.errors import api_http_error
+    from alpaca_connectors.api.app.errors import api_http_error
 
     http_error = api_http_error(exc)
     detail = _json_value(http_error.detail)

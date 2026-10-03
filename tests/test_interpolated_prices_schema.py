@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 import pytest
 
-from src.portfolios.interpolated_prices_schema import (
+from alpaca_connectors.portfolios.interpolated_prices_schema import (
     DYNAMIC_INTERPOLATED_PRICES_SOURCES_ENV,
     DYNAMIC_MIGRATION_PROVIDER,
     InterpolatedPricesStorageSpec,
@@ -54,10 +54,10 @@ def test_resolve_interpolation_specs_queries_all_bar_profiles_once() -> None:
     ]
 
     with (
-        patch("src.market_data.ALPACA_STOCK_BARS_STORAGE_BY_TRIPLE", profiles),
+        patch("alpaca_connectors.market_data.ALPACA_STOCK_BARS_STORAGE_BY_TRIPLE", profiles),
         patch("metatables.TimeIndexMetaTable.filter_by_body", return_value=rows) as query,
         patch(
-            "src.portfolios.interpolated_prices_schema.configured_alpaca_interpolated_prices_storage",
+            "alpaca_connectors.portfolios.interpolated_prices_schema.configured_alpaca_interpolated_prices_storage",
             side_effect=[output_storage("interp_iex"), output_storage("interp_sip")],
         ),
     ):
@@ -91,7 +91,7 @@ def test_dynamic_provider_env_builds_all_configured_storage_models() -> None:
     with (
         patch.dict("os.environ", environment, clear=False),
         patch(
-            "src.portfolios.interpolated_prices_schema.configured_alpaca_interpolated_prices_storage",
+            "alpaca_connectors.portfolios.interpolated_prices_schema.configured_alpaca_interpolated_prices_storage",
             return_value=output_storage("interp_sip"),
         ),
     ):
@@ -117,18 +117,18 @@ def test_check_only_requires_both_revision_and_registered_table() -> None:
     )
     with (
         patch(
-            "src.portfolios.interpolated_prices_schema.resolve_interpolated_prices_storage_specs",
+            "alpaca_connectors.portfolios.interpolated_prices_schema.resolve_interpolated_prices_storage_specs",
             return_value=[spec],
         ),
         patch(
-            "src.portfolios.interpolated_prices_schema._revision_contains_table",
+            "alpaca_connectors.portfolios.interpolated_prices_schema._revision_contains_table",
             return_value=True,
         ),
         patch(
-            "src.portfolios.interpolated_prices_schema.registered_interpolated_prices_by_table_name",
+            "alpaca_connectors.portfolios.interpolated_prices_schema.registered_interpolated_prices_by_table_name",
             return_value={"interp_sip": SimpleNamespace(uid="storage-uid")},
         ),
-        patch("src.portfolios.interpolated_prices_schema._run_metatables") as run,
+        patch("alpaca_connectors.portfolios.interpolated_prices_schema._run_metatables") as run,
     ):
         result = prepare_interpolated_prices_schema(check_only=True)
 
@@ -148,18 +148,18 @@ def test_prepare_runs_the_metatables_migration_cli_for_the_dynamic_provider() ->
     )
     with (
         patch(
-            "src.portfolios.interpolated_prices_schema.resolve_interpolated_prices_storage_specs",
+            "alpaca_connectors.portfolios.interpolated_prices_schema.resolve_interpolated_prices_storage_specs",
             return_value=[spec],
         ),
         patch(
-            "src.portfolios.interpolated_prices_schema._revision_contains_table",
+            "alpaca_connectors.portfolios.interpolated_prices_schema._revision_contains_table",
             side_effect=[False, True],
         ),
         patch(
-            "src.portfolios.interpolated_prices_schema.registered_interpolated_prices_by_table_name",
+            "alpaca_connectors.portfolios.interpolated_prices_schema.registered_interpolated_prices_by_table_name",
             side_effect=[{}, {"interp_sip": SimpleNamespace(uid="storage-uid")}],
         ),
-        patch("src.portfolios.interpolated_prices_schema.subprocess.run") as run,
+        patch("alpaca_connectors.portfolios.interpolated_prices_schema.subprocess.run") as run,
     ):
         result = prepare_interpolated_prices_schema(revision_message="add interpolation")
 

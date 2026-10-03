@@ -6,7 +6,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from src.cli.main import build_parser, main
+from alpaca_connectors.cli.main import build_parser, main
 
 
 class CliTests(unittest.TestCase):
@@ -22,13 +22,13 @@ class CliTests(unittest.TestCase):
         )
         resolution = SimpleNamespace(summary=lambda: {})
         with (
-            patch("src.runtime.start_markets_engine"),
+            patch("alpaca_connectors.runtime.start_markets_engine"),
             patch(
-                "src.cli.asset.build_alpaca_us_equity_registration_plan",
+                "alpaca_connectors.cli.asset.build_alpaca_us_equity_registration_plan",
                 return_value=plan,
             ) as build_plan,
             patch(
-                "src.cli.asset.resolve_alpaca_us_equity_registration_plan",
+                "alpaca_connectors.cli.asset.resolve_alpaca_us_equity_registration_plan",
                 return_value=resolution,
             ),
         ):
@@ -101,7 +101,7 @@ class CliTests(unittest.TestCase):
         )
         stdout = io.StringIO()
         with (
-            patch("src.account.services.register_alpaca_account", return_value=result) as register,
+            patch("alpaca_connectors.account.services.register_alpaca_account", return_value=result) as register,
             contextlib.redirect_stdout(stdout),
         ):
             exit_code = main(
@@ -115,7 +115,7 @@ class CliTests(unittest.TestCase):
                 ]
             )
         self.assertEqual(exit_code, 0)
-        from src.account.credentials import AlpacaSecretNames
+        from alpaca_connectors.account.credentials import AlpacaSecretNames
 
         register.assert_called_once_with(
             credentials=AlpacaSecretNames(
@@ -130,7 +130,7 @@ class CliTests(unittest.TestCase):
         stdout = io.StringIO()
         with (
             patch(
-                "src.account.services.backfill_account_secret_uids",
+                "alpaca_connectors.account.services.backfill_account_secret_uids",
                 return_value={"execute": False, "pending": 0},
             ) as backfill,
             contextlib.redirect_stdout(stdout),
@@ -149,8 +149,8 @@ class CliTests(unittest.TestCase):
         }
         stdout = io.StringIO()
         with (
-            patch("src.universes.get_asset_universe_view", return_value=universe),
-            patch("src.universes.preview_asset_universe", return_value=plan) as preview,
+            patch("alpaca_connectors.universes.get_asset_universe_view", return_value=universe),
+            patch("alpaca_connectors.universes.preview_asset_universe", return_value=plan) as preview,
             contextlib.redirect_stdout(stdout),
         ):
             exit_code = main(
@@ -181,7 +181,7 @@ class CliTests(unittest.TestCase):
                 "enabled": True,
             }
         )
-        with patch("src.universes.create_universe_source", return_value=source) as create:
+        with patch("alpaca_connectors.universes.create_universe_source", return_value=source) as create:
             exit_code = main(
                 [
                     "universe-source",
@@ -212,14 +212,14 @@ class CliTests(unittest.TestCase):
         stdout = io.StringIO()
         with (
             patch(
-                "src.universes.get_asset_universe_view",
+                "alpaca_connectors.universes.get_asset_universe_view",
                 return_value=universe,
             ),
             patch(
-                "src.market_data.configurations.bar_configurations_for_universe",
+                "alpaca_connectors.market_data.configurations.bar_configurations_for_universe",
                 return_value=[],
             ),
-            patch("src.universes.delete_asset_universe") as delete,
+            patch("alpaca_connectors.universes.delete_asset_universe") as delete,
             contextlib.redirect_stdout(stdout),
         ):
             exit_code = main(["universe", "delete", "universe-uid"])
@@ -231,7 +231,7 @@ class CliTests(unittest.TestCase):
         node = SimpleNamespace()
         summary = {"dataset": {"uid": "dataset-uid"}, "account_uid": "account-uid"}
         with patch(
-            "src.market_data.build_market_data_update",
+            "alpaca_connectors.market_data.build_market_data_update",
             return_value=(node, summary),
         ) as build:
             exit_code = main(
@@ -252,7 +252,7 @@ class CliTests(unittest.TestCase):
         row = SimpleNamespace(
             model_dump=lambda mode=None: {"uid": "configuration-uid", "asset_source": "assets"}
         )
-        with patch("src.market_data.create_bar_configuration", return_value=row) as create:
+        with patch("alpaca_connectors.market_data.create_bar_configuration", return_value=row) as create:
             exit_code = main(
                 [
                     "market-data",
@@ -297,11 +297,11 @@ class CliTests(unittest.TestCase):
         )
         with (
             patch(
-                "src.operations.create_signal_job_configuration",
+                "alpaca_connectors.operations.create_signal_job_configuration",
                 return_value=row,
             ) as create,
             patch(
-                "src.operations.signal_uid_for_configuration",
+                "alpaca_connectors.operations.signal_uid_for_configuration",
                 return_value="signal-uid",
             ),
         ):
@@ -369,11 +369,11 @@ class CliTests(unittest.TestCase):
     def test_portfolio_prepare_interpolated_prices_uses_migration_preflight(self) -> None:
         result = {
             "created_revision": False,
-            "dynamic_provider": "src.portfolios.interpolated_prices_migration:migration",
+            "dynamic_provider": "alpaca_connectors.portfolios.interpolated_prices_migration:migration",
             "storages": [],
         }
         with patch(
-            "src.portfolios.interpolated_prices_schema.prepare_interpolated_prices_schema",
+            "alpaca_connectors.portfolios.interpolated_prices_schema.prepare_interpolated_prices_schema",
             return_value=result,
         ) as prepare:
             exit_code = main(["portfolio", "prepare-interpolated-prices", "--check-only"])
@@ -386,7 +386,7 @@ class CliTests(unittest.TestCase):
         sensitive = "raw-secret-value"
         with (
             patch(
-                "src.universes.preview_universe_source",
+                "alpaca_connectors.universes.preview_universe_source",
                 side_effect=RuntimeError(f"upstream headers contained {sensitive}"),
             ),
             contextlib.redirect_stderr(stderr),

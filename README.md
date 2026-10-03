@@ -26,15 +26,16 @@ project's top-level ontology.
 
 ## Repository Boundaries
 
-- `src/assets/`: instrument discovery, FIGI resolution, and strict registration.
-- `src/universes/`: source configurations, registered Asset Universes, and category materialization.
-- `src/market_data/`: migrated price storage, updater, queries, and account-backed execution.
-- `src/account/`: account identity, credential Secret references, registration, and refresh.
-- `src/holdings/`: Alpaca-position translation and canonical snapshot publication.
-- `src/portfolios/`: analytical portfolio construction.
-- `src/cli/`: thin command adapters over reusable services.
+- `src/alpaca_connectors/assets/`: instrument discovery, FIGI resolution, and strict registration.
+- `src/alpaca_connectors/universes/`: source configurations, registered Asset Universes, and category materialization.
+- `src/alpaca_connectors/market_data/`: migrated price storage, updater, queries, and account-backed execution.
+- `src/alpaca_connectors/account/`: account identity, credential Secret references, registration, and refresh.
+- `src/alpaca_connectors/holdings/`: Alpaca-position translation and canonical snapshot publication.
+- `src/alpaca_connectors/portfolios/`: analytical portfolio construction.
+- `src/alpaca_connectors/cli/`: thin command adapters over reusable services.
 - `src/jobs/`: reviewed launchers for platform-managed execution.
-- `api/`: FastAPI-only contracts, pagination, routing, and response shaping.
+- `src/alpaca_connectors/api/`: FastAPI-only contracts, pagination, routing, and response shaping.
+- `api/app/main.py`: path-stable entry point for the deployed FastAPI resource (not in the wheel).
 - `.mainsequence/workflows/`: backend-validated Job and FastAPI deployment declarations.
 - `docs/`: architecture and operating instructions.
 
@@ -50,7 +51,7 @@ the reproducible resolution. The project runs on Main Sequence SDK 9, ms-markets
 ```bash
 uv sync
 mainsequence refresh-token
-metatables migrations upgrade --provider src.migrations:migration head
+metatables migrations upgrade --provider alpaca_connectors.migrations:migration head
 alpaca-connectors portfolio prepare-interpolated-prices
 alpaca-connectors universe-source seed-defaults
 ```
@@ -177,7 +178,7 @@ signal UID.
 ## API
 
 ```bash
-uv run uvicorn api.app.main:app --reload
+uv run uvicorn alpaca_connectors.api.app.main:app --reload
 ```
 
 For joint local debugging, launch **Debug Alpaca API + Command Center Site** from VS Code. It starts

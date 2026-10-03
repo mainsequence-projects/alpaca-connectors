@@ -7,8 +7,8 @@ from unittest.mock import MagicMock, patch
 
 from msm.constants import ASSET_TYPE_CURRENCY, ASSET_TYPE_CURRENCY_DEFINITION
 
-from src.account import api_key_fingerprint
-from src.account.credentials import (
+from alpaca_connectors.account import api_key_fingerprint
+from alpaca_connectors.account.credentials import (
     CREDENTIAL_SOURCE_EXTERNAL,
     CREDENTIAL_SOURCE_MANAGED,
     AlpacaCredentialsRejectedError,
@@ -18,7 +18,7 @@ from src.account.credentials import (
     ResolvedAlpacaCredentials,
     managed_secret_names,
 )
-from src.account.services import (
+from alpaca_connectors.account.services import (
     backfill_account_secret_uids,
     build_account_balance_values,
     build_account_detail_values,
@@ -29,8 +29,8 @@ from src.account.services import (
     remove_account_registration,
     update_account_registration,
 )
-from src.holdings import build_account_holdings_rows
-from src.holdings.services import (
+from alpaca_connectors.holdings import build_account_holdings_rows
+from alpaca_connectors.holdings.services import (
     AccountHoldingsRegistryError,
     _latest_holdings_set_uid_statement,
     publish_account_holdings_snapshot,
@@ -273,7 +273,7 @@ class AccountServiceShapingTests(unittest.TestCase):
             patch("msm.api.assets.Asset.upsert", return_value=asset) as asset_upsert,
             patch("msm.api.assets.CurrencySpot.upsert") as currency_spot_upsert,
             patch(
-                "src.assets.alpaca_asset_details.upsert_alpaca_asset_details"
+                "alpaca_connectors.assets.alpaca_asset_details.upsert_alpaca_asset_details"
             ) as alpaca_details_upsert,
         ):
             identifier = ensure_cash_currency_asset("usd")
@@ -288,7 +288,7 @@ class AccountServiceShapingTests(unittest.TestCase):
         alpaca_details_upsert.assert_not_called()
 
     def test_position_identity_uses_alpaca_asset_uuid(self) -> None:
-        from src.account.services import canonical_identifier_for_position
+        from alpaca_connectors.account.services import canonical_identifier_for_position
 
         self.assertEqual(
             canonical_identifier_for_position(_stub_positions()[0]),
@@ -296,7 +296,7 @@ class AccountServiceShapingTests(unittest.TestCase):
         )
 
     def test_position_resolver_registers_missing_asset_without_figi_requirement(self) -> None:
-        from src.account.services import make_position_resolver
+        from alpaca_connectors.account.services import make_position_resolver
 
         provider_asset = SimpleNamespace(
             id=uuid.UUID("11111111-1111-4111-8111-111111111111"),
@@ -317,15 +317,15 @@ class AccountServiceShapingTests(unittest.TestCase):
         with (
             patch("msm.api.assets.Asset.get_by_unique_identifier", return_value=None),
             patch(
-                "src.assets.alpaca_us_equities.classify_alpaca_us_equities",
+                "alpaca_connectors.assets.alpaca_us_equities.classify_alpaca_us_equities",
                 return_value="PLAN",
             ),
             patch(
-                "src.assets.alpaca_us_equities.resolve_alpaca_us_equity_registration_plan",
+                "alpaca_connectors.assets.alpaca_us_equities.resolve_alpaca_us_equity_registration_plan",
                 return_value="RESOLUTION",
             ),
             patch(
-                "src.assets.alpaca_us_equities.register_alpaca_us_equity_assets",
+                "alpaca_connectors.assets.alpaca_us_equities.register_alpaca_us_equity_assets",
                 return_value={"assets": {"AAPL": "ALPACA::11111111-1111-4111-8111-111111111111"}},
             ) as register,
         ):
@@ -338,7 +338,7 @@ class AccountServiceShapingTests(unittest.TestCase):
         register.assert_called_once_with(registration_resolution="RESOLUTION")
 
     def test_position_identity_mismatch_names_asset_and_both_uuids(self) -> None:
-        from src.account.services import make_position_resolver
+        from alpaca_connectors.account.services import make_position_resolver
 
         provider_asset = SimpleNamespace(
             id=uuid.UUID("33333333-3333-4333-8333-333333333333"),
@@ -408,11 +408,11 @@ class AccountServiceShapingTests(unittest.TestCase):
 
         with (
             patch(
-                "src.assets.alpaca_us_equities.resolve_alpaca_us_equity_registration_plan",
+                "alpaca_connectors.assets.alpaca_us_equities.resolve_alpaca_us_equity_registration_plan",
                 return_value=resolution,
             ) as resolve_registration,
             patch(
-                "src.assets.alpaca_us_equities.register_alpaca_us_equity_assets"
+                "alpaca_connectors.assets.alpaca_us_equities.register_alpaca_us_equity_assets"
             ) as register_assets,
         ):
             identifiers, result_resolution = prepare_alpaca_position_assets(
@@ -436,7 +436,7 @@ class AccountServiceShapingTests(unittest.TestCase):
         register_assets.assert_called_once_with(registration_resolution=resolution)
 
     def test_crypto_position_resolves_catalog_uuid_by_symbol(self) -> None:
-        from src.account.services import make_position_resolver
+        from alpaca_connectors.account.services import make_position_resolver
 
         provider_asset = SimpleNamespace(
             id=uuid.UUID("276e2673-764b-4ab6-a611-caf665ca6340"),
@@ -460,11 +460,11 @@ class AccountServiceShapingTests(unittest.TestCase):
         with (
             patch("msm.api.assets.Asset.get_by_unique_identifier", return_value=None),
             patch(
-                "src.assets.alpaca_us_equities.resolve_alpaca_us_equity_registration_plan",
+                "alpaca_connectors.assets.alpaca_us_equities.resolve_alpaca_us_equity_registration_plan",
                 return_value="RESOLUTION",
             ),
             patch(
-                "src.assets.alpaca_us_equities.register_alpaca_us_equity_assets",
+                "alpaca_connectors.assets.alpaca_us_equities.register_alpaca_us_equity_assets",
                 return_value={"assets": {"BTC/USD": canonical_identifier}},
             ),
         ):
@@ -479,7 +479,7 @@ class AccountServiceShapingTests(unittest.TestCase):
     def test_unresolved_position_blocks_snapshot_before_storage(self) -> None:
         snapshot_time = SimpleNamespace()
         with (
-            patch("src.account.services.ensure_cash_currency_asset", return_value="USD"),
+            patch("alpaca_connectors.account.services.ensure_cash_currency_asset", return_value="USD"),
             patch("msm.api.accounts.AccountHoldingsSet") as holdings_set,
         ):
             with self.assertRaisesRegex(
@@ -497,7 +497,7 @@ class AccountServiceShapingTests(unittest.TestCase):
         holdings_set.upsert.assert_not_called()
 
     def test_crypto_position_is_not_rejected_by_class(self) -> None:
-        with patch("src.account.services.ensure_cash_currency_asset", return_value="USD"):
+        with patch("alpaca_connectors.account.services.ensure_cash_currency_asset", return_value="USD"):
             rows = resolve_complete_account_holdings_rows(
                 positions=[_stub_positions()[1]],
                 cash="0",
@@ -509,7 +509,7 @@ class AccountServiceShapingTests(unittest.TestCase):
 
     def test_nonzero_cash_ensures_and_uses_canonical_currency_asset(self) -> None:
         with patch(
-            "src.account.services.ensure_cash_currency_asset", return_value="USD"
+            "alpaca_connectors.account.services.ensure_cash_currency_asset", return_value="USD"
         ) as ensure_cash:
             rows = resolve_complete_account_holdings_rows(
                 positions=[],
@@ -524,17 +524,17 @@ class AccountServiceShapingTests(unittest.TestCase):
     def test_account_plan_reports_missing_cash_asset_without_writing_it(self) -> None:
         client = StubTradingClient(_stub_account(), [], raw={"cash": "1000.50"})
         with (
-            patch("src.runtime.start_markets_engine"),
+            patch("alpaca_connectors.runtime.start_markets_engine"),
             patch(
-                "src.account.services.resolve_alpaca_secret_references",
+                "alpaca_connectors.account.services.resolve_alpaca_secret_references",
                 return_value=_external_references(),
             ),
             patch(
-                "src.account.services.resolve_alpaca_credentials",
+                "alpaca_connectors.account.services.resolve_alpaca_credentials",
                 return_value=ResolvedAlpacaCredentials(api_key="PKTEST", secret_key="SKTEST"),
             ),
-            patch("src.account.services.cash_asset_exists", return_value=False),
-            patch("src.account.services.ensure_cash_currency_asset") as ensure_cash,
+            patch("alpaca_connectors.account.services.cash_asset_exists", return_value=False),
+            patch("alpaca_connectors.account.services.ensure_cash_currency_asset") as ensure_cash,
         ):
             plan = plan_alpaca_account(credentials=EXTERNAL_NAMES, client=client)
 
@@ -552,14 +552,14 @@ class AccountServiceShapingTests(unittest.TestCase):
             {"name": "ALPACA_CONNECTORS__010203ABCD__ALPACA_PAPER__SECRET_KEY", "action": "create"},
         ]
         with (
-            patch("src.runtime.start_markets_engine"),
-            patch("src.account.services.cash_asset_exists", return_value=True),
+            patch("alpaca_connectors.runtime.start_markets_engine"),
+            patch("alpaca_connectors.account.services.cash_asset_exists", return_value=True),
             patch(
-                "src.account.services.plan_managed_secret_writes",
+                "alpaca_connectors.account.services.plan_managed_secret_writes",
                 return_value=planned_writes,
             ) as plan_writes,
-            patch("src.account.services.store_managed_alpaca_credentials") as store,
-            patch("src.account.services.resolve_alpaca_secret_references") as resolve_names,
+            patch("alpaca_connectors.account.services.store_managed_alpaca_credentials") as store,
+            patch("alpaca_connectors.account.services.resolve_alpaca_secret_references") as resolve_names,
         ):
             plan = plan_alpaca_account(credentials=SUBMITTED, client=client)
 
@@ -575,7 +575,7 @@ class AccountServiceShapingTests(unittest.TestCase):
         self.assertNotIn("PKSUBMITTED", str(plan))
 
     def test_holdings_plan_treats_missing_cash_asset_as_an_execution_write(self) -> None:
-        from src.holdings.services import plan_alpaca_account_holdings
+        from alpaca_connectors.holdings.services import plan_alpaca_account_holdings
 
         client = StubTradingClient(_stub_account(), [], raw={"cash": "1000.50"})
         registration = {
@@ -583,9 +583,9 @@ class AccountServiceShapingTests(unittest.TestCase):
             "alpaca_account_id": "aid-uuid",
         }
         with (
-            patch("src.runtime.start_markets_engine"),
-            patch("src.account.services.get_account_registration", return_value=registration),
-            patch("src.account.services.cash_asset_exists", return_value=False),
+            patch("alpaca_connectors.runtime.start_markets_engine"),
+            patch("alpaca_connectors.account.services.get_account_registration", return_value=registration),
+            patch("alpaca_connectors.account.services.cash_asset_exists", return_value=False),
         ):
             plan = plan_alpaca_account_holdings("account-uid", client=client)
 
@@ -618,27 +618,27 @@ class RegisterAlpacaAccountTests(unittest.TestCase):
         ]
 
         with (
-            patch("src.runtime.start_markets_engine", return_value=runtime),
+            patch("alpaca_connectors.runtime.start_markets_engine", return_value=runtime),
             patch("msm.api.accounts.Account", fake_account),
             patch("msm.repositories.crud.upsert_model", upsert_model),
             patch(
-                "src.account.services.resolve_alpaca_secret_references",
+                "alpaca_connectors.account.services.resolve_alpaca_secret_references",
                 return_value=_external_references(),
             ),
             patch(
-                "src.account.services.resolve_alpaca_credentials",
+                "alpaca_connectors.account.services.resolve_alpaca_credentials",
                 return_value=ResolvedAlpacaCredentials(
                     api_key="PKTEST",
                     secret_key="SKTEST",
                 ),
             ),
-            patch("src.account.services._previous_managed_references", return_value=None),
+            patch("alpaca_connectors.account.services._previous_managed_references", return_value=None),
             patch(
-                "src.holdings.services.resolve_complete_account_holdings_rows",
+                "alpaca_connectors.holdings.services.resolve_complete_account_holdings_rows",
                 return_value=resolved_rows,
             ) as resolve_holdings,
             patch(
-                "src.holdings.services.publish_resolved_account_holdings_snapshot",
+                "alpaca_connectors.holdings.services.publish_resolved_account_holdings_snapshot",
                 return_value=capture_result,
             ) as publish_holdings,
         ):
@@ -695,27 +695,27 @@ class RegisterAlpacaAccountTests(unittest.TestCase):
         client = StubTradingClient(_stub_account(), [_stub_positions()[0]], raw={"cash": "1000.50"})
 
         with (
-            patch("src.runtime.start_markets_engine", return_value=runtime),
+            patch("alpaca_connectors.runtime.start_markets_engine", return_value=runtime),
             patch("msm.api.accounts.Account", fake_account),
             patch("msm.repositories.crud.upsert_model") as upsert_model,
             patch(
-                "src.account.services.resolve_alpaca_secret_references",
+                "alpaca_connectors.account.services.resolve_alpaca_secret_references",
                 return_value=_external_references(),
             ),
             patch(
-                "src.account.services.resolve_alpaca_credentials",
+                "alpaca_connectors.account.services.resolve_alpaca_credentials",
                 return_value=ResolvedAlpacaCredentials(api_key="PKTEST", secret_key="SKTEST"),
             ),
             patch(
-                "src.holdings.services.resolve_complete_account_holdings_rows",
+                "alpaca_connectors.holdings.services.resolve_complete_account_holdings_rows",
                 side_effect=registry_error,
             ),
             patch(
-                "src.account.services.prepare_alpaca_position_assets",
+                "alpaca_connectors.account.services.prepare_alpaca_position_assets",
                 return_value=({}, SimpleNamespace()),
             ),
             patch(
-                "src.holdings.services.publish_resolved_account_holdings_snapshot"
+                "alpaca_connectors.holdings.services.publish_resolved_account_holdings_snapshot"
             ) as publish_holdings,
         ):
             with self.assertRaises(AccountHoldingsRegistryError):
@@ -738,18 +738,18 @@ class RegisterAlpacaAccountTests(unittest.TestCase):
             get_account=lambda: SimpleNamespace(id="different-alpaca-id")
         )
         with (
-            patch("src.account.services.get_account_registration", return_value=current),
-            patch("src.runtime.start_markets_engine", return_value=SimpleNamespace(context=None)),
+            patch("alpaca_connectors.account.services.get_account_registration", return_value=current),
+            patch("alpaca_connectors.runtime.start_markets_engine", return_value=SimpleNamespace(context=None)),
             patch(
-                "src.account.services.resolve_alpaca_secret_references",
+                "alpaca_connectors.account.services.resolve_alpaca_secret_references",
                 return_value=_external_references("NEW_API_KEY", "NEW_SECRET_KEY"),
             ),
             patch(
-                "src.account.services.resolve_alpaca_credentials",
+                "alpaca_connectors.account.services.resolve_alpaca_credentials",
                 return_value=ResolvedAlpacaCredentials(api_key="rotated", secret_key="secret"),
             ),
             patch(
-                "src.account.services.build_alpaca_trading_client",
+                "alpaca_connectors.account.services.build_alpaca_trading_client",
                 return_value=candidate_client,
             ),
             patch("msm.repositories.crud.update_model") as update_model,
@@ -767,13 +767,13 @@ class RegisterAlpacaAccountTests(unittest.TestCase):
         fake_account = MagicMock()
         with (
             patch(
-                "src.account.services.get_account_registration",
+                "alpaca_connectors.account.services.get_account_registration",
                 return_value=_stub_registration(),
             ),
-            patch("src.runtime.start_markets_engine", return_value=SimpleNamespace(context=None)),
+            patch("alpaca_connectors.runtime.start_markets_engine", return_value=SimpleNamespace(context=None)),
             patch("msm.api.accounts.Account", fake_account),
-            patch("src.account.services.resolve_alpaca_credentials") as resolve_credentials,
-            patch("src.account.services.build_alpaca_trading_client") as build_client,
+            patch("alpaca_connectors.account.services.resolve_alpaca_credentials") as resolve_credentials,
+            patch("alpaca_connectors.account.services.build_alpaca_trading_client") as build_client,
             patch("msm.repositories.crud.update_model") as update_model,
         ):
             result = update_account_registration(
@@ -802,16 +802,16 @@ class RegisterAlpacaAccountTests(unittest.TestCase):
             with (
                 self.subTest(names=names),
                 patch(
-                    "src.account.services.get_account_registration",
+                    "alpaca_connectors.account.services.get_account_registration",
                     return_value=_stub_registration(),
                 ),
                 patch(
-                    "src.runtime.start_markets_engine",
+                    "alpaca_connectors.runtime.start_markets_engine",
                     return_value=SimpleNamespace(context=None),
                 ),
                 patch("msm.api.accounts.Account", fake_account),
-                patch("src.account.services.resolve_alpaca_credentials") as resolve_credentials,
-                patch("src.account.services.build_alpaca_trading_client") as build_client,
+                patch("alpaca_connectors.account.services.resolve_alpaca_credentials") as resolve_credentials,
+                patch("alpaca_connectors.account.services.build_alpaca_trading_client") as build_client,
                 patch("msm.repositories.crud.update_model") as update_model,
             ):
                 update_account_registration("acc-uid-1", **names)
@@ -828,24 +828,24 @@ class RegisterAlpacaAccountTests(unittest.TestCase):
         )
         with (
             patch(
-                "src.account.services.get_account_registration",
+                "alpaca_connectors.account.services.get_account_registration",
                 return_value=_stub_registration(),
             ),
-            patch("src.runtime.start_markets_engine", return_value=SimpleNamespace(context=None)),
+            patch("alpaca_connectors.runtime.start_markets_engine", return_value=SimpleNamespace(context=None)),
             patch(
-                "src.account.services.resolve_alpaca_secret_references",
+                "alpaca_connectors.account.services.resolve_alpaca_secret_references",
                 return_value=_external_references("NEW_API_KEY", "OLD_SECRET_KEY"),
             ) as resolve_names,
             patch(
-                "src.account.services.resolve_alpaca_credentials",
+                "alpaca_connectors.account.services.resolve_alpaca_credentials",
                 return_value=credentials,
             ),
             patch(
-                "src.account.services.build_alpaca_trading_client",
+                "alpaca_connectors.account.services.build_alpaca_trading_client",
                 return_value=candidate_client,
             ) as build_client,
             patch("msm.repositories.crud.update_model") as update_model,
-            patch("src.account.services.delete_managed_alpaca_secrets") as delete_managed,
+            patch("alpaca_connectors.account.services.delete_managed_alpaca_secrets") as delete_managed,
         ):
             update_account_registration(
                 "acc-uid-1",
@@ -916,22 +916,22 @@ class ManagedCredentialRegistrationTests(unittest.TestCase):
         )
         with (
             patch(
-                "src.runtime.start_markets_engine",
+                "alpaca_connectors.runtime.start_markets_engine",
                 return_value=SimpleNamespace(context=SimpleNamespace()),
             ),
             patch("msm.api.accounts.Account", fake_account),
             patch("msm.repositories.crud.upsert_model", upsert_model),
             patch(
-                "src.holdings.services.resolve_complete_account_holdings_rows",
+                "alpaca_connectors.holdings.services.resolve_complete_account_holdings_rows",
                 side_effect=lambda **kwargs: events.append("holdings") or [],
             ),
             patch(
-                "src.holdings.services.publish_resolved_account_holdings_snapshot",
+                "alpaca_connectors.holdings.services.publish_resolved_account_holdings_snapshot",
                 return_value=SimpleNamespace(holdings_rows=1, unresolved_symbols=[]),
             ),
-            patch("src.account.services.store_managed_alpaca_credentials", store),
-            patch("src.account.services.delete_secrets_best_effort") as delete_created,
-            patch("src.account.services.resolve_alpaca_secret_references") as resolve_names,
+            patch("alpaca_connectors.account.services.store_managed_alpaca_credentials", store),
+            patch("alpaca_connectors.account.services.delete_secrets_best_effort") as delete_created,
+            patch("alpaca_connectors.account.services.resolve_alpaca_secret_references") as resolve_names,
         ):
             outcome: object
             try:
@@ -1000,30 +1000,30 @@ class ManagedCredentialRegistrationTests(unittest.TestCase):
         client = StubTradingClient(_stub_account(), [], raw={})
         with (
             patch(
-                "src.runtime.start_markets_engine",
+                "alpaca_connectors.runtime.start_markets_engine",
                 return_value=SimpleNamespace(context=SimpleNamespace()),
             ),
             patch("msm.api.accounts.Account", fake_account),
             patch("msm.repositories.crud.upsert_model"),
             patch(
-                "src.account.services.resolve_alpaca_secret_references",
+                "alpaca_connectors.account.services.resolve_alpaca_secret_references",
                 return_value=_external_references(),
             ),
             patch(
-                "src.account.services.resolve_alpaca_credentials",
+                "alpaca_connectors.account.services.resolve_alpaca_credentials",
                 return_value=ResolvedAlpacaCredentials(api_key="PKTEST", secret_key="SKTEST"),
             ),
             patch(
-                "src.account.services._previous_managed_references",
+                "alpaca_connectors.account.services._previous_managed_references",
                 return_value=previous,
             ),
             patch(
-                "src.account.services.delete_managed_alpaca_secrets",
+                "alpaca_connectors.account.services.delete_managed_alpaca_secrets",
                 return_value=([], ["Managed Secret 'X' could not be deleted."]),
             ) as delete_managed,
-            patch("src.holdings.services.resolve_complete_account_holdings_rows", return_value=[]),
+            patch("alpaca_connectors.holdings.services.resolve_complete_account_holdings_rows", return_value=[]),
             patch(
-                "src.holdings.services.publish_resolved_account_holdings_snapshot",
+                "alpaca_connectors.holdings.services.publish_resolved_account_holdings_snapshot",
                 return_value=SimpleNamespace(holdings_rows=1, unresolved_symbols=[]),
             ),
         ):
@@ -1044,26 +1044,26 @@ class AccountCredentialUpdateTests(unittest.TestCase):
             get_account=lambda: SimpleNamespace(id=alpaca_account_id)
         )
         with (
-            patch("src.account.services.get_account_registration", return_value=current),
-            patch("src.runtime.start_markets_engine", return_value=SimpleNamespace(context=None)),
+            patch("alpaca_connectors.account.services.get_account_registration", return_value=current),
+            patch("alpaca_connectors.runtime.start_markets_engine", return_value=SimpleNamespace(context=None)),
             patch("msm.api.accounts.Account"),
             patch(
-                "src.account.services.build_alpaca_trading_client",
+                "alpaca_connectors.account.services.build_alpaca_trading_client",
                 return_value=candidate_client,
             ) as build_client,
             patch(
-                "src.account.services.store_managed_alpaca_credentials",
+                "alpaca_connectors.account.services.store_managed_alpaca_credentials",
                 return_value=_managed_write(),
             ) as store,
             patch(
-                "src.account.services.resolve_alpaca_secret_references",
+                "alpaca_connectors.account.services.resolve_alpaca_secret_references",
                 return_value=_external_references("NEW_API_KEY", "NEW_SECRET_KEY"),
             ),
             patch(
-                "src.account.services.resolve_alpaca_credentials",
+                "alpaca_connectors.account.services.resolve_alpaca_credentials",
                 return_value=ResolvedAlpacaCredentials(api_key="PKNEW", secret_key="SKNEW"),
             ),
-            patch("src.account.services.delete_managed_alpaca_secrets") as delete_managed,
+            patch("alpaca_connectors.account.services.delete_managed_alpaca_secrets") as delete_managed,
             patch("msm.repositories.crud.update_model") as update_model,
         ):
             try:
@@ -1132,17 +1132,17 @@ class AccountCredentialUpdateTests(unittest.TestCase):
 class AccountRemovalAndBackfillTests(unittest.TestCase):
     def _remove(self, current):
         with (
-            patch("src.account.services.get_account_registration", return_value=current),
+            patch("alpaca_connectors.account.services.get_account_registration", return_value=current),
             patch(
-                "src.operations.signal_job_configurations.signal_job_configurations_for_account",
+                "alpaca_connectors.operations.signal_job_configurations.signal_job_configurations_for_account",
                 return_value=[],
             ),
-            patch("src.runtime.start_markets_engine", return_value=SimpleNamespace(context=None)),
+            patch("alpaca_connectors.runtime.start_markets_engine", return_value=SimpleNamespace(context=None)),
             patch("msm.api.accounts.Account"),
             patch("msm.api.accounts.AccountHoldingsSet") as holdings_sets,
             patch("msm.repositories.crud.delete_model"),
             patch(
-                "src.account.services.delete_managed_alpaca_secrets",
+                "alpaca_connectors.account.services.delete_managed_alpaca_secrets",
                 return_value=(["A", "B"], []),
             ) as delete_managed,
         ):
@@ -1163,7 +1163,7 @@ class AccountRemovalAndBackfillTests(unittest.TestCase):
         self.assertEqual(result["deleted_secrets"], [])
 
     def test_backfill_resolves_missing_uids_in_one_set_based_update(self) -> None:
-        from src.platform_secrets import PlatformSecretNotFoundError
+        from alpaca_connectors.platform_secrets import PlatformSecretNotFoundError
 
         rows = [
             {**_stub_registration(), "account_uid": str(uuid.uuid4())},
@@ -1191,12 +1191,12 @@ class AccountRemovalAndBackfillTests(unittest.TestCase):
             with (
                 self.subTest(execute=execute),
                 patch(
-                    "src.account.services.list_account_registrations",
+                    "alpaca_connectors.account.services.list_account_registrations",
                     return_value=(rows, len(rows)),
                 ),
-                patch("src.account.services.resolve_alpaca_secret_references", side_effect=resolve),
+                patch("alpaca_connectors.account.services.resolve_alpaca_secret_references", side_effect=resolve),
                 patch(
-                    "src.runtime.start_markets_engine",
+                    "alpaca_connectors.runtime.start_markets_engine",
                     return_value=SimpleNamespace(context=None),
                 ),
                 patch("msm.repositories.base.compile_markets_statement") as compile_statement,

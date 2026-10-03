@@ -4,8 +4,8 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
-import src.universes.sources as universe_sources
-from src.universes.sources import (
+import alpaca_connectors.universes.sources as universe_sources
+from alpaca_connectors.universes.sources import (
     UniverseSourceTable,
     load_default_universe_sources,
     normalize_source_values,

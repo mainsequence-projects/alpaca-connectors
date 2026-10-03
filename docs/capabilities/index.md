@@ -101,10 +101,10 @@ A Job is one possible invocation mechanism. It is not the primary product ontolo
 
 Use these capability-oriented imports:
 
-- `src.assets`
-- `src.universes`
-- `src.market_data`
-- `src.account`
-- `src.holdings`
-- `src.portfolios`
-- `api.app.capabilities` for the API-only descriptive catalog
+- `alpaca_connectors.assets`
+- `alpaca_connectors.universes`
+- `alpaca_connectors.market_data`
+- `alpaca_connectors.account`
+- `alpaca_connectors.holdings`
+- `alpaca_connectors.portfolios`
+- `alpaca_connectors.api.app.capabilities` for the API-only descriptive catalog

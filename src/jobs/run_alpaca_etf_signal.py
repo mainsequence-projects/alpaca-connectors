@@ -6,7 +6,7 @@ import json
 
 
 def main() -> int:
-    from src.operations import execute_current_signal_job
+    from alpaca_connectors.operations import execute_current_signal_job
 
     result = execute_current_signal_job()
     print(json.dumps(result, sort_keys=True, default=str))

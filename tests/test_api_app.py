@@ -6,20 +6,6 @@ from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from api.app.main import app
-from api.app.schemas import (
-    AccountResponse,
-    AssetRegistrationOperationResponse,
-    AssetRegistrationRequest,
-    AssetUniverseResponse,
-    BarConfigurationUpdateAcceptedResponse,
-    BulkActionRequest,
-    JobRunStatusResponse,
-    ProjectConfigurationResponse,
-    ResourceCollection,
-    ResourceDiscoveryResponse,
-)
-from api.app.services.universes import preview_universe_run as preview_universe_service
 from etfhextractor.exceptions import WorkbookParseError
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
@@ -33,8 +19,24 @@ from msm.api.http import ResourceCollection as MarketsResourceCollection
 from msm.api.http import api_http_error as markets_api_http_error
 from starlette.routing import Match
 
-from src.holdings.services import AccountHoldingsRegistryError
-from src.platform_secrets import PlatformSecretAccessError
+from alpaca_connectors.api.app.main import app
+from alpaca_connectors.api.app.schemas import (
+    AccountResponse,
+    AssetRegistrationOperationResponse,
+    AssetRegistrationRequest,
+    AssetUniverseResponse,
+    BarConfigurationUpdateAcceptedResponse,
+    BulkActionRequest,
+    JobRunStatusResponse,
+    ProjectConfigurationResponse,
+    ResourceCollection,
+    ResourceDiscoveryResponse,
+)
+from alpaca_connectors.api.app.services.universes import (
+    preview_universe_run as preview_universe_service,
+)
+from alpaca_connectors.holdings.services import AccountHoldingsRegistryError
+from alpaca_connectors.platform_secrets import PlatformSecretAccessError
 
 
 def _asset_universe_response(
@@ -112,7 +114,7 @@ class ApiAppTests(unittest.TestCase):
         self.assertEqual(missing_response_models, [])
 
     def test_http_contract_machinery_comes_from_ms_markets(self) -> None:
-        from api.app import errors
+        from alpaca_connectors.api.app import errors
 
         self.assertTrue(issubclass(ResourceCollection, MarketsResourceCollection))
         self.assertTrue(issubclass(ResourceDiscoveryResponse, ResourceDiscovery))
@@ -209,10 +211,10 @@ class ApiAppTests(unittest.TestCase):
         )
         with (
             patch(
-                "api.app.routers.assets.start_asset_registration_operation",
+                "alpaca_connectors.api.app.routers.assets.start_asset_registration_operation",
                 return_value=operation,
             ),
-            patch("api.app.routers.assets.run_asset_registration_operation") as run_operation,
+            patch("alpaca_connectors.api.app.routers.assets.run_asset_registration_operation") as run_operation,
         ):
             response = self.client.post(
                 "/v1/assets/registration/operations",
@@ -252,7 +254,7 @@ class ApiAppTests(unittest.TestCase):
             completed_at=None,
         )
         with patch(
-            "api.app.routers.assets.get_asset_registration_operation_status",
+            "alpaca_connectors.api.app.routers.assets.get_asset_registration_operation_status",
             return_value=operation,
         ) as get_status:
             response = self.client.get(
@@ -278,7 +280,7 @@ class ApiAppTests(unittest.TestCase):
             migrated_market_data_profiles=["1d/sip/all"],
         )
         with patch(
-            "api.app.routers.project_state.get_project_configuration",
+            "alpaca_connectors.api.app.routers.project_state.get_project_configuration",
             return_value=mocked_response,
         ):
             response = self.client.get("/v1/project-state/configuration")
@@ -298,10 +300,10 @@ class ApiAppTests(unittest.TestCase):
         )
         with (
             patch(
-                "api.app.routers.bar_configurations.submit_configuration_update",
+                "alpaca_connectors.api.app.routers.bar_configurations.submit_configuration_update",
                 return_value=accepted,
             ) as submit,
-            patch("src.market_data.execute_market_data_update") as execute,
+            patch("alpaca_connectors.market_data.execute_market_data_update") as execute,
         ):
             response = self.client.post(
                 f"/v1/market-data/bar-configurations/{configuration_uid}/actions/update",
@@ -343,7 +345,7 @@ class ApiAppTests(unittest.TestCase):
             error=None,
         )
         with patch(
-            "api.app.routers.operations.get_job_run",
+            "alpaca_connectors.api.app.routers.operations.get_job_run",
             return_value=status,
         ) as get_status:
             response = self.client.get(f"/v1/operations/job-runs/{job_run_uid}")
@@ -395,7 +397,7 @@ class ApiAppTests(unittest.TestCase):
                     self.assertEqual(set(error), {"loc", "msg", "type"})
 
     def test_managed_registration_passes_values_only_to_the_account_service(self) -> None:
-        from src.account.credentials import ResolvedAlpacaCredentials
+        from alpaca_connectors.account.credentials import ResolvedAlpacaCredentials
 
         registration = {
             "uid": "account-uid",
@@ -413,11 +415,11 @@ class ApiAppTests(unittest.TestCase):
         }
         with (
             patch(
-                "api.app.services.accounts.register_alpaca_account",
+                "alpaca_connectors.api.app.services.accounts.register_alpaca_account",
                 return_value=SimpleNamespace(account_uid="account-uid"),
             ) as register,
             patch(
-                "api.app.services.accounts.get_account_registration",
+                "alpaca_connectors.api.app.services.accounts.get_account_registration",
                 return_value=registration,
             ),
         ):
@@ -445,10 +447,10 @@ class ApiAppTests(unittest.TestCase):
         self.assertNotIn("fingerprint", response.text)
 
     def test_rejected_alpaca_credentials_return_a_fixed_client_error(self) -> None:
-        from src.account.credentials import AlpacaCredentialsRejectedError
+        from alpaca_connectors.account.credentials import AlpacaCredentialsRejectedError
 
         with patch(
-            "api.app.routers.accounts.preflight_account_registration",
+            "alpaca_connectors.api.app.routers.accounts.preflight_account_registration",
             side_effect=AlpacaCredentialsRejectedError(),
         ):
             response = self.client.post(
@@ -474,7 +476,7 @@ class ApiAppTests(unittest.TestCase):
         )
 
     def test_account_patch_routes_credentials_only_when_supplied(self) -> None:
-        from src.account.credentials import ResolvedAlpacaCredentials
+        from alpaca_connectors.account.credentials import ResolvedAlpacaCredentials
 
         registration = {
             "uid": "account-uid",
@@ -513,7 +515,7 @@ class ApiAppTests(unittest.TestCase):
             with (
                 self.subTest(body=sorted(body)),
                 patch(
-                    "api.app.services.accounts.update_account_registration",
+                    "alpaca_connectors.api.app.services.accounts.update_account_registration",
                     return_value=registration,
                 ) as update,
             ):
@@ -542,7 +544,7 @@ class ApiAppTests(unittest.TestCase):
             SimpleNamespace(name="ALPACA_PAPER_API_KEY", value="another-private-value"),
         ]
         with patch(
-            "api.app.services.accounts.msc.Secret.filter",
+            "alpaca_connectors.api.app.services.accounts.msc.Secret.filter",
             return_value=visible_secrets,
         ):
             response = self.client.get("/v1/accounts/secret-references")
@@ -607,7 +609,7 @@ class ApiAppTests(unittest.TestCase):
 
     def test_universe_source_preview_route_returns_conflict_on_blocker(self) -> None:
         with patch(
-            "api.app.routers.universe_sources.preview_source",
+            "alpaca_connectors.api.app.routers.universe_sources.preview_source",
             side_effect=ValueError("blocked"),
         ):
             response = self.client.post(
@@ -628,7 +630,7 @@ class ApiAppTests(unittest.TestCase):
     def test_universe_source_preview_hides_provider_exception_details(self) -> None:
         provider_message = "provider workbook contains private diagnostic context"
         with patch(
-            "api.app.routers.universe_sources.preview_source",
+            "alpaca_connectors.api.app.routers.universe_sources.preview_source",
             side_effect=WorkbookParseError(provider_message),
         ):
             response = self.client.post(
@@ -691,7 +693,7 @@ class ApiAppTests(unittest.TestCase):
             "'WRONG' with UUID 33333333-3333-4333-8333-333333333333."
         )
         with patch(
-            "api.app.routers.accounts.create_account_registration",
+            "alpaca_connectors.api.app.routers.accounts.create_account_registration",
             side_effect=ValueError(message),
         ):
             response = self.client.post(
@@ -729,7 +731,7 @@ class ApiAppTests(unittest.TestCase):
             },
         }
         with patch(
-            "api.app.routers.holdings.list_holdings",
+            "alpaca_connectors.api.app.routers.holdings.list_holdings",
             return_value=collection,
         ) as list_holdings:
             response = self.client.get("/v1/accounts/account-uid/holdings/latest?limit=25&offset=0")
@@ -742,7 +744,7 @@ class ApiAppTests(unittest.TestCase):
         error = AccountHoldingsRegistryError(
             unresolved_symbols=["AAPL", "USD"],
         )
-        with patch("api.app.routers.holdings.capture_holdings", side_effect=error):
+        with patch("alpaca_connectors.api.app.routers.holdings.capture_holdings", side_effect=error):
             response = self.client.post(
                 "/v1/accounts/account-uid/holdings/actions/capture",
                 json={},
@@ -758,7 +760,7 @@ class ApiAppTests(unittest.TestCase):
         private_message = "provider exception containing private context"
         safe_client = TestClient(app, raise_server_exceptions=False)
         with patch(
-            "api.app.routers.accounts.get_account",
+            "alpaca_connectors.api.app.routers.accounts.get_account",
             side_effect=RuntimeError(private_message),
         ):
             response = safe_client.get("/v1/accounts/account-uid")
@@ -773,7 +775,7 @@ class ApiAppTests(unittest.TestCase):
             "could not read its value."
         )
         with patch(
-            "api.app.routers.accounts.preflight_account_registration",
+            "alpaca_connectors.api.app.routers.accounts.preflight_account_registration",
             side_effect=PlatformSecretAccessError(message),
         ):
             response = self.client.post(
@@ -842,7 +844,7 @@ class ApiAppTests(unittest.TestCase):
             symbol="DIA",
         )
         with patch(
-            "api.app.routers.universes.create_universe",
+            "alpaca_connectors.api.app.routers.universes.create_universe",
             return_value=universe,
         ) as create:
             response = self.client.post(
@@ -879,9 +881,9 @@ class ApiAppTests(unittest.TestCase):
             "openfigi_unmatched_symbols": [],
         }
         with (
-            patch("api.app.routers.universes.get_universe", return_value=universe),
+            patch("alpaca_connectors.api.app.routers.universes.get_universe", return_value=universe),
             patch(
-                "api.app.routers.universes.run_universe",
+                "alpaca_connectors.api.app.routers.universes.run_universe",
                 return_value=result,
             ) as run,
         ):
@@ -926,7 +928,7 @@ class ApiAppTests(unittest.TestCase):
             },
         }
         with patch(
-            "api.app.routers.universes.list_universe_assets",
+            "alpaca_connectors.api.app.routers.universes.list_universe_assets",
             return_value=collection,
         ) as list_assets:
             response = self.client.get(
@@ -960,9 +962,9 @@ class ApiAppTests(unittest.TestCase):
             ],
         }
         with (
-            patch("api.app.routers.universes.get_universe", return_value=universe),
+            patch("alpaca_connectors.api.app.routers.universes.get_universe", return_value=universe),
             patch(
-                "api.app.routers.universes.preview_universe_run",
+                "alpaca_connectors.api.app.routers.universes.preview_universe_run",
                 return_value=preview,
             ) as preview_run,
         ):
@@ -1021,11 +1023,11 @@ class ApiAppTests(unittest.TestCase):
         )
         with (
             patch(
-                "api.app.services.universes.get_universe",
+                "alpaca_connectors.api.app.services.universes.get_universe",
                 return_value=universe,
             ),
             patch(
-                "api.app.services.universes.preview_asset_universe",
+                "alpaca_connectors.api.app.services.universes.preview_asset_universe",
                 return_value=plan,
             ),
         ):
@@ -1047,8 +1049,8 @@ class ApiAppTests(unittest.TestCase):
         )
         inactive = universe.model_copy(update={"is_active": False})
         with (
-            patch("api.app.routers.universes.get_universe", return_value=universe),
-            patch("api.app.routers.universes.update_universe", return_value=inactive) as update,
+            patch("alpaca_connectors.api.app.routers.universes.get_universe", return_value=universe),
+            patch("alpaca_connectors.api.app.routers.universes.update_universe", return_value=inactive) as update,
         ):
             response = self.client.post(
                 "/v1/universes/actions/deactivate",
@@ -1069,9 +1071,9 @@ class ApiAppTests(unittest.TestCase):
             "Daily IVV bars (bars-configuration-uid)."
         )
         with (
-            patch("api.app.routers.universes.get_universe", return_value=universe),
+            patch("alpaca_connectors.api.app.routers.universes.get_universe", return_value=universe),
             patch(
-                "api.app.routers.universes.universe_delete_blockers",
+                "alpaca_connectors.api.app.routers.universes.universe_delete_blockers",
                 return_value=[blocker],
             ),
         ):

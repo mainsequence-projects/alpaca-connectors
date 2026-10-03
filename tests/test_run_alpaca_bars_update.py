@@ -1,12 +1,18 @@
 from __future__ import annotations
 
 import json
+import runpy
 import uuid
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
-from src.jobs.run_alpaca_bars_update import main
+# Job launchers are scripts executed by path (`src/jobs/...`), not package modules.
+_LAUNCHER = runpy.run_path(
+    str(Path(__file__).resolve().parents[1] / "src" / "jobs" / "run_alpaca_bars_update.py")
+)
+main = _LAUNCHER["main"]
 
 CONFIGURATION_UID = "11111111-1111-4111-8111-111111111111"
 
@@ -49,7 +55,7 @@ def test_launcher_executes_exact_stored_configuration(capsys) -> None:
         "secret_key": "must-not-be-printed",
     }
     with patch(
-        "src.market_data.execute_market_data_update",
+        "alpaca_connectors.market_data.execute_market_data_update",
         return_value=result,
     ) as execute:
         exit_code = main(["--configuration-uid", CONFIGURATION_UID])
@@ -78,7 +84,7 @@ def test_launcher_executes_exact_stored_configuration(capsys) -> None:
 )
 def test_launcher_propagates_update_errors(error: Exception) -> None:
     with (
-        patch("src.market_data.execute_market_data_update", side_effect=error),
+        patch("alpaca_connectors.market_data.execute_market_data_update", side_effect=error),
         pytest.raises(type(error), match=str(error)),
     ):
         main(["--configuration-uid", CONFIGURATION_UID])

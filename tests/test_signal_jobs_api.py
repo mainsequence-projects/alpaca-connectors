@@ -3,14 +3,15 @@ from __future__ import annotations
 import datetime as dt
 from unittest.mock import patch
 
-from api.app.main import app
-from api.app.schemas import (
+from fastapi.testclient import TestClient
+
+from alpaca_connectors.api.app.main import app
+from alpaca_connectors.api.app.schemas import (
     SignalJobConfigurationResponse,
     SignalJobRunAcceptedResponse,
     SignalObservationAssetResponse,
     SignalObservationsResponse,
 )
-from fastapi.testclient import TestClient
 
 CONFIGURATION_UID = "11111111-1111-4111-8111-111111111111"
 UNIVERSE_UID = "22222222-2222-4222-8222-222222222222"
@@ -90,7 +91,7 @@ def test_signal_discovery_columns_match_the_local_renderer_contract() -> None:
 
 def test_signal_create_forwards_configuration_without_an_environment_selector() -> None:
     with patch(
-        "api.app.routers.signal_jobs.create_configuration",
+        "alpaca_connectors.api.app.routers.signal_jobs.create_configuration",
         return_value=response(),
     ) as create:
         result = TestClient(app).post("/v1/signal-jobs", json=create_request())
@@ -122,7 +123,7 @@ def test_signal_run_returns_the_accepted_job_run_without_arguments() -> None:
         status_url=f"/v1/operations/job-runs/{JOB_RUN_UID}",
     )
     with patch(
-        "api.app.routers.signal_jobs.run_configuration",
+        "alpaca_connectors.api.app.routers.signal_jobs.run_configuration",
         return_value=accepted,
     ) as run:
         result = TestClient(app).post(
@@ -152,7 +153,7 @@ def test_signal_observations_are_loaded_on_demand_with_the_default_limit() -> No
         ],
     )
     with patch(
-        "api.app.routers.signal_jobs.get_configuration_observations",
+        "alpaca_connectors.api.app.routers.signal_jobs.get_configuration_observations",
         return_value=observations,
     ) as get_observations:
         result = TestClient(app).get(

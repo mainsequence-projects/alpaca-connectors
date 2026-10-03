@@ -1,6 +1,6 @@
 from msm.models.registration import resolve_markets_meta_table_models
 
-from src.runtime import application_runtime_models, portfolio_runtime_models
+from alpaca_connectors.runtime import application_runtime_models, portfolio_runtime_models
 
 
 def test_portfolio_runtime_includes_project_foreign_key_dependencies() -> None:

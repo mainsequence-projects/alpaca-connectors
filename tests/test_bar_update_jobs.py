@@ -6,7 +6,7 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from src.operations.bar_updates import (
+from alpaca_connectors.operations.bar_updates import (
     ALPACA_BARS_UPDATE_EXECUTION_PATH,
     ALPACA_BARS_UPDATE_JOB_NAME,
     get_alpaca_bars_update_job_run,
@@ -31,7 +31,7 @@ def _ready_job() -> SimpleNamespace:
 def test_launch_preflights_and_enqueues_only_configuration_uid() -> None:
     job = _ready_job()
     with (
-        patch("src.market_data.resolve_market_data_update") as resolve,
+        patch("alpaca_connectors.market_data.resolve_market_data_update") as resolve,
         patch("mainsequence.client.Job.filter", return_value=[job]) as job_filter,
     ):
         submission = launch_alpaca_bars_update(CONFIGURATION_UID)
@@ -57,7 +57,7 @@ def test_launch_preflights_and_enqueues_only_configuration_uid() -> None:
 )
 def test_launch_requires_exactly_one_branch_job(jobs: list, message: str) -> None:
     with (
-        patch("src.market_data.resolve_market_data_update"),
+        patch("alpaca_connectors.market_data.resolve_market_data_update"),
         patch("mainsequence.client.Job.filter", return_value=jobs),
         pytest.raises((ValueError, RuntimeError), match=message),
     ):
@@ -68,7 +68,7 @@ def test_launch_rejects_non_ready_job() -> None:
     job = _ready_job()
     job.image_status = "BUILDING"
     with (
-        patch("src.market_data.resolve_market_data_update"),
+        patch("alpaca_connectors.market_data.resolve_market_data_update"),
         patch("mainsequence.client.Job.filter", return_value=[job]),
         pytest.raises(ValueError, match="image is not ready"),
     ):
@@ -81,7 +81,7 @@ def test_launch_rejects_unreviewed_execution_path() -> None:
     job = _ready_job()
     job.execution_path = "src/jobs/something_else.py"
     with (
-        patch("src.market_data.resolve_market_data_update"),
+        patch("alpaca_connectors.market_data.resolve_market_data_update"),
         patch("mainsequence.client.Job.filter", return_value=[job]),
         pytest.raises(RuntimeError, match="reviewed launcher"),
     ):

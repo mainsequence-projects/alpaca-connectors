@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 import pytest
 
-from src.assets.alpaca_asset_details import (
+from alpaca_connectors.assets.alpaca_asset_details import (
     AlpacaAssetDetails,
     AlpacaAssetDetailsTable,
     build_alpaca_unique_identifier,
@@ -92,7 +92,7 @@ def test_detail_upsert_is_idempotent_on_asset_uid() -> None:
         patch("msm.bootstrap.resolve_runtime", return_value=SimpleNamespace(context="ctx")),
         patch("msm.repositories.crud.upsert_model", return_value="result") as upsert,
         patch(
-            "src.assets.alpaca_asset_details.operation_result_rows",
+            "alpaca_connectors.assets.alpaca_asset_details.operation_result_rows",
             return_value=[{"asset_uid": ASSET_UID}],
         ),
         patch.object(AlpacaAssetDetails, "model_validate", return_value=expected),

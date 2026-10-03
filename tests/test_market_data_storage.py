@@ -10,7 +10,7 @@ import pytest
 from msm.settings import ASSET_IDENTIFIER_DIMENSION
 from sqlalchemy import DateTime
 
-from src.market_data.storage import (
+from alpaca_connectors.market_data.storage import (
     AlpacaStockBars1dIexRawStorage,
     AlpacaStockBars1dSipAllStorage,
     project_storage_models,

@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 import pandas as pd
 
-from src.cli.bars import parse_tickers
+from alpaca_connectors.cli.bars import parse_tickers
 
 os.environ.setdefault("MAINSEQUENCE_ACCESS_TOKEN", "dummy")
 os.environ.setdefault("MAINSEQUENCE_REFRESH_TOKEN", "dummy")
@@ -15,9 +15,9 @@ os.environ["MAIN_SEQUENCE_PROJECT_ID"] = "INVALID"
 os.environ.setdefault("TDAG_ROOT_PATH", "/tmp")
 os.environ.setdefault("LOGGER_FILE_PATH", "/dev/stdout")
 
-from src.market_data.alpaca_bars import AlpacaStockBarsConfig, AlpacaStockBarsNode
-from src.market_data.alpaca_bars_support import AlpacaBarAssetBinding
-from src.market_data.storage import storage_for
+from alpaca_connectors.market_data.alpaca_bars import AlpacaStockBarsConfig, AlpacaStockBarsNode
+from alpaca_connectors.market_data.alpaca_bars_support import AlpacaBarAssetBinding
+from alpaca_connectors.market_data.storage import storage_for
 
 
 class RunDailyStockBarsTests(unittest.TestCase):
@@ -75,7 +75,7 @@ class RunDailyStockBarsTests(unittest.TestCase):
                 return_value={},
             ),
             patch(
-                "src.market_data.alpaca_bars.fetch_stock_bars_frame",
+                "alpaca_connectors.market_data.alpaca_bars.fetch_stock_bars_frame",
                 return_value=pd.DataFrame(),
             ) as fetch_bars,
         ):

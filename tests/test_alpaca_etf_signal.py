@@ -10,7 +10,7 @@ from msm_portfolios.data_nodes.constants import ASSET_IDENTIFIER
 from msm_portfolios.data_nodes.signals.storage import SignalWeightsStorage
 from msm_portfolios.data_nodes.signals.weights import SignalWeights
 
-from src.portfolios.alpaca_etf_signal import (
+from alpaca_connectors.portfolios.alpaca_etf_signal import (
     AlpacaETFHoldingsSignal,
     AlpacaETFHoldingsSignalConfig,
 )
@@ -55,6 +55,17 @@ def test_account_changes_runtime_config_but_not_signal_business_identity() -> No
     assert build_signal(universe_uid="other-universe").signal_uid != first.signal_uid
 
 
+def test_signal_identity_survives_the_package_rename() -> None:
+    # Golden value computed before the package moved from `src` to `alpaca_connectors`.
+    signal = build_signal(universe_uid="11111111-2222-4333-8444-555555555555")
+
+    assert signal._signal_uid_payload()["table_updater_class_import_path"] == {
+        "module": "src.portfolios.alpaca_etf_signal",
+        "qualname": "AlpacaETFHoldingsSignal",
+    }
+    assert signal.signal_uid == "3a9b557bcb6bb17a08f8a9cb0da5f13e"
+
+
 def test_signal_uses_canonical_ms_markets_storage() -> None:
     assert AlpacaETFHoldingsSignal._required_output_table() is SignalWeightsStorage
     assert SignalWeightsStorage.__index_names__ == [
@@ -71,7 +82,7 @@ def test_each_update_materializes_once_and_returns_one_batched_observation() -> 
     materialization = build_materialization()
 
     with patch(
-        "src.universes.services.materialize_asset_universe",
+        "alpaca_connectors.universes.services.materialize_asset_universe",
         return_value=materialization,
     ) as materialize:
         frame = signal._calculate_signal_weights()
@@ -103,7 +114,7 @@ def test_unchanged_extractions_are_still_distinct_observations() -> None:
     )
 
     with patch(
-        "src.universes.services.materialize_asset_universe",
+        "alpaca_connectors.universes.services.materialize_asset_universe",
         side_effect=[first, second],
     ):
         first_frame = signal._calculate_signal_weights()
@@ -123,7 +134,7 @@ def test_prepared_plan_is_transient_and_consumed_by_the_next_update() -> None:
     signal.set_prepared_universe_plan(plan)
 
     with patch(
-        "src.universes.services.materialize_asset_universe",
+        "alpaca_connectors.universes.services.materialize_asset_universe",
         return_value=materialization,
     ) as materialize:
         signal._calculate_signal_weights()

@@ -4,7 +4,7 @@ import uuid
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from src.assets.catalog import list_assets
+from alpaca_connectors.assets.catalog import list_assets
 
 
 def test_asset_list_scopes_to_category_with_set_based_paginated_queries() -> None:
@@ -24,7 +24,7 @@ def test_asset_list_scopes_to_category_with_set_based_paginated_queries() -> Non
     }
     with (
         patch(
-            "src.runtime.start_markets_engine",
+            "alpaca_connectors.runtime.start_markets_engine",
             return_value=SimpleNamespace(context=object()),
         ),
         patch(

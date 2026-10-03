@@ -6,7 +6,7 @@ import os
 
 
 def main() -> int:
-    from src.market_data import execute_market_data_update
+    from alpaca_connectors.market_data import execute_market_data_update
 
     configuration_uid = os.environ.get("ALPACA_BARS_CONFIGURATION_UID", "").strip()
     if not configuration_uid:

@@ -20,7 +20,7 @@ That keeps credential values out of the application, but it makes the site depen
 - the Secrets belong to whoever created them, so their lifecycle (rotation, deletion) is not
   connected to the account registration that depends on them;
 - Secrets are referenced by name, so renaming one breaks the account, and a second Secret with the
-  same name makes every resolution fail as ambiguous (`src/platform_secrets.py`);
+  same name makes every resolution fail as ambiguous (`src/alpaca_connectors/platform_secrets.py`);
 - the registration form cannot check the keys until the user has already created both Secrets.
 
 The installed SDK (`mainsequence` 9.0.2) supports `Secret.create(name=..., value=...)`. The create
@@ -188,15 +188,15 @@ Organization Environment and its result recorded here before the status becomes 
 
 Implemented on 2026-10-03:
 
-- `src/platform_secrets.py` and `src/account/credentials.py`: UID resolution, managed Secret
+- `src/alpaca_connectors/platform_secrets.py` and `src/alpaca_connectors/account/credentials.py`: UID resolution, managed Secret
   create/update/delete, reserved-prefix guard, and the fixed Alpaca rejection error.
-- `src/account/services.py`: registration order and cleanup, plan output (`credential_source`,
+- `src/alpaca_connectors/account/services.py`: registration order and cleanup, plan output (`credential_source`,
   `secret_writes`), rotation, managed-to-external switching, removal, and the backfill.
 - Revision `0015_add_account_credential_secret_references`.
-- `api/app`: the `credentials` union, agent-only request models, the redacted 422 handler, the
+- `alpaca_connectors.api.app`: the `credentials` union, agent-only request models, the redacted 422 handler, the
   `alpaca_credentials_rejected` mapping, and the caller's user UID on create and update.
 - `AGENTS.md`, `README.md`, `docs/`, and `.agents/skills/account_workflow/` describe the new model.
-- `src/settings.py`: the unused `get_alpaca_api_key` / `get_alpaca_secret_key` global fallbacks and
+- `src/alpaca_connectors/settings.py`: the unused `get_alpaca_api_key` / `get_alpaca_secret_key` global fallbacks and
   their tests are deleted.
 
 Still open before acceptance: the four platform checks above, `metatables migrations upgrade` to
