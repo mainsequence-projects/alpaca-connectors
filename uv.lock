@@ -54,7 +54,7 @@ requires-dist = [
     { name = "fastapi", specifier = ">=0.135.3" },
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "mainsequence", specifier = ">=9.0.5,<10" },
-    { name = "mainsequence-metatable", specifier = ">=0.1.17,<0.2" },
+    { name = "mainsequence-metatable", specifier = ">=0.1.19,<0.2" },
     { name = "mkdocs", specifier = ">=1.6.1" },
     { name = "mkdocs-material", specifier = ">=9.7.6" },
     { name = "ms-markets", specifier = ">=2.2.2,<3" },
@@ -607,7 +607,7 @@ server = [
 
 [[package]]
 name = "mainsequence-metatable"
-version = "0.1.17"
+version = "0.1.19"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "alembic" },
@@ -637,9 +637,9 @@ dependencies = [
     { name = "urllib3" },
     { name = "uvicorn" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/06/9e/c8c426ee16bbfade9ec64c103d68c56331ed30e629b176fd225fb69dc7ae/mainsequence_metatable-0.1.17.tar.gz", hash = "sha256:62221c158faa68773c15ad0648a3f0b2c266e129dd9277bf53626830b07d308a", size = 1011150, upload-time = "2026-10-03T17:39:12.074Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/f1/0a/341a9eb0d82d5496301193e510c5ffab26d1432f08061e321c243dc13765/mainsequence_metatable-0.1.19.tar.gz", hash = "sha256:c0631e7bd91419b6186d68c6c16031cddc764f30b35026f6e65f619666d749d0", size = 1005061, upload-time = "2026-10-03T20:15:56.312Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/c7/57/fb0a63f7e99e113306f202136b38f0af85430ac16bd7ca1933c80fccfa7a/mainsequence_metatable-0.1.17-py3-none-any.whl", hash = "sha256:e90291cbe2f0f097658077fdd6e622d4f8ebfb9d6946f9f1f682b97d3f807c16", size = 2034879, upload-time = "2026-10-03T17:39:10.247Z" },
+    { url = "https://files.pythonhosted.org/packages/52/05/8eda31a42f7da4e15e2b3eafa5ba38dcd918e5d93ebe4384bfcf3c75e892/mainsequence_metatable-0.1.19-py3-none-any.whl", hash = "sha256:6f945da9acc9ebd1e7b816ca100d047f1c9143860da51391d909fa14b92d333f", size = 2039168, upload-time = "2026-10-03T20:15:54.465Z" },
 ]
 
 [[package]]

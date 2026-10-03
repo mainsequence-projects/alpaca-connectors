@@ -83,11 +83,11 @@ scripts/dev_stack.sh api      # MetaTables and API
 scripts/dev_stack.sh site     # site only
 ```
 
-The script connects through `metatables.configure_local_client()` to the local MetaTables API that
-is already running, or starts `metatables serve --local` on its default port `18473` when none is.
-It never starts a second local API on another port: when `18473` is taken by a server this checkout
-cannot connect to, it stops and names the owning process. The API and site ports are fixed the same
-way. It warns, and never migrates, when the local runtime is uninitialized or a provider's schema is
-behind. Ctrl-C stops everything it started and leaves a pre-existing MetaTables API running.
+The script connects through `metatables.configure_local_client()` to the laptop's one local
+MetaTables API, which every checkout shares, and starts it with `metatables serve --local` when it is
+not running. The API and site ports are fixed: when one is taken, the script stops and names the
+owning process. It warns, and never migrates, when the local runtime is uninitialized or a
+provider's schema is behind. Ctrl-C stops everything it started and leaves a MetaTables API that was
+already running alone.
 
 `.claude/launch.json` exposes the three modes to the Claude desktop app's Browser panel.

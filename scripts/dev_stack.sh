@@ -3,14 +3,14 @@
 #
 #   scripts/dev_stack.sh [all|api|site]     (default: all)
 #
-# - MetaTables: uses the local API that is already running, otherwise starts `metatables serve
-#   --local` on its default port 18473. It never starts a second local API on another port.
+# - MetaTables: uses the laptop's running local API, otherwise starts it with `metatables serve
+#   --local`. Every checkout shares that one API (mainsequence-metatable 0.1.19).
 # - API: the same settings as the VS Code "Debug Alpaca Connectors API (8321)" configuration,
-#   connected to this project's local MetaTables runtime.
+#   connected to the local MetaTables API.
 # - Site: the same settings as "Debug Alpaca Command Center Site (5421)".
 #
-# Ctrl-C (or stopping the preview) stops every process this script started; a MetaTables launcher
-# that was already running is left alone. Used by .claude/launch.json.
+# Ctrl-C (or stopping the preview) stops every process this script started; a MetaTables API that
+# was already running is left alone. Used by .claude/launch.json.
 set -euo pipefail
 
 MODE="${1:-all}"
@@ -18,7 +18,6 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SITE_DIR="${ALPACA_SITE_DIR:-$ROOT/../alpacaconnectorssite-ab9d29c9-2dcb-417f-8d88-ee9c9e9c8baf}"
 API_PORT=8321
 SITE_PORT=5421
-METATABLES_DEFAULT_PORT=18473 # `metatables serve` default
 PY="$ROOT/.venv/bin/python"
 METATABLES="$ROOT/.venv/bin/metatables"
 
@@ -67,7 +66,7 @@ require_free_port() {
   die "$2 port $1 is already in use by $(port_owner "$1"). Stop it first; the API and site ports are fixed."
 }
 
-# Prints this project's live MetaTables API port; fails when there is no live connection.
+# Prints the running local MetaTables API's port; fails when no local API is running.
 metatables_connection_port() {
   "$PY" - <<'PY' 2>/dev/null
 import socket
@@ -88,25 +87,20 @@ PY
 
 ensure_metatables() {
   local port
-  if port="$(metatables_connection_port)"; then
-    log "MetaTables: using the running local API on 127.0.0.1:$port"
-  elif port_in_use "$METATABLES_DEFAULT_PORT"; then
-    die "MetaTables: a local API already runs on 127.0.0.1:$METATABLES_DEFAULT_PORT ($(port_owner "$METATABLES_DEFAULT_PORT")), but metatables.configure_local_client() cannot connect this checkout to it. Not starting a second one."
-  else
-    port="$METATABLES_DEFAULT_PORT"
-    log "MetaTables: starting the local API on 127.0.0.1:$port"
+  if ! port="$(metatables_connection_port)"; then
+    log "MetaTables: starting the local API"
     # The launcher stops its API worker and removes its connection file on SIGTERM.
     "$METATABLES" serve --local --no-open-browser > >(prefix metatables) 2>&1 &
     local launcher="$!" attempt
-    PIDS+=("$launcher")
     for attempt in $(seq 1 60); do
-      metatables_connection_port >/dev/null && break
-      kill -0 "$launcher" 2>/dev/null ||
-        die "MetaTables exited before it was ready."
+      port="$(metatables_connection_port)" && break
+      kill -0 "$launcher" 2>/dev/null || die "MetaTables exited before it was ready."
       sleep 1
     done
-    metatables_connection_port >/dev/null || die "MetaTables did not become ready on port $port."
+    [[ -n "$port" ]] || die "The local MetaTables API did not become ready."
+    PIDS+=("$launcher")
   fi
+  log "MetaTables: local API on 127.0.0.1:$port"
   report_local_schema
 }
 
@@ -119,7 +113,7 @@ configure_local_client()
 state = get_runtime_status()
 bootstrap = state.get("bootstrap") or {}
 if state.get("local_mode") is not True:
-    print("WARNING: the API is not in Local mode; select Local in Settings before writing.")
+    print("WARNING: the API is not in Local mode; restart it with metatables serve --local.")
 elif bootstrap.get("migration_status") != "up_to_date" or not bootstrap.get("active"):
     print("WARNING: the local runtime is not initialized: metatables --local runtime initialize")
 else:

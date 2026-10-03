@@ -44,7 +44,8 @@ revision and refuses to replace an installation used by a running launcher.
 
 For API-only development, omit `--admin`. Set alternate ports with `--port` and
 `--admin-port`. `init` preserves existing configuration; startup never migrates a
-database. In another terminal in the same project:
+database. The laptop runs one local API: `serve --local` in another project reports
+the running API and exits. In another terminal in any project:
 
 ```bash
 metatables --local runtime status
@@ -52,7 +53,7 @@ metatables --local runtime initialize
 metatables --local meta-table list
 ```
 
-Global `--local` selects the project's private, live connection. A missing or
+Global `--local` selects the laptop's private, live connection. A missing or
 stale connection fails locally. It never falls back to hosted discovery. The
 launcher generates the token and removes its connection file on exit. Python
 clients select it before using the public resources:
@@ -66,7 +67,7 @@ print(get_runtime_status())
 ```
 
 The API uses your SDK login for identity. Native local requests use the private
-launcher token and Git provenance; SDK platform credentials are not redirected to
+launcher token; SDK platform credentials are not redirected to
 the local API. See the [complete write/read example](../examples/local_app/README.md)
 and [runtime guide](../operations/local-runtime.md) for explicit initialization,
 application migrations, persistence and credentials.
@@ -107,7 +108,7 @@ Use `metatables-local-development` to guide application work from local setup
 through verification and an explicit return to the intended environment. It
 checks actual runtime mode and DataSource before test writes, keeps fixtures in
 local SQLite, and distinguishes passing local tests from verification of an
-engine-specific feature. Switching runtimes never promotes local data.
+engine-specific feature. Local data is never promoted to a hosted runtime.
 
 Rerunning the command replaces matching skill folders, including local edits to
 those folders, and preserves unrelated skill folders and namespaces. Use
