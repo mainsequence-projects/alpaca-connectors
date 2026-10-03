@@ -237,7 +237,7 @@ def _patch_platform_job(
         memory_request=settings.memory_request,
         spot=settings.spot,
         max_runtime_seconds=settings.max_runtime_seconds,
-        automatic_deployment=True,
+        # Automatic deployment is read-only on Job updates (SDK 9.0.5); it is set at creation.
         create_schedule=True,
         schedule=_job_schedule_update(settings),
     )
@@ -345,7 +345,6 @@ def update_portfolio_job_configuration(
         job.patch(
             name=_job_name(configuration),
             description=_job_description(configuration),
-            automatic_deployment=True,
         )
     return configuration
 

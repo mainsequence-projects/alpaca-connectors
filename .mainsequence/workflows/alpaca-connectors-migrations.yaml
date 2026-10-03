@@ -1,0 +1,24 @@
+api_version: 2.3.0
+name: alpaca-connectors-migrations
+resources:
+- key: alpaca-connectors-migrate
+  kind: job
+  spec:
+    name: Alpaca Connectors Migrations
+    description: Apply the alpaca_connectors MetaTable schema revisions on every push (ADR 0012).
+    execution_path: src/jobs/migrate_alpaca_connectors.py
+    cpu_request: '0.25'
+    memory_request: '0.5'
+    max_runtime_seconds: 1800
+    spot: false
+    automatic_redeployment:
+      enabled: true
+      tag_regex: null
+execution:
+  steps:
+    image:
+      prepare_image: alpaca-connectors-migrate
+    migrate:
+      run_job: alpaca-connectors-migrate
+      image_from: image
+      needs: [image]

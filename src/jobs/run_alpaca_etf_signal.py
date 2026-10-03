@@ -6,6 +6,11 @@ import json
 
 
 def main() -> int:
+    from alpaca_connectors.migrations.schema_gate import skip_if_schema_behind
+
+    if skip_if_schema_behind("Alpaca ETF signal Job"):
+        return 0
+
     from alpaca_connectors.operations import execute_current_signal_job
 
     result = execute_current_signal_job()

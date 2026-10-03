@@ -51,7 +51,8 @@ the reproducible resolution. The project runs on Main Sequence SDK 9, ms-markets
 ```bash
 uv sync
 mainsequence refresh-token
-metatables migrations upgrade --provider alpaca_connectors.migrations:migration head
+metatables --local migrations upgrade --provider msm_migrations:migration head
+metatables --local migrations upgrade --provider alpaca_connectors.migrations:migration head   # local runtime; hosted: migration Job
 alpaca-connectors portfolio prepare-interpolated-prices
 alpaca-connectors universe-source seed-defaults
 ```

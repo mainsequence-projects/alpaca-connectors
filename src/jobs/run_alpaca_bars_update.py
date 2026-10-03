@@ -44,6 +44,11 @@ def _result_summary(configuration_uid: str, result: dict[str, Any]) -> dict[str,
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
 
+    from alpaca_connectors.migrations.schema_gate import skip_if_schema_behind
+
+    if skip_if_schema_behind("Alpaca bars update Job"):
+        return 0
+
     from alpaca_connectors.market_data import execute_market_data_update
 
     result = execute_market_data_update(configuration_uid=args.configuration_uid)

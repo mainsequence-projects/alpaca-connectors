@@ -199,7 +199,6 @@ def test_platform_job_patch_uses_sdk_8_1_interval_schedule_contract() -> None:
         memory_request="0.5",
         spot=False,
         max_runtime_seconds=3600,
-        automatic_deployment=True,
         create_schedule=True,
         schedule={
             "schedule_type": "interval",

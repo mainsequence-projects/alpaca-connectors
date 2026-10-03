@@ -216,7 +216,8 @@ def test_portfolio_job_patch_writes_operational_settings_only_to_job() -> None:
         "period": "days",
         "one_off": False,
     }
-    assert job.patch.call_args.kwargs["automatic_deployment"] is True
+    # Automatic deployment is read-only on Job updates (SDK 9.0.5).
+    assert "automatic_deployment" not in job.patch.call_args.kwargs
 
 
 def test_portfolio_job_patch_writes_crontab_timezone_only_to_job() -> None:

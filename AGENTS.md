@@ -191,8 +191,18 @@ Operational notes:
 - MetaTables come from the `mainsequence-metatable` client, not from the SDK: import table,
   migration, and updater interfaces from `metatables` and follow the copied
   `.agents/skills/metatables/` skills
-- apply project-owned MetaTable schema changes through
-  `metatables migrations upgrade --provider alpaca_connectors.migrations:migration head`
+- hosted schema changes are applied only by the deployment workflow's migration Job
+  (`.mainsequence/workflows/alpaca-connectors-migrations.yaml`,
+  `src/jobs/migrate_alpaca_connectors.py`; ADR 0012), which applies only this project's provider;
+  the ms-markets schema is migrated only by the ms-markets deployment's `migrate-markets` Job; never
+  run `metatables migrations upgrade` or `downgrade` against a hosted environment from a developer
+  or agent session
+- during development apply revisions to the local runtime, which has no ms-markets deployment, with
+  `metatables --local migrations upgrade --provider msm_migrations:migration head`, then
+  `metatables --local migrations upgrade --provider alpaca_connectors.migrations:migration head`; every revision must keep
+  the previously deployed release working (add first, drop or rename in a later release)
+- every launcher under `src/jobs/` except the migration Job starts with
+  `alpaca_connectors.migrations.schema_gate.skip_if_schema_behind`
 
 Do not remove the `<!-- mainsequence-agent-scaffold:start schema=1 source=agent_scaffold -->`
 or `<!-- mainsequence-agent-scaffold:end -->` markers.

@@ -223,7 +223,7 @@ def _patch_platform_job(configuration: AlpacaETFSignalJobConfiguration, job: Any
         "memory_request": configuration.memory_request,
         "spot": configuration.spot,
         "max_runtime_seconds": configuration.max_runtime_seconds,
-        "automatic_deployment": True,
+        # Automatic deployment is read-only on Job updates (SDK 9.0.5); it is set at creation.
         "create_schedule": configuration.enabled,
     }
     if configuration.enabled:

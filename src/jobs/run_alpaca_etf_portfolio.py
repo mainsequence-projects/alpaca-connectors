@@ -6,6 +6,12 @@ import json
 
 
 def main() -> int:
+    from alpaca_connectors.migrations.schema_gate import skip_if_schema_behind
+
+    # Before the runtime bootstrap, which itself resolves project tables.
+    if skip_if_schema_behind("Alpaca ETF portfolio Job"):
+        return 0
+
     from alpaca_connectors.runtime import start_portfolio_job_engine
 
     start_portfolio_job_engine()

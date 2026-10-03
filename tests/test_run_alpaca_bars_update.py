@@ -17,6 +17,25 @@ main = _LAUNCHER["main"]
 CONFIGURATION_UID = "11111111-1111-4111-8111-111111111111"
 
 
+@pytest.fixture(autouse=True)
+def schema_current():
+    """Launcher tests run against a database at the code's head revision unless stated."""
+    with patch(
+        "alpaca_connectors.migrations.schema_gate.skip_if_schema_behind",
+        return_value=False,
+    ) as gate:
+        yield gate
+
+
+def test_launcher_skips_without_side_effects_when_schema_is_behind(schema_current) -> None:
+    schema_current.return_value = True
+    with patch("alpaca_connectors.market_data.execute_market_data_update") as execute:
+        exit_code = main(["--configuration-uid", CONFIGURATION_UID])
+
+    assert exit_code == 0
+    execute.assert_not_called()
+
+
 def test_launcher_requires_configuration_uid() -> None:
     with pytest.raises(SystemExit) as exc_info:
         main([])

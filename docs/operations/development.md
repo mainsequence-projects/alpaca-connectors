@@ -6,9 +6,17 @@
 uv sync
 mainsequence refresh-token
 mainsequence code-repository current --debug --json
-metatables migrations current --provider alpaca_connectors.migrations:migration
-metatables migrations upgrade --provider alpaca_connectors.migrations:migration head
+metatables serve --local          # in its own terminal; the laptop's single local runtime
+metatables --local runtime status
+metatables --local migrations upgrade --provider msm_migrations:migration head
+metatables --local migrations upgrade --provider alpaca_connectors.migrations:migration head
 ```
+
+Hosted environments are migrated only by the deployment workflow's migration Job
+(`.mainsequence/workflows/alpaca-connectors-migrations.yaml`, ADR 0012). From a developer or agent
+session, use only the read-only `metatables migrations current --provider
+alpaca_connectors.migrations:migration` against a hosted environment. Every Job launcher checks the
+applied schema first and skips the run while the database is behind its code.
 
 `mainsequence refresh-token` renews the saved session; the SDK keeps credentials in the operating
 system credential store, not in the CodeRepository `.env`. MetaTables schema commands come from the

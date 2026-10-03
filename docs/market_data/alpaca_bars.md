@@ -42,7 +42,7 @@ range.
 Apply project-owned schemas before running an update:
 
 ```bash
-metatables migrations upgrade --provider alpaca_connectors.migrations:migration head
+metatables --local migrations upgrade --provider alpaca_connectors.migrations:migration head   # hosted: deployment migration Job
 ```
 
 Processes attach to those existing tables through `alpaca_connectors.runtime.start_markets_engine()`; runtime

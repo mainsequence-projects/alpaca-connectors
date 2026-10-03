@@ -78,7 +78,9 @@ a duplicate name no longer breaks an account. Revision `0015` adds the UID colum
 gives `credential_source` a permanent server default of `external`. That default labels existing
 rows and keeps the previous release able to insert registrations while the new code rolls out, as
 the MetaTables rule that each schema change stay compatible with the previous release requires. The
-order is: run `0015`, deploy the code, then run the backfill. Those rows are backfilled once by the reviewed
+order is: the deployment's migration Job applies `0015` before the code rolls out
+([ADR 0012](0012_deployment_workflow_migrations_and_schema_gated_jobs.md)), then the backfill runs
+once. Those rows are backfilled once by the reviewed
 `alpaca-connectors account backfill-secret-uids --execute`, which resolves their stored names to
 UIDs in one set-based update; until then their resolution fails with that instruction. A follow-up
 revision makes the UID columns non-null once the backfill has run in every environment. There is no
@@ -199,5 +201,7 @@ Implemented on 2026-10-03:
 - `src/alpaca_connectors/settings.py`: the unused `get_alpaca_api_key` / `get_alpaca_secret_key` global fallbacks and
   their tests are deleted.
 
-Still open before acceptance: the four platform checks above, `metatables migrations upgrade` to
-`0015` with the backfill in each environment, and the follow-up non-null revision.
+Still open before acceptance: the four platform checks above, the `0015` rollout followed by the
+one-time backfill in each environment, and the follow-up non-null revision. During development the
+short window between the rollout and the backfill, in which existing accounts cannot resolve
+credentials, is accepted rather than engineered around.
