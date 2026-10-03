@@ -96,6 +96,9 @@ Use the [application migrations skill](../metatables-migrations/SKILL.md),
 `docs/client/define-and-migrate-tables.md`, and
 `docs/adr/api/0013-application-owned-migrations.md` for that workflow. Ordinary
 SQL continues through the governed API, independently of the migration connection.
+If the application's deployment workflow does not yet run its providers in a
+migration Job before its API and agents roll out, add one as
+`docs/client/deploy-application-migrations.md` describes.
 
 ## Verify the upgrade
 

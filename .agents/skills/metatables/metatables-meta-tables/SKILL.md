@@ -80,6 +80,25 @@ the time name for updater compatibility. The mixin automatically creates the
 unique index for the full grain; add only additional lookup indexes. Declare
 `__cadence__` when the stable observation interval is known.
 
+The default storage layout names its lookup index by joining the identity
+columns (`__index_names__[1:]`) with `_`. MetaTables never shortens that name: if
+it exceeds 63 characters, registration raises and names the model. Declare an
+explicit `__storage_layout__` with a short `secondary_indexes[0].name` (at most
+59 characters, leaving room for the `_idx` suffix); the other fields must restate
+the grain:
+
+```python
+__storage_layout__ = {
+    "version": 1,
+    "time_index": {"name": "time_index"},
+    "identity_dimensions": DIMENSIONS,  # __index_names__[1:]
+    "index_progress": {"grain": DIMENSIONS},
+    "uniqueness": {"columns": ["time_index", *DIMENSIONS]},
+    "tail_delete": {"scope_dimensions": DIMENSIONS},
+    "secondary_indexes": [{"name": "portfolio_event_lookup", "columns": DIMENSIONS}],
+}
+```
+
 Physical names remain stable across schema changes. Evolve through new Alembic
 revisions; do not recompute identity from columns or rewrite applied history.
 

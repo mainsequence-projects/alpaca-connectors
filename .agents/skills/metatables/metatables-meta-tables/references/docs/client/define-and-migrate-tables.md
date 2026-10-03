@@ -93,6 +93,11 @@ Python setup code can call `metatables.upgrade_application("ledger.migrations:mi
 For current and downgrade, use `metatables.migrations.runner.run_migration` with
 `operation="current"` or `operation="downgrade", revision="0001"`.
 
+Hosted runtimes are migrated by the application's deployment workflow, not from a
+developer machine: a Job applies the providers from the candidate image before
+the application rolls out. See
+[Migrate in the deployment workflow](deploy-application-migrations.md).
+
 The provider is installed only in the application process. Remove the retired
 `application_migration_providers` setting from existing deployment configuration;
 replace old aliases with application Python references. No API provider registration,

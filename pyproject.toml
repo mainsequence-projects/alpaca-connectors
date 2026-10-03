@@ -11,9 +11,9 @@ license-files = ["LICENSE"]
 requires-python = ">=3.13,<3.14"
 dependencies = [
     # Keep compatible ranges here and let uv.lock capture the reproducible environment.
-    "ms-markets>=2,<3",
-    "mainsequence>=9.0.4,<10",
-    "mainsequence-metatable>=0.1.8,<0.2",
+    "ms-markets>=2.2.0,<3",
+    "mainsequence>=9.0.5,<10",
+    "mainsequence-metatable>=0.1.16,<0.2",
     "alpaca-py",
     "playwright",
     "mkdocs>=1.6.1",
