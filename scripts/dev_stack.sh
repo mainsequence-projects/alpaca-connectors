@@ -3,9 +3,8 @@
 #
 #   scripts/dev_stack.sh [all|api|site]     (default: all)
 #
-# - MetaTables: reuses this project's running `metatables serve --local` launcher, otherwise starts
-#   one on this project's own port 18491, never the MetaTables default 18473 that other projects use
-#   (override with ALPACA_METATABLES_PORT). A launcher serves only the checkout that started it.
+# - MetaTables: uses the local API that is already running, otherwise starts `metatables serve
+#   --local` on its default port 18473. It never starts a second local API on another port.
 # - API: the same settings as the VS Code "Debug Alpaca Connectors API (8321)" configuration,
 #   connected to this project's local MetaTables runtime.
 # - Site: the same settings as "Debug Alpaca Command Center Site (5421)".
@@ -19,7 +18,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SITE_DIR="${ALPACA_SITE_DIR:-$ROOT/../alpacaconnectorssite-ab9d29c9-2dcb-417f-8d88-ee9c9e9c8baf}"
 API_PORT=8321
 SITE_PORT=5421
-METATABLES_PORT="${ALPACA_METATABLES_PORT:-18491}"
+METATABLES_DEFAULT_PORT=18473 # `metatables serve` default
 PY="$ROOT/.venv/bin/python"
 METATABLES="$ROOT/.venv/bin/metatables"
 
@@ -65,7 +64,7 @@ trap 'exit 143' TERM
 
 require_free_port() {
   port_in_use "$1" || return 0
-  die "$2 port $1 is already in use by $(port_owner "$1"). Stop it first; this project's ports are fixed."
+  die "$2 port $1 is already in use by $(port_owner "$1"). Stop it first; the API and site ports are fixed."
 }
 
 # Prints this project's live MetaTables API port; fails when there is no live connection.
@@ -90,13 +89,14 @@ PY
 ensure_metatables() {
   local port
   if port="$(metatables_connection_port)"; then
-    log "MetaTables: reusing this project's local API on 127.0.0.1:$port"
+    log "MetaTables: using the running local API on 127.0.0.1:$port"
+  elif port_in_use "$METATABLES_DEFAULT_PORT"; then
+    die "MetaTables: a local API already runs on 127.0.0.1:$METATABLES_DEFAULT_PORT ($(port_owner "$METATABLES_DEFAULT_PORT")), but metatables.configure_local_client() cannot connect this checkout to it. Not starting a second one."
   else
-    port="$METATABLES_PORT"
-    require_free_port "$port" "MetaTables"
+    port="$METATABLES_DEFAULT_PORT"
     log "MetaTables: starting the local API on 127.0.0.1:$port"
     # The launcher stops its API worker and removes its connection file on SIGTERM.
-    "$METATABLES" serve --local --port "$port" --no-open-browser > >(prefix metatables) 2>&1 &
+    "$METATABLES" serve --local --no-open-browser > >(prefix metatables) 2>&1 &
     local launcher="$!" attempt
     PIDS+=("$launcher")
     for attempt in $(seq 1 60); do
