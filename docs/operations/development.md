@@ -71,3 +71,22 @@ or select another free pair in `.vscode/launch.json` rather than allowing an aut
 
 The sibling static-site repository and its `node_modules` installation must exist before launching
 the compound. Run `npm ci` from that repository if the Vite executable is missing.
+
+## Run the local stack without a debugger
+
+`scripts/dev_stack.sh` starts the same API and site, with the same ports and environment, and
+connects the API to the local MetaTables runtime:
+
+```bash
+scripts/dev_stack.sh          # MetaTables, API and site
+scripts/dev_stack.sh api      # MetaTables and API
+scripts/dev_stack.sh site     # site only
+```
+
+The script reuses this checkout's running `metatables serve --local` launcher, or starts one on the
+default port `18473`. A launcher serves only the checkout that started it, so when another project
+already holds `18473` the script uses the next free port; set `ALPACA_METATABLES_PORT` to choose
+one. It warns, and never migrates, when the local runtime is uninitialized or a provider's schema
+is behind. Ctrl-C stops everything it started and leaves a pre-existing launcher running.
+
+`.claude/launch.json` exposes the three modes to the Claude desktop app's Browser panel.

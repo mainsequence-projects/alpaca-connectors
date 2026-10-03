@@ -1,0 +1,26 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "Alpaca API + Command Center Site",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": ["scripts/dev_stack.sh", "all"],
+      "port": 5421,
+      "url": "http://127.0.0.1:5421"
+    },
+    {
+      "name": "Alpaca Connectors API (8321)",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": ["scripts/dev_stack.sh", "api"],
+      "port": 8321,
+      "url": "http://127.0.0.1:8321"
+    },
+    {
+      "name": "Alpaca Command Center Site (5421)",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": ["scripts/dev_stack.sh", "site"],
+      "port": 5421,
+      "url": "http://127.0.0.1:5421"
+    }
+  ]
+}
