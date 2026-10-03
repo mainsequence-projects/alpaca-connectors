@@ -216,8 +216,9 @@ first deployment of this file.
 Results recorded on 2026-10-03:
 
 1. **Workflow template:** done. The graph exists at `api_version` 2.3.0; steps must reference
-   same-file resources; `resource_release` is not a 2.3.0 kind. The standalone migration workflow
-   validates. **Open:** whether converting the API to `kind: fastapi` keeps its release.
+   same-file resources; `resource_release` is not a 2.3.0 kind. `alpaca-connectors-api.yaml`, with
+   the API as `kind: fastapi` behind `needs: [migrate]`, validates. **Open:** whether converting
+   the API to `kind: fastapi` keeps its release.
 2. **API-created Jobs:** partly done. One signal Job and one portfolio Job exist on `main`, both
    with `automatic_deployment: true`. **Open:** whether they move to a new image on the push or
    after the graph. The gate covers either answer.
@@ -227,8 +228,12 @@ Results recorded on 2026-10-03:
    completed migration it reports `behind` and the signal launcher exits 0 without side effects.
    ms-markets' `JSONB` columns used to block every provider that depends on it on local SQLite
    ([MainSequenceMarkets#15](https://github.com/mainsequence-projects/MainSequenceMarkets/issues/15));
-   MetaTables 0.1.12 and ms-markets 2.1.0 fix that. **Open:** a full local run of the migration Job
-   and the gate's `active` path, which is covered by unit tests only so far.
+   MetaTables 0.1.12 and ms-markets 2.1.0 fix that. The full local run is done with MetaTables
+   0.1.17 and ms-markets 2.2.2 (2.2.2 declares the `PortfolioEventLedgerTS` storage layout,
+   [MainSequenceMarkets#19](https://github.com/mainsequence-projects/MainSequenceMarkets/issues/19)):
+   both providers upgrade to head (`0018`, `0015`); the migration Job then reports
+   `already current`; and the gate's `active` path reads both version tables and reports neither
+   provider behind.
 5. **Job creation:** done. Creation accepts `automatic_deployment`; updates no longer send it.
 
 Running `run_migration(..., operation="current")` reserves the version table's catalog row even

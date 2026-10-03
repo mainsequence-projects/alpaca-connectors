@@ -138,6 +138,14 @@ A null cutoff requires a scope. Do not replace that workflow with ad hoc SQL.
 Deletion/cascade requires edit access, relevant protection checks, and explicit
 cascade intent; it is not an administrator-role bypass or migration repair.
 
+Before a destructive action, or to show impact in an application UI, call
+`table.get_impact(action=...)` with `delete_rows`, `update_keys` or `drop_table`.
+The API returns whether the caller may run it, every blocker, and a graph of
+affected tables, foreign-key effects and reading updates; render that result
+rather than re-deriving foreign-key or permission rules in the client. Cascading
+foreign keys are allowed, but write on a table requires write on every table its
+cascades modify; a cascade into an unregistered table makes the parent read-only.
+
 On a TimescaleDB DataSource, time-index tables are hypertables. Their compression
 and retention policies are set only through `TimeIndexMetaTable.set_timescale_policies`
 (Writer) and read with `get_timescale_policies`. Do not add policies to table
