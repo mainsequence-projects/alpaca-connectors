@@ -113,13 +113,13 @@ keyring==25.7.0
     #   mainsequence-metatable
 korean-lunar-calendar==0.3.1
     # via exchange-calendars
-mainsequence==9.0.3
+mainsequence==9.0.5
     # via
     #   alpaca-connectors
     #   etfhextractor
     #   mainsequence-metatable
     #   ms-markets
-mainsequence-metatable==0.1.6
+mainsequence-metatable==0.1.8
     # via
     #   alpaca-connectors
     #   etfhextractor

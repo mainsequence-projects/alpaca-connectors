@@ -12,8 +12,8 @@ requires-python = ">=3.13,<3.14"
 dependencies = [
     # Keep compatible ranges here and let uv.lock capture the reproducible environment.
     "ms-markets>=2,<3",
-    "mainsequence>=9.0.2,<10",
-    "mainsequence-metatable>=0.1.6,<0.2",
+    "mainsequence>=9.0.4,<10",
+    "mainsequence-metatable>=0.1.8,<0.2",
     "alpaca-py",
     "playwright",
     "mkdocs>=1.6.1",

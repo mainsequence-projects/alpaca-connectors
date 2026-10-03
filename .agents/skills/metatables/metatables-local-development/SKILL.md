@@ -140,12 +140,16 @@ local rows, catalog UIDs, credentials and fixture data are not promoted by a swi
 When returning to the environment is part of the requested workflow:
 
 1. Finish local tests and stop active writers. In Admin **Settings → Runtime mode**,
-   inspect the displayed hosted environment and choose the intended registered
-   DataSource. Use **Switch to Hosted**. This changes the API worker and selected
-   database; it does not copy or merge the local database. Leave local capability
-   enabled if the developer needs to switch back later.
+   inspect the displayed hosted environment and use **Switch to Hosted**. Hosted
+   opens the runtime database the API's deployment declares, through the same
+   Environment Secret; there is no DataSource to choose and the launcher never
+   migrates it. This changes the API worker and database; it does not copy or merge
+   the local database. Leave local capability enabled if the developer needs to
+   switch back later.
 2. Re-read runtime status and verify `local_mode: false`, the intended verified
-   hosted environment, the expected DataSource and readiness. The same local
+   hosted environment, the expected DataSource and readiness. `migration_required`
+   means the branch has system migrations the deployed API does not have yet; it
+   clears once that code is deployed. The same local
    connection command still reaches this supervised API; its `--local` flag alone
    does not prove SQLite. If the switch fails and the old worker is restored,
    report the actual mode instead of claiming the switch succeeded.
