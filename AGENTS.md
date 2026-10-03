@@ -191,9 +191,11 @@ Operational notes:
 - MetaTables come from the `mainsequence-metatable` client, not from the SDK: import table,
   migration, and updater interfaces from `metatables` and follow the copied
   `.agents/skills/metatables/` skills
-- hosted schema changes are applied only by the deployment workflow's migration Job
-  (`.mainsequence/workflows/alpaca-connectors-migrations.yaml`,
-  `src/jobs/migrate_alpaca_connectors.py`; ADR 0012), which applies only this project's provider;
+- hosted schema changes are applied only by the migration Job in
+  `.mainsequence/workflows/alpaca-connectors-api.yaml` (`src/jobs/migrate_alpaca_connectors.py`;
+  ADR 0012), which runs from the candidate image before the API deploys (`needs: [migrate]`) and
+  applies only this project's provider; keep every deployed resource that reads project tables in
+  that file with its own `needs: [migrate]` deploy step;
   the ms-markets schema is migrated only by the ms-markets deployment's `migrate-markets` Job; never
   run `metatables migrations upgrade` or `downgrade` against a hosted environment from a developer
   or agent session

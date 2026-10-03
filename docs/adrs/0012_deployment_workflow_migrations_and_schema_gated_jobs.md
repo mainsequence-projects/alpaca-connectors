@@ -173,8 +173,13 @@ Implemented on 2026-10-03:
   `metatables.upgrade_application` and prints one JSON line per provider. The schema gate checks
   `msm_migrations:migration` and our provider (`GATED_PROVIDERS`). If the ms-markets deployment has
   not yet migrated to the version this image pins, Jobs skip instead of failing.
-- `.mainsequence/workflows/alpaca-connectors-migrations.yaml` declares that Job with an `execution`
-  graph (prepare its image, then run it) so it runs on every push. `validate-workflow` accepts it.
+- `.mainsequence/workflows/alpaca-connectors-api.yaml` declares the API and that Job in one file
+  at `api_version` 2.3.0, with the graph: prepare the image from the API, run the migration Job, then
+  deploy the API with `needs: [migrate]`. It keeps the workflow `name` and the API `key`; the API
+  moves from `kind: resource_release` (`resource_uid`) to `kind: fastapi` with
+  `source_path: api/app/main.py`, the pattern ms-markets uses for its own API (its commit `29dc96b`
+  made the same conversion). An earlier standalone migrations workflow, which ran the Job but gated
+  nothing, is removed.
 - `alpaca_connectors.migrations.schema_gate` and the gate in all four Job launchers. The applied
   revision comes from the provider's version MetaTable through a governed SELECT. A version table
   whose catalog row is missing or only `reserved` counts as never migrated, because the catalog
@@ -183,18 +188,16 @@ Implemented on 2026-10-03:
 
 Not yet gated by the graph:
 
-- **FastAPI release:** declared as `kind: resource_release` with `resource_uid` at `api_version`
-  2.2.0. Joining the graph requires `kind: fastapi` with `source_path: api/app/main.py` in the
-  migration workflow file. Whether that conversion keeps release `6318ffdd-…` or creates a new
-  release is unverified.
 - **Coding agent:** `alpaca-connectors-agent.yaml` uses `kind: code_repository_coding_agent`, which
   the current platform rejects (`unsupported_kind`), so that declaration is not applied today.
 - **Declared Jobs:** `alpaca-bars-update` and `daily-stock-bars-holdings-ivv` have automatic
   redeployment disabled, so pushes never move them to a new image. The gate protects them when they
   are redeployed.
 
-Until those resources join the graph, the API and agent can briefly serve new code against the old
-schema during a rollout; this is accepted during development.
+Until those resources join the graph, the agent can briefly serve new code against the old schema
+during a rollout; this is accepted during development. **Unverified:** whether converting the API
+declaration keeps release `6318ffdd-…` or creates a new release. Check the release UID after the
+first deployment of this file.
 
 ## Consequences
 

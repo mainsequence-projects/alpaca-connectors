@@ -12,8 +12,9 @@ metatables --local migrations upgrade --provider msm_migrations:migration head
 metatables --local migrations upgrade --provider alpaca_connectors.migrations:migration head
 ```
 
-Hosted environments are migrated only by the deployment workflow's migration Job
-(`.mainsequence/workflows/alpaca-connectors-migrations.yaml`, ADR 0012). From a developer or agent
+Hosted environments are migrated only by the migration Job in
+`.mainsequence/workflows/alpaca-connectors-api.yaml` (ADR 0012), which runs from the candidate image
+before the API deploys. From a developer or agent
 session, use only the read-only `metatables migrations current --provider
 alpaca_connectors.migrations:migration` against a hosted environment. Every Job launcher checks the
 applied schema first and skips the run while the database is behind its code.

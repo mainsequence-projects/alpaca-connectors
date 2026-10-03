@@ -193,18 +193,37 @@ def test_launchers_do_no_work_while_the_schema_is_behind(launcher, work) -> None
     work_call.assert_not_called()
 
 
-def test_migration_workflow_runs_the_migration_job_on_every_push() -> None:
+def test_api_deploys_only_after_the_migration_job_in_one_workflow() -> None:
     import yaml
 
+    root = JOBS.parents[1]
     workflow = yaml.safe_load(
-        (JOBS.parents[1] / ".mainsequence/workflows/alpaca-connectors-migrations.yaml").read_text()
+        (root / ".mainsequence/workflows/alpaca-connectors-api.yaml").read_text()
     )
-    (job,) = workflow["resources"]
-    assert job["spec"]["execution_path"] == "src/jobs/migrate_alpaca_connectors.py"
-    assert (JOBS / "migrate_alpaca_connectors.py").is_file()
-    assert job["spec"]["automatic_redeployment"]["enabled"] is True
-    assert workflow["execution"]["steps"]["migrate"] == {
-        "run_job": job["key"],
+    resources = {resource["key"]: resource for resource in workflow["resources"]}
+    api = resources["alpaca-connectors-api"]
+    job = resources["alpaca-connectors-migrate"]
+
+    # Same workflow name and API key as the release it replaces; 2.3.0 kinds only.
+    assert workflow["name"] == "alpaca-connectors-api"
+    assert workflow["api_version"] == "2.3.0"
+    assert api["kind"] == "fastapi"
+    assert (root / api["spec"]["source_path"]).is_file()
+    assert job["kind"] == "job"
+    assert (root / job["spec"]["execution_path"]).is_file()
+    for resource in (api, job):
+        assert resource["spec"]["automatic_redeployment"]["enabled"] is True
+
+    steps = workflow["execution"]["steps"]
+    assert steps["image"] == {"prepare_image": "alpaca-connectors-api"}
+    assert steps["migrate"] == {
+        "run_job": "alpaca-connectors-migrate",
         "image_from": "image",
         "needs": ["image"],
     }
+    assert steps["deploy_api"] == {
+        "deploy": "alpaca-connectors-api",
+        "image_from": "image",
+        "needs": ["migrate"],
+    }
+    assert not (root / ".mainsequence/workflows/alpaca-connectors-migrations.yaml").exists()
