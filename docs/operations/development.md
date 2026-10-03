@@ -28,7 +28,7 @@ bash scripts/install_browser_runtime.sh
 ```bash
 uv run pytest
 uv run ruff check api src tests
-uv run ruff format --check api src tests --exclude src/.agents
+uv run ruff format --check api src tests
 uv run mkdocs build --strict
 ```
 
