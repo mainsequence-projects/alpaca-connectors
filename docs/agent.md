@@ -50,7 +50,8 @@ FastAPI application.
 
 - The Organization Environment is derived from the deployed CodeRepositoryBranch and is never a
   user or tool argument.
-- Account registration receives Main Sequence Secret names, never Alpaca credential values.
+- Agent account registration receives Main Sequence Secret names, never Alpaca credential values;
+  users who want the application to store their keys use the static site.
 - Account creation preserves the mandatory initial Asset registration and holdings capture.
 - Universe extraction registers missing constituents in bulk, replaces the linked AssetCategory in
   bulk, and publishes one complete observed weight frame.

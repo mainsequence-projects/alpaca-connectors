@@ -42,8 +42,8 @@ alpaca-connectors market-data dataset list
 uv run uvicorn api.app.main:app --reload
 ```
 
-Mutating account and market-data operations use a registered Account UID. Account registration
-accepts Main Sequence Secret names only. Universe sync uses a UniverseSource UID and does not infer
+Mutating account and market-data operations use a registered Account UID. CLI account registration
+accepts Main Sequence Secret names only; the API also accepts values to store as managed Secrets. Universe sync uses a UniverseSource UID and does not infer
 extraction targets from source-code constants.
 
 ## Debug the API and Command Center site

@@ -353,17 +353,187 @@ class ApiAppTests(unittest.TestCase):
         self.assertEqual(response.json(), status.model_dump(mode="json"))
         get_status.assert_called_once_with(job_run_uid)
 
-    def test_account_registration_rejects_raw_credentials(self) -> None:
+    def test_account_registration_rejects_stray_credential_fields_without_echo(self) -> None:
         response = self.client.post(
             "/v1/accounts",
             json={
                 "environment": "paper",
-                "api_key_secret_name": "ALPACA_API_KEY",
-                "secret_key_secret_name": "ALPACA_SECRET_KEY",
+                "credentials": {
+                    "source": "external",
+                    "api_key_secret_name": "ALPACA_API_KEY",
+                    "secret_key_secret_name": "ALPACA_SECRET_KEY",
+                },
                 "api_key": "raw-value-must-not-be-accepted",
             },
         )
 
+        self.assertEqual(response.status_code, 422)
+        self.assertNotIn("raw-value-must-not-be-accepted", response.text)
+
+    def test_managed_credential_validation_errors_never_echo_values(self) -> None:
+        for credentials in (
+            {"source": "managed", "api_key": "PKSAMEVALUE1", "secret_key": "PKSAMEVALUE1"},
+            {"source": "managed", "api_key": "PK WITH SPACE", "secret_key": "SKVALUE7788"},
+            {
+                "source": "managed",
+                "api_key": "PKVALUE5566",
+                "secret_key": "SKVALUE7788",
+                "unexpected": "PKVALUE5566",
+            },
+            {"source": "managed", "api_key": "PKVALUE5566"},
+        ):
+            with self.subTest(fields=sorted(credentials)):
+                response = self.client.post(
+                    "/v1/accounts/registration/preflight",
+                    json={"environment": "paper", "credentials": credentials},
+                )
+
+                self.assertEqual(response.status_code, 422)
+                for value in ("PKSAMEVALUE1", "PK WITH SPACE", "SKVALUE7788", "PKVALUE5566"):
+                    self.assertNotIn(value, response.text)
+                for error in response.json()["detail"]:
+                    self.assertEqual(set(error), {"loc", "msg", "type"})
+
+    def test_managed_registration_passes_values_only_to_the_account_service(self) -> None:
+        from src.account.credentials import ResolvedAlpacaCredentials
+
+        registration = {
+            "uid": "account-uid",
+            "account_uid": "account-uid",
+            "unique_identifier": "123__ALPACA_PAPER",
+            "account_name": "Paper",
+            "is_paper": True,
+            "account_is_active": True,
+            "credential_source": "managed",
+            "api_key_secret_name": "ALPACA_CONNECTORS__123__ALPACA_PAPER__API_KEY",
+            "secret_key_secret_name": "ALPACA_CONNECTORS__123__ALPACA_PAPER__SECRET_KEY",
+            "api_key_secret_uid": "api-uid",
+            "secret_key_secret_uid": "secret-uid",
+            "api_key_fingerprint": "fingerprint",
+        }
+        with (
+            patch(
+                "api.app.services.accounts.register_alpaca_account",
+                return_value=SimpleNamespace(account_uid="account-uid"),
+            ) as register,
+            patch(
+                "api.app.services.accounts.get_account_registration",
+                return_value=registration,
+            ),
+        ):
+            response = self.client.post(
+                "/v1/accounts",
+                json={
+                    "account_name": "Paper",
+                    "environment": "paper",
+                    "credentials": {
+                        "source": "managed",
+                        "api_key": " PKVALUE5566 ",
+                        "secret_key": "SKVALUE7788",
+                    },
+                },
+            )
+
+        self.assertEqual(response.status_code, 201)
+        credentials = register.call_args.kwargs["credentials"]
+        self.assertIsInstance(credentials, ResolvedAlpacaCredentials)
+        self.assertEqual(credentials.api_key, "PKVALUE5566")
+        self.assertIsNone(register.call_args.kwargs["actor_user_uid"])
+        self.assertEqual(response.json()["credential_source"], "managed")
+        self.assertNotIn("PKVALUE5566", response.text)
+        self.assertNotIn("SKVALUE7788", response.text)
+        self.assertNotIn("fingerprint", response.text)
+
+    def test_rejected_alpaca_credentials_return_a_fixed_client_error(self) -> None:
+        from src.account.credentials import AlpacaCredentialsRejectedError
+
+        with patch(
+            "api.app.routers.accounts.preflight_account_registration",
+            side_effect=AlpacaCredentialsRejectedError(),
+        ):
+            response = self.client.post(
+                "/v1/accounts/registration/preflight",
+                json={
+                    "environment": "live",
+                    "credentials": {
+                        "source": "managed",
+                        "api_key": "PKVALUE5566",
+                        "secret_key": "SKVALUE7788",
+                    },
+                },
+            )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            response.json()["detail"],
+            {
+                "code": "alpaca_credentials_rejected",
+                "message": "Alpaca rejected the supplied credentials.",
+                "retryable": False,
+            },
+        )
+
+    def test_account_patch_routes_credentials_only_when_supplied(self) -> None:
+        from src.account.credentials import ResolvedAlpacaCredentials
+
+        registration = {
+            "uid": "account-uid",
+            "account_uid": "account-uid",
+            "unique_identifier": "123__ALPACA_PAPER",
+            "account_name": "Renamed",
+            "is_paper": True,
+            "account_is_active": False,
+            "api_key_secret_name": "A",
+            "secret_key_secret_name": "B",
+        }
+        cases = (
+            ({"account_name": "Renamed", "account_is_active": False}, set()),
+            (
+                {
+                    "credentials": {
+                        "source": "managed",
+                        "api_key": "PKVALUE5566",
+                        "secret_key": "SKVALUE7788",
+                    }
+                },
+                {"credential_values"},
+            ),
+            (
+                {
+                    "credentials": {
+                        "source": "external",
+                        "api_key_secret_name": "NEW_A",
+                        "secret_key_secret_name": "NEW_B",
+                    }
+                },
+                {"api_key_secret_name", "secret_key_secret_name"},
+            ),
+        )
+        for body, credential_kwargs in cases:
+            with (
+                self.subTest(body=sorted(body)),
+                patch(
+                    "api.app.services.accounts.update_account_registration",
+                    return_value=registration,
+                ) as update,
+            ):
+                response = self.client.patch("/v1/accounts/account-uid", json=body)
+
+                self.assertEqual(response.status_code, 200)
+                kwargs = update.call_args.kwargs
+                self.assertEqual(
+                    {"api_key_secret_name", "secret_key_secret_name", "credential_values"}
+                    & set(kwargs),
+                    credential_kwargs,
+                )
+                if "credential_values" in kwargs:
+                    self.assertIsInstance(kwargs["credential_values"], ResolvedAlpacaCredentials)
+                self.assertNotIn("PKVALUE5566", response.text)
+
+        response = self.client.patch(
+            "/v1/accounts/account-uid",
+            json={"api_key_secret_name": "LEGACY_TOP_LEVEL_FIELD"},
+        )
         self.assertEqual(response.status_code, 422)
 
     def test_account_secret_references_expose_names_only(self) -> None:
@@ -417,19 +587,23 @@ class ApiAppTests(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json()["detail"]["code"], "invalid_request")
 
-    def test_openapi_never_declares_raw_alpaca_credential_fields(self) -> None:
+    def test_openapi_declares_credential_values_only_as_write_only_managed_fields(self) -> None:
         schemas = self.client.get("/openapi.json").json()["components"]["schemas"]
-        property_names = {
-            property_name
-            for schema in schemas.values()
-            for property_name in schema.get("properties", {})
+        declaring_schemas = {
+            schema_name
+            for schema_name, schema in schemas.items()
+            if {"api_key", "secret_key"} & set(schema.get("properties", {}))
         }
 
-        self.assertNotIn("api_key", property_names)
-        self.assertNotIn("secret_key", property_names)
-        self.assertNotIn("secretValues", property_names)
-        self.assertIn("api_key_secret_name", property_names)
-        self.assertIn("secret_key_secret_name", property_names)
+        self.assertEqual(declaring_schemas, {"ManagedAlpacaCredentials"})
+        managed = schemas["ManagedAlpacaCredentials"]["properties"]
+        for field_name in ("api_key", "secret_key"):
+            self.assertEqual(managed[field_name]["format"], "password")
+            self.assertTrue(managed[field_name]["writeOnly"])
+        response_properties = schemas["AccountResponse"]["properties"]
+        self.assertNotIn("api_key", response_properties)
+        self.assertNotIn("api_key_fingerprint", response_properties)
+        self.assertIn("credential_source", response_properties)
 
     def test_universe_source_preview_route_returns_conflict_on_blocker(self) -> None:
         with patch(
@@ -483,8 +657,11 @@ class ApiAppTests(unittest.TestCase):
             "/v1/accounts",
             json={
                 "environment": "paper",
-                "api_key_secret_name": "ALPACA_API_KEY",
-                "secret_key_secret_name": "ALPACA_SECRET_KEY",
+                "credentials": {
+                    "source": "external",
+                    "api_key_secret_name": "ALPACA_API_KEY",
+                    "secret_key_secret_name": "ALPACA_SECRET_KEY",
+                },
                 "register_missing_assets": False,
             },
         )
@@ -496,8 +673,11 @@ class ApiAppTests(unittest.TestCase):
             "/v1/accounts",
             json={
                 "environment": "paper",
-                "api_key_secret_name": "ALPACA_API_KEY",
-                "secret_key_secret_name": "ALPACA_SECRET_KEY",
+                "credentials": {
+                    "source": "external",
+                    "api_key_secret_name": "ALPACA_API_KEY",
+                    "secret_key_secret_name": "ALPACA_SECRET_KEY",
+                },
                 "capture_initial_holdings": False,
             },
         )
@@ -518,8 +698,11 @@ class ApiAppTests(unittest.TestCase):
                 "/v1/accounts",
                 json={
                     "environment": "paper",
-                    "api_key_secret_name": "ALPACA_API_KEY",
-                    "secret_key_secret_name": "ALPACA_SECRET_KEY",
+                    "credentials": {
+                        "source": "external",
+                        "api_key_secret_name": "ALPACA_API_KEY",
+                        "secret_key_secret_name": "ALPACA_SECRET_KEY",
+                    },
                 },
             )
 
@@ -597,8 +780,11 @@ class ApiAppTests(unittest.TestCase):
                 "/v1/accounts/registration/preflight",
                 json={
                     "environment": "paper",
-                    "api_key_secret_name": "ALPACA_API_KEY__JOSE_DEV",
-                    "secret_key_secret_name": "ALPACA_SECRET_KEY__JOSE_DEV",
+                    "credentials": {
+                        "source": "external",
+                        "api_key_secret_name": "ALPACA_API_KEY__JOSE_DEV",
+                        "secret_key_secret_name": "ALPACA_SECRET_KEY__JOSE_DEV",
+                    },
                 },
             )
 

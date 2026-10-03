@@ -14,8 +14,8 @@ from dataclasses import dataclass
 from typing import Any, Literal
 
 from api.app.schemas import (
-    AccountRegistrationRequest,
-    AccountUpdateRequest,
+    AccountSecretNameRegistrationRequest,
+    AccountSecretNameUpdateRequest,
     AssetRegistrationRequest,
     AssetUniverseCreateRequest,
     AssetUniverseUpdateRequest,
@@ -308,13 +308,16 @@ def manage_account(arguments: Mapping[str, Any]) -> Any:
         {"capture_holdings", "create", "delete", "plan_create", "refresh", "update"},
     )
     if operation in {"create", "plan_create"}:
-        request = _request_model(arguments, AccountRegistrationRequest)
+        request = _request_model(arguments, AccountSecretNameRegistrationRequest)
         if operation == "plan_create":
             return preflight_account_registration(request)
         return create_account_registration(request)
     account_uid = _required_text(arguments, "account_uid")
     if operation == "update":
-        return update_account(account_uid, _request_model(arguments, AccountUpdateRequest))
+        return update_account(
+            account_uid,
+            _request_model(arguments, AccountSecretNameUpdateRequest),
+        )
     if operation == "refresh":
         return refresh_account(account_uid)
     if operation == "capture_holdings":
@@ -845,7 +848,10 @@ PROJECT_AGENT_TOOLS: tuple[ProjectAgentTool, ...] = (
         description=(
             "Plan, create, update, refresh, or delete an Alpaca Account registration, or capture "
             "its holdings. Creation accepts Main Sequence Secret names only and always performs "
-            "the connector's mandatory initial asset registration and holdings capture."
+            "the connector's mandatory initial asset registration and holdings capture. Never "
+            "ask a user for Alpaca key values; users who want the application to store their "
+            "keys register through the static site. Deleting an account also deletes its "
+            "application-managed credential Secrets."
         ),
         parameters=_operations(
             *[
@@ -853,7 +859,7 @@ PROJECT_AGENT_TOOLS: tuple[ProjectAgentTool, ...] = (
                     operation,
                     properties={
                         "request": _request(
-                            AccountRegistrationRequest,
+                            AccountSecretNameRegistrationRequest,
                             "Account registration containing Secret names, never credential values.",
                         )
                     },
@@ -865,7 +871,10 @@ PROJECT_AGENT_TOOLS: tuple[ProjectAgentTool, ...] = (
                 "update",
                 properties={
                     "account_uid": _uid("Account"),
-                    "request": _request(AccountUpdateRequest, "Mutable Account fields."),
+                    "request": _request(
+                        AccountSecretNameUpdateRequest,
+                        "Mutable Account fields; credentials change only by Secret name.",
+                    ),
                 },
                 required=("account_uid", "request"),
             ),

@@ -150,8 +150,8 @@ alpaca-connectors asset IVV update_prices daily \
   --execute
 ```
 
-The account's stored Secret names are resolved only during execution, immediately before the
-Alpaca clients are constructed. Credential values are never accepted or persisted by this flow.
+The account's referenced Secrets are resolved by UID only during execution, immediately before
+the Alpaca clients are constructed. Credential values are never accepted or persisted by this flow.
 
 ## Run through the API and platform Job
 

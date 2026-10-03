@@ -6,6 +6,9 @@ import sys
 from collections.abc import Sequence
 
 from .account import (
+    configure_backfill_secret_uids_parser as configure_account_backfill_secret_uids_parser,
+)
+from .account import (
     configure_get_parser as configure_account_get_parser,
 )
 from .account import (
@@ -186,6 +189,12 @@ def build_parser() -> argparse.ArgumentParser:
     configure_account_update_parser(account_commands.add_parser("update"))
     configure_account_refresh_parser(account_commands.add_parser("refresh"))
     configure_account_remove_parser(account_commands.add_parser("remove"))
+    configure_account_backfill_secret_uids_parser(
+        account_commands.add_parser(
+            "backfill-secret-uids",
+            help="One-time: store Secret UIDs for registrations that predate them.",
+        )
+    )
 
     holdings_parser = top_level.add_parser("holdings", help="Account holdings snapshots.")
     holdings_commands = holdings_parser.add_subparsers(dest="holdings_command")

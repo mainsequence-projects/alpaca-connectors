@@ -115,12 +115,30 @@ class CliTests(unittest.TestCase):
                 ]
             )
         self.assertEqual(exit_code, 0)
+        from src.account.credentials import AlpacaSecretNames
+
         register.assert_called_once_with(
-            api_key_secret_name="ALPACA_PAPER_API_KEY",
-            secret_key_secret_name="ALPACA_PAPER_SECRET_KEY",
+            credentials=AlpacaSecretNames(
+                api_key_secret_name="ALPACA_PAPER_API_KEY",
+                secret_key_secret_name="ALPACA_PAPER_SECRET_KEY",
+            ),
             paper=True,
             account_name=None,
         )
+
+    def test_account_backfill_secret_uids_is_a_dry_run_by_default(self) -> None:
+        stdout = io.StringIO()
+        with (
+            patch(
+                "src.account.services.backfill_account_secret_uids",
+                return_value={"execute": False, "pending": 0},
+            ) as backfill,
+            contextlib.redirect_stdout(stdout),
+        ):
+            exit_code = main(["account", "backfill-secret-uids"])
+
+        self.assertEqual(exit_code, 0)
+        backfill.assert_called_once_with(execute=False)
 
     def test_universe_run_uses_registered_universe_uid(self) -> None:
         plan = SimpleNamespace(summary=lambda: {"etf_ticker": "IVV"}, has_blockers=lambda: False)
@@ -358,9 +376,7 @@ class CliTests(unittest.TestCase):
             "src.portfolios.interpolated_prices_schema.prepare_interpolated_prices_schema",
             return_value=result,
         ) as prepare:
-            exit_code = main(
-                ["portfolio", "prepare-interpolated-prices", "--check-only"]
-            )
+            exit_code = main(["portfolio", "prepare-interpolated-prices", "--check-only"])
 
         self.assertEqual(exit_code, 0)
         prepare.assert_called_once_with(check_only=True, revision_message=None)

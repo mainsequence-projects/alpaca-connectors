@@ -55,7 +55,7 @@ Accounts owns brokerage account identity and account-level state:
 - paper or live environment
 - Alpaca account details
 - status, balances, margin, and buying power
-- Secret-name bindings, account registration, CRUD, and refresh
+- managed or external credential Secret references, account registration, CRUD, and refresh
 
 Individual positions are part of Holdings. Account refresh and holdings capture are separate
 lifecycle operations.

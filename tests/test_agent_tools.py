@@ -76,6 +76,22 @@ class ProjectAgentToolTests(unittest.TestCase):
         self.assertIn("api_key_secret_name", serialized)
         self.assertIn("secret_key_secret_name", serialized)
 
+        def property_names(schema: object) -> set[str]:
+            if isinstance(schema, dict):
+                names = set(schema.get("properties", {})) if "properties" in schema else set()
+                for value in schema.values():
+                    names |= property_names(value)
+                return names
+            if isinstance(schema, list):
+                return set().union(*(property_names(item) for item in schema))
+            return set()
+
+        # Agent sessions persist tool inputs, so the managed credential shape is HTTP-only.
+        names = property_names(account_tool.parameters)
+        self.assertNotIn("api_key", names)
+        self.assertNotIn("secret_key", names)
+        self.assertNotIn("credentials", names)
+
     def test_delete_cases_require_exact_confirmation_argument(self) -> None:
         for tool in PROJECT_AGENT_TOOLS:
             cases = tool.parameters.get("oneOf", [])

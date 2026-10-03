@@ -13,8 +13,36 @@ from src.account.services import (
     update_account_registration,
 )
 
-from ..schemas import AccountRegistrationRequest, AccountResponse, AccountUpdateRequest
+from ..schemas import (
+    AccountRegistrationRequest,
+    AccountResponse,
+    AccountSecretNameRegistrationRequest,
+    AccountSecretNameUpdateRequest,
+    AccountUpdateRequest,
+    ManagedAlpacaCredentials,
+)
 from .common import collection_response
+
+RegistrationRequest = AccountRegistrationRequest | AccountSecretNameRegistrationRequest
+UpdateRequest = AccountUpdateRequest | AccountSecretNameUpdateRequest
+
+
+def _credential_input(request: RegistrationRequest):
+    """Translate a registration request into the domain credential input."""
+    from src.account.credentials import AlpacaSecretNames, submitted_alpaca_credentials
+
+    credentials = (
+        request.credentials if isinstance(request, AccountRegistrationRequest) else request
+    )
+    if isinstance(credentials, ManagedAlpacaCredentials):
+        return submitted_alpaca_credentials(
+            api_key=credentials.api_key.get_secret_value(),
+            secret_key=credentials.secret_key.get_secret_value(),
+        )
+    return AlpacaSecretNames(
+        api_key_secret_name=credentials.api_key_secret_name,
+        secret_key_secret_name=credentials.secret_key_secret_name,
+    )
 
 
 def list_accounts(
@@ -56,20 +84,23 @@ def list_secret_references(*, limit: int, offset: int, search: str | None):
     )
 
 
-def preflight_account_registration(request: AccountRegistrationRequest) -> dict:
+def preflight_account_registration(request: RegistrationRequest) -> dict:
     return plan_alpaca_account(
-        api_key_secret_name=request.api_key_secret_name,
-        secret_key_secret_name=request.secret_key_secret_name,
+        credentials=_credential_input(request),
         paper=request.environment == "paper",
     )
 
 
-def create_account_registration(request: AccountRegistrationRequest) -> AccountResponse:
+def create_account_registration(
+    request: RegistrationRequest,
+    *,
+    actor_user_uid: str | None = None,
+) -> AccountResponse:
     result = register_alpaca_account(
-        api_key_secret_name=request.api_key_secret_name,
-        secret_key_secret_name=request.secret_key_secret_name,
+        credentials=_credential_input(request),
         paper=request.environment == "paper",
         account_name=request.account_name,
+        actor_user_uid=actor_user_uid,
     )
     account = get_account_registration(result.account_uid)
     if account is None:
@@ -82,10 +113,37 @@ def get_account(account_uid: str) -> AccountResponse | None:
     return AccountResponse.model_validate(row) if row else None
 
 
-def update_account(account_uid: str, request: AccountUpdateRequest) -> AccountResponse:
+def update_account(
+    account_uid: str,
+    request: UpdateRequest,
+    *,
+    actor_user_uid: str | None = None,
+) -> AccountResponse:
+    from src.account.credentials import submitted_alpaca_credentials
+
+    changes = {
+        "account_name": request.account_name,
+        "account_is_active": request.account_is_active,
+    }
+    if isinstance(request, AccountSecretNameUpdateRequest):
+        changes.update(
+            api_key_secret_name=request.api_key_secret_name,
+            secret_key_secret_name=request.secret_key_secret_name,
+        )
+    elif isinstance(request.credentials, ManagedAlpacaCredentials):
+        changes["credential_values"] = submitted_alpaca_credentials(
+            api_key=request.credentials.api_key.get_secret_value(),
+            secret_key=request.credentials.secret_key.get_secret_value(),
+        )
+    elif request.credentials is not None:
+        changes.update(
+            api_key_secret_name=request.credentials.api_key_secret_name,
+            secret_key_secret_name=request.credentials.secret_key_secret_name,
+        )
     row = update_account_registration(
         account_uid,
-        **request.model_dump(exclude_unset=True),
+        actor_user_uid=actor_user_uid,
+        **{key: value for key, value in changes.items() if value is not None},
     )
     return AccountResponse.model_validate(row)
 

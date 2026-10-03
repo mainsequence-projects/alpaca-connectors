@@ -1,6 +1,6 @@
 ---
 name: alpaca-account-workflow
-description: Register and maintain Alpaca Accounts using Main Sequence Secret names, and inspect or capture their ms-markets holdings snapshots.
+description: Register and maintain Alpaca Accounts using Main Sequence Secret names, and inspect or capture their ms-markets holdings snapshots. Users who want the application to store their keys use the static site.
 ---
 
 # Alpaca Account Workflow
@@ -12,7 +12,12 @@ shell, use the installed `alpaca-connectors` command.
 ## Credential Boundary
 
 - The user supplies the names of the Main Sequence Secrets containing the Alpaca API key and secret
-  key. Never accept, return, log, or persist the credential values.
+  key. Never ask for, accept, return, log, or persist the credential values: agent tool inputs
+  persist in session transcripts. A user who wants the application to store their keys registers
+  through the static site, which creates application-managed Secrets (ADR 0011).
+- Names starting with `ALPACA_CONNECTORS__` are application-managed Secrets and cannot be selected.
+  An account's `credential_source` is `managed` or `external`; deleting a managed account also
+  deletes its credential Secrets, while external Secrets are never modified or deleted.
 - The user selects `paper` or `live`; deployed Organization Environment resolution remains automatic
   and is never a tool input.
 - Account creation always resolves the provider Account, registers every position Asset plus the

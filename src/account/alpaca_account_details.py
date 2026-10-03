@@ -31,6 +31,7 @@ from sqlalchemy import (
     Integer,
     Numeric,
     String,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.types import Uuid
@@ -145,6 +146,53 @@ class AlpacaAccountDetails(ProjectStorageNameMixin, AlpacaMarketsMetaTableMixin,
                 "Name of the Main Sequence Secret containing the Alpaca secret key. "
                 "The credential value is never persisted in this table."
             ),
+        },
+    )
+    # Credentials resolve by Secret UID (ADR 0011). Nullable only until the reviewed one-time
+    # backfill of registrations that predate UID storage has run.
+    api_key_secret_uid: Mapped[str | None] = mapped_column(
+        String(64),
+        nullable=True,
+        info={
+            "label": "API Key Secret UID",
+            "description": "UID of the Main Sequence Secret containing the Alpaca API key.",
+        },
+    )
+    secret_key_secret_uid: Mapped[str | None] = mapped_column(
+        String(64),
+        nullable=True,
+        info={
+            "label": "Secret Key Secret UID",
+            "description": "UID of the Main Sequence Secret containing the Alpaca secret key.",
+        },
+    )
+    credential_source: Mapped[str] = mapped_column(
+        String(16),
+        nullable=False,
+        # Rows written before ADR 0011, or by a release without this column, selected Secrets by name.
+        server_default=text("'external'"),
+        info={
+            "label": "Credential Source",
+            "description": (
+                "'managed' when this application created and owns both Secrets from submitted "
+                "values; 'external' when existing Secrets were selected by name."
+            ),
+        },
+    )
+    credentials_updated_at: Mapped[dt.datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        info={
+            "label": "Credentials Updated At",
+            "description": "When the credential references or managed values last changed.",
+        },
+    )
+    credentials_updated_by_user_uid: Mapped[str | None] = mapped_column(
+        String(64),
+        nullable=True,
+        info={
+            "label": "Credentials Updated By",
+            "description": "Public UID of the user who last changed the credentials, if known.",
         },
     )
     is_paper: Mapped[bool] = mapped_column(

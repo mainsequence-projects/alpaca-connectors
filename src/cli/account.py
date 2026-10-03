@@ -17,8 +17,9 @@ def _print(value) -> None:
 
 def configure_register_parser(parser: argparse.ArgumentParser) -> None:
     parser.description = (
-        "Register an Alpaca account using the names of two Main Sequence Secrets. "
-        "Credential values are never accepted by this command."
+        "Register an Alpaca account using the names of two existing Main Sequence Secrets. "
+        "Credential values are never accepted by this command; the static site is the only "
+        "surface that stores submitted values as application-managed Secrets."
     )
     parser.add_argument("--api-key-secret-name", required=True)
     parser.add_argument("--secret-key-secret-name", required=True)
@@ -71,12 +72,24 @@ def configure_remove_parser(parser: argparse.ArgumentParser) -> None:
     parser.set_defaults(handler=run_account_remove_command)
 
 
+def configure_backfill_secret_uids_parser(parser: argparse.ArgumentParser) -> None:
+    parser.description = (
+        "Resolve the stored Secret names of registrations that predate Secret UID storage "
+        "(ADR 0011). Dry run by default."
+    )
+    parser.add_argument("--execute", action="store_true")
+    parser.set_defaults(handler=run_account_backfill_secret_uids_command)
+
+
 def run_account_register_command(args: argparse.Namespace) -> int:
+    from src.account.credentials import AlpacaSecretNames
     from src.account.services import plan_alpaca_account, register_alpaca_account
 
     common = {
-        "api_key_secret_name": args.api_key_secret_name,
-        "secret_key_secret_name": args.secret_key_secret_name,
+        "credentials": AlpacaSecretNames(
+            api_key_secret_name=args.api_key_secret_name,
+            secret_key_secret_name=args.secret_key_secret_name,
+        ),
         "paper": args.paper,
     }
     if args.plan_only:
@@ -158,7 +171,11 @@ def run_account_remove_command(args: argparse.Namespace) -> int:
         "allowed": True,
         "account_uid": args.account_uid,
         "retained_holdings_rows": holdings_count,
-        "detail": "The Alpaca binding will be removed and Account will be deactivated.",
+        "credential_source": account.get("credential_source"),
+        "detail": (
+            "The Alpaca binding will be removed and Account will be deactivated. "
+            "Application-managed credential Secrets are deleted; external Secrets are kept."
+        ),
     }
     if not args.execute:
         _print(preflight)
@@ -167,7 +184,15 @@ def run_account_remove_command(args: argparse.Namespace) -> int:
     return 0
 
 
+def run_account_backfill_secret_uids_command(args: argparse.Namespace) -> int:
+    from src.account.services import backfill_account_secret_uids
+
+    _print(backfill_account_secret_uids(execute=args.execute))
+    return 0
+
+
 __all__ = [
+    "configure_backfill_secret_uids_parser",
     "configure_get_parser",
     "configure_list_parser",
     "configure_refresh_parser",

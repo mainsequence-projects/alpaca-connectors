@@ -43,7 +43,7 @@ process restarts; the shared in-memory operation repository is intentionally not
 | --- | --- |
 | Project State | `GET /health`, `GET /v1/project-state/capabilities`, `GET /v1/project-state/configuration` |
 | Assets | `GET /v1/assets`, `GET /v1/assets/{asset_uid}`, synchronous registration plan/execute, and observable registration operations |
-| Accounts | `GET/POST /v1/accounts`, `GET /v1/accounts/secret-references`, `GET/PATCH/DELETE /v1/accounts/{account_uid}`, refresh and bulk actions |
+| Accounts | `GET/POST /v1/accounts`, `GET /v1/accounts/secret-references`, `POST /v1/accounts/registration/preflight`, `GET/PATCH/DELETE /v1/accounts/{account_uid}`, refresh and bulk actions |
 | Holdings | list/get and capture under `/v1/accounts/{account_uid}/holdings`; `/latest` lists only the newest immutable snapshot |
 | Universe Sources | Explicit extraction-configuration CRUD and read-only source preview under `/v1/universe-sources` |
 | Universes | Create/list/get/update registered `AssetUniverse` rows; list linked category Assets at `GET /v1/universes/{universe_uid}/assets`; run, activate, deactivate, and confirmed delete actions under `/v1/universes` |
@@ -194,13 +194,29 @@ platform Job. A process termination can therefore leave an accepted operation in
 
 ## Credentials And Identity
 
-Account create/update requests accept only `api_key_secret_name` and
-`secret_key_secret_name`. Raw Alpaca keys and secure-configuration value payloads are rejected by
-the request schemas and never returned.
+Account registration, preflight, and `PATCH` requests carry a `credentials` object discriminated
+by `source` ([ADR 0011](adrs/0011_api_managed_alpaca_credential_secrets.md)):
+
+- `{"source": "managed", "api_key": "...", "secret_key": "..."}`: the API validates the values
+  against Alpaca and stores them in the application-managed Secrets
+  `ALPACA_CONNECTORS__<Account.unique_identifier>__API_KEY` / `__SECRET_KEY`. Both fields are
+  `writeOnly` `password` strings in OpenAPI and are never returned. The static site uses only this
+  shape.
+- `{"source": "external", "api_key_secret_name": "...", "secret_key_secret_name": "..."}`:
+  existing Secrets the API only reads.
+
+`PATCH` without `credentials` changes only the name or active state and never reads credentials.
+Rotation must authenticate as the registered Alpaca account. Preflight reports the managed Secret
+names and whether each would be created or updated, and writes nothing. Responses expose
+`credential_source`, both Secret names and UIDs, and `credentials_updated_at`/`_by_user_uid`; never
+values or the key fingerprint. `DELETE` reports `deleted_secrets` and `warnings`.
+
+Alpaca rejecting the keys returns `400 alpaca_credentials_rejected` without provider text. Every
+`422` response lists only `loc`, `msg`, and `type`: FastAPI's default body echoes the rejected
+`input`, which could be a credential.
 
 `GET /v1/accounts/secret-references` returns only Main Sequence Secret names visible to the API
-runtime. It exists solely to populate account credential-reference pickers and never serializes
-Secret values.
+runtime, for clients that use the `external` shape. It never serializes Secret values.
 
 In a deployed release, Main Sequence injects the authenticated human as `request.state.user` and
 `request.state.user_uid`. There is no `request.state.user_id`, local SDK identity middleware, or

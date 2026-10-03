@@ -51,7 +51,7 @@ Repository rules:
 Asset registration:
 
 - use `alpaca-connectors asset register`
-- require `--account-uid`; provider access resolves the Main Sequence Secret names stored on that
+- require `--account-uid`; provider access resolves the Main Sequence Secrets referenced by that
   registered Alpaca account, and the workflow never accepts credential values or global fallback
   credentials
 - dry run is the default; pass `--execute` only when you want to write missing assets into Main
@@ -142,8 +142,10 @@ Project-to-agent boundary:
 - load read-only query tools in parallel and execute mutations sequentially
 - never expose an Organization Environment selector; the deployed CodeRepositoryBranch resolves it
   automatically
-- never accept Alpaca credential values; Account operations accept visible Main Sequence Secret
-  names only
+- Tau tools, agent sessions, and the CLI never accept Alpaca credential values; their Account
+  operations accept visible Main Sequence Secret names only. The HTTP account create and rotate
+  endpoints are the only surfaces that accept values, solely to store them in application-managed
+  Secrets (ADR 0011); never echo, log, or persist those values anywhere else
 - destructive Tau operations require exact `DELETE <uid>` confirmation
 - long-running bars, signal, and portfolio updates must submit their existing Main Sequence Jobs
   and return a JobRun UID; inspect them with `alpaca_get_job_run_status`
@@ -163,8 +165,12 @@ Operational notes:
   or `alpaca-connectors` runs that need authenticated platform access; the SDK keeps the session
   in the operating-system credential store, never in `.env`
 - before live platform checks, run `mainsequence refresh-token`
-- account registration records the names of the Main Sequence Secrets containing Alpaca
-  credentials; live holdings and price updates resolve those stored names at execution time
+- account registration references two Main Sequence Secrets by UID: `managed` Secrets the API
+  created from submitted values (named `ALPACA_CONNECTORS__<Account.unique_identifier>__...` and
+  deleted with the registration) or `external` Secrets selected by name (never modified); live
+  holdings and price updates resolve them by UID at execution time
+- registrations that predate Secret UID storage need the reviewed one-time
+  `alpaca-connectors account backfill-secret-uids --execute` after the `0015` migration
 - account registration and holdings capture resolve the whole position set from one Alpaca catalog
   request and use bulk Main Sequence identity lookup and registration operations
 - if a stored bar configuration resolves an asset that is missing or ambiguous in Alpaca, fix its

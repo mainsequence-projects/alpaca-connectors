@@ -77,9 +77,9 @@ The FIGI market-sector and security-type constants are local string literals in 
 ## Provider credentials
 
 Asset discovery and registration require a registered Alpaca account UID. The workflow reads the
-two Main Sequence Secret names stored on that account's `AlpacaAccountDetails` row and resolves
-their values only at the provider boundary. The public CLI and API never accept credential values,
-and there is no process-environment or conventional-name fallback.
+two Main Sequence Secrets referenced by UID on that account's `AlpacaAccountDetails` row and
+resolves their values only at the provider boundary. Asset registration never accepts credential
+values, and there is no process-environment or conventional-name fallback.
 
 ## Symbol Normalization
 

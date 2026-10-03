@@ -13,19 +13,33 @@ environment. Rotating API credentials therefore does not create a new account id
 
 ## Credential Boundary
 
-The application stores only:
+Every registration references exactly two Main Sequence Secrets, one for the API key and one for
+the secret key ([ADR 0011](../adrs/0011_api_managed_alpaca_credential_secrets.md)). The detail row
+stores, per Secret, its UID and display name, plus:
 
-- `api_key_secret_name`;
-- `secret_key_secret_name`;
-- a non-reversible API-key fingerprint.
+- `credential_source`: `managed` or `external`;
+- `credentials_updated_at` and `credentials_updated_by_user_uid`;
+- a non-reversible API-key fingerprint, which no response exposes.
 
-The named Main Sequence Secrets are resolved immediately before creating an Alpaca client. Values
-are not cached, persisted, accepted by CLI/API request fields, or returned. Create the Secrets in
-the active Organization Environment before registration.
+**Managed** credentials come from the static site. The user types both keys; the API checks them
+against Alpaca, then creates or overwrites the Secrets
+`ALPACA_CONNECTORS__<Account.unique_identifier>__API_KEY` and `...__SECRET_KEY`. The application
+owns them: rotation overwrites them in place and removing the registration deletes them. The
+`ALPACA_CONNECTORS__` prefix is reserved and can never be selected as an external Secret.
 
-Main Sequence Secret collection queries return metadata only. The connector first resolves each
-exact name to its Secret UID and then reads the UID-addressed detail resource to obtain the value.
-It never interprets the intentionally redacted value on a list result as an empty Secret.
+**External** credentials are existing Secrets selected by name through the CLI, the Tau tools, or
+the API's `external` credential shape. The application only reads them; rotation or removal never
+modifies or deletes them.
+
+Credentials resolve by Secret UID immediately before an Alpaca client is constructed, so renaming a
+Secret or creating a duplicate name does not affect a registered account. Values are not cached,
+returned, logged, or persisted outside Main Sequence Secrets. Only the HTTP create and rotate
+endpoints accept values; the CLI and Tau tools accept Secret names only.
+
+Alpaca must accept the credentials, and every held position must resolve, before any Secret,
+Account, or holdings row is written. If a later write fails, Secrets created by that request are
+deleted on a best-effort basis; because the names are deterministic, a retry reuses any Secret left
+behind.
 
 ## CLI
 
@@ -60,7 +74,15 @@ alpaca-connectors account remove <ACCOUNT_UID> --execute
 ```
 
 Removal deletes the project binding and deactivates the shared Account. It retains historical
-holdings.
+holdings, deletes managed credential Secrets, and keeps external ones.
+
+Registrations created before Secret UIDs were stored must be backfilled once after the `0015`
+migration; until then their credential resolution fails with an instruction to run it:
+
+```bash
+alpaca-connectors account backfill-secret-uids
+alpaca-connectors account backfill-secret-uids --execute
+```
 
 ## Holdings
 

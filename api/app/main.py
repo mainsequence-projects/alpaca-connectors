@@ -7,6 +7,8 @@ from contextlib import asynccontextmanager
 from hashlib import sha256
 
 from fastapi import FastAPI, Request
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -51,6 +53,28 @@ async def sanitized_unhandled_error(_request: Request, _exc: Exception) -> JSONR
                 "message": "The operation could not be completed by a required service.",
                 "retryable": True,
             }
+        },
+    )
+
+
+@app.exception_handler(RequestValidationError)
+async def redacted_validation_error(_request: Request, exc: RequestValidationError) -> JSONResponse:
+    """Report validation failures without echoing request input.
+
+    FastAPI's default 422 body includes each rejected ``input``; account requests can carry
+    Alpaca credential values, so only the location, message, and error type are returned.
+    """
+    return JSONResponse(
+        status_code=422,
+        content={
+            "detail": [
+                {
+                    "loc": jsonable_encoder(error.get("loc", ())),
+                    "msg": error.get("msg", ""),
+                    "type": error.get("type", ""),
+                }
+                for error in exc.errors()
+            ]
         },
     )
 

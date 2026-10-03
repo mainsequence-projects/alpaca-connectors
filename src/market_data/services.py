@@ -10,10 +10,9 @@ from typing import Any
 from msm.api.base import operation_result_rows
 
 from src.account.credentials import (
-    AlpacaSecretNames,
     build_alpaca_historical_data_client,
     build_alpaca_trading_client,
-    resolve_alpaca_credentials,
+    resolve_registered_alpaca_credentials,
 )
 from src.market_data.storage import ALPACA_STOCK_BARS_STORAGE_BY_TRIPLE
 
@@ -388,12 +387,7 @@ def execute_market_data_update(
     registration = get_account_registration(summary["account_uid"])
     if registration is None:
         raise LookupError(f"Alpaca account registration {summary['account_uid']!s} does not exist.")
-    credentials = resolve_alpaca_credentials(
-        AlpacaSecretNames(
-            api_key_secret_name=str(registration["api_key_secret_name"]),
-            secret_key_secret_name=str(registration["secret_key_secret_name"]),
-        )
-    )
+    credentials = resolve_registered_alpaca_credentials(registration)
     node._historical_client = build_alpaca_historical_data_client(credentials=credentials)
     node._trading_client = build_alpaca_trading_client(
         credentials=credentials,

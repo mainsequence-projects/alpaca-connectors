@@ -9,6 +9,7 @@ from msm.api.http import api_error
 from msm.api.http import api_http_error as markets_api_http_error
 from msm.api.http import not_found as not_found
 
+from src.account.credentials import AlpacaCredentialsRejectedError
 from src.platform_secrets import PlatformSecretAccessError
 
 logger = logging.getLogger(__name__)
@@ -25,6 +26,12 @@ def api_http_error(exc: Exception) -> HTTPException:
             code="secret_resolution_failed",
             message=str(exc),
             retryable=True,
+        )
+    if isinstance(exc, AlpacaCredentialsRejectedError):
+        return api_error(
+            status_code=400,
+            code="alpaca_credentials_rejected",
+            message=str(exc),
         )
     if isinstance(exc, ValueError):
         return api_error(status_code=409, code="action_conflict", message=str(exc))

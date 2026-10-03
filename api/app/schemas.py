@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from msm.api.http import (
     BulkActionExecutionRequest,
@@ -13,7 +13,7 @@ from msm.api.http import (
     ResourcePageInfo,
 )
 from msm.api.http import ResourceCollection as MarketsResourceCollection
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, model_validator
 
 
 def _normalize_symbol_list(values: list[str] | None) -> list[str] | None:
@@ -149,7 +149,73 @@ class ResourceDiscoveryResponse(ResourceDiscovery):
     """Alpaca schema name for the shared resource discovery contract."""
 
 
+class ManagedAlpacaCredentials(BaseModel):
+    """Credential values the API stores in application-managed Secrets (ADR 0011).
+
+    Both values are write-only: they are never returned, logged, or echoed in validation errors.
+    """
+
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
+
+    source: Literal["managed"]
+    api_key: SecretStr = Field(description="Alpaca API key ID. Write-only.")
+    secret_key: SecretStr = Field(description="Alpaca secret key. Write-only.")
+
+    @model_validator(mode="after")
+    def validate_values(self) -> "ManagedAlpacaCredentials":
+        from src.account.credentials import submitted_alpaca_credentials
+
+        submitted_alpaca_credentials(
+            api_key=self.api_key.get_secret_value(),
+            secret_key=self.secret_key.get_secret_value(),
+        )
+        return self
+
+
+class ExternalAlpacaCredentials(BaseModel):
+    """Existing Main Sequence Secrets selected by name; the API only ever reads them."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    source: Literal["external"]
+    api_key_secret_name: str = Field(min_length=1, max_length=255)
+    secret_key_secret_name: str = Field(min_length=1, max_length=255)
+
+
+AlpacaCredentials = Annotated[
+    ManagedAlpacaCredentials | ExternalAlpacaCredentials,
+    Field(discriminator="source"),
+]
+
+
 class AccountRegistrationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
+
+    account_name: str | None = Field(default=None, max_length=255)
+    environment: Literal["paper", "live"] = "paper"
+    credentials: AlpacaCredentials
+
+
+class AccountUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
+
+    account_name: str | None = Field(default=None, min_length=1, max_length=255)
+    account_is_active: bool | None = None
+    credentials: AlpacaCredentials | None = Field(
+        default=None,
+        description="Replacement credentials; omitted for name or active-state changes.",
+    )
+
+    @model_validator(mode="after")
+    def require_change(self) -> "AccountUpdateRequest":
+        if all(getattr(self, field_name) is None for field_name in self.__class__.model_fields):
+            raise ValueError("At least one mutable account field must be provided.")
+        return self
+
+
+class AccountSecretNameRegistrationRequest(BaseModel):
+    """Agent-facing registration by Secret names only; agent sessions never receive values."""
+
     model_config = ConfigDict(extra="forbid")
 
     account_name: str | None = Field(default=None, max_length=255)
@@ -158,7 +224,9 @@ class AccountRegistrationRequest(BaseModel):
     secret_key_secret_name: str = Field(min_length=1, max_length=255)
 
 
-class AccountUpdateRequest(BaseModel):
+class AccountSecretNameUpdateRequest(BaseModel):
+    """Agent-facing account update; credentials change only by selecting Secret names."""
+
     model_config = ConfigDict(extra="forbid")
 
     account_name: str | None = Field(default=None, min_length=1, max_length=255)
@@ -167,7 +235,7 @@ class AccountUpdateRequest(BaseModel):
     account_is_active: bool | None = None
 
     @model_validator(mode="after")
-    def require_change(self) -> "AccountUpdateRequest":
+    def require_change(self) -> "AccountSecretNameUpdateRequest":
         if all(getattr(self, field_name) is None for field_name in self.__class__.model_fields):
             raise ValueError("At least one mutable account field must be provided.")
         return self
@@ -182,8 +250,13 @@ class AccountResponse(BaseModel):
     account_name: str
     is_paper: bool
     account_is_active: bool
+    credential_source: Literal["managed", "external"] = "external"
     api_key_secret_name: str
     secret_key_secret_name: str
+    api_key_secret_uid: str | None = None
+    secret_key_secret_uid: str | None = None
+    credentials_updated_at: Any | None = None
+    credentials_updated_by_user_uid: str | None = None
     status: str | None = None
     currency: str | None = None
     snapshot_time: Any | None = None

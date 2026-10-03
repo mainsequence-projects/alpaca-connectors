@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Body, HTTPException, Query
+from fastapi import APIRouter, Body, HTTPException, Query, Request
 from msm.api.http import BulkActionPreflightResponse
 
 from ..errors import api_http_error, bad_request, not_found
@@ -32,6 +32,12 @@ from ..services.common import resource_discovery, validate_ordering, validate_pa
 from ..services.holdings import capture_holdings, preflight_holdings
 
 router = APIRouter(prefix="/v1/accounts", tags=["Accounts"])
+
+
+def _actor_user_uid(request: Request) -> str | None:
+    """Platform-injected human caller, recorded as the credential author."""
+    user_uid = getattr(request.state, "user_uid", None)
+    return str(user_uid) if user_uid else None
 
 
 @router.get("", response_model=ResourceCollection)
@@ -136,9 +142,12 @@ def account_registration_preflight(
 
 
 @router.post("", response_model=AccountResponse, status_code=201)
-def account_create(request: AccountRegistrationRequest = Body(...)) -> AccountResponse:
+def account_create(
+    http_request: Request,
+    request: AccountRegistrationRequest = Body(...),
+) -> AccountResponse:
     try:
-        return create_account_registration(request)
+        return create_account_registration(request, actor_user_uid=_actor_user_uid(http_request))
     except Exception as exc:
         raise api_http_error(exc) from exc
 
@@ -162,7 +171,8 @@ def accounts_remove_preflight(request: BulkActionRequest = Body(...)) -> dict[st
         "contract": "command-center.bulk_action_preflight@v1",
         "allowed": not blockers,
         "detail": (
-            "Registrations will be removed, accounts deactivated, and holdings retained."
+            "Registrations will be removed, accounts deactivated, application-managed "
+            "credential Secrets deleted, and holdings retained."
             if not blockers
             else "One or more account registrations have blocking dependencies."
         ),
@@ -241,10 +251,11 @@ def account_get(account_uid: str) -> AccountResponse:
 @router.patch("/{account_uid}", response_model=AccountResponse)
 def account_update(
     account_uid: str,
+    http_request: Request,
     request: AccountUpdateRequest = Body(...),
 ) -> AccountResponse:
     try:
-        return update_account(account_uid, request)
+        return update_account(account_uid, request, actor_user_uid=_actor_user_uid(http_request))
     except Exception as exc:
         raise api_http_error(exc) from exc
 

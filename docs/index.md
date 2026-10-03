@@ -8,7 +8,8 @@ Current scope:
 - register MainSequence public assets from Alpaca symbols through FIGI
 - maintain durable extraction sources and materialize provider-derived asset universes
 - publish Alpaca stock bars through an ms-markets `AssetIndexedDataNode` (storage-first)
-- register Alpaca brokerage accounts by Secret names and capture holdings snapshots independently
+- register Alpaca brokerage accounts with application-managed or external credential Secrets and
+  capture holdings snapshots independently
 - build durable scheduled analytical portfolios from existing ETF Weight Signals, persistent
   interpolated Alpaca bars, and reusable persisted-calendar rebalance configurations
 - expose plans, executions, validation outcomes, and existing invocation paths

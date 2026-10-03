@@ -14,7 +14,8 @@ user-maintained universes, and analytical portfolios to Main Sequence and ms-mar
   ms-markets `AssetCategory` materialization target through real foreign keys.
 - **Market Data:** maintain reusable bar configurations and query or publish Alpaca OHLCV
   observations in migrated asset-indexed tables.
-- **Accounts:** register and maintain Alpaca accounts using Main Sequence Secret names only.
+- **Accounts:** register and maintain Alpaca accounts from submitted keys stored as
+  application-managed Main Sequence Secrets, or from existing Secrets selected by name.
 - **Holdings:** capture Alpaca positions and cash as immutable ms-markets account snapshots.
 - **Portfolios:** publish scheduled Universe-backed ETF signals and create durable scheduled
   analytical ETF-tracking portfolios from existing signals, persistent interpolated Alpaca bars,
@@ -28,7 +29,7 @@ project's top-level ontology.
 - `src/assets/`: instrument discovery, FIGI resolution, and strict registration.
 - `src/universes/`: source configurations, registered Asset Universes, and category materialization.
 - `src/market_data/`: migrated price storage, updater, queries, and account-backed execution.
-- `src/account/`: account identity, Secret-name resolution, registration, and refresh.
+- `src/account/`: account identity, credential Secret references, registration, and refresh.
 - `src/holdings/`: Alpaca-position translation and canonical snapshot publication.
 - `src/portfolios/`: analytical portfolio construction.
 - `src/cli/`: thin command adapters over reusable services.

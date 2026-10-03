@@ -51,6 +51,7 @@ nav:
       - "0008 Portfolio Configuration And Job Ownership": adrs/0008_portfolio_configuration_and_job_ownership.md
       - "0009 Calendar-Event Portfolio Timing": adrs/0009_calendar_event_portfolio_timing.md
       - "0010 Shared ms-markets HTTP Contracts": adrs/0010_shared_ms_markets_http_contracts.md
+      - "0011 API-Managed Alpaca Credential Secrets": adrs/0011_api_managed_alpaca_credential_secrets.md
   - Implementation Records:
       - SDK 8 And ms-markets Migration: implementation_tasks/0001_ms_markets_storage_first_migration.md
       - Alpaca Account Storage: implementation_tasks/0002_alpaca_account_module.md
