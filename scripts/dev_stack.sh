@@ -4,8 +4,8 @@
 #   scripts/dev_stack.sh [all|api|site]     (default: all)
 #
 # - MetaTables: reuses this project's running `metatables serve --local` launcher, otherwise starts
-#   one on the default port 18473. A launcher serves only the checkout that started it, so when
-#   another project holds 18473 the next free port is used (override with ALPACA_METATABLES_PORT).
+#   one on this project's own port 18491, never the MetaTables default 18473 that other projects use
+#   (override with ALPACA_METATABLES_PORT). A launcher serves only the checkout that started it.
 # - API: the same settings as the VS Code "Debug Alpaca Connectors API (8321)" configuration,
 #   connected to this project's local MetaTables runtime.
 # - Site: the same settings as "Debug Alpaca Command Center Site (5421)".
@@ -19,7 +19,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SITE_DIR="${ALPACA_SITE_DIR:-$ROOT/../alpacaconnectorssite-ab9d29c9-2dcb-417f-8d88-ee9c9e9c8baf}"
 API_PORT=8321
 SITE_PORT=5421
-METATABLES_DEFAULT_PORT=18473
+METATABLES_PORT="${ALPACA_METATABLES_PORT:-18491}"
 PY="$ROOT/.venv/bin/python"
 METATABLES="$ROOT/.venv/bin/metatables"
 
@@ -65,7 +65,7 @@ trap 'exit 143' TERM
 
 require_free_port() {
   port_in_use "$1" || return 0
-  die "$2 port $1 is already in use by $(port_owner "$1"). Stop it first; ports are fixed to match .vscode/launch.json."
+  die "$2 port $1 is already in use by $(port_owner "$1"). Stop it first; this project's ports are fixed."
 }
 
 # Prints this project's live MetaTables API port; fails when there is no live connection.
@@ -92,16 +92,8 @@ ensure_metatables() {
   if port="$(metatables_connection_port)"; then
     log "MetaTables: reusing this project's local API on 127.0.0.1:$port"
   else
-    port="${ALPACA_METATABLES_PORT:-$METATABLES_DEFAULT_PORT}"
-    if port_in_use "$port"; then
-      [[ -z "${ALPACA_METATABLES_PORT:-}" ]] ||
-        die "MetaTables port $port is already in use by $(port_owner "$port")."
-      log "MetaTables: port $port is held by another launcher ($(port_owner "$port")); a launcher serves only its own checkout"
-      for port in $(seq $((METATABLES_DEFAULT_PORT + 1)) $((METATABLES_DEFAULT_PORT + 50))); do
-        port_in_use "$port" || break
-      done
-      port_in_use "$port" && die "No free MetaTables port near $METATABLES_DEFAULT_PORT."
-    fi
+    port="$METATABLES_PORT"
+    require_free_port "$port" "MetaTables"
     log "MetaTables: starting the local API on 127.0.0.1:$port"
     # The launcher stops its API worker and removes its connection file on SIGTERM.
     "$METATABLES" serve --local --port "$port" --no-open-browser > >(prefix metatables) 2>&1 &
