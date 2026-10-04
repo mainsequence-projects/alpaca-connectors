@@ -28,7 +28,7 @@ record at `docs/implementation_tasks/0001_ms_markets_storage_first_migration.md`
 - `src/alpaca_connectors/holdings/`: public account-holdings capability boundary
 - `src/alpaca_connectors/cli/`: thin capability command adapters
 - `src/jobs/`: repository-local launchers for platform-managed execution
-- `src/alpaca_connectors/operations/`: durable workflow state and one-configuration-per-Job reconciliation
+- `src/alpaca_connectors/operations/`: durable workflow state and runs on the workflow-declared signal and portfolio Jobs
 - `src/alpaca_connectors/portfolios/`: ETF holdings portfolio construction with `msm_portfolios`
 
 See [Capability Model](capabilities/index.md) before the workflow-specific pages.
@@ -68,8 +68,10 @@ Use that page first when the question is about:
 - Portfolio construction uses the portfolio runtime (`start_portfolio_markets_engine()`), the
   connector-owned Universe-backed `AlpacaETFHoldingsSignal`, and
   persistent `msm_portfolios.InterpolatedPrices` over the registered Alpaca bars table. Durable
-  Portfolio Configurations reference existing Signal, Bars, and Rebalance Configurations; their
-  dedicated Jobs exclusively own schedule and compute state.
+  Portfolio Configurations reference existing Signal, Bars, and Rebalance Configurations. The
+  signal and portfolio Jobs declared in `.mainsequence/workflows/alpaca-connectors-api.yaml` run
+  every configuration and own schedule and compute; a configuration only chooses whether the
+  daily scheduled run includes it (ADR 0013).
 - Daily bar `time_index` is normalized to `16:00 America/New_York` on the session date as a project convention.
 
 ## Build The Docs
@@ -101,3 +103,5 @@ uv run mkdocs build
 - `alpaca-connectors portfolio run <CONFIGURATION_UID>`
 - `src/jobs/run_alpaca_bars_update.py`
 - `.mainsequence/workflows/alpaca-bars-update.yaml`
+- `src/jobs/run_alpaca_etf_signal.py` and `src/jobs/run_alpaca_etf_portfolio.py`, declared in
+  `.mainsequence/workflows/alpaca-connectors-api.yaml`

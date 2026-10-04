@@ -19,7 +19,8 @@ user-maintained universes, and analytical portfolios to Main Sequence and ms-mar
 - **Holdings:** capture Alpaca positions and cash as immutable ms-markets account snapshots.
 - **Portfolios:** publish scheduled Universe-backed ETF signals and create durable scheduled
   analytical ETF-tracking portfolios from existing signals, persistent interpolated Alpaca bars,
-  and reusable persisted-calendar rebalance configurations.
+  and reusable persisted-calendar rebalance configurations. Two Jobs declared in the API workflow,
+  one per kind, run every configuration ([ADR 0013](docs/adrs/0013_workflow_declared_configuration_jobs.md)).
 
 ETF extraction is supplied by `etfhextractor`; it is an input to Universes and Portfolios, not the
 project's top-level ontology.
@@ -119,24 +120,24 @@ The FastAPI update action queues the generic `Alpaca Bars Update` Job with only 
 configuration UID. Its JobRun can be polled at `/v1/operations/job-runs/{job_run_uid}`; the API
 does not execute the bars update in its own process.
 
-Create one dedicated scheduled Job for a Universe-backed signal:
+Create a Universe-backed signal configuration; the shared signal Job runs it:
 
 ```bash
 alpaca-connectors signal create \
   --name "Daily S&P 500 observation" \
   --universe-uid <UNIVERSE_UID> \
-  --account-uid <ACCOUNT_UID> \
-  --schedule-type interval \
-  --schedule-every 1 \
-  --schedule-period days
+  --account-uid <ACCOUNT_UID>
 alpaca-connectors signal run <CONFIGURATION_UID>
 ```
 
-The JobRun receives no signal arguments. Its launcher resolves the stored configuration through
-`JOB_RUN_UID` and the owning Job. Each configuration owns one Job. The current CodeRepositoryBranch
-resolves Environment scope automatically; the user never supplies an Environment UID.
+Signal and portfolio configurations hold no schedule or compute. The `Alpaca ETF Signal` and
+`Alpaca ETF Portfolio` Jobs declared in `.mainsequence/workflows/alpaca-connectors-api.yaml` run
+them: a run carries `--configuration-uid <uid>`, and each Job's daily scheduled run (00:30 and
+02:00 UTC) starts one such run per configuration whose `scheduled` flag is set (`--no-scheduled`
+clears it). The current CodeRepositoryBranch resolves Environment scope automatically; the user
+never supplies an Environment UID.
 
-Create a reusable rebalance policy and one durable Portfolio Configuration with its dedicated Job:
+Create a reusable rebalance policy and one durable Portfolio Configuration:
 
 ```bash
 alpaca-connectors portfolio rebalance create \
@@ -151,16 +152,12 @@ alpaca-connectors portfolio create \
   --signal-configuration-uid <SIGNAL_CONFIGURATION_UID> \
   --bars-configuration-uid <BARS_CONFIGURATION_UID> \
   --rebalance-configuration-uid <REBALANCE_CONFIGURATION_UID> \
-  --valuation-maximum-staleness-seconds 86400 \
-  --schedule-type interval \
-  --schedule-every 1 \
-  --schedule-period days
+  --valuation-maximum-staleness-seconds 86400
 alpaca-connectors portfolio run <PORTFOLIO_CONFIGURATION_UID>
 ```
 
-The Portfolio Configuration stores calculation intent only. Schedule, compute, image, and
-automatic-deployment state remain on its Job. The JobRun has no business arguments and resolves
-the Portfolio Configuration from `JOB_RUN_UID` and the owning Job. Rebalances use actual persisted
+The Portfolio Configuration stores calculation intent and its scheduled flag only. Schedule,
+compute, image, and automatic-deployment state belong to the declared portfolio Job. Rebalances use actual persisted
 market events and the latest signal observed at or before each event; signal observations still do
 not claim exact point-in-time ETF holdings or live execution.
 

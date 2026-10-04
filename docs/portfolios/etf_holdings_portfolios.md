@@ -4,15 +4,17 @@
 
 Build a durable ms-markets analytical portfolio from an existing ETF Weight Signal, an existing
 Alpaca Bars Configuration, persistent interpolated prices, and a reusable Rebalance Configuration.
-See [ADR 0008](../adrs/0008_portfolio_configuration_and_job_ownership.md) for Job ownership and
-[ADR 0009](../adrs/0009_calendar_event_portfolio_timing.md) for valuation and rebalance timing.
+See [ADR 0008](../adrs/0008_portfolio_configuration_and_job_ownership.md) for configuration
+ownership, [ADR 0013](../adrs/0013_workflow_declared_configuration_jobs.md) for the shared
+portfolio Job, and [ADR 0009](../adrs/0009_calendar_event_portfolio_timing.md) for valuation and
+rebalance timing.
 
 The implementation lives in:
 
 - `src/alpaca_connectors/portfolios/configurations.py`: calculation-only Portfolio and Rebalance MetaTables
 - `src/alpaca_connectors/portfolios/execution.py`: reference resolution and portfolio graph execution
-- `src/alpaca_connectors/operations/portfolio_jobs.py`: one dedicated Main Sequence Job per Portfolio Configuration
-- `src/jobs/run_alpaca_etf_portfolio.py`: repository-local scheduled launcher
+- `src/alpaca_connectors/operations/configuration_jobs.py`: runs on the workflow-declared portfolio Job
+- `src/jobs/run_alpaca_etf_portfolio.py`: entry point of that Job (`--configuration-uid` or `--scheduled`)
 - `src/alpaca_connectors/api/app/routers/portfolio_configurations.py`: thin HTTP CRUD and run surface
 - `src/alpaca_connectors/cli/portfolios.py`: thin CLI CRUD and run surface
 
@@ -27,12 +29,14 @@ A Portfolio Configuration stores only calculation intent:
 - valuation column, maximum permitted valuation staleness, and missing-price policy
 - commission-fee assumption
 - linked canonical `PortfolioTable.uid` after materialization
-- linked dedicated `Job.uid`
+- `scheduled`: whether the shared portfolio Job's daily scheduled run includes it
 
-The Main Sequence Job exclusively stores execution path, schedule, CPU, memory, spot preference,
-maximum runtime, automatic deployment, and image association. A JobRun exclusively stores an
-execution's status, timestamps, resolved image/commit, logs, and failure state. None of those
-operational values are copied into the Portfolio Configuration MetaTable.
+Every Portfolio Configuration runs on the `Alpaca ETF Portfolio` Job declared in
+`.mainsequence/workflows/alpaca-connectors-api.yaml`. That declaration exclusively owns execution
+path, schedule, CPU, memory, spot preference, maximum runtime, automatic deployment, and image
+association. A JobRun exclusively stores an execution's status, timestamps, resolved image/commit,
+arguments, logs, and failure state. None of those operational values are copied into the Portfolio
+Configuration MetaTable. Its retired `job_uid` column is neither read nor written.
 
 The selected Signal Configuration already resolves its Universe and runtime Alpaca Account. The
 selected Bars Configuration already resolves its asset source and raw bars profile. A Portfolio
@@ -100,7 +104,7 @@ alpaca-connectors portfolio rebalance create \
   --rebalance-cadence every_session
 ```
 
-Create a Portfolio Configuration and its dedicated Job together:
+Create a Portfolio Configuration; the shared portfolio Job runs it:
 
 ```bash
 alpaca-connectors portfolio create \
@@ -108,13 +112,11 @@ alpaca-connectors portfolio create \
   --signal-configuration-uid <SIGNAL_CONFIGURATION_UID> \
   --bars-configuration-uid <BARS_CONFIGURATION_UID> \
   --rebalance-configuration-uid <REBALANCE_CONFIGURATION_UID> \
-  --valuation-maximum-staleness-seconds 86400 \
-  --schedule-type crontab \
-  --schedule-expression "30 8 * * 1-5" \
-  --schedule-timezone America/New_York \
-  --cpu-request 0.25 \
-  --memory-request 0.5
+  --valuation-maximum-staleness-seconds 86400
 ```
+
+`--no-scheduled` leaves it out of the Job's daily scheduled run (02:00 UTC); a manual run still
+works.
 
 List, inspect, update, run, inspect executions, and delete:
 
@@ -122,6 +124,7 @@ List, inspect, update, run, inspect executions, and delete:
 alpaca-connectors portfolio list
 alpaca-connectors portfolio get <PORTFOLIO_CONFIGURATION_UID>
 alpaca-connectors portfolio update <PORTFOLIO_CONFIGURATION_UID> --commission-fee 0.0002
+alpaca-connectors portfolio update <PORTFOLIO_CONFIGURATION_UID> --no-scheduled
 alpaca-connectors portfolio run <PORTFOLIO_CONFIGURATION_UID>
 alpaca-connectors portfolio runs <PORTFOLIO_CONFIGURATION_UID>
 alpaca-connectors portfolio delete <PORTFOLIO_CONFIGURATION_UID>
@@ -139,9 +142,9 @@ the ms-markets dynamic storage identities, generates one real Alembic revision w
 the shared project migration history, and verifies every resulting `TimeIndexMetaTable`. Normal
 portfolio execution only checks and attaches those tables; it never creates schema.
 
-There is no environment argument. The CodeRepositoryBranch runtime resolves its Environment.
-Manual and scheduled portfolio JobRuns receive no business arguments; the launcher resolves the
-Portfolio Configuration from `JOB_RUN_UID -> Job.uid -> Portfolio Configuration.job_uid`.
+There is no environment argument. The CodeRepositoryBranch runtime resolves its Environment. A
+portfolio run carries `--configuration-uid <uid>`; the Job's scheduled run carries `--scheduled` and
+starts one such run per scheduled configuration whose preflight passes.
 
 ## API
 
@@ -156,11 +159,11 @@ The API exposes:
 - `POST /v1/portfolio-configurations/{uid}/actions/run`
 - `GET /v1/portfolio-configurations/{uid}/runs`
 
-Create requests nest schedule and compute values under `job`. Responses compose the durable row
-with a live Job projection. Schedule and compute updates patch only the Job.
+Create and update requests accept `scheduled` and reject schedule and compute settings with 422.
+Responses report the shared Job as `job_uid` and `job`, both null until a push creates it.
 
 The configuration detail `GET` resolves the linked Signal, Universe, Alpaca accounts, Bars source,
-Rebalance policy, live Job settings, and canonical Portfolio metadata. With the optional
+Rebalance policy, the shared Job's live settings, and canonical Portfolio metadata. With the optional
 `observation_limit` query parameter (default 2,500, maximum 5,000), it also returns the most recent
 portfolio values from shared `PortfoliosStorage`, ordered chronologically for presentation. The
 storage query is constrained by the canonical `PortfolioTable.unique_identifier`; it does not scan
@@ -203,7 +206,7 @@ Before the first live execution:
 - the selected Bars Configuration must be enabled and its migrated raw bars table must contain the
   required assets
 - the configuration-derived dynamic `InterpolatedPrices` storage must be migrated and registered
-- the dedicated Job image must be ready
+- the declared `Alpaca ETF Portfolio` Job must exist on the branch and its image must be ready
 
 Normal portfolio runtime code never creates schema.
 
@@ -211,11 +214,12 @@ Normal portfolio runtime code never creates schema.
 
 After a successful live JobRun, verify:
 
-- the JobRun resolved the configuration through its owning Job without command arguments
+- the JobRun's `command_args` are `--configuration-uid <uid>` for the intended configuration
 - the persistent `InterpolatedPrices` table contains the selected assets
 - `PortfolioCalendarEvents` contains the configured actual session events
 - `PortfolioRebalanceStateStorage` and `PortfolioWeightsStorage` use those event timestamps rather
   than midnight-normalized dates
 - the Portfolio Configuration stores the resulting canonical `Portfolio.uid`
 - `PortfolioWeightsStorage` and `PortfoliosStorage` contain output for that Portfolio
-- the Job remains the only source for schedule, compute, image, and automatic-deployment state
+- the workflow declaration remains the only source for schedule, compute, image, and
+  automatic-deployment state

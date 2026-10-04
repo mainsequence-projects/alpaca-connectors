@@ -7,6 +7,12 @@ Proposed on 2026-10-03; partially implemented the same day (see
 [Verification Before Acceptance](#verification-before-acceptance). Amends the rollout section of
 [ADR 0011](0011_api_managed_alpaca_credential_secrets.md).
 
+On 2026-10-05 [ADR 0013](0013_workflow_declared_configuration_jobs.md) replaced the API-created
+signal and portfolio Jobs described below with two Jobs declared in
+`.mainsequence/workflows/alpaca-connectors-api.yaml`, also outside `execution.steps`. Their
+launchers keep the schema gate, which still covers the gap between a push promoting their image and
+the migration Job finishing.
+
 ## Context
 
 Until now, project MetaTable revisions were applied by hand. AGENTS.md told operators to run

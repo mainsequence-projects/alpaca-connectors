@@ -48,8 +48,8 @@ process restarts; the shared in-memory operation repository is intentionally not
 | Universe Sources | Explicit extraction-configuration CRUD and read-only source preview under `/v1/universe-sources` |
 | Universes | Create/list/get/update registered `AssetUniverse` rows; list linked category Assets at `GET /v1/universes/{universe_uid}/assets`; run, activate, deactivate, and confirmed delete actions under `/v1/universes` |
 | Market Data | configuration CRUD and resolve/update actions under `/v1/market-data/bar-configurations`; dataset list/get and bounded observations under `/v1/market-data/datasets` |
-| ETF Signals | dedicated Job configuration CRUD under `/v1/signal-jobs`; run, pause, resume, reconcile, and JobRun-history actions |
-| ETF Portfolios | calculation-only configuration CRUD under `/v1/portfolio-configurations`; reusable calendar-event policies under `/v1/portfolio-rebalance-configurations`; run and JobRun-history actions |
+| ETF Signals | signal configuration CRUD under `/v1/signal-jobs`; run, pause, resume, reconcile, and JobRun-history actions on the shared signal Job |
+| ETF Portfolios | configuration CRUD under `/v1/portfolio-configurations`; reusable calendar-event policies under `/v1/portfolio-rebalance-configurations`; run and JobRun-history actions on the shared portfolio Job |
 | Operations | poll an accepted Alpaca bars, ETF signal, or ETF portfolio JobRun under `GET /v1/operations/job-runs/{job_run_uid}` |
 
 Market-data writes are configuration-oriented. Create one stored definition with exactly one
@@ -81,16 +81,31 @@ collection and detail endpoints do not perform one backend request per Asset. Un
 publishes the extracted weights through the canonical `SignalWeightsStorage`. The linked category
 records membership only; weights do not become category-membership columns.
 
-## Scheduled ETF Signals
+## Signal And Portfolio Jobs
 
-`POST /v1/signal-jobs` creates one durable signal configuration and one dedicated Job. The request
-selects the current Organization Environment, one Universe, one registered Alpaca account, one
-schedule, and compute settings. `universe_uid` defines signal identity. `account_uid` is runtime
-configuration and never becomes part of the final signal UID or `SignalWeightsStorage`.
+Signal and portfolio configurations run on the two Jobs declared in
+`.mainsequence/workflows/alpaca-connectors-api.yaml`, one per kind
+([ADR 0013](adrs/0013_workflow_declared_configuration_jobs.md)).
 
-The Job is created without a schedule, linked to the stored configuration, and only then scheduled.
-Manual and scheduled runs pass no business arguments. The launcher resolves the configuration via
-`JOB_RUN_UID -> job_uid`, then performs one Universe extraction/materialization/signal update.
+- **Requests.** Create and update requests accept `scheduled` (default true). It decides whether
+  the kind's daily scheduled run includes the configuration. A request that still sends schedule or
+  compute settings (a nested portfolio `job`, or the flat signal schedule and compute fields) gets
+  422 naming the workflow file, because they belong to the declaration. Signals no longer accept
+  `enabled`; send `scheduled`.
+- **Responses.** They report `scheduled` and the kind's Job as `job_uid` and `job` (its schedule,
+  compute and image). Both are null until a push creates the Job on the branch. A signal's
+  `lifecycle_state` is `provisioning` until then, and afterwards `ready` or `paused`.
+- **Runs.** A run returns 202 with the JobRun UID and a `status_url`. It starts the kind's Job with
+  `--configuration-uid <uid>` and is refused while that configuration's newest run is pending or
+  running. Run lists and `/v1/operations/job-runs/{job_run_uid}` find a configuration's runs by that
+  argument and return it as `command_args`.
+
+## ETF Signals
+
+`POST /v1/signal-jobs` creates one durable signal configuration from one Universe and one registered
+Alpaca account; it does not touch the platform. `universe_uid` defines signal identity.
+`account_uid` is runtime configuration and never becomes part of the final signal UID or
+`SignalWeightsStorage`. A run performs one Universe extraction, materialization and signal update.
 
 Lifecycle routes are:
 
@@ -103,8 +118,9 @@ GET  /v1/signal-jobs/{configuration_uid}/runs
 GET  /v1/signal-jobs/{configuration_uid}/observations?limit=100
 ```
 
-Deleting the configuration removes its dedicated Job and desired-state row while retaining prior
-signal observations.
+`pause` and `resume` set `scheduled`. `reconcile` only ensures the signal's ms-markets metadata.
+The list filters on `scheduled` and orders by `name` or `updated_at`. Deleting a configuration
+removes only its row; prior signal observations and the shared Job's runs remain.
 
 The observations endpoint resolves the signal UID from the stored configuration, selects the
 latest distinct observation timestamps from canonical ms-markets `SignalWeightsStorage`, and
@@ -115,18 +131,18 @@ Asset carries one aligned weight per timestamp; the frontend projects that paylo
 as rows and Assets as columns. Because signal updates publish complete frames, an absent Asset row
 is represented as zero while an explicit stored null remains null.
 
-## Scheduled ETF Portfolios
+## ETF Portfolios
 
-`POST /v1/portfolio-configurations` creates one durable calculation definition and one dedicated
-Main Sequence Job. The calculation definition references an existing ETF Signal Configuration,
-Bars Configuration, and Rebalance Configuration. The supported strategy is
-`CalendarEventSignal`, backed by persisted market-session events; valuation uses daily persistent
-`InterpolatedPrices`, forward-fill interpolation, and a bounded staleness policy.
+`POST /v1/portfolio-configurations` creates one durable calculation definition; it does not touch
+the platform. The definition references an existing ETF Signal Configuration, Bars Configuration,
+and Rebalance Configuration. The supported strategy is `CalendarEventSignal`, backed by persisted
+market-session events; valuation uses daily persistent `InterpolatedPrices`, forward-fill
+interpolation, and a bounded staleness policy.
 
-Job settings are nested under `job` in create and update requests. They are written only to the
-Main Sequence Job; the Portfolio Configuration MetaTable does not duplicate schedule, compute,
-image, deployment, Environment, or JobRun state. Responses compose the calculation row with a live
-Job projection.
+The Portfolio Configuration MetaTable stores no schedule, compute, image, deployment, Environment,
+or JobRun state; its only operational field is `scheduled`. `PATCH {"scheduled": false}` pauses a
+portfolio without validating its references. A run also needs an allowed preflight: its linked
+configurations must exist and be enabled, and its signal must have published observations.
 
 ```text
 GET|POST /v1/portfolio-configurations
@@ -138,10 +154,9 @@ GET|POST /v1/portfolio-rebalance-configurations
 GET|PATCH|DELETE /v1/portfolio-rebalance-configurations/{configuration_uid}
 ```
 
-There is no Environment request field. Manual and scheduled JobRuns contain no business
-arguments. The launcher resolves `JOB_RUN_UID -> Job.uid -> Portfolio Configuration.job_uid`,
-updates persistent interpolation, calendar events, rebalance state, executed weights, and
-valuation without rerunning the Signal or raw Bars producers. Rebalance rows use actual configured
+There is no Environment request field. A run selects its configuration with
+`--configuration-uid <uid>` and updates persistent interpolation, calendar events, rebalance state,
+executed weights, and valuation without rerunning the Signal or raw Bars producers. Rebalance rows use actual configured
 market-event timestamps and select the latest signal observed at or before each event. The result
 is still an analytical reconstruction rather than guaranteed point-in-time ETF replication.
 

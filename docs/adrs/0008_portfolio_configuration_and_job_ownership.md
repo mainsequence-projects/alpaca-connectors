@@ -5,6 +5,14 @@
 Accepted. The Job-ownership decision remains authoritative; its ImmediateSignal timing decision is
 superseded by [ADR 0009](0009_calendar_event_portfolio_timing.md).
 
+Amended on 2026-10-05 by [ADR 0013](0013_workflow_declared_configuration_jobs.md): one portfolio
+Job declared in `.mainsequence/workflows/alpaca-connectors-api.yaml` runs every Portfolio
+Configuration, because `mainsequence` 9.0.2 removed runtime Job creation. Configurations keep a
+`scheduled` flag (revision 0016) instead of a `job_uid` link, runs select their configuration with
+`--configuration-uid`, and the API no longer accepts `job` settings. Where the dedicated-Job parts
+below disagree, ADR 0013 applies; the calculation-ownership decisions remain, with schedule and
+compute owned by the workflow declaration.
+
 ## Context
 
 The project needs a durable definition for an analytical ETF portfolio assembled from an existing

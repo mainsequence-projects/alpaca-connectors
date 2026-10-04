@@ -3,9 +3,16 @@
 ## Status
 
 Superseded in part by
-[ADR 0008](0008_portfolio_configuration_and_job_ownership.md). One dedicated Job per signal
-configuration remains accepted. Schedule, compute, deployment, and execution-state ownership now
-follows ADR 0008 and belongs only to the Main Sequence Job or JobRun.
+[ADR 0008](0008_portfolio_configuration_and_job_ownership.md). Schedule, compute, deployment, and
+execution-state ownership follows ADR 0008 and belongs only to the Main Sequence Job or JobRun.
+
+Amended on 2026-10-05 by
+[ADR 0013](0013_workflow_declared_configuration_jobs.md): one signal Job declared in
+`.mainsequence/workflows/alpaca-connectors-api.yaml` runs every signal configuration, because
+`mainsequence` 9.0.2 removed runtime Job creation. The dedicated Job per configuration, the
+creation sequence, the `job_uid` link and the `JOB_RUN_UID` resolution below no longer apply: a run
+selects its configuration with `--configuration-uid`, and `enabled` is the configuration's scheduled
+flag. The signal identity and runtime-account decisions remain.
 
 ## Context
 

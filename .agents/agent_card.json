@@ -77,7 +77,7 @@
     {
       "id": "etf-weight-signals",
       "name": "ETF Weight Signals",
-      "description": "Create, inspect, schedule, and run Universe-backed ETF weight signal configurations with one durable Job per configuration.",
+      "description": "Create, inspect, schedule, and run Universe-backed ETF weight signal configurations on the shared, workflow-declared signal Job.",
       "tags": [
         "etf",
         "signals",

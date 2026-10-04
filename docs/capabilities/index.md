@@ -81,7 +81,8 @@ Portfolios owns analytical construction based on registered assets and market da
 - reusable calendar-event rebalance configurations
 - durable calculation configurations composed from existing Signal and Bars configurations
 - portfolio weights and valuation results
-- one dedicated scheduled Job per Portfolio Configuration
+- runs on the shared portfolio Job declared in the API workflow, with a per-configuration
+  scheduled flag
 
 The repository does not provide order placement or trade execution.
 

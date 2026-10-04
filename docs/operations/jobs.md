@@ -1,21 +1,91 @@
 # Jobs And Deployment
 
-## Universe-Backed ETF Signal Jobs
+## Signal And Portfolio Jobs
 
-Every stored signal configuration projects to its own Main Sequence Job. Different Universes can
-therefore have different accounts, schedules, compute requests, and lifecycle state. The durable
+Signal and portfolio configurations run on two Jobs declared in
+`.mainsequence/workflows/alpaca-connectors-api.yaml`, one per kind
+([ADR 0013](../adrs/0013_workflow_declared_configuration_jobs.md)). No code creates a Job: since
+`mainsequence` 9.0.2 only a workflow declaration can, and the push that carries a declaration creates
+its Job.
+
+| Key | Display name | Daily schedule | Scheduled argument |
+|---|---|---|---|
+| `alpaca-etf-signal` | `Alpaca ETF Signal` | `30 0 * * *` UTC | `--scheduled` |
+| `alpaca-etf-portfolio` | `Alpaca ETF Portfolio` | `0 2 * * *` UTC | `--scheduled` |
+
+Both run after the 00:00 UTC daily bars Job and after the US equity close. Their compute is
+0.25 CPU, 0.5 GiB and 3600 seconds, and every push promotes their image. No `execution.steps` entry
+references them, so a push may promote their image before the migration Job finishes; the schema
+gate in each entry point turns a run in that window into a clean skip
+([ADR 0012](../adrs/0012_deployment_workflow_migrations_and_schema_gated_jobs.md)).
+
+How they run:
+
+- **A manual run executes one configuration.** These all start a run of the kind's Job with the
+  arguments `--configuration-uid <uid>`:
+  - `POST /v1/signal-jobs/{uid}/actions/run` and `POST /v1/portfolio-configurations/{uid}/actions/run`;
+  - `alpaca-connectors signal run <uid>` and `alpaca-connectors portfolio run <uid>`.
+
+  A run is refused while the configuration's newest run is pending or running, or while the Job's
+  image is not ready, which includes the image build after each push. A signal run needs an active
+  Universe and Account. A portfolio run needs an allowed preflight: its linked configurations must
+  exist and be enabled, and its signal must have published observations.
+- **The scheduled run executes nothing itself.** It starts one `--configuration-uid` run for each
+  configuration whose scheduled flag is true.
+  - It skips configurations with a pending or running run, and portfolios whose preflight is
+    blocked.
+  - It prints what it launched, skipped and failed, and fails if any start failed.
+- **`scheduled` is the only per-configuration operational setting**, and it defaults to true.
+  - For a signal, `POST /v1/signal-jobs/{uid}/actions/pause` and `resume` set it. Signal rows store
+    it in the `enabled` column.
+  - `PATCH` sets it for either kind, and so do the CLI's `--scheduled` and `--no-scheduled`.
+  - A configuration left out of the scheduled run can still be run manually.
+- **Schedule and compute belong to the declarations.** To change them, edit the workflow file and
+  push. A push re-applies the declared schedule, so a schedule edited on the platform lasts only
+  until the next push. Requests that still send schedule or compute settings get 422.
+- **Run history comes from each Job's 500 newest runs.** Configuration responses report the Job as
+  `job_uid` and `job`, both null until the push creates it. Run lists and
+  `/v1/operations/job-runs/{uid}` find a configuration's runs by their `--configuration-uid`
+  argument.
+
+The scheduled run starts other runs of its own Job from inside a Job. This has not yet been checked
+on a hosted runtime: confirm it on the first scheduled run after the push.
+
+### Cleanup Of Per-Configuration Jobs
+
+Before ADR 0013, the API created one Job per configuration. That worked with SDK 8, from 2026-09-04
+until the repository moved to `mainsequence` 9.0.2 on 2026-10-01. Such a Job has no workflow
+binding, so no push deletes it. It keeps its schedule:
+
+- On its old image it still resolves its configuration through `job_uid` and repeats the work of
+  the declared Job.
+- If a push promotes it to the new image, it runs without a mode and fails with a usage error.
+
+On each platform branch, after the push that creates the two declared Jobs:
+
+1. List the candidates from a checkout of the branch:
+   `mainsequence code-repository jobs list --filter "name__contains=Alpaca ETF"`.
+   - The two declared Jobs are named exactly `Alpaca ETF Signal` and `Alpaca ETF Portfolio`.
+   - A per-configuration Job is named `Alpaca ETF Signal — <configuration name> [<UID prefix>]` or
+     `Alpaca ETF Portfolio — <configuration name> [<UID prefix>]`.
+   - On 2026-10-05 the `main` branch on the development server had two:
+     `0039edbc-f98a-418b-8237-e935c3a1bf3c` (signal) and
+     `c099820c-8b63-420a-aeb6-9672ae0112cd` (portfolio).
+2. Delete each per-configuration Job in the platform UI, or with
+   `uv run python -c "from mainsequence.client import Job; Job.destroy_by_uid('<Job UID>')"`.
+   The `mainsequence` 9.0.5 CLI has no Job delete command. Deleting a Job also deletes its JobRuns.
+3. Check that the list from step 1 shows only the two declared Jobs.
+
+## ETF Weight Signals
+
+A signal configuration is one Universe plus the registered Alpaca account its runs use. The durable
 record is `AlpacaETFSignalJobConfiguration`; JobRuns are execution history only.
-
-Create and operate a signal Job through the CLI:
 
 ```bash
 alpaca-connectors signal create \
   --name "Daily S&P 500 observation" \
   --universe-uid <UNIVERSE_UID> \
-  --account-uid <ACCOUNT_UID> \
-  --schedule-type crontab \
-  --schedule-expression "0 9 * * 1-5" \
-  --schedule-timezone America/New_York
+  --account-uid <ACCOUNT_UID>
 
 alpaca-connectors signal list
 alpaca-connectors signal run <CONFIGURATION_UID>
@@ -25,15 +95,14 @@ alpaca-connectors signal resume <CONFIGURATION_UID>
 alpaca-connectors signal reconcile <CONFIGURATION_UID>
 ```
 
-Creation stores desired state, materializes the deterministic ms-markets Signal metadata, creates
-an initially unscheduled Job with automatic deployment, links its UID, then activates the schedule.
-It does not publish weights. The launcher accepts no business arguments. It resolves the
-configuration from `JOB_RUN_UID` and the owning Job UID, then runs one Universe-backed signal
-update. Environment scope is derived from the current CodeRepositoryBranch and is never a caller
-argument. See [ADR 0007](../adrs/0007_one_signal_configuration_per_job.md).
+Creation stores the configuration and materializes the deterministic ms-markets Signal metadata. It
+does not publish weights and does not touch the platform. `reconcile` only ensures that metadata
+row. Environment scope is derived from the current CodeRepositoryBranch and is never a caller
+argument. See [ADR 0007](../adrs/0007_one_signal_configuration_per_job.md) for the signal identity
+rules that remain.
 
-The API exposes the same lifecycle at `/v1/signal-jobs`, including list discovery, CRUD,
-run/pause/resume/reconcile actions, and per-configuration JobRun history.
+The API exposes the same lifecycle at `/v1/signal-jobs`: list discovery, CRUD, run, pause, resume
+and reconcile actions, and per-configuration JobRun history.
 
 `GET /v1/signal-jobs/{configuration_uid}/observations?limit=100` is the read-only inspection
 surface for published weights. It resolves the stable signal identity from the saved configuration
@@ -41,35 +110,25 @@ and returns the latest 100 distinct frames from `SignalWeightsStorage` as aligne
 Assets, and weights. The static site displays timestamps as rows and Assets as columns. Opening
 signal details triggers this query; listing signals does not.
 
-The browser form generates calendar schedules from daily, weekday, weekly, or monthly controls and
-shows the resulting five-field expression. Advanced numeric expressions support wildcards, lists,
-ranges, and steps; the API validates both syntax and the legal range of every cron field before it
-stores desired state. Every crontab may select an IANA timezone such as `America/New_York` or
-`Europe/Vienna`; abbreviations and fixed-offset `Etc/GMT` zones are rejected. The platform
-evaluates the local cron clock through daylight-saving transitions. New backend Jobs that omit the
-timezone default to UTC, while updates that omit it preserve the Job's current timezone. Interval
-schedules never carry a timezone.
-
 The Job schedule and the `TimeIndexTableUpdater` configuration are separate contracts. The schedule
 decides when the JobRun starts. `AlpacaETFHoldingsSignal` receives `universe_uid` and the runtime
 `account_uid`, and its output remains the canonical `SignalWeightsStorage` grain. ms-markets nests
 that producer input under `SignalWeightsConfiguration.signal_configuration` and deliberately
 excludes it from the canonical shared `SignalWeights` update hash; `signal_uid` separates each
-Universe's observations in storage. The dedicated Job configuration row is the durable source for
-reconstructing those runtime values.
+Universe's observations in storage. The configuration row selected by `--configuration-uid` is the
+durable source for reconstructing those runtime values.
 
-With Main Sequence SDK 8.1, each `run()` call performs one update cycle directly. The removed
-`force_update` and `debug_mode` parameters are not configuration fields and are not exposed in the
-GUI, API, CLI, or Job launcher. This producer therefore publishes one observation on every
-successful call, including unchanged weights. Dependency-tree execution remains a run control. The
-inherited `offset_start` updater field is not exposed because this producer observes the provider's
-current holdings and cannot backfill historically effective ETF weights.
+Each `run()` call performs one update cycle directly. The removed `force_update` and `debug_mode`
+parameters are not configuration fields and are not exposed in the GUI, API, CLI, or Job launcher.
+This producer therefore publishes one observation on every successful call, including unchanged
+weights. Dependency-tree execution remains a run control. The inherited `offset_start` updater field
+is not exposed because this producer observes the provider's current holdings and cannot backfill
+historically effective ETF weights.
 
-## ETF Portfolio Jobs
+## ETF Portfolios
 
-Every durable Portfolio Configuration owns one dedicated Main Sequence Job. The Portfolio
-Configuration stores only calculation inputs and its `job_uid` relationship. Schedule, compute,
-spot, maximum runtime, automatic deployment, and image state remain exclusively on the Job.
+A Portfolio Configuration stores only calculation inputs and its scheduled flag. Schedule, compute,
+spot, maximum runtime, automatic deployment, and image state belong to the declared portfolio Job.
 
 ```bash
 alpaca-connectors portfolio rebalance create \
@@ -84,24 +143,12 @@ alpaca-connectors portfolio create \
   --name "Daily IVV analytical portfolio" \
   --signal-configuration-uid <SIGNAL_CONFIGURATION_UID> \
   --bars-configuration-uid <BARS_CONFIGURATION_UID> \
-  --rebalance-configuration-uid <REBALANCE_CONFIGURATION_UID> \
-  --schedule-type crontab \
-  --schedule-expression "0 20 * * 1-5" \
-  --schedule-timezone America/New_York
+  --rebalance-configuration-uid <REBALANCE_CONFIGURATION_UID>
 
 alpaca-connectors portfolio run <PORTFOLIO_CONFIGURATION_UID>
 alpaca-connectors portfolio runs <PORTFOLIO_CONFIGURATION_UID>
+alpaca-connectors portfolio update <PORTFOLIO_CONFIGURATION_UID> --no-scheduled
 ```
-
-The Job is first created without a schedule, linked to the Portfolio Configuration, and then
-patched with its schedule. Automatic deployment is always enabled. The launcher accepts no
-business arguments and resolves its definition through
-`JOB_RUN_UID -> Job.uid -> Portfolio Configuration.job_uid`.
-
-For crontab schedules, timezone is stored only on that Job. Portfolio API responses read the live
-Job and return both its IANA timezone and whether it was explicitly supplied; a backend-defaulted
-UTC schedule is therefore distinguishable from an explicit UTC choice. Portfolio Configuration
-rows do not duplicate either field.
 
 Execution reads an existing Signal observation, updates the configuration-derived persistent
 `InterpolatedPrices`, and calculates `PortfoliosDataNode` with dependency traversal disabled. It
@@ -145,19 +192,19 @@ keeps automatic redeployment disabled. A recurring schedule needs a separate dur
 schedule-to-configuration design because the current schedule declaration does not bind per-run
 arguments.
 
-## Current platform blocker
+### Run arguments
 
-Live verification on 2026-09-03 proved that JobRun creation persists the requested
-`command_args`, but the deployed runtime wrapper does not forward them to the Python script. Run
-`d060f538-d63a-4328-bce9-979643876033` recorded the exact two arguments and then invoked the
-launcher without them, causing its required-argument validation to fail. A second run with an
-explicit separator produced the same result.
+The bars Job and the signal and portfolio Jobs receive their per-run arguments through
+`JobRun.command_args`. Live verification on 2026-09-03 showed the runtime wrapper dropping them: run
+`d060f538-d63a-4328-bce9-979643876033` recorded the two arguments but invoked the launcher without
+them, so its required-argument validation failed.
 
-This conflicts with the current SDK/CLI Job argument contract. Do not weaken the launcher, move the
-configuration into an environment variable, or retire the transitional Job to hide the platform
-failure. The runtime executor must forward `JobRun.command_args` to the saved Python entrypoint;
-after that correction, repeat the live smoke test with a real enabled configuration before the
-cutover.
+PodDeploymentOrchestrator `09e5ab4` (2026-09-13, "preserve script child argv") passes them to the
+script as `sys.argv[1:]`, and tdag-django `01f475a86` appends `JobRun.command_args` to the runtime
+command. No hosted run has confirmed the fix yet. A run that loses its arguments fails with a usage
+error and does no work. Do not weaken a launcher or move a configuration into an environment
+variable to work around a missing argument; repeat the smoke test with a real configuration
+instead.
 
 ## API Invocation And Observation
 

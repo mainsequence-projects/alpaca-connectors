@@ -16,8 +16,10 @@ history, and statistics. In a CodeRepository Executor session, use
 - A portfolio configuration references one existing ETF signal configuration, one existing bars
   configuration, and one stored rebalance configuration.
 - The rebalance configuration owns market calendar, session, market-open/close event, event offset,
-  and cadence. The platform Job owns schedule and compute settings; do not duplicate those fields in
-  the portfolio table.
+  and cadence. The `Alpaca ETF Portfolio` Job declared in
+  `.mainsequence/workflows/alpaca-connectors-api.yaml` runs every portfolio and owns the daily
+  schedule (02:00 UTC) and compute. A configuration only sets `scheduled`; never send schedule or
+  compute fields.
 - Phase 1 uses `calendar_event_signal`, daily persistent `InterpolatedPrices`, forward-fill
   interpolation, and actual calendar event timestamps. It must not create midnight timestamps.
 - Price interpolation can fill between real price observations but does not make missing source
@@ -28,7 +30,9 @@ history, and statistics. In a CodeRepository Executor session, use
 
 1. Query or create a rebalance configuration using the rebalance tools.
 2. Query the selected signal and bar configurations and verify their relationships and data scope.
-3. Create one ETF portfolio configuration with its dedicated Job settings.
+3. Create one ETF portfolio configuration. A run needs the shared Job (created by a push) and an
+   allowed preflight: existing, enabled linked configurations and a signal with published
+   observations.
 4. Submit operation `run`, poll `alpaca_get_job_run_status`, and inspect the resulting detail with
    `alpaca_query_etf_portfolios` operation `get`.
 5. Report linked configuration details, historical value observations, and the existing

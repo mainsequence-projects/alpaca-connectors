@@ -17,7 +17,8 @@ Primary project capabilities:
 - register and refresh Alpaca brokerage accounts and their holdings snapshots
 - publish Alpaca stock-market data for one asset or a reusable asset universe
 - build ETF-tracking ms-markets portfolios from ETF holdings signals and interpolated Alpaca bars
-- create and operate one dedicated scheduled Job per Universe-backed Alpaca ETF signal
+- run Universe-backed ETF signal and analytical portfolio configurations on the two Jobs declared
+  in `.mainsequence/workflows/alpaca-connectors-api.yaml` (ADR 0013)
 - expose thin FastAPI endpoints for the supported project state, Asset, Account, holdings,
   Universe, bars, ETF signal, rebalance, portfolio, and JobRun operations
 
@@ -52,8 +53,13 @@ Repository rules:
   one-off workflow scripts for the main operations
 - keep CLI-facing behavior thin; CLI commands should orchestrate reusable modules, not duplicate
   business logic
-- keep durable signal Job desired state and reconciliation under `src/alpaca_connectors/operations/`; JobRuns are
-  execution history and never own signal configuration
+- keep the signal and portfolio configuration runs under `src/alpaca_connectors/operations/`
+  (`configuration_jobs.py`): a run selects its configuration only through `--configuration-uid`;
+  JobRuns are execution history and never own configuration
+- never create a Job or write a Job's schedule at runtime: since `mainsequence` 9.0.2 only
+  `.mainsequence/workflows/*.yaml` declarations create Jobs, and a push re-applies their schedule. A
+  configuration only stores whether its Job's scheduled run includes it (`scheduled`; signals keep it
+  in the `enabled` column)
 - if a scheduled job still needs a repository-local launcher, keep that launcher under `src/jobs/`
   and declare the reviewed schedule under `.mainsequence/workflows/`
 
@@ -161,8 +167,8 @@ Project-to-agent boundary:
   and return a JobRun UID; inspect them with `alpaca_get_job_run_status`
 - agent-facing descriptions must stay within supported local project behavior: asset registration,
   explicit Asset Universe registration and component extraction, Account registration and holdings,
-  stored market-data updates, Universe-backed ETF signal Jobs, rebalance configuration, and
-  analytical ETF portfolio construction
+  stored market-data updates, Universe-backed ETF signal configurations, rebalance configuration,
+  and analytical ETF portfolio construction
 - do not invent trading, order submission, brokerage portfolio management, arbitrary SQL or shell,
   or generic platform-release capabilities
 - route specialized work through the repository-owned `alpaca-asset-registration`,
