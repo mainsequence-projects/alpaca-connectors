@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter
 
 from ..capabilities import capability_summaries
+from ..identity import caller_uid
 from ..schemas import CapabilityCatalogResponse, HealthResponse, ProjectConfigurationResponse
 from ..services import get_project_configuration
 
@@ -37,7 +38,5 @@ def capabilities() -> CapabilityCatalogResponse:
     summary="Runtime application configuration",
     description="Return live account, universe-source, and migrated dataset catalog state.",
 )
-def configuration(request: Request) -> ProjectConfigurationResponse:
-    return get_project_configuration(
-        request_user_uid=getattr(request.state, "user_uid", None),
-    )
+def configuration() -> ProjectConfigurationResponse:
+    return get_project_configuration(request_user_uid=caller_uid())

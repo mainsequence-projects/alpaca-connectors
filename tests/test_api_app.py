@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import pytest
 from etfhextractor.exceptions import WorkbookParseError
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
@@ -89,8 +90,11 @@ def _matches_registered_route(method: str, path: str) -> bool:
 
 
 class ApiAppTests(unittest.TestCase):
-    def setUp(self) -> None:
-        self.client = TestClient(app)
+    @pytest.fixture(autouse=True)
+    def _authenticated_client(self, local_caller) -> None:
+        """Call the app as the caller the SDK's local request identity accepts."""
+        self.caller = local_caller
+        self.client = TestClient(app, headers=local_caller.headers)
 
     def test_health(self) -> None:
         response = self.client.get("/health")
@@ -264,7 +268,7 @@ class ApiAppTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.headers["cache-control"], "no-store")
         self.assertEqual(response.json()["current_step"], "prepare_scope")
-        get_status.assert_called_once_with(operation.operation_uid, owner_uid=None)
+        get_status.assert_called_once_with(operation.operation_uid, owner_uid=self.caller.uid)
 
     def test_asset_registration_requires_a_registered_account_uid(self) -> None:
         response = self.client.post(
@@ -440,7 +444,7 @@ class ApiAppTests(unittest.TestCase):
         credentials = register.call_args.kwargs["credentials"]
         self.assertIsInstance(credentials, ResolvedAlpacaCredentials)
         self.assertEqual(credentials.api_key, "PKVALUE5566")
-        self.assertIsNone(register.call_args.kwargs["actor_user_uid"])
+        self.assertEqual(register.call_args.kwargs["actor_user_uid"], self.caller.uid)
         self.assertEqual(response.json()["credential_source"], "managed")
         self.assertNotIn("PKVALUE5566", response.text)
         self.assertNotIn("SKVALUE7788", response.text)
@@ -758,7 +762,7 @@ class ApiAppTests(unittest.TestCase):
 
     def test_unhandled_api_errors_use_sanitized_fallback(self) -> None:
         private_message = "provider exception containing private context"
-        safe_client = TestClient(app, raise_server_exceptions=False)
+        safe_client = TestClient(app, headers=self.caller.headers, raise_server_exceptions=False)
         with patch(
             "alpaca_connectors.api.app.routers.accounts.get_account",
             side_effect=RuntimeError(private_message),
@@ -1146,7 +1150,3 @@ class ApiAppTests(unittest.TestCase):
         )
         self.assertEqual(asset_type_column["value_path"], "asset_type")
         self.assertEqual(asset_type_column["data_type"], "text")
-
-
-if __name__ == "__main__":
-    unittest.main()

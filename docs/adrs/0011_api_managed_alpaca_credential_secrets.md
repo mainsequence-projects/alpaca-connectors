@@ -5,6 +5,8 @@
 Proposed on 2026-10-03. Implemented in the connector and the static site on 2026-10-03; acceptance
 still requires the platform checks listed under
 [Verification Before Acceptance](#verification-before-acceptance).
+[ADR 0014](0014_sdk_request_identity.md) changes how the API identifies the human caller: it is the
+caller the SDK request identity verified, read with `User.get_logged_user()`.
 
 ## Context
 
@@ -26,7 +28,7 @@ That keeps credential values out of the application, but it makes the site depen
 The installed SDK (`mainsequence` 9.0.2) supports `Secret.create(name=..., value=...)`. The create
 response may omit `uid` and `value`, so the new Secret must be read back by its exact name. Secret
 names are unique within an Organization Environment. SDK calls made inside the FastAPI release are
-authenticated as the API's runtime principal, not as the human caller in `request.state.user`.
+authenticated as the API's runtime principal, not as the human caller of the request.
 
 ## Decision
 
@@ -69,8 +71,9 @@ An Alembic revision adds these columns to `AlpacaAccountDetails`:
 
 - `api_key_secret_uid` and `secret_key_secret_uid`;
 - `credential_source` (`managed` | `external`);
-- `credentials_updated_at` and `credentials_updated_by_user_uid` (the human caller from
-  `request.state.user_uid`, or null for CLI and Tau writes).
+- `credentials_updated_at` and `credentials_updated_by_user_uid` (the human caller that the
+  request identity verified, [ADR 0014](0014_sdk_request_identity.md), or null for CLI and Tau
+  writes).
 
 `api_key_secret_name`, `secret_key_secret_name` and `api_key_fingerprint` stay as display and audit
 fields. All credential resolution switches to `Secret.get_by_uid`, so renaming a Secret or creating

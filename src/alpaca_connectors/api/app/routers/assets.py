@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks, Body, Query, Request, Response, status
+from fastapi import APIRouter, BackgroundTasks, Body, Query, Response, status
 
 from ..errors import api_http_error, not_found
+from ..identity import caller_uid
 from ..schemas import (
     AssetRegistrationDiscoveryResponse,
     AssetRegistrationExecuteResponse,
@@ -28,11 +29,6 @@ from ..services.assets import (
 from ..services.common import resource_discovery, validate_ordering, validate_page_window
 
 router = APIRouter(prefix="/v1/assets", tags=["Assets"])
-
-
-def _request_user_uid(request: Request) -> str | None:
-    value = getattr(request.state, "user_uid", None)
-    return str(value) if value is not None else None
 
 
 @router.get("", response_model=ResourceCollection)
@@ -122,13 +118,14 @@ def asset_registration_execute(
 def asset_registration_operation_start(
     operation_request: AssetRegistrationOperationStartRequest,
     background_tasks: BackgroundTasks,
-    request: Request,
 ) -> AssetRegistrationOperationResponse:
+    # The operation belongs to the verified caller; only that caller can poll it.
+    owner_uid = caller_uid()
     try:
         operation = start_asset_registration_operation(
             action=operation_request.action,
             request=operation_request.request,
-            owner_uid=_request_user_uid(request),
+            owner_uid=owner_uid,
         )
     except Exception as exc:
         raise api_http_error(exc) from exc
@@ -148,15 +145,12 @@ def asset_registration_operation_start(
 )
 def asset_registration_operation_get(
     operation_uid: str,
-    request: Request,
     response: Response,
 ) -> AssetRegistrationOperationResponse:
     response.headers["Cache-Control"] = "no-store"
+    owner_uid = caller_uid()
     try:
-        return get_asset_registration_operation_status(
-            operation_uid,
-            owner_uid=_request_user_uid(request),
-        )
+        return get_asset_registration_operation_status(operation_uid, owner_uid=owner_uid)
     except Exception as exc:
         raise api_http_error(exc) from exc
 

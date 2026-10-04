@@ -14,7 +14,6 @@ from unittest.mock import patch
 import pytest
 import sqlalchemy as sa
 import yaml
-from fastapi.testclient import TestClient
 
 from alpaca_connectors.operations import configuration_jobs
 from alpaca_connectors.operations.configuration_jobs import (
@@ -655,10 +654,10 @@ def test_portfolio_responses_report_the_declared_job(monkeypatch) -> None:
         ),
     ],
 )
-def test_create_requests_reject_job_settings_naming_the_workflow_file(path, body, field) -> None:
-    from alpaca_connectors.api.app.main import app
-
-    response = TestClient(app).post(path, json=body)
+def test_create_requests_reject_job_settings_naming_the_workflow_file(
+    path, body, field, api_client
+) -> None:
+    response = api_client.post(path, json=body)
 
     assert response.status_code == 422
     (error,) = response.json()["detail"]
@@ -674,25 +673,21 @@ def test_create_requests_reject_job_settings_naming_the_workflow_file(path, body
         (f"/v1/portfolio-configurations/{A}", {"job": {"schedule_type": "interval"}}),
     ],
 )
-def test_update_requests_reject_job_settings_naming_the_workflow_file(path, body) -> None:
-    from alpaca_connectors.api.app.main import app
-
-    response = TestClient(app).patch(path, json=body)
+def test_update_requests_reject_job_settings_naming_the_workflow_file(
+    path, body, api_client
+) -> None:
+    response = api_client.patch(path, json=body)
 
     assert response.status_code == 422
     assert WORKFLOW_PATH in response.json()["detail"][0]["msg"]
 
 
-def test_portfolio_patch_sets_only_the_scheduled_flag() -> None:
-    from alpaca_connectors.api.app.main import app
-
+def test_portfolio_patch_sets_only_the_scheduled_flag(api_client) -> None:
     with patch(
         "alpaca_connectors.api.app.services.portfolio_configurations.update_portfolio_configuration",
         side_effect=LookupError("stop"),
     ) as update:
-        response = TestClient(app).patch(
-            f"/v1/portfolio-configurations/{A}", json={"scheduled": False}
-        )
+        response = api_client.patch(f"/v1/portfolio-configurations/{A}", json={"scheduled": False})
 
     assert response.status_code == 404
     update.assert_called_once_with(A, scheduled=False)

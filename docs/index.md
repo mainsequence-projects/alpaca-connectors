@@ -73,6 +73,9 @@ Use that page first when the question is about:
   every configuration and own schedule and compute; a configuration only chooses whether the
   daily scheduled run includes it (ADR 0013).
 - Daily bar `time_index` is normalized to `16:00 America/New_York` on the session date as a project convention.
+- The FastAPI application authenticates every caller through the SDK request identity that
+  `create_app()` installs; routes read the verified caller with `User.get_logged_user()`, and no
+  route is public (ADR 0014).
 
 ## Build The Docs
 

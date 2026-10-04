@@ -55,6 +55,23 @@ Mutating account and market-data operations use a registered Account UID. CLI ac
 accepts Main Sequence Secret names only; the API also accepts values to store as managed Secrets. Universe sync uses a UniverseSource UID and does not infer
 extraction targets from source-code constants.
 
+### Call the local API
+
+Every request to the API needs a caller ([ADR 0014](../adrs/0014_sdk_request_identity.md)).
+Without deployment markers the API checks a direct Bearer token against
+`MAINSEQUENCE_ENDPOINT/api/v1/users/me/`, so the CLI that issues the token and the API must use the
+same backend. Both read `MAINSEQUENCE_ENDPOINT` from the environment; the repository `.env` holds the
+development value:
+
+```bash
+set -a; source .env; set +a
+curl -H "Authorization: Bearer $(.venv/bin/mainsequence auth token)" http://127.0.0.1:8321/health
+```
+
+A request without a token, or with a token that backend did not issue, gets 401; the API answers 503
+when the backend cannot be reached. `/health`, `/openapi.json` and `/docs` need a token too. Tokens
+are short-lived: request a new one when calls start answering 401.
+
 ## Debug the API and Command Center site
 
 Open this backend repository as the VS Code workspace, select **Run and Debug**, and launch
@@ -71,6 +88,11 @@ or select another free pair in `.vscode/launch.json` rather than allowing an aut
 
 The sibling static-site repository and its `node_modules` installation must exist before launching
 the compound. Run `npm ci` from that repository if the Vite executable is missing.
+
+The site calls the API directly from the browser and sends no token, so the API answers its
+requests with 401 until the site sends `Authorization: Bearer <token>` from
+`mainsequence auth token`. That change belongs to the site repository. The API's CORS policy wraps
+the request identity, so the site can read those 401 responses.
 
 ## Run the local stack without a debugger
 

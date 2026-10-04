@@ -64,6 +64,6 @@
   paper/live Secret names; this implementation does not guess them or inspect an unknown account.
 - The initial FastAPI ResourceRelease and its first deployment still require repository sync and
   post-webhook verification; workflow validation alone is not deployment proof.
-- The platform injects authenticated request identity and gates the ResourceRelease. A concrete
-  application edit-policy for per-route mutation authorization has not been selected; the code does
-  not invent user/team RBAC rules.
+- The API verifies every caller through the SDK request identity (ADR 0014) and the platform
+  gates the ResourceRelease. A concrete application edit-policy for per-route mutation
+  authorization has not been selected; the code does not invent user/team RBAC rules.

@@ -147,6 +147,17 @@ FastAPI surface:
 - canonical routes are grouped under `/v1/project-state`, `/v1/assets`, `/v1/accounts`,
   `/v1/universe-sources`, `/v1/universes`, `/v1/market-data/bar-configurations`, and
   `/v1/market-data/datasets`, and `/v1/signal-jobs`
+- the API authenticates callers only through the SDK request identity (ADR 0014): `create_app()` in
+  `src/alpaca_connectors/api/app/main.py` calls `mainsequence.server.fastapi.install_request_identity`
+  once, after mounting the routers, and the platform's FastAPI launcher refuses to serve an app
+  without it
+- routes get the caller only from `alpaca_connectors.api.app.identity` (`User.get_logged_user()`);
+  never read identity headers, `request.state` or the process's own SDK user for it, and never add
+  a local, synthetic or header fallback. Every route needs a caller except the routes the workflow
+  declares in `public_ingress` (none); call a local API with
+  `Authorization: Bearer $(mainsequence auth token)`
+- the vendored SDK `api_surfaces` skill still says the platform injects `request.state.user` with
+  no setup; that part is outdated, and the installed `mainsequence.server.fastapi` is authoritative
 
 Project-to-agent boundary:
 

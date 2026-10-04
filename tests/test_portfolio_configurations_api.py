@@ -5,9 +5,6 @@ import uuid
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from fastapi.testclient import TestClient
-
-from alpaca_connectors.api.app.main import app
 from alpaca_connectors.api.app.schemas import (
     ConfigurationJobResponse,
     PortfolioConfigurationDetailResponse,
@@ -231,7 +228,7 @@ def test_portfolio_response_resolves_linked_metatables_with_bulk_uid_queries() -
     rebalances_by_uids.assert_called_once_with([REBALANCE_CONFIGURATION_UID])
 
 
-def test_rebalance_crud_serializes_storage_domain_models() -> None:
+def test_rebalance_crud_serializes_storage_domain_models(api_client) -> None:
     row = rebalance_row()
     request = {
         "name": row.name,
@@ -244,7 +241,7 @@ def test_rebalance_crud_serializes_storage_domain_models() -> None:
         "rebalance_cadence": row.rebalance_cadence,
         "rebalance_weekday": row.rebalance_weekday,
     }
-    client = TestClient(app)
+    client = api_client
 
     with patch(
         "alpaca_connectors.api.app.services.portfolio_configurations.list_rebalance_configurations",
@@ -281,8 +278,8 @@ def test_rebalance_crud_serializes_storage_domain_models() -> None:
     assert listed.json()["items"][0]["uid"] == REBALANCE_CONFIGURATION_UID
 
 
-def test_portfolio_discovery_columns_are_renderable() -> None:
-    result = TestClient(app).get("/v1/portfolio-configurations/discovery")
+def test_portfolio_discovery_columns_are_renderable(api_client) -> None:
+    result = api_client.get("/v1/portfolio-configurations/discovery")
 
     assert result.status_code == 200
     assert [column["id"] for column in result.json()["list"]["columns"]] == [
@@ -302,12 +299,12 @@ def test_portfolio_discovery_columns_are_renderable() -> None:
             assert column.get("value_path") or column.get("data_type")
 
 
-def test_portfolio_create_sends_only_the_scheduled_flag_and_rejects_environment() -> None:
+def test_portfolio_create_sends_only_the_scheduled_flag_and_rejects_environment(api_client) -> None:
     with patch(
         "alpaca_connectors.api.app.routers.portfolio_configurations.create_configuration",
         return_value=response(),
     ) as create:
-        result = TestClient(app).post("/v1/portfolio-configurations", json=create_request())
+        result = api_client.post("/v1/portfolio-configurations", json=create_request())
 
     assert result.status_code == 201
     assert result.json()["job"]["schedule_expression"] == "0 2 * * *"
@@ -320,23 +317,23 @@ def test_portfolio_create_sends_only_the_scheduled_flag_and_rejects_environment(
 
     invalid = create_request()
     invalid["environment_uid"] = "77777777-7777-4777-8777-777777777777"
-    assert TestClient(app).post("/v1/portfolio-configurations", json=invalid).status_code == 422
+    assert api_client.post("/v1/portfolio-configurations", json=invalid).status_code == 422
 
 
-def test_portfolio_create_rejects_unimplemented_rebalance_and_interpolation() -> None:
+def test_portfolio_create_rejects_unimplemented_rebalance_and_interpolation(api_client) -> None:
     invalid_strategy = create_request()
     invalid_strategy["rebalance_strategy"] = "time_weighted"
     invalid_interpolation = create_request()
     invalid_interpolation["intraday_bar_interpolation_rule"] = "linear"
 
-    client = TestClient(app)
+    client = api_client
     assert client.post("/v1/portfolio-configurations", json=invalid_strategy).status_code == 422
     assert (
         client.post("/v1/portfolio-configurations", json=invalid_interpolation).status_code == 422
     )
 
 
-def test_portfolio_run_returns_jobrun_status_url_without_arguments() -> None:
+def test_portfolio_run_returns_jobrun_status_url_without_arguments(api_client) -> None:
     accepted = PortfolioJobRunAcceptedResponse(
         configuration_uid=CONFIGURATION_UID,
         job_uid=JOB_UID,
@@ -348,9 +345,7 @@ def test_portfolio_run_returns_jobrun_status_url_without_arguments() -> None:
         "alpaca_connectors.api.app.routers.portfolio_configurations.run_configuration",
         return_value=accepted,
     ) as run:
-        result = TestClient(app).post(
-            f"/v1/portfolio-configurations/{CONFIGURATION_UID}/actions/run"
-        )
+        result = api_client.post(f"/v1/portfolio-configurations/{CONFIGURATION_UID}/actions/run")
 
     assert result.status_code == 202
     assert result.json()["status_url"] == f"/v1/operations/job-runs/{JOB_RUN_UID}"
@@ -447,7 +442,7 @@ def test_portfolio_detail_resolves_business_labels_and_value_history() -> None:
     assert detail.canonical_portfolio.latest_close == 103.25
 
 
-def test_portfolio_detail_route_loads_latest_100_observations() -> None:
+def test_portfolio_detail_route_loads_latest_100_observations(api_client) -> None:
     detail = PortfolioConfigurationDetailResponse.model_validate(
         {
             **response().model_dump(mode="json"),
@@ -527,7 +522,7 @@ def test_portfolio_detail_route_loads_latest_100_observations() -> None:
         "alpaca_connectors.api.app.routers.portfolio_configurations.get_configuration_detail",
         return_value=detail,
     ) as get_detail:
-        result = TestClient(app).get(
+        result = api_client.get(
             f"/v1/portfolio-configurations/{CONFIGURATION_UID}?observation_limit=100"
         )
 

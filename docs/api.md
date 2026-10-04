@@ -199,9 +199,9 @@ failures. OpenFIGI failures and unmatched symbols are recorded as warnings and d
 operation.
 
 Progress records are persisted in the project-owned
-`alpaca_connectors__asset_registration_operation` MetaTable and scoped to the request-bound user UID
-when the platform supplies one. The existing synchronous plan and execute routes remain available
-for non-interactive callers.
+`alpaca_connectors__asset_registration_operation` MetaTable and belong to the verified caller who
+started them ([Authentication](#authentication)); polling another caller's operation answers 404.
+The existing synchronous plan and execute routes remain available for non-interactive callers.
 
 The record is durable, but execution currently runs as a FastAPI background task rather than a
 platform Job. A process termination can therefore leave an accepted operation in `queued` or
@@ -233,10 +233,57 @@ Alpaca rejecting the keys returns `400 alpaca_credentials_rejected` without prov
 `GET /v1/accounts/secret-references` returns only Main Sequence Secret names visible to the API
 runtime, for clients that use the `external` shape. It never serializes Secret values.
 
-In a deployed release, Main Sequence injects the authenticated human as `request.state.user` and
-`request.state.user_uid`. There is no `request.state.user_id`, local SDK identity middleware, or
-trusted browser user UID. Governed MetaTable operations declare read/write scope; the Resource
-Release is the deployed application access boundary.
+Create and rotate record the verified caller ([Authentication](#authentication)) as
+`credentials_updated_by_user_uid`. Calls the API makes to Main Sequence, the Secret writes
+included, run as the API's runtime principal. There is no trusted browser user UID. Governed
+MetaTable operations declare read/write scope; the Resource Release is the deployed application
+access boundary.
+
+## Authentication
+
+`create_app()` in `src/alpaca_connectors/api/app/main.py` builds the application and calls
+`mainsequence.server.fastapi.install_request_identity(app)` once; `api/app/main.py` re-exports the
+`app` it creates ([ADR 0014](adrs/0014_sdk_request_identity.md)). The platform's FastAPI launcher
+(PodDeploymentOrchestrator since `3057764`) serves an application only when
+`app.state.mainsequence_request_identity` declares that installation with the deployment's caller
+mode and public routes. Without it every new revision fails at startup with
+`Application request identity is not installed`, and the previous revision keeps serving.
+
+Every route needs an authenticated caller, `/health`, `/openapi.json` and `/docs` included. The
+workflow declares no `public_ingress`, so the deployment's `FASTAPI_PUBLIC_INGRESS` is empty and no
+route admits an anonymous request. Hosted readiness is the launcher's own `/ms-health-deployment`,
+which never reaches the application.
+
+| Where | Caller proof | Rejected |
+| --- | --- | --- |
+| Hosted | The platform-signed caller assertion (`X-MainSequence-Caller-Assertion`) that the gateway forwards, verified against the release, Environment, issuer and key URL the backend sets on the deployment | 401 for a missing, invalid, expired or foreign assertion; 503 while the caller keys cannot be fetched |
+| Local, without deployment markers | `Authorization: Bearer <token>`, checked against `MAINSEQUENCE_ENDPOINT/api/v1/users/me/` | 401 for a missing or rejected token; 503 when the backend fails or `MAINSEQUENCE_ENDPOINT` is unset |
+
+`X-User-UID` alone never names a caller, and `X-User-ID` is rejected. Routes read the caller only
+through `alpaca_connectors.api.app.identity`, which calls `User.get_logged_user()`; they never read
+identity headers, `request.state` or the process's own SDK user. The caller decides:
+
+- the credential author recorded when an account is created or its credentials rotated;
+- the owner of an asset-registration operation, the only caller who can poll it;
+- `request_user_uid` in `GET /v1/project-state/configuration`;
+- the discovery `ETag`, which differs per caller.
+
+The identity says who called, not what the caller may do: any authenticated caller may use every
+route. The CORS middleware that `ALPACA_CONNECTORS_CORS_ORIGINS` configures wraps the identity, as
+the launcher's own CORS does in a deployment. Preflights therefore need no caller, and an allowed
+origin can read a 401.
+
+Call a local API with the session of `mainsequence login`, giving the API and the CLI the same
+development backend (for example `MAINSEQUENCE_ENDPOINT=http://127.0.0.1:8000`, the value the
+repository `.env` holds):
+
+```bash
+curl -H "Authorization: Bearer $(.venv/bin/mainsequence auth token)" http://127.0.0.1:8321/health
+```
+
+The token is short-lived; request a new one when calls start answering 401. The static site's
+standalone development mode sends no token, so it gets 401 from a local API until the site sends
+one.
 
 ## Deployment
 
@@ -245,5 +292,7 @@ automatic deployment, revision retention, and the platform-provided static-site 
 workflow is validated through the branch-owned backend validator.
 
 ```bash
-uv run uvicorn alpaca_connectors.api.app.main:app --reload
+uv run uvicorn alpaca_connectors.api.app.main:app --port 8321 --reload
 ```
+
+Every request to the local API needs a Bearer token; see [Authentication](#authentication).

@@ -3,9 +3,6 @@ from __future__ import annotations
 import datetime as dt
 from unittest.mock import patch
 
-from fastapi.testclient import TestClient
-
-from alpaca_connectors.api.app.main import app
 from alpaca_connectors.api.app.schemas import (
     ConfigurationJobResponse,
     SignalJobConfigurationResponse,
@@ -67,8 +64,8 @@ def create_request() -> dict:
     }
 
 
-def test_signal_discovery_columns_match_the_local_renderer_contract() -> None:
-    result = TestClient(app).get("/v1/signal-jobs/discovery")
+def test_signal_discovery_columns_match_the_local_renderer_contract(api_client) -> None:
+    result = api_client.get("/v1/signal-jobs/discovery")
 
     assert result.status_code == 200
     columns = result.json()["list"]["columns"]
@@ -87,12 +84,12 @@ def test_signal_discovery_columns_match_the_local_renderer_contract() -> None:
     assert result.json()["list"]["controls"]["ordering"] == ["name", "updated_at"]
 
 
-def test_signal_create_forwards_configuration_without_an_environment_selector() -> None:
+def test_signal_create_forwards_configuration_without_an_environment_selector(api_client) -> None:
     with patch(
         "alpaca_connectors.api.app.routers.signal_jobs.create_configuration",
         return_value=response(),
     ) as create:
-        result = TestClient(app).post("/v1/signal-jobs", json=create_request())
+        result = api_client.post("/v1/signal-jobs", json=create_request())
 
     assert result.status_code == 201
     assert result.json()["job_uid"] == JOB_UID
@@ -105,32 +102,32 @@ def test_signal_create_forwards_configuration_without_an_environment_selector() 
     assert request.scheduled is True
 
 
-def test_signal_list_filters_on_the_scheduled_flag() -> None:
+def test_signal_list_filters_on_the_scheduled_flag(api_client) -> None:
     from alpaca_connectors.api.app.services.common import collection_response
 
     with patch(
         "alpaca_connectors.api.app.routers.signal_jobs.list_configurations",
         return_value=collection_response(items=[], total=0, limit=25, offset=0),
     ) as list_configurations:
-        result = TestClient(app).get("/v1/signal-jobs?scheduled=false&ordering=-updated_at")
+        result = api_client.get("/v1/signal-jobs?scheduled=false&ordering=-updated_at")
 
     assert result.status_code == 200
     list_configurations.assert_called_once_with(
         limit=25, offset=0, search=None, scheduled=False, ordering="-updated_at"
     )
-    assert TestClient(app).get("/v1/signal-jobs?ordering=lifecycle_state").status_code == 400
+    assert api_client.get("/v1/signal-jobs?ordering=lifecycle_state").status_code == 400
 
 
-def test_signal_create_rejects_a_caller_supplied_environment() -> None:
+def test_signal_create_rejects_a_caller_supplied_environment(api_client) -> None:
     request = create_request()
     request["environment_uid"] = ENVIRONMENT_UID
 
-    result = TestClient(app).post("/v1/signal-jobs", json=request)
+    result = api_client.post("/v1/signal-jobs", json=request)
 
     assert result.status_code == 422
 
 
-def test_signal_run_returns_the_accepted_job_run() -> None:
+def test_signal_run_returns_the_accepted_job_run(api_client) -> None:
     accepted = SignalJobRunAcceptedResponse(
         configuration_uid=CONFIGURATION_UID,
         job_uid=JOB_UID,
@@ -142,7 +139,7 @@ def test_signal_run_returns_the_accepted_job_run() -> None:
         "alpaca_connectors.api.app.routers.signal_jobs.run_configuration",
         return_value=accepted,
     ) as run:
-        result = TestClient(app).post(
+        result = api_client.post(
             f"/v1/signal-jobs/{CONFIGURATION_UID}/actions/run",
         )
 
@@ -151,7 +148,7 @@ def test_signal_run_returns_the_accepted_job_run() -> None:
     run.assert_called_once_with(CONFIGURATION_UID)
 
 
-def test_signal_observations_are_loaded_on_demand_with_the_default_limit() -> None:
+def test_signal_observations_are_loaded_on_demand_with_the_default_limit(api_client) -> None:
     observed_at = dt.datetime(2026, 9, 4, 14, tzinfo=dt.UTC)
     observations = SignalObservationsResponse(
         configuration_uid=CONFIGURATION_UID,
@@ -172,7 +169,7 @@ def test_signal_observations_are_loaded_on_demand_with_the_default_limit() -> No
         "alpaca_connectors.api.app.routers.signal_jobs.get_configuration_observations",
         return_value=observations,
     ) as get_observations:
-        result = TestClient(app).get(
+        result = api_client.get(
             f"/v1/signal-jobs/{CONFIGURATION_UID}/observations",
         )
 
@@ -183,8 +180,8 @@ def test_signal_observations_are_loaded_on_demand_with_the_default_limit() -> No
     get_observations.assert_called_once_with(CONFIGURATION_UID, limit=100)
 
 
-def test_signal_observation_limit_is_bounded() -> None:
-    result = TestClient(app).get(
+def test_signal_observation_limit_is_bounded(api_client) -> None:
+    result = api_client.get(
         f"/v1/signal-jobs/{CONFIGURATION_UID}/observations?limit=101",
     )
 

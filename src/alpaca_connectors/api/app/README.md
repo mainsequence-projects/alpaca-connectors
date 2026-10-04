@@ -9,13 +9,19 @@ contracts derive from `msm.api.http`; route-facing response shaping lives in `se
 extraction, MetaTable writes, account transformation, source resolution, and DataNode execution
 remain in the reusable `alpaca_connectors` modules.
 
-Main Sequence injects `request.state.user` and `request.state.user_uid` in deployed requests. The
-application does not accept a browser-supplied user identity and does not install SDK middleware.
+`main.py` builds the application in `create_app()`, which installs the Main Sequence request
+identity once (`mainsequence.server.fastapi.install_request_identity`); the platform's FastAPI
+launcher refuses to serve an application without it. Every route needs a verified caller: the
+platform-signed caller assertion when hosted, a direct Bearer token checked against
+`MAINSEQUENCE_ENDPOINT` locally. Routes read the caller only through `identity.py`
+(`User.get_logged_user()`), never from `request.state` or a header. See
+[ADR 0014](../../../../docs/adrs/0014_sdk_request_identity.md).
 
-Run locally:
+Run locally, then call it with a token from the same backend:
 
 ```bash
-uv run uvicorn alpaca_connectors.api.app.main:app --reload
+uv run uvicorn alpaca_connectors.api.app.main:app --port 8321 --reload
+curl -H "Authorization: Bearer $(.venv/bin/mainsequence auth token)" http://127.0.0.1:8321/health
 ```
 
 Deployment is declared in `.mainsequence/workflows/alpaca-connectors-api.yaml`.

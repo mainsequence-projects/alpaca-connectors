@@ -18,7 +18,8 @@ the secret key ([ADR 0011](../adrs/0011_api_managed_alpaca_credential_secrets.md
 stores, per Secret, its UID and display name, plus:
 
 - `credential_source`: `managed` or `external`;
-- `credentials_updated_at` and `credentials_updated_by_user_uid`;
+- `credentials_updated_at` and `credentials_updated_by_user_uid`: when the credentials last
+  changed and the API caller who changed them, null for CLI and Tau writes;
 - a non-reversible API-key fingerprint, which no response exposes.
 
 **Managed** credentials come from the static site. The user types both keys; the API checks them

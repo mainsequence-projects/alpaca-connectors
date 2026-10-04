@@ -189,6 +189,13 @@ The API exposes `/v1/accounts`, account holdings, `/v1/assets`, `/v1/universe-so
 `/v1/portfolio-rebalance-configurations`, `/v1/operations/job-runs/{job_run_uid}`, and
 `/v1/project-state`. Collections use
 authoritative `pageInfo`; selectable collections have separate resource-discovery endpoints.
-Main Sequence injects the authenticated request identity in deployed FastAPI requests.
+
+Every request needs a verified caller, `/health` included: the platform-signed caller assertion
+when hosted, a direct Bearer token checked against `MAINSEQUENCE_ENDPOINT` locally. `create_app()`
+installs the Main Sequence request identity that does this once; the platform's FastAPI launcher
+refuses an app without it. Give the API and the CLI the same development backend and call a local
+API as `curl -H "Authorization: Bearer $(.venv/bin/mainsequence auth token)" http://127.0.0.1:8321/health`.
+See [ADR 0014](docs/adrs/0014_sdk_request_identity.md) and
+[Authentication](docs/api.md#authentication).
 
 See [the documentation map](docs/SUMMARY.md) and [API reference](docs/api.md).
