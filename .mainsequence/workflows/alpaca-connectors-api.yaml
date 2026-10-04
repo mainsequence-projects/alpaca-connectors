@@ -28,6 +28,49 @@ resources:
     automatic_redeployment:
       enabled: true
       tag_regex: null
+# One shared Job per configuration kind (ADR 0013). The API starts a manual run with
+# `--configuration-uid <uid>`; the scheduled run (`--scheduled`) starts one such run for every
+# configuration whose scheduled flag is set. No step references them, so a push promotes their
+# image without waiting for the migration; their launchers' schema gate (ADR 0012) covers that gap.
+# A push re-applies the declared schedule. Both run after the 00:00 UTC daily bars Job.
+- key: alpaca-etf-signal
+  kind: job
+  spec:
+    name: Alpaca ETF Signal
+    description: Run one ETF signal configuration (--configuration-uid) or start a run per scheduled one (--scheduled).
+    execution_path: src/jobs/run_alpaca_etf_signal.py
+    cpu_request: '0.25'
+    memory_request: '0.5'
+    max_runtime_seconds: 3600
+    spot: false
+    task_schedule:
+      schedule:
+        type: crontab
+        expression: '30 0 * * *'
+        timezone: UTC
+    scheduled_command_args: ['--scheduled']
+    automatic_redeployment:
+      enabled: true
+      tag_regex: null
+- key: alpaca-etf-portfolio
+  kind: job
+  spec:
+    name: Alpaca ETF Portfolio
+    description: Run one ETF portfolio configuration (--configuration-uid) or start a run per scheduled one (--scheduled).
+    execution_path: src/jobs/run_alpaca_etf_portfolio.py
+    cpu_request: '0.25'
+    memory_request: '0.5'
+    max_runtime_seconds: 3600
+    spot: false
+    task_schedule:
+      schedule:
+        type: crontab
+        expression: '0 2 * * *'
+        timezone: UTC
+    scheduled_command_args: ['--scheduled']
+    automatic_redeployment:
+      enabled: true
+      tag_regex: null
 execution:
   steps:
     image:

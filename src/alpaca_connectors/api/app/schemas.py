@@ -494,74 +494,95 @@ class BarConfigurationUpdateAcceptedResponse(BaseModel):
     poll_after_ms: int = 1000
 
 
-class SignalJobConfigurationCreateRequest(BaseModel):
-    """Create one durable signal configuration and its dedicated platform Job."""
+CONFIGURATION_JOBS_WORKFLOW_PATH = ".mainsequence/workflows/alpaca-connectors-api.yaml"
+WORKFLOW_OWNED_JOB_SETTINGS = (
+    f"Job schedule and compute are declared in {CONFIGURATION_JOBS_WORKFLOW_PATH} (ADR 0013); "
+    "`scheduled` decides whether the Job's scheduled run includes this configuration."
+)
+# Settings of the former one-Job-per-configuration design: nested `job` (portfolios) and the
+# flat schedule and compute fields (signals).
+RETIRED_JOB_SETTING_FIELDS = frozenset(
+    {
+        "job",
+        "schedule_type",
+        "schedule_every",
+        "schedule_period",
+        "schedule_expression",
+        "schedule_timezone",
+        "schedule_start_time",
+        "cpu_request",
+        "memory_request",
+        "max_runtime_seconds",
+        "spot",
+    }
+)
+
+
+class _ConfigurationRequest(BaseModel):
+    """Reject the retired per-configuration Job settings with a message naming the workflow."""
 
     model_config = ConfigDict(extra="forbid")
+
+    @model_validator(mode="before")
+    @classmethod
+    def reject_job_settings(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            retired = sorted(RETIRED_JOB_SETTING_FIELDS.intersection(data))
+            if retired:
+                raise ValueError(f"{', '.join(retired)}: {WORKFLOW_OWNED_JOB_SETTINGS}")
+            if "enabled" in data:
+                raise ValueError(f"`enabled` is now `scheduled`. {WORKFLOW_OWNED_JOB_SETTINGS}")
+        return data
+
+
+class SignalJobConfigurationCreateRequest(_ConfigurationRequest):
+    """Create one durable signal configuration; the shared signal Job runs it."""
 
     name: str = Field(min_length=1, max_length=255)
     description: str | None = None
     universe_uid: str = Field(min_length=1)
     account_uid: str = Field(min_length=1)
-    enabled: bool = True
-    schedule_type: Literal["interval", "crontab"]
-    schedule_every: int | None = Field(default=None, gt=0)
-    schedule_period: Literal["seconds", "minutes", "hours", "days"] | None = None
-    schedule_expression: str | None = Field(default=None, max_length=128)
-    schedule_timezone: str | None = Field(default=None, min_length=1, max_length=64)
-    schedule_start_time: dt.datetime | None = None
-    cpu_request: str = "0.25"
-    memory_request: str = "0.5"
-    max_runtime_seconds: int = Field(default=3600, gt=0)
-    spot: bool = False
-
-    @model_validator(mode="after")
-    def validate_schedule_shape(self) -> "SignalJobConfigurationCreateRequest":
-        if self.schedule_type == "interval":
-            if self.schedule_every is None or self.schedule_period is None:
-                raise ValueError("interval schedule requires schedule_every and schedule_period.")
-            if self.schedule_expression is not None:
-                raise ValueError("interval schedule forbids schedule_expression.")
-            if self.schedule_timezone is not None:
-                raise ValueError("interval schedule forbids schedule_timezone.")
-        elif (
-            not self.schedule_expression
-            or self.schedule_every is not None
-            or self.schedule_period is not None
-        ):
-            raise ValueError(
-                "crontab schedule requires schedule_expression and forbids interval fields."
-            )
-        return self
+    scheduled: bool = True
 
 
-class SignalJobConfigurationUpdateRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
+class SignalJobConfigurationUpdateRequest(_ConfigurationRequest):
     name: str | None = Field(default=None, min_length=1, max_length=255)
     description: str | None = None
     universe_uid: str | None = None
     account_uid: str | None = None
-    enabled: bool | None = None
-    schedule_type: Literal["interval", "crontab"] | None = None
-    schedule_every: int | None = Field(default=None, gt=0)
-    schedule_period: Literal["seconds", "minutes", "hours", "days"] | None = None
-    schedule_expression: str | None = Field(default=None, max_length=128)
-    schedule_timezone: str | None = Field(default=None, min_length=1, max_length=64)
-    schedule_start_time: dt.datetime | None = None
-    cpu_request: str | None = None
-    memory_request: str | None = None
-    max_runtime_seconds: int | None = Field(default=None, gt=0)
-    spot: bool | None = None
+    scheduled: bool | None = None
 
     @model_validator(mode="after")
     def require_change(self) -> "SignalJobConfigurationUpdateRequest":
         if not self.model_fields_set:
-            raise ValueError("At least one signal Job configuration field must be provided.")
+            raise ValueError("At least one signal configuration field must be provided.")
         return self
 
 
+class ConfigurationJobResponse(BaseModel):
+    """The workflow-declared Job that runs every configuration of one kind (ADR 0013)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    uid: str
+    schedule_type: Literal["interval", "crontab"] | None
+    schedule_every: int | None
+    schedule_period: Literal["seconds", "minutes", "hours", "days"] | None
+    schedule_expression: str | None
+    schedule_timezone: str | None
+    schedule_timezone_explicit: bool | None
+    schedule_start_time: dt.datetime | None
+    cpu_request: str | None
+    memory_request: str | None
+    max_runtime_seconds: int | None
+    spot: bool
+    image_status: str | None
+    automatic_deployment: bool
+
+
 class SignalJobConfigurationResponse(BaseModel):
+    """A signal configuration and the shared signal Job; both Job fields are null before a push."""
+
     model_config = ConfigDict(extra="forbid")
 
     uid: str
@@ -570,22 +591,10 @@ class SignalJobConfigurationResponse(BaseModel):
     signal_uid: str
     universe_uid: str
     account_uid: str
+    scheduled: bool
     job_uid: str | None
-    enabled: bool
-    schedule_type: Literal["interval", "crontab"]
-    schedule_every: int | None
-    schedule_period: Literal["seconds", "minutes", "hours", "days"] | None
-    schedule_expression: str | None
-    schedule_timezone: str | None
-    schedule_start_time: dt.datetime | None
-    cpu_request: str
-    memory_request: str
-    max_runtime_seconds: int
-    spot: bool
-    lifecycle_state: Literal["provisioning", "ready", "paused", "error", "deleting"]
-    last_error: str | None
-    job_image_status: str | None = None
-    job_automatic_deployment: bool | None = None
+    job: ConfigurationJobResponse | None
+    lifecycle_state: Literal["provisioning", "ready", "paused"]
     latest_run_status: str | None = None
     latest_run_at: dt.datetime | None = None
     created_at: dt.datetime
@@ -615,17 +624,21 @@ class SignalObservationsResponse(BaseModel):
 
 
 class SignalJobRunResponse(BaseModel):
+    """One run of the shared Job; ``command_args`` select its configuration."""
+
     model_config = ConfigDict(extra="forbid")
 
     uid: str
     job_uid: str
     job_name: str
+    configuration_uid: str | None
     status: str
     execution_start: dt.datetime | None
     execution_end: dt.datetime | None
     commit_hash: str | None
     runtime_image_uid: str | None
     runtime_image_digest: str | None
+    command_args: list[str]
     logs_url: str | None
     failure_message: str | None
 
@@ -703,44 +716,8 @@ class PortfolioRebalanceConfigurationResponse(BaseModel):
     updated_at: dt.datetime
 
 
-class PortfolioJobSettingsRequest(BaseModel):
-    """Operational settings written directly to the Main Sequence Job."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    schedule_type: Literal["interval", "crontab"]
-    schedule_every: int | None = Field(default=None, gt=0)
-    schedule_period: Literal["seconds", "minutes", "hours", "days"] | None = None
-    schedule_expression: str | None = Field(default=None, max_length=128)
-    schedule_timezone: str | None = Field(default=None, min_length=1, max_length=64)
-    schedule_start_time: dt.datetime | None = None
-    cpu_request: str = "0.25"
-    memory_request: str = "0.5"
-    max_runtime_seconds: int = Field(default=3600, gt=0)
-    spot: bool = False
-
-    @model_validator(mode="after")
-    def validate_schedule_shape(self) -> "PortfolioJobSettingsRequest":
-        if self.schedule_type == "interval":
-            if self.schedule_every is None or self.schedule_period is None:
-                raise ValueError("interval schedule requires schedule_every and schedule_period.")
-            if self.schedule_expression is not None:
-                raise ValueError("interval schedule forbids schedule_expression.")
-            if self.schedule_timezone is not None:
-                raise ValueError("interval schedule forbids schedule_timezone.")
-        elif (
-            not self.schedule_expression
-            or self.schedule_every is not None
-            or self.schedule_period is not None
-        ):
-            raise ValueError(
-                "crontab schedule requires schedule_expression and forbids interval fields."
-            )
-        return self
-
-
-class PortfolioConfigurationCreateRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+class PortfolioConfigurationCreateRequest(_ConfigurationRequest):
+    """Create one durable portfolio configuration; the shared portfolio Job runs it."""
 
     name: str = Field(min_length=1, max_length=255)
     description: str | None = None
@@ -760,12 +737,10 @@ class PortfolioConfigurationCreateRequest(BaseModel):
     )
     fail_on_missing_prices: bool = True
     commission_fee: float = Field(default=0.00018, ge=0)
-    job: PortfolioJobSettingsRequest
+    scheduled: bool = True
 
 
-class PortfolioConfigurationUpdateRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
+class PortfolioConfigurationUpdateRequest(_ConfigurationRequest):
     name: str | None = Field(default=None, min_length=1, max_length=255)
     description: str | None = None
     signal_configuration_uid: str | None = None
@@ -777,7 +752,7 @@ class PortfolioConfigurationUpdateRequest(BaseModel):
     valuation_maximum_staleness_seconds: int | None = Field(default=None, gt=0)
     fail_on_missing_prices: bool | None = None
     commission_fee: float | None = Field(default=None, ge=0)
-    job: PortfolioJobSettingsRequest | None = None
+    scheduled: bool | None = None
 
     @model_validator(mode="after")
     def require_change(self) -> "PortfolioConfigurationUpdateRequest":
@@ -786,26 +761,9 @@ class PortfolioConfigurationUpdateRequest(BaseModel):
         return self
 
 
-class PortfolioJobResponse(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    uid: str
-    schedule_type: Literal["interval", "crontab"] | None
-    schedule_every: int | None
-    schedule_period: Literal["seconds", "minutes", "hours", "days"] | None
-    schedule_expression: str | None
-    schedule_timezone: str | None
-    schedule_timezone_explicit: bool | None
-    schedule_start_time: dt.datetime | None
-    cpu_request: str | None
-    memory_request: str | None
-    max_runtime_seconds: int | None
-    spot: bool
-    image_status: str | None
-    automatic_deployment: bool
-
-
 class PortfolioConfigurationResponse(BaseModel):
+    """A portfolio configuration and the shared portfolio Job; both are null before a push."""
+
     model_config = ConfigDict(extra="forbid")
 
     uid: str
@@ -817,6 +775,7 @@ class PortfolioConfigurationResponse(BaseModel):
     rebalance_configuration_uid: str
     rebalance_strategy: Literal["calendar_event_signal"]
     portfolio_uid: str | None
+    scheduled: bool
     job_uid: str | None
     upsample_frequency_id: Literal["1d"]
     intraday_bar_interpolation_rule: Literal["ffill"]
@@ -824,7 +783,7 @@ class PortfolioConfigurationResponse(BaseModel):
     valuation_maximum_staleness_seconds: int
     fail_on_missing_prices: bool
     commission_fee: float
-    job: PortfolioJobResponse | None
+    job: ConfigurationJobResponse | None
     latest_run_status: str | None = None
     latest_run_at: dt.datetime | None = None
     created_at: dt.datetime
@@ -836,7 +795,7 @@ class PortfolioLinkedSignalResponse(BaseModel):
 
     name: str
     description: str | None
-    enabled: bool
+    scheduled: bool
     universe_name: str
     universe_symbol: str
     account_name: str

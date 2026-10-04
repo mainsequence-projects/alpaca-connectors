@@ -1,7 +1,16 @@
-"""Durable desired state for Universe-backed Alpaca ETF signal Jobs.
+"""Durable Universe-backed Alpaca ETF signal configurations.
 
-One row is one signal update configuration and projects to exactly one Main Sequence Job.
-The Job may create many JobRuns, but JobRuns never carry the business configuration.
+One row is one signal update configuration: its Universe, its runtime Alpaca account, and one
+operational flag. The flag is stored in the ``enabled`` column and exposed as ``scheduled``: it
+decides whether the scheduled run of the signal Job declared in
+``.mainsequence/workflows/alpaca-connectors-api.yaml`` includes the configuration (ADR 0013). The
+Job owns schedule, compute and image; JobRuns own execution state and never carry the business
+configuration.
+
+Revision 0009 created this table for the former one-Job-per-configuration design (ADR 0007), so it
+still has NOT NULL schedule, compute and lifecycle columns plus the ``job_uid`` link. Nothing reads
+them any more. Until a later revision drops them, a new row fills them with placeholders that keep
+revision 0009's constraints and the previous release's row model satisfied.
 """
 
 from __future__ import annotations
@@ -9,8 +18,7 @@ from __future__ import annotations
 import datetime as dt
 import uuid
 from collections.abc import Sequence
-from typing import Any, ClassVar, Literal
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+from typing import Any, ClassVar
 
 from msm.api.base import MarketsMetaTableRow, operation_result_rows
 from msm.base import MarketsBase, markets_table_args, new_markets_uid
@@ -32,28 +40,23 @@ from sqlalchemy.types import Uuid
 from alpaca_connectors.metatables import AlpacaMarketsMetaTableMixin, ProjectStorageNameMixin
 from alpaca_connectors.universes.registry import AssetUniverseTable
 
-ScheduleType = Literal["interval", "crontab"]
-SchedulePeriod = Literal["seconds", "minutes", "hours", "days"]
-LifecycleState = Literal["provisioning", "ready", "paused", "error", "deleting"]
-
-SCHEDULE_TYPES: tuple[ScheduleType, ...] = ("interval", "crontab")
-SCHEDULE_PERIODS: tuple[SchedulePeriod, ...] = ("seconds", "minutes", "hours", "days")
-LIFECYCLE_STATES: tuple[LifecycleState, ...] = (
-    "provisioning",
-    "ready",
-    "paused",
-    "error",
-    "deleting",
-)
 UTC = dt.timezone.utc
-_UNSET = object()
-_CRONTAB_FIELD_LIMITS = (
-    ("minute", 0, 59),
-    ("hour", 0, 23),
-    ("day of month", 1, 31),
-    ("month", 1, 12),
-    ("day of week", 0, 7),
-)
+
+# Insert-only values for the NOT NULL columns of the former one-Job-per-configuration design
+# (ADR 0007): the former API defaults (a daily interval, 0.25 CPU, 0.5 GiB, 3600 seconds, no spot)
+# and the state revision-0009 code gave a row before it linked a Job. `job_uid` and the other
+# nullable retired columns stay NULL. Nothing reads any of them.
+RETIRED_JOB_COLUMN_VALUES: dict[str, Any] = {
+    "schedule_type": "interval",
+    "schedule_every": 1,
+    "schedule_period": "days",
+    "cpu_request": "0.25",
+    "memory_request": "0.5",
+    "max_runtime_seconds": 3600,
+    "spot": False,
+    "lifecycle_state": "provisioning",
+}
+_RETIRED = "Retired with the one-Job-per-configuration design (ADR 0013); never read."
 
 
 def utc_now() -> dt.datetime:
@@ -65,14 +68,14 @@ class AlpacaETFSignalJobConfigurationTable(
     AlpacaMarketsMetaTableMixin,
     MarketsBase,
 ):
-    """Desired business and operational state for one signal Job."""
+    """Business configuration and scheduled-run flag of one ETF weight signal."""
 
     __project_storage_concept__ = "etf_signal_job_configuration"
     __markets_base_identifier__ = "AlpacaETFSignalJobConfiguration"
     __metatable_description__ = (
-        "Durable configurations for Universe-backed Alpaca ETF signal Jobs. Each row links one "
-        "Universe and one registered Alpaca account to exactly one Main Sequence Job; JobRuns "
-        "resolve this row through their owning Job UID."
+        "Durable configurations for Universe-backed Alpaca ETF weight signals. Each row links one "
+        "Universe and one registered Alpaca account. The signal Job declared in the repository "
+        "workflow runs them; JobRuns select a row with their --configuration-uid argument."
     )
     __table_args__ = markets_table_args(
         "AlpacaETFSignalJobConfiguration",
@@ -118,7 +121,7 @@ class AlpacaETFSignalJobConfigurationTable(
     name: Mapped[str] = mapped_column(
         String(255),
         nullable=False,
-        info={"label": "Name", "description": "User-facing signal Job name."},
+        info={"label": "Name", "description": "User-facing signal configuration name."},
     )
     description: Mapped[str | None] = mapped_column(
         Text,
@@ -149,91 +152,79 @@ class AlpacaETFSignalJobConfigurationTable(
     job_uid: Mapped[uuid.UUID | None] = mapped_column(
         Uuid(as_uuid=True),
         nullable=True,
-        info={
-            "label": "Job UID",
-            "description": "Main Sequence Job projected from this desired configuration.",
-        },
+        info={"label": "Job UID", "description": _RETIRED},
     )
     enabled: Mapped[bool] = mapped_column(
         Boolean,
         nullable=False,
         default=True,
         info={
-            "label": "Enabled",
-            "description": "Whether the Job schedule and manual Run action are enabled.",
+            "label": "Scheduled",
+            "description": (
+                "Whether the scheduled run of the shared signal Job includes this configuration."
+            ),
         },
     )
     schedule_type: Mapped[str] = mapped_column(
         String(16),
         nullable=False,
-        info={"label": "Schedule Type", "description": "interval or crontab."},
+        info={"label": "Schedule Type", "description": _RETIRED},
     )
     schedule_every: Mapped[int | None] = mapped_column(
         Integer,
         nullable=True,
-        info={"label": "Every", "description": "Positive interval quantity."},
+        info={"label": "Every", "description": _RETIRED},
     )
     schedule_period: Mapped[str | None] = mapped_column(
         String(16),
         nullable=True,
-        info={"label": "Period", "description": "Interval unit."},
+        info={"label": "Period", "description": _RETIRED},
     )
     schedule_expression: Mapped[str | None] = mapped_column(
         String(128),
         nullable=True,
-        info={"label": "Cron Expression", "description": "Five-field crontab expression."},
+        info={"label": "Cron Expression", "description": _RETIRED},
     )
     schedule_timezone: Mapped[str | None] = mapped_column(
         String(64),
         nullable=True,
-        info={
-            "label": "Schedule Timezone",
-            "description": (
-                "IANA timezone used to evaluate a crontab schedule; null for intervals."
-            ),
-        },
+        info={"label": "Schedule Timezone", "description": _RETIRED},
     )
     schedule_start_time: Mapped[dt.datetime | None] = mapped_column(
         DateTime(timezone=True),
         nullable=True,
-        info={"label": "Starts At", "description": "Optional UTC schedule activation time."},
+        info={"label": "Starts At", "description": _RETIRED},
     )
     cpu_request: Mapped[str] = mapped_column(
         String(16),
         nullable=False,
-        info={"label": "CPU", "description": "Requested vCPU units."},
+        info={"label": "CPU", "description": _RETIRED},
     )
     memory_request: Mapped[str] = mapped_column(
         String(16),
         nullable=False,
-        info={"label": "Memory", "description": "Requested GiB units."},
+        info={"label": "Memory", "description": _RETIRED},
     )
     max_runtime_seconds: Mapped[int] = mapped_column(
         Integer,
         nullable=False,
-        info={"label": "Maximum Runtime", "description": "Run timeout in seconds."},
+        info={"label": "Maximum Runtime", "description": _RETIRED},
     )
     spot: Mapped[bool] = mapped_column(
         Boolean,
         nullable=False,
         default=False,
-        info={"label": "Spot", "description": "Whether the Job prefers spot capacity."},
+        info={"label": "Spot", "description": _RETIRED},
     )
     lifecycle_state: Mapped[str] = mapped_column(
         String(16),
         nullable=False,
-        info={
-            "label": "Lifecycle State",
-            "description": "Projection state: provisioning, ready, paused, error, or deleting.",
-        },
+        info={"label": "Lifecycle State", "description": _RETIRED},
     )
     last_error: Mapped[str | None] = mapped_column(
         Text,
         nullable=True,
-        info={
-            "label": "Last Error",
-            "description": "Sanitized reconciliation failure; never provider credentials.",
-        },
+        info={"label": "Last Error", "description": _RETIRED},
     )
     created_at: Mapped[dt.datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=utc_now
@@ -244,7 +235,7 @@ class AlpacaETFSignalJobConfigurationTable(
 
 
 class AlpacaETFSignalJobConfiguration(MarketsMetaTableRow):
-    """Typed row for one signal Job configuration."""
+    """Typed row for one signal configuration; the retired Job columns are not read."""
 
     model_config = ConfigDict(extra="ignore", frozen=True)
 
@@ -261,30 +252,22 @@ class AlpacaETFSignalJobConfiguration(MarketsMetaTableRow):
     description: str | None
     universe_uid: uuid.UUID
     account_uid: uuid.UUID
-    job_uid: uuid.UUID | None
     enabled: bool
-    schedule_type: ScheduleType
-    schedule_every: int | None
-    schedule_period: SchedulePeriod | None
-    schedule_expression: str | None
-    schedule_timezone: str | None
-    schedule_start_time: dt.datetime | None
-    cpu_request: str
-    memory_request: str
-    max_runtime_seconds: int
-    spot: bool
-    lifecycle_state: LifecycleState
-    last_error: str | None
     created_at: dt.datetime
     updated_at: dt.datetime
+
+    @property
+    def scheduled(self) -> bool:
+        """Whether the shared signal Job's scheduled run includes this configuration."""
+        return self.enabled
 
 
 def _normalize_name(value: str) -> str:
     normalized = str(value or "").strip()
     if not normalized:
-        raise ValueError("Signal Job configuration name must not be empty.")
+        raise ValueError("Signal configuration name must not be empty.")
     if len(normalized) > 255:
-        raise ValueError("Signal Job configuration name must be at most 255 characters.")
+        raise ValueError("Signal configuration name must be at most 255 characters.")
     return normalized
 
 
@@ -293,122 +276,6 @@ def _normalize_description(value: str | None) -> str | None:
         return None
     normalized = value.strip()
     return normalized or None
-
-
-def _validate_crontab_field(
-    value: str,
-    *,
-    label: str,
-    minimum: int,
-    maximum: int,
-) -> None:
-    """Validate the numeric five-field syntax supported by the Signal schedule UI."""
-    for part in value.split(","):
-        range_part, separator, step_part = part.partition("/")
-        if separator:
-            if not step_part.isdigit() or int(step_part) < 1 or "/" in step_part:
-                raise ValueError(f"Invalid crontab {label} step {step_part!r}.")
-        if range_part == "*":
-            continue
-        bounds = range_part.split("-")
-        if len(bounds) > 2 or any(not bound.isdigit() for bound in bounds):
-            raise ValueError(f"Invalid crontab {label} field {value!r}.")
-        numbers = [int(bound) for bound in bounds]
-        if any(number < minimum or number > maximum for number in numbers):
-            raise ValueError(f"Crontab {label} must stay between {minimum} and {maximum}.")
-        if len(numbers) == 2 and numbers[0] > numbers[1]:
-            raise ValueError(f"Invalid descending crontab {label} range {range_part!r}.")
-
-
-def _normalize_crontab_expression(value: str | None) -> str:
-    expression = " ".join(str(value or "").strip().split())
-    fields = expression.split()
-    if len(fields) != 5:
-        raise ValueError("schedule_expression must contain exactly five crontab fields.")
-    for field, (label, minimum, maximum) in zip(
-        fields,
-        _CRONTAB_FIELD_LIMITS,
-        strict=True,
-    ):
-        _validate_crontab_field(
-            field,
-            label=label,
-            minimum=minimum,
-            maximum=maximum,
-        )
-    return expression
-
-
-def normalize_schedule_timezone(value: str) -> str:
-    """Return the backend's canonical explicit IANA timezone shape."""
-    timezone_name = str(value).strip()
-    if not timezone_name:
-        raise ValueError("schedule_timezone must not be empty.")
-    if timezone_name != "UTC" and (
-        "/" not in timezone_name or timezone_name.startswith("Etc/GMT")
-    ):
-        raise ValueError(
-            "Use an IANA timezone such as Europe/Vienna or UTC; fixed offsets and "
-            "abbreviations are not supported."
-        )
-    try:
-        ZoneInfo(timezone_name)
-    except (ZoneInfoNotFoundError, ValueError) as exc:
-        raise ValueError(f"{timezone_name!r} is not a valid IANA timezone.") from exc
-    return timezone_name
-
-
-def normalize_schedule(
-    *,
-    schedule_type: str,
-    schedule_every: int | None = None,
-    schedule_period: str | None = None,
-    schedule_expression: str | None = None,
-    schedule_timezone: str | None = None,
-    schedule_start_time: dt.datetime | None = None,
-) -> dict[str, Any]:
-    """Validate the durable schedule shape using the same contract as Main Sequence Jobs."""
-    from mainsequence.client.models_helpers import CrontabSchedule, IntervalSchedule
-
-    normalized_type = str(schedule_type or "").strip().lower()
-    start_time = schedule_start_time
-    if start_time is not None:
-        if start_time.tzinfo is None:
-            raise ValueError("schedule_start_time must include a timezone.")
-        start_time = start_time.astimezone(UTC)
-    if normalized_type == "interval":
-        if schedule_timezone is not None:
-            raise ValueError("schedule_timezone is only valid for crontab schedules.")
-        schedule = IntervalSchedule(
-            every=schedule_every,
-            period=str(schedule_period or "").strip().lower(),
-            start_time=start_time,
-        )
-        return {
-            "schedule_type": schedule.type,
-            "schedule_every": schedule.every,
-            "schedule_period": schedule.period,
-            "schedule_expression": None,
-            "schedule_timezone": None,
-            "schedule_start_time": schedule.start_time,
-        }
-    if normalized_type == "crontab":
-        expression = _normalize_crontab_expression(schedule_expression)
-        timezone_name = (
-            normalize_schedule_timezone(schedule_timezone)
-            if schedule_timezone is not None
-            else None
-        )
-        schedule = CrontabSchedule(expression=expression, start_time=start_time)
-        return {
-            "schedule_type": schedule.type,
-            "schedule_every": None,
-            "schedule_period": None,
-            "schedule_expression": schedule.expression,
-            "schedule_timezone": timezone_name,
-            "schedule_start_time": schedule.start_time,
-        }
-    raise ValueError(f"schedule_type must be one of {list(SCHEDULE_TYPES)!r}.")
 
 
 def validate_signal_job_references(
@@ -436,21 +303,11 @@ def create_signal_job_configuration_row(
     name: str,
     universe_uid: uuid.UUID | str,
     account_uid: uuid.UUID | str,
-    schedule_type: str,
-    schedule_every: int | None = None,
-    schedule_period: str | None = None,
-    schedule_expression: str | None = None,
-    schedule_timezone: str | None = None,
-    schedule_start_time: dt.datetime | None = None,
     description: str | None = None,
-    enabled: bool = True,
-    cpu_request: str = "0.25",
-    memory_request: str = "0.5",
-    max_runtime_seconds: int = 3600,
-    spot: bool = False,
+    scheduled: bool = True,
     uid: uuid.UUID | str | None = None,
 ) -> AlpacaETFSignalJobConfiguration:
-    """Create desired state before provisioning its platform Job."""
+    """Store one signal configuration; it touches no platform Job."""
     from msm.bootstrap import resolve_runtime
     from msm.repositories.crud import create_model
 
@@ -458,19 +315,6 @@ def create_signal_job_configuration_row(
 
     normalized_universe_uid = uuid.UUID(str(universe_uid))
     normalized_account_uid = uuid.UUID(str(account_uid))
-    requested_timezone = schedule_timezone
-    if str(schedule_type or "").strip().lower() == "crontab" and requested_timezone is None:
-        requested_timezone = "UTC"
-    schedule = normalize_schedule(
-        schedule_type=schedule_type,
-        schedule_every=schedule_every,
-        schedule_period=schedule_period,
-        schedule_expression=schedule_expression,
-        schedule_timezone=requested_timezone,
-        schedule_start_time=schedule_start_time,
-    )
-    if max_runtime_seconds <= 0:
-        raise ValueError("max_runtime_seconds must be positive.")
     start_markets_engine(models=account_runtime_models())
     validate_signal_job_references(
         universe_uid=normalized_universe_uid,
@@ -478,25 +322,18 @@ def create_signal_job_configuration_row(
     )
     if signal_job_configurations_for_universe(normalized_universe_uid):
         raise ValueError(
-            f"Asset Universe {normalized_universe_uid!s} already has a signal Job configuration "
+            f"Asset Universe {normalized_universe_uid!s} already has a signal configuration "
             "in this Environment."
         )
     now = utc_now()
     values = {
+        **RETIRED_JOB_COLUMN_VALUES,
         "uid": uuid.UUID(str(uid)) if uid is not None else new_markets_uid(),
         "name": _normalize_name(name),
         "description": _normalize_description(description),
         "universe_uid": normalized_universe_uid,
         "account_uid": normalized_account_uid,
-        "job_uid": None,
-        "enabled": bool(enabled),
-        **schedule,
-        "cpu_request": str(cpu_request).strip(),
-        "memory_request": str(memory_request).strip(),
-        "max_runtime_seconds": int(max_runtime_seconds),
-        "spot": bool(spot),
-        "lifecycle_state": "provisioning",
-        "last_error": None,
+        "enabled": bool(scheduled),
         "created_at": now,
         "updated_at": now,
     }
@@ -511,7 +348,7 @@ def create_signal_job_configuration_row(
     )
     rows = operation_result_rows(result)
     if not rows:
-        raise RuntimeError("Signal Job configuration create returned no row.")
+        raise RuntimeError("Signal configuration create returned no row.")
     return AlpacaETFSignalJobConfiguration.model_validate(rows[0])
 
 
@@ -524,12 +361,27 @@ def get_signal_job_configuration(
     return AlpacaETFSignalJobConfiguration.get_by_uid(configuration_uid)
 
 
+def _select_rows(statement: Any) -> list[AlpacaETFSignalJobConfiguration]:
+    from msm.bootstrap import resolve_runtime
+    from msm.repositories.base import compile_markets_statement, execute_markets_operation
+
+    runtime = resolve_runtime(
+        models=[AlpacaETFSignalJobConfigurationTable],
+        row_model_name="AlpacaETFSignalJobConfiguration",
+    )
+    operation = compile_markets_statement(statement, context=runtime.context, operation="select")
+    return [
+        AlpacaETFSignalJobConfiguration.model_validate(row)
+        for row in operation_result_rows(
+            execute_markets_operation(operation, context=runtime.context)
+        )
+    ]
+
+
 def signal_job_configurations_by_uids(
     configuration_uids: Sequence[uuid.UUID | str],
 ) -> dict[str, AlpacaETFSignalJobConfiguration]:
-    """Load a Signal Job configuration UID set with one governed backend query."""
-    from msm.bootstrap import resolve_runtime
-    from msm.repositories.base import compile_markets_statement, execute_markets_operation
+    """Load a signal configuration UID set with one governed backend query."""
     from sqlalchemy import select
 
     from alpaca_connectors.runtime import account_runtime_models, start_markets_engine
@@ -540,36 +392,25 @@ def signal_job_configurations_by_uids(
     if not normalized_uids:
         return {}
     start_markets_engine(models=account_runtime_models())
-    runtime = resolve_runtime(
-        models=[AlpacaETFSignalJobConfigurationTable],
-        row_model_name="AlpacaETFSignalJobConfiguration",
-    )
-    operation = compile_markets_statement(
+    rows = _select_rows(
         select(AlpacaETFSignalJobConfigurationTable).where(
             AlpacaETFSignalJobConfigurationTable.uid.in_(normalized_uids)
-        ),
-        context=runtime.context,
-        operation="select",
-    )
-    rows = [
-        AlpacaETFSignalJobConfiguration.model_validate(row)
-        for row in operation_result_rows(
-            execute_markets_operation(operation, context=runtime.context)
         )
-    ]
+    )
     return {str(row.uid): row for row in rows}
 
 
-def get_signal_job_configuration_by_job_uid(
-    job_uid: uuid.UUID | str,
-) -> AlpacaETFSignalJobConfiguration | None:
+def scheduled_signal_configurations() -> list[AlpacaETFSignalJobConfiguration]:
+    """Return every signal configuration the signal Job's scheduled run includes."""
+    from sqlalchemy import select
+
     from alpaca_connectors.runtime import account_runtime_models, start_markets_engine
 
+    table = AlpacaETFSignalJobConfigurationTable
     start_markets_engine(models=account_runtime_models())
-    rows = AlpacaETFSignalJobConfiguration.filter(job_uid=str(job_uid), limit=2)
-    if len(rows) > 1:
-        raise RuntimeError(f"Job {job_uid!s} is linked to multiple signal configurations.")
-    return rows[0] if rows else None
+    return _select_rows(
+        select(table).where(table.enabled.is_(True)).order_by(table.name.asc(), table.uid.asc())
+    )
 
 
 def signal_job_configurations_for_universe(
@@ -595,8 +436,7 @@ def list_signal_job_configurations(
     limit: int = 25,
     offset: int = 0,
     search: str | None = None,
-    enabled: bool | None = None,
-    lifecycle_state: str | None = None,
+    scheduled: bool | None = None,
     ordering: str = "name",
 ) -> tuple[list[AlpacaETFSignalJobConfiguration], int]:
     from msm.bootstrap import resolve_runtime
@@ -611,15 +451,8 @@ def list_signal_job_configurations(
         row_model_name="AlpacaETFSignalJobConfiguration",
     )
     statement = select(AlpacaETFSignalJobConfigurationTable)
-    if enabled is not None:
-        statement = statement.where(AlpacaETFSignalJobConfigurationTable.enabled == enabled)
-    if lifecycle_state is not None:
-        normalized_state = lifecycle_state.strip().lower()
-        if normalized_state not in LIFECYCLE_STATES:
-            raise ValueError(f"Unsupported lifecycle_state filter {lifecycle_state!r}.")
-        statement = statement.where(
-            AlpacaETFSignalJobConfigurationTable.lifecycle_state == normalized_state
-        )
+    if scheduled is not None:
+        statement = statement.where(AlpacaETFSignalJobConfigurationTable.enabled == scheduled)
     if search:
         pattern = f"%{search.strip()}%"
         statement = statement.where(
@@ -636,32 +469,21 @@ def list_signal_job_configurations(
     ordering_columns = {
         "name": AlpacaETFSignalJobConfigurationTable.name,
         "updated_at": AlpacaETFSignalJobConfigurationTable.updated_at,
-        "lifecycle_state": AlpacaETFSignalJobConfigurationTable.lifecycle_state,
     }
     if ordering_key not in ordering_columns:
-        raise ValueError(f"Unsupported signal Job configuration ordering {ordering!r}.")
+        raise ValueError(f"Unsupported signal configuration ordering {ordering!r}.")
     ordering_column = ordering_columns[ordering_key]
     ordering_expression = ordering_column.desc() if descending else ordering_column.asc()
     statement = statement.order_by(
         ordering_expression,
         AlpacaETFSignalJobConfigurationTable.uid.asc(),
     )
-    page_operation = compile_markets_statement(
-        statement.limit(limit).offset(offset),
-        context=runtime.context,
-        operation="select",
-    )
+    rows = _select_rows(statement.limit(limit).offset(offset))
     count_operation = compile_markets_statement(
         count_statement,
         context=runtime.context,
         operation="select",
     )
-    rows = [
-        AlpacaETFSignalJobConfiguration.model_validate(row)
-        for row in operation_result_rows(
-            execute_markets_operation(page_operation, context=runtime.context)
-        )
-    ]
     count_rows = operation_result_rows(
         execute_markets_operation(count_operation, context=runtime.context)
     )
@@ -673,9 +495,9 @@ def update_signal_job_configuration_row(
     *,
     values: dict[str, Any],
 ) -> AlpacaETFSignalJobConfiguration:
-    """Apply already-normalized desired or reconciliation state."""
+    """Apply already-normalized configuration values."""
     if get_signal_job_configuration(configuration_uid) is None:
-        raise LookupError(f"Signal Job configuration {configuration_uid!s} does not exist.")
+        raise LookupError(f"Signal configuration {configuration_uid!s} does not exist.")
     return AlpacaETFSignalJobConfiguration.update(
         configuration_uid,
         {**values, "updated_at": utc_now()},
@@ -684,7 +506,7 @@ def update_signal_job_configuration_row(
 
 def delete_signal_job_configuration_row(configuration_uid: uuid.UUID | str) -> dict[str, Any]:
     if get_signal_job_configuration(configuration_uid) is None:
-        raise LookupError(f"Signal Job configuration {configuration_uid!s} does not exist.")
+        raise LookupError(f"Signal configuration {configuration_uid!s} does not exist.")
     return AlpacaETFSignalJobConfiguration.delete(configuration_uid)
 
 
@@ -693,25 +515,18 @@ def project_signal_job_models() -> list[type[MarketsBase]]:
 
 
 __all__ = [
-    "LIFECYCLE_STATES",
-    "SCHEDULE_PERIODS",
-    "SCHEDULE_TYPES",
+    "RETIRED_JOB_COLUMN_VALUES",
     "AlpacaETFSignalJobConfiguration",
     "AlpacaETFSignalJobConfigurationTable",
-    "LifecycleState",
-    "SchedulePeriod",
-    "ScheduleType",
     "create_signal_job_configuration_row",
     "delete_signal_job_configuration_row",
     "get_signal_job_configuration",
-    "get_signal_job_configuration_by_job_uid",
     "list_signal_job_configurations",
-    "normalize_schedule",
-    "normalize_schedule_timezone",
     "project_signal_job_models",
+    "scheduled_signal_configurations",
+    "signal_job_configurations_by_uids",
     "signal_job_configurations_for_account",
     "signal_job_configurations_for_universe",
-    "signal_job_configurations_by_uids",
     "update_signal_job_configuration_row",
     "validate_signal_job_references",
 ]

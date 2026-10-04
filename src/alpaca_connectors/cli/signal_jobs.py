@@ -1,9 +1,13 @@
-"""CLI for Universe-backed Alpaca ETF signal Job configurations."""
+"""CLI for Universe-backed Alpaca ETF signal configurations.
+
+Every configuration runs on the signal Job declared in the repository workflow (ADR 0013). A
+configuration holds no schedule or compute: `--no-scheduled` leaves it out of that Job's scheduled
+run.
+"""
 
 from __future__ import annotations
 
 import argparse
-import datetime as dt
 import json
 from dataclasses import asdict
 from typing import Any
@@ -17,28 +21,21 @@ def _print(value: Any) -> None:
     print(json.dumps(value, indent=2, sort_keys=True, default=str))
 
 
-def _parse_datetime(value: str | None) -> dt.datetime | None:
-    return dt.datetime.fromisoformat(value.replace("Z", "+00:00")) if value else None
-
-
 def _configuration_payload(configuration: Any) -> dict[str, Any]:
     from alpaca_connectors.operations import signal_uid_for_configuration
 
-    return {
-        **configuration.model_dump(mode="json"),
-        "signal_uid": signal_uid_for_configuration(configuration),
-    }
+    payload = configuration.model_dump(mode="json")
+    # The `enabled` column stores the scheduled flag (ADR 0013).
+    payload["scheduled"] = payload.pop("enabled")
+    payload["signal_uid"] = signal_uid_for_configuration(configuration)
+    return payload
 
 
 def configure_list_parser(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--limit", type=int, default=25)
     parser.add_argument("--offset", type=int, default=0)
     parser.add_argument("--search")
-    parser.add_argument("--enabled", action=argparse.BooleanOptionalAction, default=None)
-    parser.add_argument(
-        "--lifecycle-state",
-        choices=("provisioning", "ready", "paused", "error", "deleting"),
-    )
+    parser.add_argument("--scheduled", action=argparse.BooleanOptionalAction, default=None)
     parser.add_argument("--ordering", default="name")
     parser.set_defaults(handler=run_list_command)
 
@@ -53,30 +50,12 @@ def _add_configuration_values(parser: argparse.ArgumentParser, *, required: bool
     parser.add_argument("--description")
     parser.add_argument("--universe-uid", required=required)
     parser.add_argument("--account-uid", required=required)
-    parser.add_argument("--schedule-type", choices=("interval", "crontab"), required=required)
-    parser.add_argument("--schedule-every", type=int)
+    # Schedule and compute belong to the signal Job in the workflow file (ADR 0013).
     parser.add_argument(
-        "--schedule-period",
-        choices=("seconds", "minutes", "hours", "days"),
-    )
-    parser.add_argument("--schedule-expression")
-    parser.add_argument(
-        "--schedule-timezone",
-        help="IANA timezone for crontab schedules, for example America/New_York or UTC.",
-    )
-    parser.add_argument("--schedule-start-time")
-    parser.add_argument("--cpu-request", default="0.25" if required else None)
-    parser.add_argument("--memory-request", default="0.5" if required else None)
-    parser.add_argument("--max-runtime-seconds", type=int, default=3600 if required else None)
-    parser.add_argument(
-        "--spot",
-        action=argparse.BooleanOptionalAction,
-        default=False if required else None,
-    )
-    parser.add_argument(
-        "--enabled",
+        "--scheduled",
         action=argparse.BooleanOptionalAction,
         default=True if required else None,
+        help="Include the configuration in the signal Job's scheduled run.",
     )
 
 
@@ -114,17 +93,7 @@ def _configuration_values(args: argparse.Namespace, *, exclude_none: bool) -> di
         "description": args.description,
         "universe_uid": args.universe_uid,
         "account_uid": args.account_uid,
-        "enabled": args.enabled,
-        "schedule_type": args.schedule_type,
-        "schedule_every": args.schedule_every,
-        "schedule_period": args.schedule_period,
-        "schedule_expression": args.schedule_expression,
-        "schedule_timezone": args.schedule_timezone,
-        "schedule_start_time": _parse_datetime(args.schedule_start_time),
-        "cpu_request": args.cpu_request,
-        "memory_request": args.memory_request,
-        "max_runtime_seconds": args.max_runtime_seconds,
-        "spot": args.spot,
+        "scheduled": args.scheduled,
     }
     return (
         {key: value for key, value in values.items() if value is not None}
@@ -140,8 +109,7 @@ def run_list_command(args: argparse.Namespace) -> int:
         limit=args.limit,
         offset=args.offset,
         search=args.search,
-        enabled=args.enabled,
-        lifecycle_state=args.lifecycle_state,
+        scheduled=args.scheduled,
         ordering=args.ordering,
     )
     _print(
@@ -158,7 +126,7 @@ def run_get_command(args: argparse.Namespace) -> int:
 
     item = get_signal_job_configuration(args.configuration_uid)
     if item is None:
-        raise SystemExit(f"Signal Job configuration {args.configuration_uid} does not exist.")
+        raise SystemExit(f"Signal configuration {args.configuration_uid} does not exist.")
     _print(_configuration_payload(item))
     return 0
 
@@ -176,7 +144,7 @@ def run_update_command(args: argparse.Namespace) -> int:
 
     values = _configuration_values(args, exclude_none=True)
     if not values:
-        raise SystemExit("At least one signal Job configuration field must be provided.")
+        raise SystemExit("At least one signal configuration field must be provided.")
     item = update_signal_job_configuration(args.configuration_uid, **values)
     _print(_configuration_payload(item))
     return 0
@@ -190,29 +158,27 @@ def run_delete_command(args: argparse.Namespace) -> int:
 
     item = get_signal_job_configuration(args.configuration_uid)
     if item is None:
-        raise SystemExit(f"Signal Job configuration {args.configuration_uid} does not exist.")
+        raise SystemExit(f"Signal configuration {args.configuration_uid} does not exist.")
     if not args.execute:
         _print(
             {
                 "allowed": True,
                 "configuration_uid": str(item.uid),
-                "job_uid": str(item.job_uid) if item.job_uid else None,
-                "detail": "The dedicated Job and its configuration will be deleted. Signal data is retained.",
+                "detail": (
+                    "Only the configuration will be deleted. Signal data and the shared Job's "
+                    "runs are retained."
+                ),
             }
         )
         return 0
-    _print(
-        delete_signal_job_configuration(args.configuration_uid)
-    )
+    _print(delete_signal_job_configuration(args.configuration_uid))
     return 0
 
 
 def run_run_command(args: argparse.Namespace) -> int:
     from alpaca_connectors.operations import launch_signal_job
 
-    _print(
-        launch_signal_job(args.configuration_uid)
-    )
+    _print(launch_signal_job(args.configuration_uid))
     return 0
 
 

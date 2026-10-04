@@ -39,7 +39,7 @@ def test_job_migrates_only_this_application_but_the_gate_also_waits_for_ms_marke
 
 def test_each_provider_ships_one_head() -> None:
     heads = _heads()
-    assert heads[APP] == "0015"
+    assert heads[APP] == "0016"
     assert heads[MSM]
 
 
@@ -47,8 +47,8 @@ def test_each_provider_ships_one_head() -> None:
     ("applied", "behind"),
     [
         ((), True),  # never migrated
-        (("0014",), True),  # this image's revision not applied yet
-        (("0015",), False),  # current
+        (("0015",), True),  # this image's revision not applied yet
+        (("0016",), False),  # current
         (("0099_from_a_newer_release",), False),  # database ahead: older image still runs
     ],
 )
@@ -56,7 +56,7 @@ def test_provider_state_compares_database_with_code(applied, behind) -> None:
     state = schema_state([APP], read_applied=lambda migration: applied)
 
     assert state.providers == (
-        ProviderSchemaState(provider=APP, applied=applied, code_head="0015", behind=behind),
+        ProviderSchemaState(provider=APP, applied=applied, code_head="0016", behind=behind),
     )
     assert state.behind is behind
 
@@ -170,8 +170,14 @@ def test_migration_job_failure_fails_the_job() -> None:
 @pytest.mark.parametrize(
     ("launcher", "work"),
     [
-        ("run_alpaca_etf_signal.py", "alpaca_connectors.operations.execute_current_signal_job"),
-        ("run_alpaca_etf_portfolio.py", "alpaca_connectors.runtime.start_portfolio_job_engine"),
+        (
+            "run_alpaca_etf_signal.py",
+            "alpaca_connectors.operations.configuration_jobs.run_configuration_job",
+        ),
+        (
+            "run_alpaca_etf_portfolio.py",
+            "alpaca_connectors.operations.configuration_jobs.run_configuration_job",
+        ),
         (
             "run_daily_stock_bars_holdings_ivv.py",
             "alpaca_connectors.market_data.execute_market_data_update",

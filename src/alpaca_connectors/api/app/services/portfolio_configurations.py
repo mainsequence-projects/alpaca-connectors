@@ -1,24 +1,25 @@
-"""API shaping for durable analytical ETF portfolio configurations."""
+"""API shaping for durable analytical ETF portfolio configurations.
+
+Every configuration runs on the portfolio Job declared in the repository workflow (ADR 0013).
+"""
 
 from __future__ import annotations
 
-import datetime as dt
 from dataclasses import asdict
 from typing import Any, Mapping
 
 from alpaca_connectors.operations import (
-    create_portfolio_job_configuration,
-    delete_portfolio_job_configuration,
+    configuration_job_state,
     launch_portfolio_job,
     list_portfolio_job_runs,
-    normalize_portfolio_job_settings,
     signal_job_configurations_by_uids,
     signal_uid_for_configuration,
-    update_portfolio_job_configuration,
 )
 from alpaca_connectors.portfolios import (
     PortfolioRebalanceConfiguration,
+    create_portfolio_configuration_row,
     create_rebalance_configuration,
+    delete_portfolio_configuration_row,
     delete_rebalance_configuration,
     get_portfolio_configuration,
     get_rebalance_configuration,
@@ -26,6 +27,7 @@ from alpaca_connectors.portfolios import (
     list_rebalance_configurations,
     read_portfolio_history,
     rebalance_configurations_by_uids,
+    update_portfolio_configuration,
     update_rebalance_configuration,
 )
 
@@ -34,7 +36,6 @@ from ..schemas import (
     PortfolioConfigurationDetailResponse,
     PortfolioConfigurationResponse,
     PortfolioConfigurationUpdateRequest,
-    PortfolioJobResponse,
     PortfolioJobRunAcceptedResponse,
     PortfolioJobRunResponse,
     PortfolioRebalanceConfigurationCreateRequest,
@@ -42,111 +43,13 @@ from ..schemas import (
     PortfolioRebalanceConfigurationUpdateRequest,
 )
 from .common import collection_response
-
-
-def _value(value: Any, key: str, default: Any = None) -> Any:
-    if isinstance(value, Mapping):
-        return value.get(key, default)
-    return getattr(value, key, default)
-
-
-def _schedule_payload(job: Any) -> dict[str, Any]:
-    task_schedule = getattr(job, "task_schedule", None)
-    schedule = _value(task_schedule, "schedule") if task_schedule is not None else None
-    if schedule is None:
-        return {
-            "schedule_type": None,
-            "schedule_every": None,
-            "schedule_period": None,
-            "schedule_expression": None,
-            "schedule_timezone": None,
-            "schedule_timezone_explicit": None,
-            "schedule_start_time": None,
-        }
-    schedule_type = str(_value(schedule, "type", _value(schedule, "schedule_type", ""))).lower()
-    if schedule_type == "interval":
-        return {
-            "schedule_type": "interval",
-            "schedule_every": _value(schedule, "every"),
-            "schedule_period": _value(schedule, "period"),
-            "schedule_expression": None,
-            "schedule_timezone": None,
-            "schedule_timezone_explicit": None,
-            "schedule_start_time": _value(schedule, "start_time"),
-        }
-    expression = _value(schedule, "expression")
-    if not expression:
-        expression = " ".join(
-            str(_value(schedule, key, "*"))
-            for key in ("minute", "hour", "day_of_month", "month_of_year", "day_of_week")
-        )
-    return {
-        "schedule_type": "crontab",
-        "schedule_every": None,
-        "schedule_period": None,
-        "schedule_expression": expression,
-        "schedule_timezone": _value(schedule, "timezone"),
-        "schedule_timezone_explicit": _value(schedule, "timezone_explicit"),
-        "schedule_start_time": _value(schedule, "start_time"),
-    }
-
-
-def _job_response(job: Any | None) -> PortfolioJobResponse | None:
-    if job is None:
-        return None
-    image_status = getattr(job, "image_status", None)
-    image_status = getattr(image_status, "value", image_status)
-    return PortfolioJobResponse(
-        uid=str(job.uid),
-        **_schedule_payload(job),
-        cpu_request=(str(job.cpu_request) if job.cpu_request is not None else None),
-        memory_request=(str(job.memory_request) if job.memory_request is not None else None),
-        max_runtime_seconds=job.max_runtime_seconds,
-        spot=bool(job.spot),
-        image_status=(str(image_status) if image_status is not None else None),
-        automatic_deployment=bool(job.automatic_deployment),
-    )
-
-
-def _runtime_by_job_uid(rows: list[Any]) -> tuple[dict[str, Any], dict[str, Any]]:
-    from alpaca_connectors.operations.platform_jobs import PlatformJob
-    from mainsequence.client import JobRun
-
-    job_uids = list(dict.fromkeys(str(row.job_uid) for row in rows if row.job_uid is not None))
-    if not job_uids:
-        return {}, {}
-    jobs = list(PlatformJob.filter(uid__in=job_uids, timeout=60))
-    runs = list(JobRun.filter(job__uid__in=job_uids, timeout=60))
-    jobs_by_uid = {str(job.uid): job for job in jobs}
-    latest_by_job_uid: dict[str, Any] = {}
-    minimum = dt.datetime.min.replace(tzinfo=dt.UTC)
-    for run in runs:
-        job_uid = str(run.job_uid or "")
-        current = latest_by_job_uid.get(job_uid)
-        if current is None or (run.execution_start or minimum) > (
-            current.execution_start or minimum
-        ):
-            latest_by_job_uid[job_uid] = run
-    return jobs_by_uid, latest_by_job_uid
-
-
-def _canonical_status(value: Any) -> str:
-    raw = getattr(value, "value", value)
-    status = str(raw or "").strip().upper()
-    return {
-        "COMPLETE": "SUCCEEDED",
-        "COMPLETED": "SUCCEEDED",
-        "SUCCESS": "SUCCEEDED",
-        "SUCCESSFUL": "SUCCEEDED",
-        "ERROR": "FAILED",
-        "ERRORED": "FAILED",
-    }.get(status, status)
+from .configuration_jobs import accepted_run, job_fields
 
 
 def _responses(rows: list[Any]) -> list[PortfolioConfigurationResponse]:
     if not rows:
         return []
-    jobs, latest_runs = _runtime_by_job_uid(rows)
+    state = configuration_job_state("portfolio", [row.uid for row in rows])
     signal_uids = list(dict.fromkeys(str(row.signal_configuration_uid) for row in rows))
     rebalance_uids = list(dict.fromkeys(str(row.rebalance_configuration_uid) for row in rows))
     signal_configurations = signal_job_configurations_by_uids(signal_uids)
@@ -159,20 +62,13 @@ def _responses(rows: list[Any]) -> list[PortfolioConfigurationResponse]:
             raise RuntimeError(
                 f"Portfolio configuration {row.uid!s} has an unresolved required relationship."
             )
-        latest_run = latest_runs.get(str(row.job_uid))
         responses.append(
             PortfolioConfigurationResponse.model_validate(
                 {
                     **row.model_dump(mode="json"),
                     "signal_uid": signal_uid_for_configuration(signal_configuration),
                     "rebalance_strategy": rebalance_configuration.strategy,
-                    "job": _job_response(jobs.get(str(row.job_uid))),
-                    "latest_run_status": (
-                        _canonical_status(latest_run.status) if latest_run is not None else None
-                    ),
-                    "latest_run_at": (
-                        latest_run.execution_start if latest_run is not None else None
-                    ),
+                    **job_fields(state.job, state.latest_runs.get(str(row.uid))),
                 }
             )
         )
@@ -306,7 +202,7 @@ def get_configuration_detail(
             "linked_signal": {
                 "name": signal_configuration.name,
                 "description": signal_configuration.description,
-                "enabled": signal_configuration.enabled,
+                "scheduled": signal_configuration.scheduled,
                 "universe_name": signal_universe["display_name"],
                 "universe_symbol": signal_universe["symbol"],
                 "account_name": signal_account["account_name"],
@@ -386,9 +282,8 @@ def get_configuration_detail(
 def create_configuration(
     request: PortfolioConfigurationCreateRequest,
 ) -> PortfolioConfigurationResponse:
-    payload = request.model_dump()
-    job = payload.pop("job")
-    row = create_portfolio_job_configuration(**payload, **job)
+    """Store the configuration only; the shared portfolio Job runs it."""
+    row = create_portfolio_configuration_row(**request.model_dump())
     return _responses([row])[0]
 
 
@@ -396,29 +291,28 @@ def update_configuration(
     configuration_uid: str,
     request: PortfolioConfigurationUpdateRequest,
 ) -> PortfolioConfigurationResponse:
-    payload = request.model_dump(exclude_unset=True)
-    job_payload = payload.pop("job", None)
-    settings = normalize_portfolio_job_settings(**job_payload) if job_payload is not None else None
-    row = update_portfolio_job_configuration(
+    row = update_portfolio_configuration(
         configuration_uid,
-        job_settings=settings,
-        **payload,
+        **request.model_dump(exclude_unset=True),
     )
     return _responses([row])[0]
 
 
 def delete_configuration(configuration_uid: str) -> dict[str, Any]:
-    return delete_portfolio_job_configuration(configuration_uid)
+    """Delete the configuration row only; its JobRuns and published data remain."""
+    row = get_portfolio_configuration(configuration_uid)
+    if row is None:
+        raise LookupError(f"Portfolio configuration {configuration_uid!s} does not exist.")
+    return {
+        "configuration_uid": str(row.uid),
+        "deleted": True,
+        "storage_result": delete_portfolio_configuration_row(row.uid),
+    }
 
 
 def run_configuration(configuration_uid: str) -> PortfolioJobRunAcceptedResponse:
-    submission = launch_portfolio_job(configuration_uid)
-    return PortfolioJobRunAcceptedResponse(
-        configuration_uid=submission.configuration_uid,
-        job_uid=submission.job_uid,
-        job_run_uid=submission.job_run_uid,
-        status=submission.status,
-        status_url=f"/v1/operations/job-runs/{submission.job_run_uid}",
+    return PortfolioJobRunAcceptedResponse.model_validate(
+        accepted_run(launch_portfolio_job(configuration_uid))
     )
 
 

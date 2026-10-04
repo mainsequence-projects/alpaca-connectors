@@ -1,9 +1,13 @@
-"""CLI for durable ETF portfolio and rebalance configurations."""
+"""CLI for durable ETF portfolio and rebalance configurations.
+
+Every portfolio configuration runs on the portfolio Job declared in the repository workflow
+(ADR 0013). A configuration holds no schedule or compute: `--no-scheduled` leaves it out of that
+Job's scheduled run.
+"""
 
 from __future__ import annotations
 
 import argparse
-import datetime as dt
 import json
 from dataclasses import asdict
 from typing import Any
@@ -17,30 +21,13 @@ def _print(value: Any) -> None:
     print(json.dumps(value, indent=2, sort_keys=True, default=str))
 
 
-def _parse_datetime(value: str | None) -> dt.datetime | None:
-    return dt.datetime.fromisoformat(value.replace("Z", "+00:00")) if value else None
-
-
-def _add_job_arguments(parser: argparse.ArgumentParser, *, required: bool) -> None:
-    parser.add_argument("--schedule-type", choices=("interval", "crontab"), required=required)
-    parser.add_argument("--schedule-every", type=int)
+def _add_scheduled_argument(parser: argparse.ArgumentParser, *, create: bool) -> None:
+    # Schedule and compute belong to the portfolio Job in the workflow file (ADR 0013).
     parser.add_argument(
-        "--schedule-period",
-        choices=("seconds", "minutes", "hours", "days"),
-    )
-    parser.add_argument("--schedule-expression")
-    parser.add_argument(
-        "--schedule-timezone",
-        help="IANA timezone for crontab schedules, for example America/New_York or UTC.",
-    )
-    parser.add_argument("--schedule-start-time")
-    parser.add_argument("--cpu-request", default="0.25" if required else None)
-    parser.add_argument("--memory-request", default="0.5" if required else None)
-    parser.add_argument("--max-runtime-seconds", type=int, default=3600 if required else None)
-    parser.add_argument(
-        "--spot",
+        "--scheduled",
         action=argparse.BooleanOptionalAction,
-        default=False if required else None,
+        default=True if create else None,
+        help="Include the configuration in the portfolio Job's scheduled run.",
     )
 
 
@@ -79,7 +66,7 @@ def configure_create_parser(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--fail-on-missing-prices", action=argparse.BooleanOptionalAction, default=True
     )
-    _add_job_arguments(parser, required=True)
+    _add_scheduled_argument(parser, create=True)
     parser.set_defaults(handler=run_create_command)
 
 
@@ -96,7 +83,7 @@ def configure_update_parser(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--fail-on-missing-prices", action=argparse.BooleanOptionalAction, default=None
     )
-    _add_job_arguments(parser, required=False)
+    _add_scheduled_argument(parser, create=False)
     parser.set_defaults(handler=run_update_command)
 
 
@@ -181,21 +168,6 @@ def configure_rebalance_delete_parser(parser: argparse.ArgumentParser) -> None:
     parser.set_defaults(handler=run_rebalance_delete_command)
 
 
-def _job_values(args: argparse.Namespace) -> dict[str, Any]:
-    return {
-        "schedule_type": args.schedule_type,
-        "schedule_every": args.schedule_every,
-        "schedule_period": args.schedule_period,
-        "schedule_expression": args.schedule_expression,
-        "schedule_timezone": args.schedule_timezone,
-        "schedule_start_time": _parse_datetime(args.schedule_start_time),
-        "cpu_request": args.cpu_request,
-        "memory_request": args.memory_request,
-        "max_runtime_seconds": args.max_runtime_seconds,
-        "spot": args.spot,
-    }
-
-
 def run_list_command(args: argparse.Namespace) -> int:
     from alpaca_connectors.portfolios import list_portfolio_configurations
 
@@ -222,9 +194,9 @@ def run_get_command(args: argparse.Namespace) -> int:
 
 
 def run_create_command(args: argparse.Namespace) -> int:
-    from alpaca_connectors.operations import create_portfolio_job_configuration
+    from alpaca_connectors.portfolios import create_portfolio_configuration_row
 
-    row = create_portfolio_job_configuration(
+    row = create_portfolio_configuration_row(
         name=args.name,
         description=args.description,
         signal_configuration_uid=args.signal_configuration_uid,
@@ -234,17 +206,14 @@ def run_create_command(args: argparse.Namespace) -> int:
         commission_fee=args.commission_fee,
         valuation_maximum_staleness_seconds=args.valuation_maximum_staleness_seconds,
         fail_on_missing_prices=args.fail_on_missing_prices,
-        **_job_values(args),
+        scheduled=args.scheduled,
     )
     _print(row)
     return 0
 
 
 def run_update_command(args: argparse.Namespace) -> int:
-    from alpaca_connectors.operations import (
-        normalize_portfolio_job_settings,
-        update_portfolio_job_configuration,
-    )
+    from alpaca_connectors.portfolios import update_portfolio_configuration
 
     values = {
         key: value
@@ -260,34 +229,21 @@ def run_update_command(args: argparse.Namespace) -> int:
                 args.valuation_maximum_staleness_seconds
             ),
             "fail_on_missing_prices": args.fail_on_missing_prices,
+            "scheduled": args.scheduled,
         }.items()
         if value is not None
     }
-    settings = None
-    if args.schedule_type is not None:
-        job_values = _job_values(args)
-        job_values["cpu_request"] = job_values["cpu_request"] or "0.25"
-        job_values["memory_request"] = job_values["memory_request"] or "0.5"
-        job_values["max_runtime_seconds"] = job_values["max_runtime_seconds"] or 3600
-        job_values["spot"] = bool(job_values["spot"])
-        settings = normalize_portfolio_job_settings(**job_values)
-    elif any(value is not None for value in _job_values(args).values()):
-        raise SystemExit("Changing Job settings requires a complete --schedule-type definition.")
-    if not values and settings is None:
-        raise SystemExit("At least one portfolio or Job field must be provided.")
-    _print(
-        update_portfolio_job_configuration(
-            args.configuration_uid,
-            job_settings=settings,
-            **values,
-        )
-    )
+    if not values:
+        raise SystemExit("At least one portfolio configuration field must be provided.")
+    _print(update_portfolio_configuration(args.configuration_uid, **values))
     return 0
 
 
 def run_delete_command(args: argparse.Namespace) -> int:
-    from alpaca_connectors.operations import delete_portfolio_job_configuration
-    from alpaca_connectors.portfolios import get_portfolio_configuration
+    from alpaca_connectors.portfolios import (
+        delete_portfolio_configuration_row,
+        get_portfolio_configuration,
+    )
 
     row = get_portfolio_configuration(args.configuration_uid)
     if row is None:
@@ -297,12 +253,20 @@ def run_delete_command(args: argparse.Namespace) -> int:
             {
                 "allowed": True,
                 "configuration_uid": str(row.uid),
-                "job_uid": str(row.job_uid) if row.job_uid else None,
-                "detail": "The dedicated Job and configuration will be deleted; portfolio data is retained.",
+                "detail": (
+                    "Only the configuration will be deleted; portfolio data and the shared "
+                    "Job's runs are retained."
+                ),
             }
         )
         return 0
-    _print(delete_portfolio_job_configuration(args.configuration_uid))
+    _print(
+        {
+            "configuration_uid": str(row.uid),
+            "deleted": True,
+            "storage_result": delete_portfolio_configuration_row(row.uid),
+        }
+    )
     return 0
 
 

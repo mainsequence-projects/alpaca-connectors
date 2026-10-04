@@ -9,13 +9,15 @@ from fastapi.testclient import TestClient
 
 from alpaca_connectors.api.app.main import app
 from alpaca_connectors.api.app.schemas import (
+    ConfigurationJobResponse,
     PortfolioConfigurationDetailResponse,
     PortfolioConfigurationResponse,
-    PortfolioJobResponse,
     PortfolioJobRunAcceptedResponse,
     PortfolioRebalanceConfigurationResponse,
 )
+from alpaca_connectors.api.app.services import configuration_jobs as job_shaping
 from alpaca_connectors.api.app.services import portfolio_configurations as portfolio_service
+from alpaca_connectors.operations import ConfigurationJobState
 from alpaca_connectors.portfolios import (
     AlpacaETFPortfolioConfiguration,
     PortfolioRebalanceConfiguration,
@@ -74,6 +76,7 @@ def response() -> PortfolioConfigurationResponse:
         rebalance_configuration_uid=REBALANCE_CONFIGURATION_UID,
         rebalance_strategy="calendar_event_signal",
         portfolio_uid=None,
+        scheduled=True,
         job_uid=JOB_UID,
         upsample_frequency_id="1d",
         intraday_bar_interpolation_rule="ffill",
@@ -81,14 +84,14 @@ def response() -> PortfolioConfigurationResponse:
         valuation_maximum_staleness_seconds=86_400,
         fail_on_missing_prices=True,
         commission_fee=0.00018,
-        job=PortfolioJobResponse(
+        job=ConfigurationJobResponse(
             uid=JOB_UID,
-            schedule_type="interval",
-            schedule_every=1,
-            schedule_period="days",
-            schedule_expression=None,
-            schedule_timezone=None,
-            schedule_timezone_explicit=None,
+            schedule_type="crontab",
+            schedule_every=None,
+            schedule_period=None,
+            schedule_expression="0 2 * * *",
+            schedule_timezone="UTC",
+            schedule_timezone_explicit=True,
             schedule_start_time=None,
             cpu_request="0.25",
             memory_request="0.5",
@@ -117,23 +120,12 @@ def create_request() -> dict:
         "valuation_maximum_staleness_seconds": 86_400,
         "fail_on_missing_prices": True,
         "commission_fee": 0.00018,
-        "job": {
-            "schedule_type": "interval",
-            "schedule_every": 1,
-            "schedule_period": "days",
-            "schedule_expression": None,
-            "schedule_timezone": None,
-            "schedule_start_time": None,
-            "cpu_request": "0.25",
-            "memory_request": "0.5",
-            "max_runtime_seconds": 3600,
-            "spot": False,
-        },
+        "scheduled": False,
     }
 
 
 def test_portfolio_job_response_preserves_backend_crontab_timezone() -> None:
-    payload = portfolio_service._schedule_payload(
+    payload = job_shaping.schedule_payload(
         SimpleNamespace(
             task_schedule={
                 "schedule": {
@@ -189,7 +181,7 @@ def portfolio_row() -> AlpacaETFPortfolioConfiguration:
             "bars_configuration_uid": uuid.UUID(BARS_CONFIGURATION_UID),
             "rebalance_configuration_uid": uuid.UUID(REBALANCE_CONFIGURATION_UID),
             "portfolio_uid": None,
-            "job_uid": uuid.UUID(JOB_UID),
+            "scheduled": True,
             "upsample_frequency_id": "1d",
             "intraday_bar_interpolation_rule": "ffill",
             "valuation_column": "close",
@@ -208,7 +200,11 @@ def test_portfolio_response_resolves_linked_metatables_with_bulk_uid_queries() -
     rebalance = rebalance_row()
 
     with (
-        patch.object(portfolio_service, "_runtime_by_job_uid", return_value=({}, {})),
+        patch.object(
+            portfolio_service,
+            "configuration_job_state",
+            return_value=ConfigurationJobState(job=None, latest_runs={}),
+        ) as job_state,
         patch.object(
             portfolio_service,
             "signal_job_configurations_by_uids",
@@ -229,6 +225,8 @@ def test_portfolio_response_resolves_linked_metatables_with_bulk_uid_queries() -
 
     assert result[0].uid == CONFIGURATION_UID
     assert result[0].rebalance_strategy == "calendar_event_signal"
+    assert (result[0].job_uid, result[0].job, result[0].scheduled) == (None, None, True)
+    job_state.assert_called_once_with("portfolio", [row.uid])
     signals_by_uids.assert_called_once_with([SIGNAL_CONFIGURATION_UID])
     rebalances_by_uids.assert_called_once_with([REBALANCE_CONFIGURATION_UID])
 
@@ -304,7 +302,7 @@ def test_portfolio_discovery_columns_are_renderable() -> None:
             assert column.get("value_path") or column.get("data_type")
 
 
-def test_portfolio_create_nests_job_settings_and_rejects_environment() -> None:
+def test_portfolio_create_sends_only_the_scheduled_flag_and_rejects_environment() -> None:
     with patch(
         "alpaca_connectors.api.app.routers.portfolio_configurations.create_configuration",
         return_value=response(),
@@ -312,13 +310,13 @@ def test_portfolio_create_nests_job_settings_and_rejects_environment() -> None:
         result = TestClient(app).post("/v1/portfolio-configurations", json=create_request())
 
     assert result.status_code == 201
-    assert result.json()["job"]["schedule_type"] == "interval"
+    assert result.json()["job"]["schedule_expression"] == "0 2 * * *"
     assert "schedule_type" not in {
         key: value for key, value in result.json().items() if key != "job"
     }
     request = create.call_args.args[0]
     assert request.signal_configuration_uid == SIGNAL_CONFIGURATION_UID
-    assert request.job.schedule_every == 1
+    assert request.scheduled is False
 
     invalid = create_request()
     invalid["environment_uid"] = "77777777-7777-4777-8777-777777777777"
@@ -365,7 +363,7 @@ def test_portfolio_detail_resolves_business_labels_and_value_history() -> None:
         uid=uuid.UUID(SIGNAL_CONFIGURATION_UID),
         name="Daily IVV observation",
         description="Observe current IVV weights.",
-        enabled=True,
+        scheduled=True,
         universe_uid=uuid.UUID("77777777-7777-4777-8777-777777777777"),
         account_uid=uuid.UUID("88888888-8888-4888-8888-888888888888"),
     )
@@ -440,6 +438,7 @@ def test_portfolio_detail_resolves_business_labels_and_value_history() -> None:
 
     assert isinstance(detail, PortfolioConfigurationDetailResponse)
     assert detail.linked_signal.name == "Daily IVV observation"
+    assert detail.linked_signal.scheduled is True
     assert detail.linked_signal.universe_name == "S&P 500 holdings"
     assert detail.linked_bars.asset_source_name == "S&P 500 holdings (IVV)"
     assert detail.linked_bars.asset_count == 504
@@ -455,7 +454,7 @@ def test_portfolio_detail_route_loads_latest_100_observations() -> None:
             "linked_signal": {
                 "name": "Daily IVV observation",
                 "description": None,
-                "enabled": True,
+                "scheduled": True,
                 "universe_name": "S&P 500 holdings",
                 "universe_symbol": "IVV",
                 "account_name": "Paper account",

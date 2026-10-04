@@ -7,24 +7,20 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from alpaca_connectors.operations.portfolio_jobs import (
-    ALPACA_ETF_PORTFOLIO_EXECUTION_PATH,
-    _create_platform_job,
-    _patch_platform_job,
-    launch_portfolio_job,
-    normalize_portfolio_job_settings,
-    resolve_current_portfolio_job_configuration,
-)
+from alpaca_connectors.portfolios import configurations, execution
 from alpaca_connectors.portfolios.configurations import (
     AlpacaETFPortfolioConfiguration,
     AlpacaETFPortfolioConfigurationTable,
     PortfolioRebalanceConfiguration,
     normalize_rebalance_strategy,
+    update_portfolio_configuration,
 )
 from alpaca_connectors.portfolios.execution import (
     PortfolioExecutionGraph,
+    PortfolioPreflight,
     ResolvedPortfolioConfiguration,
     execute_portfolio_configuration,
+    preflight_portfolio_configuration,
     resolve_portfolio_configuration,
 )
 from alpaca_connectors.portfolios.signal_history import (
@@ -38,9 +34,6 @@ SIGNAL_CONFIGURATION_UID = uuid.UUID("22222222-2222-4222-8222-222222222222")
 BARS_CONFIGURATION_UID = uuid.UUID("33333333-3333-4333-8333-333333333333")
 REBALANCE_CONFIGURATION_UID = uuid.UUID("44444444-4444-4444-8444-444444444444")
 PORTFOLIO_UID = uuid.UUID("55555555-5555-4555-8555-555555555555")
-JOB_UID = uuid.UUID("66666666-6666-4666-8666-666666666666")
-JOB_RUN_UID = uuid.UUID("77777777-7777-4777-8777-777777777777")
-ENVIRONMENT_UID = "88888888-8888-4888-8888-888888888888"
 
 
 def portfolio_configuration(**overrides) -> AlpacaETFPortfolioConfiguration:
@@ -53,7 +46,7 @@ def portfolio_configuration(**overrides) -> AlpacaETFPortfolioConfiguration:
         "bars_configuration_uid": BARS_CONFIGURATION_UID,
         "rebalance_configuration_uid": REBALANCE_CONFIGURATION_UID,
         "portfolio_uid": None,
-        "job_uid": JOB_UID,
+        "scheduled": True,
         "upsample_frequency_id": "1d",
         "intraday_bar_interpolation_rule": "ffill",
         "valuation_column": "close",
@@ -110,7 +103,7 @@ def resolved_configuration() -> ResolvedPortfolioConfiguration:
     )
 
 
-def test_portfolio_configuration_owns_calculation_fields_only() -> None:
+def test_portfolio_configuration_owns_calculation_fields_and_the_scheduled_flag() -> None:
     columns = AlpacaETFPortfolioConfigurationTable.__table__.c
 
     for forbidden in (
@@ -134,10 +127,10 @@ def test_portfolio_configuration_owns_calculation_fields_only() -> None:
     assert columns.bars_configuration_uid.foreign_keys
     assert columns.rebalance_configuration_uid.foreign_keys
     assert columns.portfolio_uid.foreign_keys
-    assert any(
-        index.unique and [column.name for column in index.columns] == ["job_uid"]
-        for index in AlpacaETFPortfolioConfigurationTable.__table__.indexes
-    )
+    # Revision 0016: the only operational column; the retired job_uid stays until a later drop.
+    assert columns.scheduled.nullable is False
+    assert columns.scheduled.server_default is not None
+    assert "job_uid" in columns
 
 
 def test_rebalance_accepts_only_calendar_event_signal() -> None:
@@ -146,150 +139,73 @@ def test_rebalance_accepts_only_calendar_event_signal() -> None:
         normalize_rebalance_strategy("time_weighted")
 
 
-def test_portfolio_job_settings_are_transient_and_use_sdk_schedule_validation() -> None:
-    settings = normalize_portfolio_job_settings(
-        schedule_type="crontab",
-        schedule_expression="0 8 * * 1-5",
-        schedule_timezone="Europe/Vienna",
-        cpu_request="0.5",
-        memory_request="1",
-        max_runtime_seconds=7200,
-    )
-
-    assert settings.schedule_expression == "0 8 * * 1-5"
-    assert settings.schedule_timezone == "Europe/Vienna"
-    assert settings.cpu_request == "0.5"
-    assert settings.memory_request == "1"
-    with pytest.raises(ValueError, match="five crontab fields"):
-        normalize_portfolio_job_settings(
-            schedule_type="crontab",
-            schedule_expression="0 8 *",
-        )
-
-
-def test_portfolio_job_is_created_unscheduled_with_automatic_deployment() -> None:
-    row = portfolio_configuration(job_uid=None)
-    settings = normalize_portfolio_job_settings(
-        schedule_type="interval",
-        schedule_every=1,
-        schedule_period="days",
-    )
-    created = SimpleNamespace(uid=JOB_UID)
-
-    with patch("alpaca_connectors.operations.platform_jobs.PlatformJob.create", return_value=created) as create:
-        assert _create_platform_job(row, settings) is created
-
-    assert create.call_args.kwargs == {
-        "name": "Alpaca ETF Portfolio — Daily IVV analytical portfolio [11111111]",
-        "description": (
-            "NYSE-close ETF portfolio backtest. Portfolio configuration "
-            "11111111-1111-4111-8111-111111111111; signal configuration "
-            "22222222-2222-4222-8222-222222222222; bars configuration "
-            "33333333-3333-4333-8333-333333333333."
-        ),
-        "execution_path": ALPACA_ETF_PORTFOLIO_EXECUTION_PATH,
-        "task_schedule": None,
-        "cpu_request": "0.25",
-        "memory_request": "0.5",
-        "spot": False,
-        "max_runtime_seconds": 3600,
-        "automatic_deployment": True,
-        "timeout": 60,
-    }
-
-
-def test_portfolio_job_patch_writes_operational_settings_only_to_job() -> None:
-    row = portfolio_configuration()
-    settings = normalize_portfolio_job_settings(
-        schedule_type="interval",
-        schedule_every=1,
-        schedule_period="days",
-    )
-    job = Mock()
-    patched = SimpleNamespace(uid=JOB_UID, task_schedule={"schedule": {"type": "interval"}})
-    job.patch.return_value = patched
-
-    assert _patch_platform_job(row, job, settings) is patched
-    assert job.patch.call_args.kwargs["schedule"] == {
-        "schedule_type": "interval",
-        "every": 1,
-        "period": "days",
-        "one_off": False,
-    }
-    # Automatic deployment is read-only on Job updates (SDK 9.0.5).
-    assert "automatic_deployment" not in job.patch.call_args.kwargs
-
-
-def test_portfolio_job_patch_writes_crontab_timezone_only_to_job() -> None:
-    row = portfolio_configuration()
-    settings = normalize_portfolio_job_settings(
-        schedule_type="crontab",
-        schedule_expression="0 20 * * 1-5",
-        schedule_timezone="America/New_York",
-    )
-    job = Mock()
-    job.patch.return_value = SimpleNamespace(
-        uid=JOB_UID,
-        task_schedule={"schedule": {"type": "crontab"}},
-    )
-
-    _patch_platform_job(row, job, settings)
-
-    assert job.patch.call_args.kwargs["schedule"] == {
-        "schedule_type": "crontab",
-        "minute": "0",
-        "hour": "20",
-        "day_of_month": "*",
-        "month_of_year": "*",
-        "day_of_week": "1-5",
-        "timezone": "America/New_York",
-        "one_off": False,
-    }
-
-
-def test_manual_portfolio_run_passes_no_business_arguments() -> None:
-    row = portfolio_configuration()
-    job = Mock(uid=JOB_UID, image_status="ready")
-    job.run_job.return_value = {"uid": str(JOB_RUN_UID), "status": "PENDING"}
-
+def test_pausing_a_portfolio_writes_only_the_scheduled_flag() -> None:
     with (
-        patch("alpaca_connectors.operations.portfolio_jobs._current_environment_uid"),
-        patch("alpaca_connectors.operations.portfolio_jobs.get_portfolio_configuration", return_value=row),
-        patch("alpaca_connectors.operations.portfolio_jobs._require_linked_job", return_value=job),
-        patch("alpaca_connectors.operations.portfolio_jobs.list_portfolio_job_runs", return_value=[]),
-    ):
-        result = launch_portfolio_job(CONFIGURATION_UID)
-
-    job.run_job.assert_called_once_with(timeout=60)
-    assert result.job_run_uid == str(JOB_RUN_UID)
-
-
-def test_runtime_resolves_portfolio_configuration_from_owning_job() -> None:
-    row = portfolio_configuration()
-    run = SimpleNamespace(
-        uid=JOB_RUN_UID,
-        job_uid=JOB_UID,
-        organization_environment_uid=ENVIRONMENT_UID,
-    )
-
-    with (
-        patch("mainsequence.client.JobRun.filter", return_value=[run]),
-        patch(
-            "alpaca_connectors.operations.portfolio_jobs.get_portfolio_configuration_by_job_uid",
-            return_value=row,
-        ) as get_by_job,
-        patch(
-            "alpaca_connectors.operations.portfolio_jobs._current_environment_uid",
-            return_value=ENVIRONMENT_UID,
+        patch.object(
+            configurations, "get_portfolio_configuration", return_value=portfolio_configuration()
         ),
+        patch.object(configurations, "validate_portfolio_references") as validate,
+        patch.object(configurations, "update_portfolio_configuration_row") as update_row,
     ):
-        resolved, resolved_run = resolve_current_portfolio_job_configuration(
-            job_run_uid=JOB_RUN_UID
-        )
+        update_portfolio_configuration(CONFIGURATION_UID, scheduled=False)
 
-    assert resolved is row
-    assert resolved_run is run
-    get_by_job.assert_called_once_with(JOB_UID)
+    # A disabled bars configuration must not stop a portfolio from being paused.
+    validate.assert_not_called()
+    update_row.assert_called_once_with(CONFIGURATION_UID, values={"scheduled": False})
+
+
+def test_calculation_updates_still_validate_their_references() -> None:
+    with (
+        patch.object(
+            configurations, "get_portfolio_configuration", return_value=portfolio_configuration()
+        ),
+        patch.object(
+            configurations,
+            "validate_portfolio_references",
+            side_effect=ValueError("Bars configuration x is disabled."),
+        ) as validate,
+        patch.object(configurations, "update_portfolio_configuration_row") as update_row,
+        pytest.raises(ValueError, match="is disabled"),
+    ):
+        update_portfolio_configuration(CONFIGURATION_UID, commission_fee=0.0, scheduled=True)
+
+    validate.assert_called_once()
+    update_row.assert_not_called()
+
+
+def test_preflight_reports_resolution_blockers_without_writing() -> None:
+    row = portfolio_configuration()
+    with (
+        patch.object(execution, "get_portfolio_configuration", return_value=row),
+        patch.object(
+            execution,
+            "resolve_portfolio_configuration",
+            side_effect=ValueError("Signal x has no published observations."),
+        ) as resolve,
+    ):
+        blocked = preflight_portfolio_configuration(CONFIGURATION_UID)
+    with (
+        patch.object(execution, "get_portfolio_configuration", return_value=row),
+        patch.object(execution, "resolve_portfolio_configuration") as resolve_allowed,
+    ):
+        allowed = preflight_portfolio_configuration(CONFIGURATION_UID)
+
+    resolve.assert_called_once_with(CONFIGURATION_UID)
+    resolve_allowed.assert_called_once_with(CONFIGURATION_UID)
+    assert blocked == PortfolioPreflight(
+        configuration_uid=str(CONFIGURATION_UID),
+        blockers=("Signal x has no published observations.",),
+    )
+    assert not blocked.allowed
+    assert allowed.allowed
+
+
+def test_preflight_of_a_missing_configuration_is_not_found() -> None:
+    with (
+        patch.object(execution, "get_portfolio_configuration", return_value=None),
+        pytest.raises(LookupError, match="does not exist"),
+    ):
+        preflight_portfolio_configuration(CONFIGURATION_UID)
 
 
 def test_portfolio_resolution_uses_published_signal_and_selected_bars_profile() -> None:

@@ -1,4 +1,7 @@
-"""Universe-backed Alpaca ETF signal Job API."""
+"""Universe-backed Alpaca ETF signal configuration API.
+
+Every configuration runs on the signal Job declared in the repository workflow (ADR 0013).
+"""
 
 from __future__ import annotations
 
@@ -38,19 +41,17 @@ def signal_jobs_list(
     limit: int = Query(default=25, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
     search: str | None = None,
-    enabled: bool | None = None,
-    lifecycle_state: str | None = None,
+    scheduled: bool | None = None,
     ordering: str = "name",
 ) -> ResourceCollection:
     validate_page_window(limit=limit, offset=offset)
-    validate_ordering(ordering, allowed_fields={"name", "updated_at", "lifecycle_state"})
+    validate_ordering(ordering, allowed_fields={"name", "updated_at"})
     try:
         return list_configurations(
             limit=limit,
             offset=offset,
             search=search,
-            enabled=enabled,
-            lifecycle_state=lifecycle_state,
+            scheduled=scheduled,
             ordering=ordering,
         )
     except Exception as exc:
@@ -62,33 +63,24 @@ def signal_jobs_discovery() -> ResourceDiscoveryResponse:
     return resource_discovery(
         resource_id="alpaca-etf-signal-jobs",
         label="ETF Weight Signals",
-        item_label="signal Job",
+        item_label="signal configuration",
         identity_fields=["uid"],
         searchable_fields=["name", "description"],
-        filterable_fields=["enabled", "lifecycle_state"],
-        filter_types={"enabled": "boolean"},
-        filter_options={
-            "lifecycle_state": [
-                {"value": "ready", "label": "Ready"},
-                {"value": "paused", "label": "Paused"},
-                {"value": "provisioning", "label": "Provisioning"},
-                {"value": "error", "label": "Error"},
-            ]
-        },
-        orderable_fields=["name", "updated_at", "lifecycle_state"],
+        filterable_fields=["scheduled"],
+        filter_types={"scheduled": "boolean"},
+        orderable_fields=["name", "updated_at"],
         columns=[
             {"id": "name", "header": "Signal", "sortable_key": "name", "hideable": False},
             {"id": "signal_uid", "header": "Signal UID"},
             {"id": "lifecycle_state", "header": "State"},
-            {"id": "schedule_type", "header": "Schedule"},
-            {"id": "job_image_status", "header": "Image"},
+            {"id": "job_image_status", "value_path": "job.image_status", "header": "Image"},
             {"id": "latest_run_status", "header": "Last Run"},
             {
                 "id": "latest_run_at",
                 "header": "Last Run At",
                 "data_type": "datetime",
             },
-            {"id": "enabled", "header": "Enabled", "data_type": "boolean"},
+            {"id": "scheduled", "header": "Scheduled Run", "data_type": "boolean"},
         ],
     )
 
@@ -107,7 +99,7 @@ def signal_job_create(
 def signal_job_get(configuration_uid: str) -> SignalJobConfigurationResponse:
     item = get_configuration(configuration_uid)
     if item is None:
-        raise not_found("Signal Job configuration not found.")
+        raise not_found("Signal configuration not found.")
     return item
 
 

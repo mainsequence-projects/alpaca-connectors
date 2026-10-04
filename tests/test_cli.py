@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import json
 import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -288,13 +289,11 @@ class CliTests(unittest.TestCase):
             enabled=True,
         )
 
-    def test_signal_create_forwards_durable_job_configuration(self) -> None:
+    def test_signal_create_stores_only_the_configuration_and_scheduled_flag(self) -> None:
         row = SimpleNamespace(
-            model_dump=lambda mode=None: {
-                "uid": "configuration-uid",
-                "job_uid": "job-uid",
-            }
+            model_dump=lambda mode=None: {"uid": "configuration-uid", "enabled": False}
         )
+        stdout = io.StringIO()
         with (
             patch(
                 "alpaca_connectors.operations.create_signal_job_configuration",
@@ -304,6 +303,7 @@ class CliTests(unittest.TestCase):
                 "alpaca_connectors.operations.signal_uid_for_configuration",
                 return_value="signal-uid",
             ),
+            contextlib.redirect_stdout(stdout),
         ):
             exit_code = main(
                 [
@@ -315,12 +315,7 @@ class CliTests(unittest.TestCase):
                     "universe-uid",
                     "--account-uid",
                     "account-uid",
-                    "--schedule-type",
-                    "interval",
-                    "--schedule-every",
-                    "1",
-                    "--schedule-period",
-                    "days",
+                    "--no-scheduled",
                 ]
             )
 
@@ -330,41 +325,41 @@ class CliTests(unittest.TestCase):
             description=None,
             universe_uid="universe-uid",
             account_uid="account-uid",
-            enabled=True,
-            schedule_type="interval",
-            schedule_every=1,
-            schedule_period="days",
-            schedule_expression=None,
-            schedule_timezone=None,
-            schedule_start_time=None,
-            cpu_request="0.25",
-            memory_request="0.5",
-            max_runtime_seconds=3600,
-            spot=False,
+            scheduled=False,
+        )
+        self.assertEqual(
+            json.loads(stdout.getvalue()),
+            {"uid": "configuration-uid", "scheduled": False, "signal_uid": "signal-uid"},
         )
 
-    def test_signal_create_does_not_expose_an_environment_selector(self) -> None:
-        with self.assertRaises(SystemExit):
-            main(
-                [
-                    "signal",
-                    "create",
-                    "--name",
-                    "Daily IVV observation",
-                    "--universe-uid",
-                    "universe-uid",
-                    "--account-uid",
-                    "account-uid",
-                    "--schedule-type",
-                    "interval",
-                    "--schedule-every",
-                    "1",
-                    "--schedule-period",
-                    "days",
-                    "--environment-uid",
-                    "environment-uid",
-                ]
-            )
+    def test_signal_create_rejects_job_settings_and_an_environment_selector(self) -> None:
+        base = [
+            "signal",
+            "create",
+            "--name",
+            "Daily IVV observation",
+            "--universe-uid",
+            "universe-uid",
+            "--account-uid",
+            "account-uid",
+        ]
+        for extra in (
+            ["--environment-uid", "environment-uid"],
+            ["--schedule-type", "interval"],
+            ["--cpu-request", "1"],
+        ):
+            with self.subTest(extra=extra), self.assertRaises(SystemExit):
+                main([*base, *extra])
+
+    def test_portfolio_update_can_change_only_the_scheduled_flag(self) -> None:
+        with patch(
+            "alpaca_connectors.portfolios.update_portfolio_configuration",
+            return_value={"uid": "configuration-uid", "scheduled": False},
+        ) as update:
+            exit_code = main(["portfolio", "update", "configuration-uid", "--no-scheduled"])
+
+        self.assertEqual(exit_code, 0)
+        update.assert_called_once_with("configuration-uid", scheduled=False)
 
     def test_portfolio_prepare_interpolated_prices_uses_migration_preflight(self) -> None:
         result = {

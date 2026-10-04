@@ -586,8 +586,7 @@ def query_etf_signals(arguments: Mapping[str, Any]) -> Any:
         limit=limit,
         offset=offset,
         search=_optional_text(arguments, "search"),
-        enabled=arguments.get("enabled"),
-        lifecycle_state=_optional_text(arguments, "lifecycle_state"),
+        scheduled=arguments.get("scheduled"),
         ordering=str(arguments.get("ordering") or "name"),
     )
 
@@ -1138,7 +1137,7 @@ PROJECT_AGENT_TOOLS: tuple[ProjectAgentTool, ...] = (
         label="Query ETF Weight Signals",
         description=(
             "Read Universe-backed ETF signal configurations, their latest 100 observed weight "
-            "frames, and dedicated JobRun history."
+            "frames, and their runs of the shared signal Job."
         ),
         parameters=_operations(
             _operation_case(
@@ -1147,8 +1146,7 @@ PROJECT_AGENT_TOOLS: tuple[ProjectAgentTool, ...] = (
                     **PAGE,
                     **SEARCH,
                     **ORDERING,
-                    "enabled": {"type": "boolean"},
-                    "lifecycle_state": {"type": "string"},
+                    "scheduled": {"type": "boolean"},
                 },
             ),
             _operation_case(
@@ -1180,8 +1178,9 @@ PROJECT_AGENT_TOOLS: tuple[ProjectAgentTool, ...] = (
         name="alpaca_manage_etf_signal",
         label="Manage ETF Weight Signal",
         description=(
-            "Create, update, delete, or run a Universe-backed ETF signal configuration and its "
-            "dedicated scheduled Main Sequence Job."
+            "Create, update, delete, or run a Universe-backed ETF signal configuration. The "
+            "shared signal Job declared in the workflow runs it; `scheduled` includes it in that "
+            "Job's daily scheduled run."
         ),
         parameters=_operations(
             _operation_case(
@@ -1189,7 +1188,7 @@ PROJECT_AGENT_TOOLS: tuple[ProjectAgentTool, ...] = (
                 properties={
                     "request": _request(
                         SignalJobConfigurationCreateRequest,
-                        "ETF signal and dedicated Job configuration.",
+                        "ETF signal configuration.",
                     )
                 },
                 required=("request",),
@@ -1200,7 +1199,7 @@ PROJECT_AGENT_TOOLS: tuple[ProjectAgentTool, ...] = (
                     "configuration_uid": _uid("ETF signal configuration"),
                     "request": _request(
                         SignalJobConfigurationUpdateRequest,
-                        "Mutable ETF signal and Job fields.",
+                        "Mutable ETF signal fields, including scheduled.",
                     ),
                 },
                 required=("configuration_uid", "request"),
@@ -1280,7 +1279,7 @@ PROJECT_AGENT_TOOLS: tuple[ProjectAgentTool, ...] = (
         label="Query ETF Portfolios",
         description=(
             "Read analytical ETF portfolio configurations, linked signal/bars/rebalance details, "
-            "historical performance, statistics, and dedicated JobRun history."
+            "historical performance, statistics, and their runs of the shared portfolio Job."
         ),
         parameters=_operations(
             _operation_case(
@@ -1322,8 +1321,9 @@ PROJECT_AGENT_TOOLS: tuple[ProjectAgentTool, ...] = (
         name="alpaca_manage_etf_portfolio",
         label="Manage ETF Portfolio",
         description=(
-            "Create, update, delete, or run an analytical ETF portfolio configuration and its "
-            "dedicated scheduled Main Sequence Job."
+            "Create, update, delete, or run an analytical ETF portfolio configuration. The "
+            "shared portfolio Job declared in the workflow runs it; `scheduled` includes it in "
+            "that Job's daily scheduled run."
         ),
         parameters=_operations(
             _operation_case(
@@ -1331,7 +1331,7 @@ PROJECT_AGENT_TOOLS: tuple[ProjectAgentTool, ...] = (
                 properties={
                     "request": _request(
                         PortfolioConfigurationCreateRequest,
-                        "ETF portfolio, data, rebalance, and dedicated Job configuration.",
+                        "ETF portfolio, data, and rebalance configuration.",
                     )
                 },
                 required=("request",),
@@ -1342,7 +1342,7 @@ PROJECT_AGENT_TOOLS: tuple[ProjectAgentTool, ...] = (
                     "configuration_uid": _uid("ETF portfolio configuration"),
                     "request": _request(
                         PortfolioConfigurationUpdateRequest,
-                        "Mutable ETF portfolio and Job fields.",
+                        "Mutable ETF portfolio fields, including scheduled.",
                     ),
                 },
                 required=("configuration_uid", "request"),

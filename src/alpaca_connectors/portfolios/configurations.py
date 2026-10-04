@@ -1,8 +1,11 @@
 """Durable analytical portfolio and rebalance configurations.
 
-The rows in this module own calculation intent only. Scheduling, compute, image selection,
-automatic deployment, and execution history remain properties of the linked Main Sequence Job
-and its JobRuns.
+The rows in this module own calculation intent plus one operational flag, ``scheduled``: whether
+the scheduled run of the portfolio Job declared in
+``.mainsequence/workflows/alpaca-connectors-api.yaml`` includes the configuration (ADR 0013).
+Schedule, compute, image and automatic deployment belong to that declaration, and execution
+history to its JobRuns. The ``job_uid`` column of the former one-Job-per-configuration design
+stays in the schema until a later revision drops it; nothing reads or writes it.
 """
 
 from __future__ import annotations
@@ -26,6 +29,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    true,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.types import Uuid
@@ -145,14 +149,14 @@ class AlpacaETFPortfolioConfigurationTable(
     AlpacaMarketsMetaTableMixin,
     MarketsBase,
 ):
-    """One persistent analytical portfolio definition and its platform Job relationship."""
+    """One persistent analytical portfolio definition and its scheduled-run flag."""
 
     __project_storage_concept__ = "etf_portfolio_configuration"
     __markets_base_identifier__ = "AlpacaETFPortfolioConfiguration"
     __metatable_description__ = (
         "Durable analytical ETF portfolio configurations composed from one signal "
         "configuration, one Alpaca bars configuration, and one rebalance configuration. "
-        "Operational Job settings are not duplicated in this table."
+        "The portfolio Job declared in the repository workflow runs them."
     )
     __table_args__ = markets_table_args(
         "AlpacaETFPortfolioConfiguration",
@@ -240,7 +244,9 @@ class AlpacaETFPortfolioConfigurationTable(
         nullable=True,
         info={
             "label": "Job UID",
-            "description": "Dedicated Main Sequence Job; its settings remain Job-owned.",
+            "description": (
+                "Retired with the one-Job-per-configuration design (ADR 0013); never read."
+            ),
         },
     )
     upsample_frequency_id: Mapped[str] = mapped_column(String(16), nullable=False)
@@ -265,6 +271,21 @@ class AlpacaETFPortfolioConfigurationTable(
     )
     updated_at: Mapped[dt.datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now
+    )
+    scheduled: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=True,
+        # Revision 0016. The server default stays: a release that predates the column inserts
+        # rows without it.
+        server_default=true(),
+        info={
+            "label": "Scheduled",
+            "description": (
+                "Whether the scheduled run of the shared portfolio Job includes this "
+                "configuration."
+            ),
+        },
     )
 
 
@@ -308,7 +329,7 @@ class AlpacaETFPortfolioConfiguration(MarketsMetaTableRow):
     bars_configuration_uid: uuid.UUID
     rebalance_configuration_uid: uuid.UUID
     portfolio_uid: uuid.UUID | None
-    job_uid: uuid.UUID | None
+    scheduled: bool
     upsample_frequency_id: str
     intraday_bar_interpolation_rule: str
     valuation_column: str
@@ -634,8 +655,10 @@ def create_portfolio_configuration_row(
     valuation_maximum_staleness_seconds: int = 86_400,
     fail_on_missing_prices: bool = True,
     commission_fee: float = 0.00018,
+    scheduled: bool = True,
     uid: uuid.UUID | str | None = None,
 ) -> AlpacaETFPortfolioConfiguration:
+    """Store one portfolio configuration; it touches no platform Job."""
     from msm.bootstrap import resolve_runtime
     from msm.repositories.crud import create_model
 
@@ -659,7 +682,7 @@ def create_portfolio_configuration_row(
         "bars_configuration_uid": bars_uid,
         "rebalance_configuration_uid": rebalance_uid,
         "portfolio_uid": None,
-        "job_uid": None,
+        "scheduled": bool(scheduled),
         "upsample_frequency_id": _phase_one_value(
             upsample_frequency_id,
             label="upsample_frequency_id",
@@ -702,16 +725,6 @@ def get_portfolio_configuration(
 ) -> AlpacaETFPortfolioConfiguration | None:
     _start_runtime()
     return AlpacaETFPortfolioConfiguration.get_by_uid(configuration_uid)
-
-
-def get_portfolio_configuration_by_job_uid(
-    job_uid: uuid.UUID | str,
-) -> AlpacaETFPortfolioConfiguration | None:
-    _start_runtime()
-    rows = AlpacaETFPortfolioConfiguration.filter(job_uid=str(job_uid), limit=2)
-    if len(rows) > 1:
-        raise RuntimeError(f"Job {job_uid!s} is linked to multiple portfolio configurations.")
-    return rows[0] if rows else None
 
 
 def list_portfolio_configurations(
@@ -795,7 +808,7 @@ def update_portfolio_configuration_row(
     )
 
 
-def update_portfolio_calculation_configuration(
+def update_portfolio_configuration(
     configuration_uid: uuid.UUID | str,
     *,
     name: str | None = None,
@@ -809,10 +822,35 @@ def update_portfolio_calculation_configuration(
     valuation_maximum_staleness_seconds: int | None = None,
     fail_on_missing_prices: bool | None = None,
     commission_fee: float | None = None,
+    scheduled: bool | None = None,
 ) -> AlpacaETFPortfolioConfiguration:
+    """Update calculation fields, the scheduled flag, or both.
+
+    Changing only ``scheduled`` (pause or resume) skips the reference validation, so a portfolio
+    whose bars configuration is disabled can still be left out of the scheduled run.
+    """
     current = get_portfolio_configuration(configuration_uid)
     if current is None:
         raise LookupError(f"Portfolio configuration {configuration_uid!s} does not exist.")
+    calculation_values = (
+        name,
+        signal_configuration_uid,
+        bars_configuration_uid,
+        rebalance_configuration_uid,
+        upsample_frequency_id,
+        intraday_bar_interpolation_rule,
+        valuation_column,
+        valuation_maximum_staleness_seconds,
+        fail_on_missing_prices,
+        commission_fee,
+    )
+    if description is _UNSET and all(value is None for value in calculation_values):
+        if scheduled is None:
+            raise ValueError("At least one portfolio configuration field must be provided.")
+        return update_portfolio_configuration_row(
+            configuration_uid,
+            values={"scheduled": bool(scheduled)},
+        )
     signal_uid = uuid.UUID(str(signal_configuration_uid or current.signal_configuration_uid))
     bars_uid = uuid.UUID(str(bars_configuration_uid or current.bars_configuration_uid))
     rebalance_uid = uuid.UUID(
@@ -861,7 +899,31 @@ def update_portfolio_calculation_configuration(
         if commission_fee < 0:
             raise ValueError("commission_fee must be greater than or equal to zero.")
         values["commission_fee"] = float(commission_fee)
+    if scheduled is not None:
+        values["scheduled"] = bool(scheduled)
     return update_portfolio_configuration_row(configuration_uid, values=values)
+
+
+def scheduled_portfolio_configurations() -> list[AlpacaETFPortfolioConfiguration]:
+    """Return every portfolio configuration the portfolio Job's scheduled run includes."""
+    from msm.bootstrap import resolve_runtime
+    from msm.repositories.base import compile_markets_statement, execute_markets_operation
+    from sqlalchemy import select
+
+    table = AlpacaETFPortfolioConfigurationTable
+    _start_runtime()
+    runtime = resolve_runtime(models=[table], row_model_name="AlpacaETFPortfolioConfiguration")
+    operation = compile_markets_statement(
+        select(table).where(table.scheduled.is_(True)).order_by(table.name.asc(), table.uid.asc()),
+        context=runtime.context,
+        operation="select",
+    )
+    return [
+        AlpacaETFPortfolioConfiguration.model_validate(row)
+        for row in operation_result_rows(
+            execute_markets_operation(operation, context=runtime.context)
+        )
+    ]
 
 
 def delete_portfolio_configuration_row(configuration_uid: uuid.UUID | str) -> dict[str, Any]:
@@ -888,7 +950,6 @@ __all__ = [
     "delete_portfolio_configuration_row",
     "delete_rebalance_configuration",
     "get_portfolio_configuration",
-    "get_portfolio_configuration_by_job_uid",
     "get_rebalance_configuration",
     "list_portfolio_configurations",
     "list_rebalance_configurations",
@@ -897,7 +958,8 @@ __all__ = [
     "normalize_rebalance_strategy",
     "project_portfolio_configuration_models",
     "rebalance_configurations_by_uids",
-    "update_portfolio_calculation_configuration",
+    "scheduled_portfolio_configurations",
+    "update_portfolio_configuration",
     "update_portfolio_configuration_row",
     "update_rebalance_configuration",
     "validate_portfolio_references",

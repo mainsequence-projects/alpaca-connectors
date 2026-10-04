@@ -231,7 +231,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     signal_parser = top_level.add_parser(
         "signal",
-        help="Create and operate Universe-backed Alpaca ETF signal Jobs.",
+        help="Create and run Universe-backed ETF signal configurations on the signal Job.",
     )
     signal_commands = signal_parser.add_subparsers(dest="signal_command")
     configure_signal_list_parser(signal_commands.add_parser("list"))
@@ -250,7 +250,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     portfolio_parser = top_level.add_parser(
         "portfolio",
-        help="Create and operate analytical ETF portfolio Jobs.",
+        help="Create and run analytical ETF portfolio configurations on the portfolio Job.",
     )
     portfolio_commands = portfolio_parser.add_subparsers(dest="portfolio_command")
     configure_portfolio_list_parser(portfolio_commands.add_parser("list"))

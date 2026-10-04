@@ -77,6 +77,18 @@ class PortfolioExecutionResult:
 
 
 @dataclass(frozen=True, slots=True)
+class PortfolioPreflight:
+    """Whether a portfolio configuration's stored inputs resolve for a run."""
+
+    configuration_uid: str
+    blockers: tuple[str, ...]
+
+    @property
+    def allowed(self) -> bool:
+        return not self.blockers
+
+
+@dataclass(frozen=True, slots=True)
 class PortfolioExecutionGraph:
     valuation_source: Any
     calendar_events: Any
@@ -135,6 +147,22 @@ def resolve_portfolio_configuration(
         asset_identifiers=asset_identifiers,
         source_time_index_meta_table_uid=source_uid,
     )
+
+
+def preflight_portfolio_configuration(configuration_uid: Any) -> PortfolioPreflight:
+    """Resolve the inputs a run needs, read-only, and report what blocks the run.
+
+    A linked configuration that is missing or disabled, an unsupported rebalance strategy, or a
+    signal without published observations blocks the run. Any other failure propagates.
+    """
+    configuration = get_portfolio_configuration(configuration_uid)
+    if configuration is None:
+        raise LookupError(f"Portfolio configuration {configuration_uid!s} does not exist.")
+    try:
+        resolve_portfolio_configuration(configuration.uid)
+    except (LookupError, ValueError) as exc:
+        return PortfolioPreflight(configuration_uid=str(configuration.uid), blockers=(str(exc),))
+    return PortfolioPreflight(configuration_uid=str(configuration.uid), blockers=())
 
 
 def build_portfolio_graph(resolved: ResolvedPortfolioConfiguration) -> PortfolioExecutionGraph:
@@ -333,9 +361,11 @@ def _summarize_run_result(value: Any) -> Any:
 __all__ = [
     "PortfolioExecutionResult",
     "PortfolioExecutionGraph",
+    "PortfolioPreflight",
     "ResolvedPortfolioConfiguration",
     "build_portfolio_graph",
     "execute_portfolio_configuration",
     "portfolio_unique_identifier",
+    "preflight_portfolio_configuration",
     "resolve_portfolio_configuration",
 ]

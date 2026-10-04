@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 
 from alpaca_connectors.api.app.main import app
 from alpaca_connectors.api.app.schemas import (
+    ConfigurationJobResponse,
     SignalJobConfigurationResponse,
     SignalJobRunAcceptedResponse,
     SignalObservationAssetResponse,
@@ -30,22 +31,25 @@ def response() -> SignalJobConfigurationResponse:
         signal_uid="signal-uid",
         universe_uid=UNIVERSE_UID,
         account_uid=ACCOUNT_UID,
+        scheduled=True,
         job_uid=JOB_UID,
-        enabled=True,
-        schedule_type="interval",
-        schedule_every=1,
-        schedule_period="days",
-        schedule_expression=None,
-        schedule_timezone=None,
-        schedule_start_time=None,
-        cpu_request="0.25",
-        memory_request="0.5",
-        max_runtime_seconds=3600,
-        spot=False,
+        job=ConfigurationJobResponse(
+            uid=JOB_UID,
+            schedule_type="crontab",
+            schedule_every=None,
+            schedule_period=None,
+            schedule_expression="30 0 * * *",
+            schedule_timezone="UTC",
+            schedule_timezone_explicit=True,
+            schedule_start_time=None,
+            cpu_request="0.25",
+            memory_request="0.5",
+            max_runtime_seconds=3600,
+            spot=False,
+            image_status="ready",
+            automatic_deployment=True,
+        ),
         lifecycle_state="ready",
-        last_error=None,
-        job_image_status="ready",
-        job_automatic_deployment=True,
         latest_run_status=None,
         latest_run_at=None,
         created_at=now,
@@ -59,17 +63,7 @@ def create_request() -> dict:
         "description": None,
         "universe_uid": UNIVERSE_UID,
         "account_uid": ACCOUNT_UID,
-        "enabled": True,
-        "schedule_type": "interval",
-        "schedule_every": 1,
-        "schedule_period": "days",
-        "schedule_expression": None,
-        "schedule_timezone": None,
-        "schedule_start_time": None,
-        "cpu_request": "0.25",
-        "memory_request": "0.5",
-        "max_runtime_seconds": 3600,
-        "spot": False,
+        "scheduled": True,
     }
 
 
@@ -77,16 +71,20 @@ def test_signal_discovery_columns_match_the_local_renderer_contract() -> None:
     result = TestClient(app).get("/v1/signal-jobs/discovery")
 
     assert result.status_code == 200
-    assert [column["id"] for column in result.json()["list"]["columns"]] == [
+    columns = result.json()["list"]["columns"]
+    assert [column["id"] for column in columns] == [
         "name",
         "signal-uid",
         "lifecycle-state",
-        "schedule-type",
         "job-image-status",
         "latest-run-status",
         "latest-run-at",
-        "enabled",
+        "scheduled",
     ]
+    assert columns[3]["value_path"] == "job.image_status"
+    filters = result.json()["list"]["controls"]["filters"]
+    assert [item["key"] for item in filters] == ["scheduled"]
+    assert result.json()["list"]["controls"]["ordering"] == ["name", "updated_at"]
 
 
 def test_signal_create_forwards_configuration_without_an_environment_selector() -> None:
@@ -98,11 +96,29 @@ def test_signal_create_forwards_configuration_without_an_environment_selector() 
 
     assert result.status_code == 201
     assert result.json()["job_uid"] == JOB_UID
+    assert result.json()["job"]["schedule_expression"] == "30 0 * * *"
     assert result.json()["signal_uid"] == "signal-uid"
     assert "environment_uid" not in result.json()
     request = create.call_args.args[0]
     assert request.universe_uid == UNIVERSE_UID
     assert request.account_uid == ACCOUNT_UID
+    assert request.scheduled is True
+
+
+def test_signal_list_filters_on_the_scheduled_flag() -> None:
+    from alpaca_connectors.api.app.services.common import collection_response
+
+    with patch(
+        "alpaca_connectors.api.app.routers.signal_jobs.list_configurations",
+        return_value=collection_response(items=[], total=0, limit=25, offset=0),
+    ) as list_configurations:
+        result = TestClient(app).get("/v1/signal-jobs?scheduled=false&ordering=-updated_at")
+
+    assert result.status_code == 200
+    list_configurations.assert_called_once_with(
+        limit=25, offset=0, search=None, scheduled=False, ordering="-updated_at"
+    )
+    assert TestClient(app).get("/v1/signal-jobs?ordering=lifecycle_state").status_code == 400
 
 
 def test_signal_create_rejects_a_caller_supplied_environment() -> None:
@@ -114,7 +130,7 @@ def test_signal_create_rejects_a_caller_supplied_environment() -> None:
     assert result.status_code == 422
 
 
-def test_signal_run_returns_the_accepted_job_run_without_arguments() -> None:
+def test_signal_run_returns_the_accepted_job_run() -> None:
     accepted = SignalJobRunAcceptedResponse(
         configuration_uid=CONFIGURATION_UID,
         job_uid=JOB_UID,
