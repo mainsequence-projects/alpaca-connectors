@@ -76,6 +76,51 @@ On each platform branch, after the push that creates the two declared Jobs:
    The `mainsequence` 9.0.5 CLI has no Job delete command. Deleting a Job also deletes its JobRuns.
 3. Check that the list from step 1 shows only the two declared Jobs.
 
+### Cleanup Of The Duplicate Migration Job
+
+On 2026-10-05 the `main` branch on the development server had two Jobs named
+`Alpaca Connectors Migrations`. Only one is bound to the current declaration:
+
+| Job | Workflow binding (file, key) | Created by the push of | Runs |
+|---|---|---|---|
+| `f6e2433e-fe65-49ef-af83-6f515c26b023`, current | `.mainsequence/workflows/alpaca-connectors-api.yaml`, `alpaca-connectors-migrate` | `c98c629`, 2026-10-03 17:40 UTC | `216e21f3`, failed with a SQLAlchemy `ProgrammingError` |
+| `ed550d08-226f-42e5-8db1-9f00eea3d30a`, stale | `.mainsequence/workflows/alpaca-connectors-migrations.yaml`, `alpaca-connectors-migrate` | `48d135d`, 2026-10-03 16:28 UTC | `eb9dac64`, failed (`backofflimitexceeded`) |
+
+The backend identifies a workflow target by its branch, workflow file path and resource key
+(tdag-django ADR-030), so moving a declaration to another file creates a new target. `48d135d`
+declared the migration Job in its own file, `alpaca-connectors-migrations.yaml`. `c98c629` moved
+the same key into `alpaca-connectors-api.yaml` (ADR 0012) and removed that file, which created
+`f6e2433e`. At the time the backend kept targets whose declaration was gone, so `ed550d08` stayed.
+Its image stays at `48d135d`, it has no schedule, and no execution step references it, so nothing
+runs it again.
+
+The next push of `main` deletes it. Since tdag-django ADR-077 (`4a2833f12`, part of the
+`development` code the development server runs), a push to the branch head deletes every
+workflow-bound Job whose file and key no valid file of the head declares, after applying the push's
+own declarations. `alpaca-connectors-migrations.yaml` no longer exists, so:
+
+- the backend's read-only ADR-077 report (`report_undeclared_workflow_targets` for this branch, at
+  head `c98c629`) lists exactly `ed550d08` as undeclared;
+- Django's deletion collector, run without deleting anything, finds no protected or restricted
+  rows. The deletion also removes its JobRun `eb9dac64`, its pod record, redeployment policy and
+  runtime session. Its image deployment run keeps its record, with the Job reference cleared;
+- the commits after `c98c629` only add the two configuration Jobs to `alpaca-connectors-api.yaml`,
+  so nothing else becomes undeclared. The invalid `alpaca-connectors-agent.yaml` protects only
+  targets bound to its own path. The per-configuration Jobs above have no binding and are not
+  affected.
+
+After the push:
+
+1. Read the workflow action result of the pushed commit. Its `deletions` list should report
+   `ed550d08-226f-42e5-8db1-9f00eea3d30a` as `deleted`. If it reports `deletion_blocked`, its
+   reason says why and the next push tries again. Delete the Job by hand only in that case, as in
+   step 2 of the cleanup above.
+2. `mainsequence code-repository jobs list --filter "name__contains=Alpaca Connectors Migrations"`
+   should list only `f6e2433e-fe65-49ef-af83-6f515c26b023`.
+
+The API deploy step needs the migration step, and the current Job's only run failed. Check that the
+push's migration run succeeds before expecting a new API revision.
+
 ## ETF Weight Signals
 
 A signal configuration is one Universe plus the registered Alpaca account its runs use. The durable
