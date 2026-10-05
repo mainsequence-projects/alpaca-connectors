@@ -154,7 +154,9 @@ start_site() {
   command -v node >/dev/null || die "node is not on PATH."
   require_free_port "$SITE_PORT" "Site"
   log "Site: http://127.0.0.1:$SITE_PORT"
-  (cd "$SITE_DIR" && VITE_API_BASE_URL="http://127.0.0.1:$API_PORT" exec node "$vite" \
+  # The site's dev-server proxy adds the developer's access token from this CLI (ADR 0014).
+  (cd "$SITE_DIR" && VITE_API_BASE_URL="http://127.0.0.1:$API_PORT" \
+    MAINSEQUENCE_CLI="${MAINSEQUENCE_CLI:-$ROOT/.venv/bin/mainsequence}" exec node "$vite" \
     --host 127.0.0.1 --port "$SITE_PORT" --strictPort) > >(prefix site) 2>&1 &
   PIDS+=("$!")
 }

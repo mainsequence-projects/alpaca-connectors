@@ -41,7 +41,8 @@
       "cwd": "${workspaceFolder}/../alpacaconnectorssite-ab9d29c9-2dcb-417f-8d88-ee9c9e9c8baf",
       "console": "integratedTerminal",
       "env": {
-        "VITE_API_BASE_URL": "http://127.0.0.1:8321"
+        "VITE_API_BASE_URL": "http://127.0.0.1:8321",
+        "MAINSEQUENCE_CLI": "${workspaceFolder}/.venv/bin/mainsequence"
       },
       "skipFiles": [
         "<node_internals>/**"
