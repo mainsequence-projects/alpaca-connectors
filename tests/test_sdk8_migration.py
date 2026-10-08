@@ -71,6 +71,7 @@ def test_migration_metadata_includes_fk_dependencies_but_manages_only_project_ta
         "alpaca_connectors__bars_configuration",
         "alpaca_connectors__bars_configuration_asset",
         "alpaca_connectors__acct_alpaca",
+        "alpaca_connectors__account_key_request",
         "alpaca_connectors__asset_alpaca",
         "alpaca_connectors__asset_registration_operation",
         "alpaca_connectors__etf_portfolio_configuration",

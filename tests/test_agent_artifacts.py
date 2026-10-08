@@ -15,8 +15,10 @@ SKILLS_ROOT = REPO_ROOT / ".agents" / "skills"
 AGENT_CARD_PATH = REPO_ROOT / ".agents" / "agent_card.json"
 ICON_PATH = REPO_ROOT / ".agents" / "alpaca-command-center-icon.png"
 PYPROJECT_PATH = REPO_ROOT / "pyproject.toml"
-TAU_EXTENSION_PATH = REPO_ROOT / ".tau" / "extensions" / "alpaca_connectors" / "extension.py"
-WORKFLOW_PATH = REPO_ROOT / ".mainsequence" / "workflows" / "alpaca-connectors-agent.yaml"
+MCP_SERVER_PATH = REPO_ROOT / "src" / "alpaca_connectors" / "api" / "app" / "mcp_server.py"
+WORKFLOW_PATH = REPO_ROOT / ".mainsequence" / "workflows" / "alpaca-connectors-api.yaml"
+OLD_AGENT_WORKFLOW_PATH = REPO_ROOT / ".mainsequence" / "workflows" / "alpaca-connectors-agent.yaml"
+AGENT_ENTRY_PATH = REPO_ROOT / "api" / "agent" / "main.py"
 
 
 def project_skill_paths() -> list[str]:
@@ -43,7 +45,7 @@ class AgentArtifactsTests(unittest.TestCase):
         self.assertNotIn("HERE SHOULD BE THE PROJECT-SPECIFIC ACTIONS", content)
         self.assertIn("## CodeRepository-Specific Instructions", content)
         self.assertIn("Project-to-agent boundary:", content)
-        self.assertIn(".tau/extensions/alpaca_connectors/extension.py", content)
+        self.assertIn("alpaca_connectors.api.app.mcp_server", content)
         self.assertIn("alpaca-connectors asset register", content)
 
     def test_agent_card_is_source_metadata_not_a_runtime_card(self) -> None:
@@ -82,39 +84,64 @@ class AgentArtifactsTests(unittest.TestCase):
             self.assertTrue(skill["examples"])
             self.assertTrue((REPO_ROOT / skill["path"]).is_file())
 
-    def test_tau_extension_imports_the_project_tool_catalog_without_path_shims(self) -> None:
-        source = TAU_EXTENSION_PATH.read_text(encoding="utf-8")
-        tree = ast.parse(source)
-
-        self.assertNotIn("sys.path", source)
+    def test_the_agent_gets_project_tools_only_from_the_api_mcp(self) -> None:
+        # No in-process Tau tools: every project tool runs in the API, as the person it serves.
+        self.assertFalse((REPO_ROOT / ".tau" / "extensions").exists())
+        self.assertFalse(OLD_AGENT_WORKFLOW_PATH.exists())
+        source = MCP_SERVER_PATH.read_text(encoding="utf-8")
         self.assertIn("from alpaca_connectors.agent_tools import PROJECT_AGENT_TOOLS", source)
-        setup = next(
-            node
-            for node in tree.body
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == "setup"
-        )
-        setup_source = ast.get_source_segment(source, setup) or ""
-        self.assertIn("tau.register_tool", setup_source)
-        self.assertIn("PROJECT_AGENT_TOOLS", setup_source)
+        self.assertNotIn("sys.path", source)
 
-    def test_agent_workflow_enables_automatic_deployment_with_color_icon(self) -> None:
+    def test_agent_workflow_declares_a_harness_agent_that_acts_for_its_requester(self) -> None:
         workflow = yaml.safe_load(WORKFLOW_PATH.read_text(encoding="utf-8"))
 
         self.assertEqual(workflow["api_version"], "2.3.0")
-        self.assertEqual(workflow["name"], "alpaca-connectors-agent")
-        self.assertEqual(len(workflow["resources"]), 1)
-        resource = workflow["resources"][0]
-        self.assertEqual(resource["kind"], "code_repository_coding_agent")
+        resources = {resource["key"]: resource for resource in workflow["resources"]}
+        agents = [item for item in resources.values() if item["kind"] == "harness_agent"]
+        self.assertEqual(len(agents), 1)
+        resource = agents[0]
+        # `code_repository_coding_agent` is a retired kind the platform rejects.
+        self.assertEqual(resource["key"], "alpaca-connectors-agent")
+        self.assertIs(resource["acts_for_requester"], True)
         specification = resource["spec"]
-        self.assertIs(specification["automatic_deployment"], True)
-        self.assertIsNone(specification["automatic_redeployment_policy"]["tag_regex"])
+        # The same file's API serves the MCP; its key is the Agent's tool prefix.
+        self.assertEqual(specification["mcp_applications"], [{"resource": "alpaca"}])
+        self.assertRegex("alpaca", r"^[a-z][a-z0-9_]{0,39}$")
+        self.assertEqual(resources["alpaca"]["kind"], "fastapi")
+        self.assertIs(resources["alpaca"]["spec"]["mcp_enabled"], True)
         self.assertEqual(
-            specification["command_center_icon"],
-            {
-                "path": ".agents/alpaca-command-center-icon.png",
-                "rendering": "color",
-            },
+            specification["source_path"], AGENT_ENTRY_PATH.relative_to(REPO_ROOT).as_posix()
         )
+        self.assertIs(specification["automatic_deployment"], True)
+        self.assertEqual(
+            specification["automatic_redeployment"], {"enabled": True, "tag_regex": None}
+        )
+        for retired in ("command_center_icon", "cpu_limit", "memory_limit"):
+            self.assertNotIn(retired, specification)
+
+    def test_agent_entry_point_serves_the_object_create_app_returns(self) -> None:
+        tree = ast.parse(AGENT_ENTRY_PATH.read_text(encoding="utf-8"))
+        imports = [
+            (node.module, alias.name)
+            for node in tree.body
+            if isinstance(node, ast.ImportFrom)
+            for alias in node.names
+        ]
+        self.assertEqual(imports, [("ms_tau_sdk", "create_app")])
+        assignment = next(
+            node
+            for node in tree.body
+            if isinstance(node, ast.Assign)
+            and [target.id for target in node.targets if isinstance(target, ast.Name)] == ["app"]
+        )
+        self.assertIsInstance(assignment.value, ast.Call)
+        self.assertEqual(assignment.value.func.id, "create_app")
+        self.assertEqual(assignment.value.args, [])
+
+        dependencies = tomllib.loads(PYPROJECT_PATH.read_text(encoding="utf-8"))["project"][
+            "dependencies"
+        ]
+        self.assertTrue(any(item.startswith("ms-tau-sdk") for item in dependencies))
 
     def test_agent_icon_is_a_supported_rgba_png(self) -> None:
         payload = ICON_PATH.read_bytes()

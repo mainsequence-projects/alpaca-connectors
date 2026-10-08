@@ -6,8 +6,9 @@ description: Manage user-defined ETF extraction sources and registered Asset Uni
 # Holdings-Backed Asset Universes
 
 Use this skill for Universe source CRUD, registered Universe CRUD, linked AssetCategory membership,
-and component extraction. In a CodeRepository Executor session, use `alpaca_query_universes` and
-`alpaca_manage_universe`. In a shell, use the installed `alpaca-connectors` command.
+and component extraction. In an Agent session, call `alpaca_query_universes` and
+`alpaca_manage_universe` through `alpaca__call_tool`; they run in the API as the person you serve.
+In a shell, use the installed `alpaca-connectors` command.
 
 ## Model
 
@@ -49,5 +50,5 @@ Use `AssetCategory.replace_memberships` for the complete desired set. Resolve an
 Alpaca constituents in bulk before replacing membership. If any symbol cannot resolve to one
 canonical Alpaca Asset, stop and preserve the existing category and signal state.
 
-Deletion through the Tau tool requires exact `DELETE <uid>` confirmation and must stop when bar or
+Deletion through the MCP tool requires exact `DELETE <uid>` confirmation and must stop when bar or
 signal configurations reference the Universe.

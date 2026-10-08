@@ -31,7 +31,7 @@ dependencies = [
     { name = "etfhextractor" },
     { name = "fastapi" },
     { name = "httpx" },
-    { name = "mainsequence" },
+    { name = "mainsequence", extra = ["mcp"] },
     { name = "mainsequence-metatable" },
     { name = "mkdocs" },
     { name = "mkdocs-material" },
@@ -54,7 +54,7 @@ requires-dist = [
     { name = "etfhextractor", git = "https://github.com/mainsequence-projects/etfholdingextractor" },
     { name = "fastapi", specifier = ">=0.135.3" },
     { name = "httpx", specifier = ">=0.28.1" },
-    { name = "mainsequence", specifier = ">=9.0.5,<10" },
+    { name = "mainsequence", extras = ["mcp"], specifier = ">=9.0.19,<10" },
     { name = "mainsequence-metatable", specifier = ">=0.1.19,<0.2" },
     { name = "mkdocs", specifier = ">=1.6.1" },
     { name = "mkdocs-material", specifier = ">=9.7.6" },
@@ -675,6 +675,11 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/d4/03/6578aaee2005ba51ca96fc5c49289084db42eb234496e2a4649e978288f5/mainsequence-9.0.19.tar.gz", hash = "sha256:8ee23f5a9f4ba51d2dc4921258b7f5fd8c6e5477922647f3e59d17d215ab7c92", size = 329691, upload-time = "2026-10-08T06:20:11.401Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/01/21/9e71126928a83170e84f9473955f8f1573d22c7ca5d0a5bba1ac197cd34b/mainsequence-9.0.19-py3-none-any.whl", hash = "sha256:24d58a5adfd88fb33886f520b5b9ab8cb2319f2f477cb823aadb896954806fae", size = 272539, upload-time = "2026-10-08T06:20:09.727Z" },
+]
+
+[package.optional-dependencies]
+mcp = [
+    { name = "mcp" },
 ]
 
 [[package]]

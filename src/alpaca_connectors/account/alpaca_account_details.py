@@ -363,7 +363,9 @@ del _balance_column
 
 def project_account_models() -> list[type]:
     """Project-owned account MetaTables (for the migration provider + runtime attach)."""
-    return [AlpacaAccountDetails]
+    from alpaca_connectors.account.key_requests import AccountKeyRequestTable
+
+    return [AlpacaAccountDetails, AccountKeyRequestTable]
 
 
 __all__ = [

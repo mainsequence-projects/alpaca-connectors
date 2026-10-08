@@ -94,17 +94,43 @@ def preflight_account_registration(request: RegistrationRequest) -> dict:
     )
 
 
+def _key_request_uid(request: RegistrationRequest | UpdateRequest) -> str | None:
+    return getattr(request, "key_request_uid", None)
+
+
+def _require_key_request_submitter(actor_user_uid: str | None) -> str:
+    if not actor_user_uid:
+        raise LookupError("Account key requests are submitted only by the person they belong to.")
+    return actor_user_uid
+
+
 def create_account_registration(
     request: RegistrationRequest,
     *,
     actor_user_uid: str | None = None,
 ) -> AccountResponse:
+    from alpaca_connectors.account.key_requests import (
+        complete_account_key_request,
+        require_pending_account_key_request,
+    )
+
+    key_request = None
+    if key_request_uid := _key_request_uid(request):
+        # Checked before Alpaca is called or any Secret is written (ADR 0015).
+        key_request = require_pending_account_key_request(
+            key_request_uid,
+            requester_uid=_require_key_request_submitter(actor_user_uid),
+            action="register",
+            environment=request.environment,
+        )
     result = register_alpaca_account(
         credentials=_credential_input(request),
         paper=request.environment == "paper",
-        account_name=request.account_name,
+        account_name=request.account_name or (key_request.account_name if key_request else None),
         actor_user_uid=actor_user_uid,
     )
+    if key_request is not None:
+        complete_account_key_request(key_request.uid, account_uid=result.account_uid)
     account = get_account_registration(result.account_uid)
     if account is None:
         raise RuntimeError("Registered account could not be read back.")
@@ -123,7 +149,19 @@ def update_account(
     actor_user_uid: str | None = None,
 ) -> AccountResponse:
     from alpaca_connectors.account.credentials import submitted_alpaca_credentials
+    from alpaca_connectors.account.key_requests import (
+        complete_account_key_request,
+        require_pending_account_key_request,
+    )
 
+    key_request = None
+    if key_request_uid := _key_request_uid(request):
+        key_request = require_pending_account_key_request(
+            key_request_uid,
+            requester_uid=_require_key_request_submitter(actor_user_uid),
+            action="rotate",
+            account_uid=account_uid,
+        )
     changes = {
         "account_name": request.account_name,
         "account_is_active": request.account_is_active,
@@ -148,6 +186,8 @@ def update_account(
         actor_user_uid=actor_user_uid,
         **{key: value for key, value in changes.items() if value is not None},
     )
+    if key_request is not None:
+        complete_account_key_request(key_request.uid, account_uid=account_uid)
     return AccountResponse.model_validate(row)
 
 

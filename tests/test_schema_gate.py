@@ -39,7 +39,7 @@ def test_job_migrates_only_this_application_but_the_gate_also_waits_for_ms_marke
 
 def test_each_provider_ships_one_head() -> None:
     heads = _heads()
-    assert heads[APP] == "0016"
+    assert heads[APP] == "0017"
     assert heads[MSM]
 
 
@@ -47,8 +47,8 @@ def test_each_provider_ships_one_head() -> None:
     ("applied", "behind"),
     [
         ((), True),  # never migrated
-        (("0015",), True),  # this image's revision not applied yet
-        (("0016",), False),  # current
+        (("0016",), True),  # this image's revision not applied yet
+        (("0017",), False),  # current
         (("0099_from_a_newer_release",), False),  # database ahead: older image still runs
     ],
 )
@@ -56,7 +56,7 @@ def test_provider_state_compares_database_with_code(applied, behind) -> None:
     state = schema_state([APP], read_applied=lambda migration: applied)
 
     assert state.providers == (
-        ProviderSchemaState(provider=APP, applied=applied, code_head="0016", behind=behind),
+        ProviderSchemaState(provider=APP, applied=applied, code_head="0017", behind=behind),
     )
     assert state.behind is behind
 
@@ -207,13 +207,14 @@ def test_api_deploys_only_after_the_migration_job_in_one_workflow() -> None:
         (root / ".mainsequence/workflows/alpaca-connectors-api.yaml").read_text()
     )
     resources = {resource["key"]: resource for resource in workflow["resources"]}
-    api = resources["alpaca-connectors-api"]
+    api = resources["alpaca"]
     job = resources["alpaca-connectors-migrate"]
 
-    # Same workflow name and API key as the release it replaces; 2.3.0 kinds only.
+    # The API's key is the Agent's MCP tool prefix (ADR 0015); 2.3.0 kinds only.
     assert workflow["name"] == "alpaca-connectors-api"
     assert workflow["api_version"] == "2.3.0"
     assert api["kind"] == "fastapi"
+    assert api["spec"]["mcp_enabled"] is True
     assert (root / api["spec"]["source_path"]).is_file()
     assert job["kind"] == "job"
     assert (root / job["spec"]["execution_path"]).is_file()
@@ -221,14 +222,14 @@ def test_api_deploys_only_after_the_migration_job_in_one_workflow() -> None:
         assert resource["spec"]["automatic_redeployment"]["enabled"] is True
 
     steps = workflow["execution"]["steps"]
-    assert steps["image"] == {"prepare_image": "alpaca-connectors-api"}
+    assert steps["image"] == {"prepare_image": "alpaca"}
     assert steps["migrate"] == {
         "run_job": "alpaca-connectors-migrate",
         "image_from": "image",
         "needs": ["image"],
     }
     assert steps["deploy_api"] == {
-        "deploy": "alpaca-connectors-api",
+        "deploy": "alpaca",
         "image_from": "image",
         "needs": ["migrate"],
     }

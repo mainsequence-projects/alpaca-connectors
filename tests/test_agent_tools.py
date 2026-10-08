@@ -10,6 +10,7 @@ EXPECTED_TOOL_NAMES = (
     "alpaca_register_assets",
     "alpaca_query_accounts",
     "alpaca_manage_account",
+    "alpaca_account_key_request",
     "alpaca_query_universes",
     "alpaca_manage_universe",
     "alpaca_query_bar_configurations",

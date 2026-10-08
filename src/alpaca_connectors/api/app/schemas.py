@@ -188,12 +188,24 @@ AlpacaCredentials = Annotated[
 ]
 
 
+KEY_REQUEST_UID_DESCRIPTION = (
+    "The account key request this submission completes (ADR 0015). Only the person the request "
+    "belongs to may submit it, while it is pending."
+)
+
+
 class AccountRegistrationRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
 
     account_name: str | None = Field(default=None, max_length=255)
     environment: Literal["paper", "live"] = "paper"
     credentials: AlpacaCredentials
+    key_request_uid: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=64,
+        description=KEY_REQUEST_UID_DESCRIPTION,
+    )
 
 
 class AccountUpdateRequest(BaseModel):
@@ -205,11 +217,23 @@ class AccountUpdateRequest(BaseModel):
         default=None,
         description="Replacement credentials; omitted for name or active-state changes.",
     )
+    key_request_uid: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=64,
+        description=KEY_REQUEST_UID_DESCRIPTION,
+    )
 
     @model_validator(mode="after")
     def require_change(self) -> "AccountUpdateRequest":
-        if all(getattr(self, field_name) is None for field_name in self.__class__.model_fields):
+        if all(
+            getattr(self, field_name) is None
+            for field_name in self.__class__.model_fields
+            if field_name != "key_request_uid"
+        ):
             raise ValueError("At least one mutable account field must be provided.")
+        if self.key_request_uid is not None and self.credentials is None:
+            raise ValueError("A key request is completed only by submitting credentials.")
         return self
 
 
@@ -263,6 +287,28 @@ class AccountResponse(BaseModel):
     equity: Any | None = None
     cash: Any | None = None
     buying_power: Any | None = None
+
+
+class AccountKeyRequestResponse(BaseModel):
+    """A request for the signed-in person to enter Alpaca keys on the site (ADR 0015)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    uid: str
+    action: Literal["register", "rotate"]
+    account_name: str | None
+    environment: Literal["paper", "live"]
+    account_uid: str | None
+    status: Literal["pending", "completed", "cancelled", "expired"]
+    created_at: str
+    expires_at: str
+    completed_at: str | None
+
+
+class AccountKeyRequestCollectionResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    items: list[AccountKeyRequestResponse]
 
 
 class SecretReferenceResponse(BaseModel):

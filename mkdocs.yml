@@ -55,6 +55,7 @@ nav:
       - "0012 Deployment-Workflow Migrations And Schema-Gated Jobs": adrs/0012_deployment_workflow_migrations_and_schema_gated_jobs.md
       - "0013 Workflow-Declared Configuration Jobs": adrs/0013_workflow_declared_configuration_jobs.md
       - "0014 SDK Request Identity": adrs/0014_sdk_request_identity.md
+      - "0015 Agent Tools On The API's MCP And Site Key Entry": adrs/0015_agent_tools_on_the_api_mcp_and_site_key_entry.md
   - Implementation Records:
       - SDK 8 And ms-markets Migration: implementation_tasks/0001_ms_markets_storage_first_migration.md
       - Alpaca Account Storage: implementation_tasks/0002_alpaca_account_module.md

@@ -49,8 +49,11 @@ class AccountStorageTests(unittest.TestCase):
         self.assertIn("daytrade_count", table.columns)
         self.assertIn("balance_asof", table.columns)
 
-    def test_project_account_models_is_only_the_detail_table(self) -> None:
-        self.assertEqual([m.__name__ for m in project_account_models()], ["AlpacaAccountDetails"])
+    def test_project_account_models_are_the_detail_and_key_request_tables(self) -> None:
+        self.assertEqual(
+            [m.__name__ for m in project_account_models()],
+            ["AlpacaAccountDetails", "AccountKeyRequestTable"],
+        )
 
     def test_no_bespoke_balances_storage_table_exists(self) -> None:
         import alpaca_connectors.account.alpaca_account_details as module

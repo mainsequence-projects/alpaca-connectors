@@ -1,8 +1,17 @@
 api_version: 2.3.0
 name: alpaca-connectors-api
 resources:
-- key: alpaca-connectors-api
+# The key is also the Agent's MCP tool prefix (`alpaca__list_tools`, `alpaca__call_tool`), so it
+# must match ^[a-z][a-z0-9_]{0,39}$ (ADR 0015). The Alpaca site names this release by this key.
+- key: alpaca
   kind: fastapi
+  # The API's own workload User: running this branch's Jobs needs edit, and every MetaTable is
+  # read through the MetaTables API on the MetaTables repository's branch.
+  access:
+    branch: edit
+    branches:
+    - repository: MetaTables
+      level: view
   spec:
     source_path: api/app/main.py
     automatic_deployment: true
@@ -10,11 +19,35 @@ resources:
       enabled: true
       tag_regex: null
     revision_retention_count: 3
+    mcp_enabled: true
     cors_allowed_origins:
     - https://*.site-dev.main-sequence.app
     env_vars:
     - name: ALPACA_CONNECTORS_CORS_ORIGINS
       value: https://*.site-dev.main-sequence.app
+    # Where people enter Alpaca keys for the Agent's account key requests: the Alpaca site's
+    # Command Center link in this Environment.
+    - name: ALPACA_CONNECTORS_SITE_URL
+      value: http://localhost:5173/app/links/1b572c68-e4f5-4589-b17c-23d12f474130
+# The branch's one Harness Agent. It reaches every project tool through the `alpaca` API's MCP and
+# acts for the person whose request it serves (only an Organization admin's push enables this).
+- key: alpaca-connectors-agent
+  kind: harness_agent
+  acts_for_requester: true
+  spec:
+    source_path: api/agent/main.py
+    llm_provider: openai
+    llm_model: gpt-5.4
+    llm_thinking: medium
+    mcp_applications:
+    - resource: alpaca
+    cpu_request: 250m
+    memory_request: 512Mi
+    automatic_deployment: true
+    automatic_redeployment:
+      enabled: true
+      tag_regex: null
+    revision_retention_count: 3
 - key: alpaca-connectors-migrate
   kind: job
   spec:
@@ -74,12 +107,12 @@ resources:
 execution:
   steps:
     image:
-      prepare_image: alpaca-connectors-api
+      prepare_image: alpaca
     migrate:
       run_job: alpaca-connectors-migrate
       image_from: image
       needs: [image]
     deploy_api:
-      deploy: alpaca-connectors-api
+      deploy: alpaca
       image_from: image
       needs: [migrate]

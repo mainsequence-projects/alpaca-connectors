@@ -43,7 +43,7 @@ process restarts; the shared in-memory operation repository is intentionally not
 | --- | --- |
 | Project State | `GET /health`, `GET /v1/project-state/capabilities`, `GET /v1/project-state/configuration` |
 | Assets | `GET /v1/assets`, `GET /v1/assets/{asset_uid}`, synchronous registration plan/execute, and observable registration operations |
-| Accounts | `GET/POST /v1/accounts`, `GET /v1/accounts/secret-references`, `POST /v1/accounts/registration/preflight`, `GET/PATCH/DELETE /v1/accounts/{account_uid}`, refresh and bulk actions |
+| Accounts | `GET/POST /v1/accounts`, `GET /v1/accounts/secret-references`, `POST /v1/accounts/registration/preflight`, `GET/PATCH/DELETE /v1/accounts/{account_uid}`, refresh and bulk actions; the signed-in person's key requests under `/v1/accounts/key-requests` |
 | Holdings | list/get and capture under `/v1/accounts/{account_uid}/holdings`; `/latest` lists only the newest immutable snapshot |
 | Universe Sources | Explicit extraction-configuration CRUD and read-only source preview under `/v1/universe-sources` |
 | Universes | Create/list/get/update registered `AssetUniverse` rows; list linked category Assets at `GET /v1/universes/{universe_uid}/assets`; run, activate, deactivate, and confirmed delete actions under `/v1/universes` |
@@ -233,8 +233,36 @@ Alpaca rejecting the keys returns `400 alpaca_credentials_rejected` without prov
 `GET /v1/accounts/secret-references` returns only Main Sequence Secret names visible to the API
 runtime, for clients that use the `external` shape. It never serializes Secret values.
 
-Create and rotate record the verified caller ([Authentication](#authentication)) as
-`credentials_updated_by_user_uid`. Calls the API makes to Main Sequence, the Secret writes
+### Account Key Requests
+
+The Agent never receives key values. Its `alpaca_account_key_request` MCP tool creates a pending
+request for the person it serves: `register` (environment and optional name) or `rotate` (one
+account) ([ADR 0015](adrs/0015_agent_tools_on_the_api_mcp_and_site_key_entry.md)). The site then
+works only with the signed-in person's own requests:
+
+```text
+GET  /v1/accounts/key-requests                        pending, unexpired requests, newest first
+GET  /v1/accounts/key-requests/{key_request_uid}
+POST /v1/accounts/key-requests/{key_request_uid}/actions/cancel
+```
+
+The person submits the keys with `POST /v1/accounts` (registration) or
+`PATCH /v1/accounts/{account_uid}` (rotation) plus `key_request_uid`. Before Alpaca is called or a
+Secret is written, the API checks that the submitter is the request's person and that the request
+is pending, unexpired (one hour), and matches the action, environment, and account; otherwise it
+answers `404` (another person's or a missing request) or `409`. On success it completes the
+request with the account UID. A `PATCH` with `key_request_uid` must carry `credentials`.
+
+## MCP
+
+`/mcp` serves the Agent's `alpaca` MCP application: stateless Streamable HTTP with JSON responses,
+POST only, inside the same request identity as every route. `tools/list` returns the
+`alpaca_connectors.agent_tools` catalog; `tools/call` validates the arguments against the tool's
+schema and runs it in the API. Results and errors are JSON text, and errors never quote arguments.
+
+Create and rotate record the acting user ([Authentication](#authentication)) as
+`credentials_updated_by_user_uid`: the person an Agent's call works for, otherwise the verified
+caller. Calls the API makes to Main Sequence, the Secret writes
 included, run as the API's runtime principal. There is no trusted browser user UID. Governed
 MetaTable operations declare read/write scope; the Resource Release is the deployed application
 access boundary.

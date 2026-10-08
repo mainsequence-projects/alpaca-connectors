@@ -1,8 +1,9 @@
-"""Structured project tools used by the Alpaca Connectors coding agent.
+"""Structured project tools the Alpaca Agent uses through the API's MCP server.
 
-The functions in this module deliberately reuse the same application-service
-layer as the FastAPI surface.  They do not call the API over HTTP and they do
-not contain a second copy of the connector's business logic.
+`alpaca_connectors.api.app.mcp` serves this catalog at the API's `/mcp` endpoint (ADR 0015), so
+every call runs inside the API's verified request identity. The handlers deliberately reuse the
+same application-service layer as the REST routes and contain no second copy of the connector's
+business logic.
 """
 
 from __future__ import annotations
@@ -316,12 +317,13 @@ def manage_account(arguments: Mapping[str, Any]) -> Any:
         request = _request_model(arguments, AccountSecretNameRegistrationRequest)
         if operation == "plan_create":
             return preflight_account_registration(request)
-        return create_account_registration(request)
+        return create_account_registration(request, actor_user_uid=_acting_user_uid())
     account_uid = _required_text(arguments, "account_uid")
     if operation == "update":
         return update_account(
             account_uid,
             _request_model(arguments, AccountSecretNameUpdateRequest),
+            actor_user_uid=_acting_user_uid(),
         )
     if operation == "refresh":
         return refresh_account(account_uid)
@@ -336,6 +338,47 @@ def manage_account(arguments: Mapping[str, Any]) -> Any:
     if blockers:
         raise ValueError(" ".join(blockers))
     return remove_account(account_uid)
+
+
+def _acting_user_uid() -> str:
+    """The person the call works for, or the verified caller (raises 401 outside a request)."""
+    from alpaca_connectors.api.app.identity import acting_user_uid
+
+    return acting_user_uid()
+
+
+def account_key_request(arguments: Mapping[str, Any]) -> Any:
+    from alpaca_connectors.api.app.services.account_key_requests import (
+        cancel_own_key_request,
+        own_key_request,
+        start_registration_key_request,
+        start_rotation_key_request,
+    )
+
+    operation = _operation(
+        arguments,
+        {"cancel", "start_registration", "start_rotation", "status"},
+    )
+    # The request belongs to the person the call works for; never to a UID in the arguments.
+    requester_uid = _acting_user_uid()
+    if operation == "start_registration":
+        environment = str(arguments.get("environment") or "paper")
+        if environment not in {"paper", "live"}:
+            raise ValueError("environment must be paper or live.")
+        return start_registration_key_request(
+            requester_uid=requester_uid,
+            environment=environment,
+            account_name=_optional_text(arguments, "account_name"),
+        )
+    if operation == "start_rotation":
+        return start_rotation_key_request(
+            requester_uid=requester_uid,
+            account_uid=_required_text(arguments, "account_uid"),
+        )
+    key_request_uid = _required_text(arguments, "key_request_uid")
+    if operation == "status":
+        return own_key_request(key_request_uid, requester_uid=requester_uid)
+    return cancel_own_key_request(key_request_uid, requester_uid=requester_uid)
 
 
 def query_universes(arguments: Mapping[str, Any]) -> Any:
@@ -860,9 +903,10 @@ PROJECT_AGENT_TOOLS: tuple[ProjectAgentTool, ...] = (
             "Plan, create, update, refresh, or delete an Alpaca Account registration, or capture "
             "its holdings. Creation accepts Main Sequence Secret names only and always performs "
             "the connector's mandatory initial asset registration and holdings capture. Never "
-            "ask a user for Alpaca key values; users who want the application to store their "
-            "keys register through the static site. Deleting an account also deletes its "
-            "application-managed credential Secrets."
+            "ask a user for Alpaca key values; to register an account or replace keys from "
+            "values the person holds, use alpaca_account_key_request so the person enters them "
+            "on the Alpaca site. Deleting an account also deletes its application-managed "
+            "credential Secrets."
         ),
         parameters=_operations(
             *[
@@ -907,6 +951,53 @@ PROJECT_AGENT_TOOLS: tuple[ProjectAgentTool, ...] = (
         ),
         execution_mode="sequential",
         handler=manage_account,
+    ),
+    ProjectAgentTool(
+        name="alpaca_account_key_request",
+        label="Request Alpaca Keys On The Site",
+        description=(
+            "Register an Alpaca account, or replace a registered account's keys, from API keys "
+            "the person holds, without the keys entering this conversation. start_registration "
+            "or start_rotation creates a pending request for the person this call works for and "
+            "returns the Alpaca site link and instructions to give them; the person enters the "
+            "keys on the site, which stores them as Main Sequence Secrets. status reports "
+            "pending, completed (with the account UID), cancelled, or expired; cancel withdraws "
+            "a pending request. This tool never accepts key values."
+        ),
+        parameters=_operations(
+            _operation_case(
+                "start_registration",
+                properties={
+                    "environment": {
+                        "type": "string",
+                        "enum": ["paper", "live"],
+                        "default": "paper",
+                        "description": "Alpaca environment the keys belong to.",
+                    },
+                    "account_name": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 255,
+                        "description": "Optional display name for the new account.",
+                    },
+                },
+            ),
+            _operation_case(
+                "start_rotation",
+                properties={"account_uid": _uid("Account")},
+                required=("account_uid",),
+            ),
+            *[
+                _operation_case(
+                    operation,
+                    properties={"key_request_uid": _uid("account key request")},
+                    required=("key_request_uid",),
+                )
+                for operation in ("status", "cancel")
+            ],
+        ),
+        execution_mode="sequential",
+        handler=account_key_request,
     ),
     ProjectAgentTool(
         name="alpaca_query_universes",

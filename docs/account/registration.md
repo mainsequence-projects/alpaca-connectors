@@ -28,14 +28,16 @@ against Alpaca, then creates or overwrites the Secrets
 owns them: rotation overwrites them in place and removing the registration deletes them. The
 `ALPACA_CONNECTORS__` prefix is reserved and can never be selected as an external Secret.
 
-**External** credentials are existing Secrets selected by name through the CLI, the Tau tools, or
-the API's `external` credential shape. The application only reads them; rotation or removal never
+**External** credentials are existing Secrets selected by name through the CLI, the Agent's MCP
+tools, or the API's `external` credential shape. The application only reads them; rotation or removal never
 modifies or deletes them.
 
 Credentials resolve by Secret UID immediately before an Alpaca client is constructed, so renaming a
 Secret or creating a duplicate name does not affect a registered account. Values are not cached,
 returned, logged, or persisted outside Main Sequence Secrets. Only the HTTP create and rotate
-endpoints accept values; the CLI and Tau tools accept Secret names only.
+endpoints accept values; the CLI and the Agent's MCP tools accept Secret names only. An Agent
+instead starts an account key request, and the person types the keys on the Alpaca site
+([ADR 0015](../adrs/0015_agent_tools_on_the_api_mcp_and_site_key_entry.md)).
 
 Alpaca must accept the credentials, and every held position must resolve, before any Secret,
 Account, or holdings row is written. If a later write fails, Secrets created by that request are

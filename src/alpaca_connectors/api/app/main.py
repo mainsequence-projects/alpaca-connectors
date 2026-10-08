@@ -19,9 +19,11 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from mainsequence.server.fastapi import install_request_identity
+from mainsequence.server.fastapi import install_mcp, install_request_identity
 
-from .identity import bound_caller_uid
+from .identity import bound_acting_user_uid
+from .mcp_server import build_mcp_application
+from .routers.account_key_requests import router as account_key_requests_router
 from .routers.accounts import router as accounts_router
 from .routers.assets import router as assets_router
 from .routers.bar_configurations import router as bar_configurations_router
@@ -37,6 +39,7 @@ from .routers.universes import router as universes_router
 ROUTERS = (
     project_state_router,
     assets_router,
+    account_key_requests_router,
     accounts_router,
     holdings_router,
     universe_sources_router,
@@ -97,7 +100,7 @@ async def response_boundary_headers(request: Request, call_next):
     """Apply cache boundaries for caller-specific discovery and live operation state."""
     response = await call_next(request)
     if request.url.path.endswith("/discovery"):
-        caller = bound_caller_uid() or "anonymous"
+        caller = bound_acting_user_uid() or "anonymous"
         digest = sha256(f"{request.app.version}:{request.url.path}:{caller}".encode()).hexdigest()
         response.headers["Cache-Control"] = "private, max-age=0, must-revalidate"
         response.headers["ETag"] = f'"{digest}"'
@@ -159,6 +162,9 @@ def create_app() -> FastAPI:
     # Once, after every route is mounted; requests reach the middleware above, and the routes,
     # only with a verified caller.
     install_request_identity(app)
+    # The Agent's `alpaca` MCP application (ADR 0015), at /mcp inside that same identity.
+    mcp_app, mcp_lifespan = build_mcp_application()
+    install_mcp(app, mcp_app, lifespan=mcp_lifespan)
     # Outside the request identity, as the launcher's own CORS is in a deployment, so a browser on
     # an allowed origin can read the 401 or 503 that the identity answers.
     cors = _cors_options()

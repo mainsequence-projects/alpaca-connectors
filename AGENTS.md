@@ -29,7 +29,10 @@ Supported operator surfaces:
   only this top-level package
 - thin FastAPI surface in `alpaca_connectors.api` (`src/alpaca_connectors/api/`); `api/app/main.py`
   is only the deployed resource's path-stable entry point and is not part of the wheel
-- structured Tau project tools under `.tau/extensions/alpaca_connectors/`
+- the API's MCP server at `/mcp` (`alpaca_connectors.api.app.mcp_server`), which serves the
+  structured project tools in `alpaca_connectors.agent_tools` to the Harness Agent (ADR 0015)
+- the Harness Agent entry point `api/agent/main.py` (`ms_tau_sdk.create_app()`), not part of the
+  wheel
 - repository-local scheduled-job entrypoints under `src/jobs/`: scripts executed by path, not
   package modules; their paths are bound to live platform Jobs, so do not move them
 
@@ -158,22 +161,42 @@ FastAPI surface:
   `Authorization: Bearer $(mainsequence auth token)`
 - the vendored SDK `api_surfaces` skill still says the platform injects `request.state.user` with
   no setup; that part is outdated, and the installed `mainsequence.server.fastapi` is authoritative
+- `create_app()` also installs the MCP server with `install_mcp`, after the request identity
+  (ADR 0015); MCP tools are `alpaca_connectors.agent_tools` handlers over the same services as the
+  routes, and they never quote arguments in results or errors
+- authorship and ownership follow the acting user from `identity.acting_user_uid()`: the person a
+  requester-bound call works for (`User.get_requester()`), otherwise the caller; never combine the
+  two, and never take a person's UID from a request body, header, or tool argument
+- the API's workflow key is `alpaca`: it is the Agent's MCP tool prefix, so it must match
+  `^[a-z][a-z0-9_]{0,39}$`; the Alpaca site names the release by repository and key, never by UID
 
 Project-to-agent boundary:
 
-- this repository exposes one CodeRepository Coding Agent through `.agents/agent_card.json`, six
-  repository-owned skills, and the structured tools registered by
-  `.tau/extensions/alpaca_connectors/extension.py`; do not introduce a separate `agents/` runtime
-- use Tau tools in deployed CodeRepository Executor or A2A sessions and use the installed
+- this repository exposes one Harness Agent through `.agents/agent_card.json`, six
+  repository-owned skills, and the project tools the API's MCP server serves from
+  `alpaca_connectors.api.app.mcp_server`; do not introduce a separate `agents/` runtime or
+  in-process `.tau/extensions` tools
+- the Agent is the `harness_agent` in `.mainsequence/workflows/alpaca-connectors-api.yaml`, served
+  by `api/agent/main.py` (`ms_tau_sdk.create_app()`, pinned `ms-tau-sdk` runtime dependency),
+  declared `acts_for_requester: true`, with `mcp_applications: [{resource: alpaca}]`;
+  `code_repository_coding_agent` is a retired kind the platform rejects
+- the Agent calls project tools as `alpaca__call_tool` with `tool` set to an
+  `alpaca_connectors.agent_tools` name (list them with `alpaca__list_tools`); each runs in the API
+  with the permissions and identity of the person the Agent serves. Use the installed
   `alpaca-connectors` CLI in shell workflows; both must reuse the same project services
 - load read-only query tools in parallel and execute mutations sequentially
 - never expose an Organization Environment selector; the deployed CodeRepositoryBranch resolves it
   automatically
-- Tau tools, agent sessions, and the CLI never accept Alpaca credential values; their Account
+- MCP tools, agent sessions, and the CLI never accept Alpaca credential values; their Account
   operations accept visible Main Sequence Secret names only. The HTTP account create and rotate
   endpoints are the only surfaces that accept values, solely to store them in application-managed
   Secrets (ADR 0011); never echo, log, or persist those values anywhere else
-- destructive Tau operations require exact `DELETE <uid>` confirmation
+- to register an account or replace keys from values the person holds, the Agent uses
+  `alpaca_account_key_request` (ADR 0015): it creates a pending request for that person and
+  returns the Alpaca site link; the person types the keys on the Alpaca site, which submits them
+  with the request's `key_request_uid`; the API accepts them only from that same person while the
+  request is pending, and the Agent reads the result with the `status` operation
+- destructive MCP tool operations require exact `DELETE <uid>` confirmation
 - long-running bars, signal, and portfolio updates must submit their existing Main Sequence Jobs
   and return a JobRun UID; inspect them with `alpaca_get_job_run_status`
 - agent-facing descriptions must stay within supported local project behavior: asset registration,

@@ -35,13 +35,15 @@
     {
       "id": "account-workflow",
       "name": "Alpaca Accounts And Holdings",
-      "description": "Register and maintain Alpaca Accounts by Secret name, then inspect or capture their ms-markets holdings snapshots.",
+      "description": "Register Alpaca Accounts from keys the person enters on the Alpaca site or from existing Main Sequence Secret names, replace their keys, and inspect or capture their ms-markets holdings snapshots.",
       "tags": [
         "alpaca",
         "accounts",
-        "holdings"
+        "holdings",
+        "credentials"
       ],
       "examples": [
+        "Register my live Alpaca account; I have the API key and secret key.",
         "Register a paper account from these two Main Sequence Secret names and show its initial holdings."
       ],
       "path": ".agents/skills/account_workflow/SKILL.md"

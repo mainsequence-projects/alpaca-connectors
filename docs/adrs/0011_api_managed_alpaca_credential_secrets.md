@@ -2,6 +2,9 @@
 
 ## Status
 
+Amended by [ADR 0015](0015_agent_tools_on_the_api_mcp_and_site_key_entry.md): Agent sessions
+register accounts from keys the person enters on the Alpaca site, not by Secret name only.
+
 Proposed on 2026-10-03. Implemented in the connector and the static site on 2026-10-03; acceptance
 still requires the platform checks listed under
 [Verification Before Acceptance](#verification-before-acceptance).

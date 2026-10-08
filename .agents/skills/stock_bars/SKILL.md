@@ -6,8 +6,9 @@ description: Create, inspect, and run stored Alpaca bar configurations for expli
 # Alpaca Stock Bars
 
 Use this skill for durable Alpaca bar configurations, bounded bar queries, and configuration-backed
-updates. In a CodeRepository Executor session, use `alpaca_query_bar_configurations` and
-`alpaca_manage_bar_configuration`. In a shell, use the installed `alpaca-connectors` command.
+updates. In an Agent session, call `alpaca_query_bar_configurations` and
+`alpaca_manage_bar_configuration` through `alpaca__call_tool`; they run in the API as the person you
+serve. In a shell, use the installed `alpaca-connectors` command.
 
 ## Configuration Contract
 
@@ -42,5 +43,5 @@ alpaca-connectors market-data prices --dataset-uid <DATASET_UID> --limit 100
 ```
 
 Use set-based Asset/detail queries and batched Alpaca bar requests. Stop on missing or ambiguous
-Alpaca identities instead of dropping Assets or issuing per-Asset fallback requests. Tau deletion
+Alpaca identities instead of dropping Assets or issuing per-Asset fallback requests. MCP tool deletion
 requires exact `DELETE <configuration_uid>` confirmation.

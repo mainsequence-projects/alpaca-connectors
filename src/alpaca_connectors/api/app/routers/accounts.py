@@ -8,7 +8,7 @@ from fastapi import APIRouter, Body, HTTPException, Query
 from msm.api.http import BulkActionPreflightResponse
 
 from ..errors import api_http_error, bad_request, not_found
-from ..identity import caller_uid
+from ..identity import acting_user_uid
 from ..schemas import (
     AccountRegistrationRequest,
     AccountResponse,
@@ -140,8 +140,8 @@ def account_registration_preflight(
 def account_create(
     request: AccountRegistrationRequest = Body(...),
 ) -> AccountResponse:
-    # The verified caller is recorded as the credential author (ADR 0011, ADR 0014).
-    actor_user_uid = caller_uid()
+    # The acting user is recorded as the credential author (ADR 0011, ADR 0014, ADR 0015).
+    actor_user_uid = acting_user_uid()
     try:
         return create_account_registration(request, actor_user_uid=actor_user_uid)
     except Exception as exc:
@@ -249,7 +249,7 @@ def account_update(
     account_uid: str,
     request: AccountUpdateRequest = Body(...),
 ) -> AccountResponse:
-    actor_user_uid = caller_uid()
+    actor_user_uid = acting_user_uid()
     try:
         return update_account(account_uid, request, actor_user_uid=actor_user_uid)
     except Exception as exc:

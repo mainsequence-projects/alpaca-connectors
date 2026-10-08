@@ -6,8 +6,9 @@ description: Register exact Alpaca US equity symbols as canonical Main Sequence 
 # Alpaca Asset Registration
 
 Use this skill to inspect registered Alpaca-backed Assets or to plan and execute exact-symbol
-registration. In a CodeRepository Executor session, use `alpaca_query_assets` and
-`alpaca_register_assets`. In a shell, use the installed `alpaca-connectors` command.
+registration. In an Agent session, call `alpaca_query_assets` and `alpaca_register_assets` through
+`alpaca__call_tool`; they run in the API as the person you serve. In a shell, use the installed
+`alpaca-connectors` command.
 
 ## Identity And Inputs
 

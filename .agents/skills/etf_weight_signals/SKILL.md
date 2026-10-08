@@ -5,9 +5,9 @@ description: Create, inspect, schedule, and run Universe-backed Alpaca ETF weigh
 
 # Alpaca ETF Weight Signals
 
-Use this skill for durable `AlpacaETFSignalJobConfiguration` objects. In a CodeRepository Executor
-session, use `alpaca_query_etf_signals` and `alpaca_manage_etf_signal`. In a shell, use the
-installed `alpaca-connectors` command.
+Use this skill for durable `AlpacaETFSignalJobConfiguration` objects. In an Agent session, call
+`alpaca_query_etf_signals` and `alpaca_manage_etf_signal` through `alpaca__call_tool`; they run in
+the API as the person you serve. In a shell, use the installed `alpaca-connectors` command.
 
 ## Signal Contract
 
@@ -49,4 +49,4 @@ alpaca-connectors signal runs <CONFIGURATION_UID>
 ```
 
 Do not expose pause, resume, or reconcile actions as agent operations; `scheduled` covers pausing.
-Tau deletion requires exact `DELETE <configuration_uid>` confirmation.
+MCP tool deletion requires exact `DELETE <configuration_uid>` confirmation.

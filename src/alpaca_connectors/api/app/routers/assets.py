@@ -7,7 +7,7 @@ from typing import Any
 from fastapi import APIRouter, BackgroundTasks, Body, Query, Response, status
 
 from ..errors import api_http_error, not_found
-from ..identity import caller_uid
+from ..identity import acting_user_uid
 from ..schemas import (
     AssetRegistrationDiscoveryResponse,
     AssetRegistrationExecuteResponse,
@@ -119,8 +119,9 @@ def asset_registration_operation_start(
     operation_request: AssetRegistrationOperationStartRequest,
     background_tasks: BackgroundTasks,
 ) -> AssetRegistrationOperationResponse:
-    # The operation belongs to the verified caller; only that caller can poll it.
-    owner_uid = caller_uid()
+    # The operation belongs to the acting user (the person an Agent works for, otherwise the
+    # verified caller); only that user can poll it.
+    owner_uid = acting_user_uid()
     try:
         operation = start_asset_registration_operation(
             action=operation_request.action,
@@ -148,7 +149,7 @@ def asset_registration_operation_get(
     response: Response,
 ) -> AssetRegistrationOperationResponse:
     response.headers["Cache-Control"] = "no-store"
-    owner_uid = caller_uid()
+    owner_uid = acting_user_uid()
     try:
         return get_asset_registration_operation_status(operation_uid, owner_uid=owner_uid)
     except Exception as exc:

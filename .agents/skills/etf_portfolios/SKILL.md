@@ -6,10 +6,10 @@ description: Configure calendar-event rebalancing and build analytical ETF portf
 # Alpaca ETF Portfolios
 
 Use this skill for rebalance-configuration CRUD and analytical ETF portfolio configuration, runs,
-history, and statistics. In a CodeRepository Executor session, use
-`alpaca_query_rebalance_configurations`, `alpaca_manage_rebalance_configuration`,
-`alpaca_query_etf_portfolios`, and `alpaca_manage_etf_portfolio`. In a shell, use the installed
-`alpaca-connectors` command.
+history, and statistics. In an Agent session, call `alpaca_query_rebalance_configurations`,
+`alpaca_manage_rebalance_configuration`, `alpaca_query_etf_portfolios`, and
+`alpaca_manage_etf_portfolio` through `alpaca__call_tool`; they run in the API as the person you
+serve. In a shell, use the installed `alpaca-connectors` command.
 
 ## Portfolio Contract
 
@@ -49,5 +49,5 @@ alpaca-connectors portfolio runs <CONFIGURATION_UID>
 ```
 
 Never invent a Bars dataset or Signal UID; resolve them through the stored configuration foreign
-keys. Tau deletion requires exact `DELETE <configuration_uid>` confirmation. Deleting a
+keys. MCP tool deletion requires exact `DELETE <configuration_uid>` confirmation. Deleting a
 configuration retains already published portfolio data.
