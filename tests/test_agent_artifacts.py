@@ -29,6 +29,7 @@ def project_skill_paths() -> list[str]:
                 ".agents/skills/mainsequence_platform/",
                 ".agents/skills/metatables/",
                 ".agents/skills/ms_markets/",
+                ".agents/skills/ms_tau_sdk/",
             )
         ):
             continue

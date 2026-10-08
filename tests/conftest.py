@@ -175,6 +175,9 @@ def _assertion(key: ed25519.Ed25519PrivateKey, user: str, **changes: object) -> 
         "iat": now,
         "nbf": now,
         "exp": now + 120,
+        # mainsequence 9.0.19 requires the platform's statement about the caller.
+        "team_uids": [],
+        "is_organization_admin": False,
     }
     claims.update(changes)
     return jwt.encode(
