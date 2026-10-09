@@ -31,9 +31,12 @@ class UniverseSourceTable(ProjectStorageNameMixin, AlpacaMarketsMetaTableMixin, 
     __project_storage_concept__ = "universe_source"
     __markets_base_identifier__ = "UniverseSource"
     __metatable_description__ = (
-        "User-maintained universe extraction sources. Each row identifies one provider URL and "
-        "symbol that can be previewed and linked to one registered Asset Universe."
+        "One row per ETF holdings source. Where to read an exchange-traded fund's constituents "
+        "and weights: the fund's ticker and its issuer's holdings web page, such as an iShares "
+        "fund page, maintained by operators of the Alpaca Connectors application to preview "
+        "holdings and build asset universes."
     )
+    __metatable_labels__ = ["etfs", "universes", "configuration", "alpaca"]
     __table_args__ = markets_table_args(
         "UniverseSource",
         Index(None, "symbol"),
@@ -44,27 +47,33 @@ class UniverseSourceTable(ProjectStorageNameMixin, AlpacaMarketsMetaTableMixin, 
         Uuid(as_uuid=True),
         primary_key=True,
         default=new_markets_uid,
-        info={"label": "UID", "description": "Stable UUID identity of this extraction source."},
+        info={"label": "Source UID", "description": "Public UUID that identifies the source."},
     )
     name: Mapped[str] = mapped_column(
         String(255),
         nullable=False,
-        info={"label": "Name", "description": "User-facing name of the extraction source."},
+        info={
+            "label": "Name",
+            "description": "Display name of the source, usually the fund name.",
+        },
     )
     symbol: Mapped[str] = mapped_column(
         String(32),
         nullable=False,
         info={
-            "label": "Symbol",
-            "description": "Normalized symbol used by an explicitly registered universe.",
+            "label": "Fund ticker",
+            "description": "Upper-case ticker symbol of the ETF whose holdings the source lists.",
         },
     )
     source_url: Mapped[str] = mapped_column(
         String(2048),
         nullable=False,
         info={
-            "label": "Source URL",
-            "description": "Provider URL passed to etfhextractor for holdings extraction.",
+            "label": "Holdings page URL",
+            "description": (
+                "Absolute HTTP or HTTPS address of the fund issuer's page the holdings are read "
+                "from."
+            ),
         },
     )
     enabled: Mapped[bool] = mapped_column(
@@ -73,21 +82,23 @@ class UniverseSourceTable(ProjectStorageNameMixin, AlpacaMarketsMetaTableMixin, 
         default=True,
         info={
             "label": "Enabled",
-            "description": "Whether this source is eligible for preview and Universe Runs.",
+            "description": (
+                "Whether the source may be previewed and used by its asset universe's runs."
+            ),
         },
     )
     created_at: Mapped[dt.datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
         default=utc_now,
-        info={"label": "Created At", "description": "UTC time when this source was created."},
+        info={"label": "Created at", "description": "Time, in UTC, the source was created."},
     )
     updated_at: Mapped[dt.datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
         default=utc_now,
         onupdate=utc_now,
-        info={"label": "Updated At", "description": "UTC time of the latest source change."},
+        info={"label": "Updated at", "description": "Time, in UTC, the source last changed."},
     )
 
 

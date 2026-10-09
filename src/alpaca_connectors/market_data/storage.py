@@ -42,16 +42,68 @@ _BARS_1D_IEX_RAW_TABLE_NAME = schema_table_name(
     "bars_1d_iex_raw",
 )
 
-# Shared, intention-rich column metadata for every OHLCV value column. Each storage class gets
-# its own freshly built ``mapped_column`` objects (SQLAlchemy columns cannot be shared).
-_VALUE_COLUMNS: tuple[tuple[str, str, str], ...] = (
-    ("open", "Open", "Bar open price."),
-    ("high", "High", "Bar high price."),
-    ("low", "Low", "Bar low price."),
-    ("close", "Close", "Bar close price."),
-    ("volume", "Volume", "Reported traded share volume."),
-    ("trade_count", "Trade Count", "Number of trades in the bar."),
-    ("vwap", "VWAP", "Volume weighted average price in the bar."),
+_BAR_LABELS = ["equities", "us", "prices", "alpaca"]
+
+
+def _daily_bar_column_info(*, price_basis: str, volume_basis: str) -> dict[str, dict[str, str]]:
+    """Column ``info`` of one daily bars table, worded for its corporate-action adjustment.
+
+    Each call returns new dicts because every table's columns need their own ``info``.
+    """
+
+    def price(meaning: str) -> str:
+        return f"{meaning}, in USD per share, {price_basis}; null when Alpaca reports none."
+
+    return {
+        "time_index": {
+            "label": "Bar close time",
+            "description": (
+                "Scheduled 16:00 America/New_York close of the trading day the bar covers, "
+                "stored in UTC, also on early-close days."
+            ),
+        },
+        "open_time": {
+            "label": "Bar open time",
+            "description": (
+                "Scheduled 09:30 America/New_York open of the trading day the bar covers, "
+                "stored in UTC."
+            ),
+        },
+        "asset_identifier": {
+            "label": "Asset identifier",
+            "description": (
+                "Main Sequence unique identifier of the stock or ETF, ALPACA:: followed by its "
+                "Alpaca asset UUID."
+            ),
+        },
+        "open": {"label": "Open", "description": price("Opening price of the day")},
+        "high": {"label": "High", "description": price("Highest price of the day")},
+        "low": {"label": "Low", "description": price("Lowest price of the day")},
+        "close": {"label": "Close", "description": price("Closing price of the day")},
+        "volume": {
+            "label": "Volume",
+            "description": (
+                f"Number of shares the feed reported traded during the day, {volume_basis}; "
+                "null when Alpaca reports none."
+            ),
+        },
+        "trade_count": {
+            "label": "Trade count",
+            "description": (
+                "Number of trades the feed reported during the day; null when Alpaca reports none."
+            ),
+        },
+        "vwap": {"label": "VWAP", "description": price("Volume-weighted average price of the day")},
+    }
+
+
+_SIP_ALL_COLUMN_INFO = _daily_bar_column_info(
+    price_basis="adjusted for splits, dividends and other corporate actions",
+    volume_basis="adjusted for splits",
+)
+_IEX_RAW_COLUMN_INFO = _daily_bar_column_info(
+    price_basis="not adjusted for corporate actions",
+    volume_basis="not adjusted for splits",
 )
 
 
@@ -66,61 +118,49 @@ class AlpacaStockBars1dSipAllStorage(MarketsTimeIndexMetaTableMixin, MarketsBase
         "adjustment": "all",
     }
     __metatable_description__ = (
-        "Alpaca US equity OHLCV bars at 1d frequency from the sip feed with all adjustment, "
-        "keyed by (time_index, asset_identifier). Backs holdings-universe price updates."
+        "One row per asset per US trading day. Daily stock prices (OHLCV bars) of US stocks "
+        "and ETFs, adjusted for splits, dividends and other corporate actions, from Alpaca's "
+        "consolidated SIP market-data feed for the assets the stored price-update "
+        "configurations select. A day's bar is written by the first update that runs after the "
+        "following 00:00 UTC."
     )
+    __metatable_labels__ = _BAR_LABELS
     __time_index_name__: ClassVar[str] = "time_index"
     __cadence__: ClassVar[str] = "1d"
     __index_names__: ClassVar[list[str]] = ["time_index", ASSET_IDENTIFIER_DIMENSION]
 
     time_index: Mapped[datetime.datetime] = mapped_column(
-        DateTime(timezone=True),
-        nullable=False,
-        info={"label": "Time Index", "description": "UTC bar close timestamp."},
+        DateTime(timezone=True), nullable=False, info=_SIP_ALL_COLUMN_INFO["time_index"]
     )
     open_time: Mapped[datetime.datetime] = mapped_column(
-        DateTime(timezone=True),
-        nullable=False,
-        info={
-            "label": "Open Time",
-            "description": "UTC timestamp at which the Alpaca bar interval opened.",
-        },
+        DateTime(timezone=True), nullable=False, info=_SIP_ALL_COLUMN_INFO["open_time"]
     )
     asset_identifier: Mapped[str] = mapped_column(
         String(255),
         ForeignKey(_ASSET_IDENTIFIER_FK, ondelete="RESTRICT"),
         nullable=False,
-        info={
-            "label": "Asset Identifier",
-            "description": "Asset unique identifier from the Asset MetaTable.",
-        },
+        info=_SIP_ALL_COLUMN_INFO["asset_identifier"],
     )
     open: Mapped[float | None] = mapped_column(
-        Float, nullable=True, info={"label": "Open", "description": "Bar open price."}
+        Float, nullable=True, info=_SIP_ALL_COLUMN_INFO["open"]
     )
     high: Mapped[float | None] = mapped_column(
-        Float, nullable=True, info={"label": "High", "description": "Bar high price."}
+        Float, nullable=True, info=_SIP_ALL_COLUMN_INFO["high"]
     )
     low: Mapped[float | None] = mapped_column(
-        Float, nullable=True, info={"label": "Low", "description": "Bar low price."}
+        Float, nullable=True, info=_SIP_ALL_COLUMN_INFO["low"]
     )
     close: Mapped[float | None] = mapped_column(
-        Float, nullable=True, info={"label": "Close", "description": "Bar close price."}
+        Float, nullable=True, info=_SIP_ALL_COLUMN_INFO["close"]
     )
     volume: Mapped[float | None] = mapped_column(
-        Float,
-        nullable=True,
-        info={"label": "Volume", "description": "Reported traded share volume."},
+        Float, nullable=True, info=_SIP_ALL_COLUMN_INFO["volume"]
     )
     trade_count: Mapped[float | None] = mapped_column(
-        Float,
-        nullable=True,
-        info={"label": "Trade Count", "description": "Number of trades in the bar."},
+        Float, nullable=True, info=_SIP_ALL_COLUMN_INFO["trade_count"]
     )
     vwap: Mapped[float | None] = mapped_column(
-        Float,
-        nullable=True,
-        info={"label": "VWAP", "description": "Volume weighted average price in the bar."},
+        Float, nullable=True, info=_SIP_ALL_COLUMN_INFO["vwap"]
     )
 
 
@@ -135,62 +175,49 @@ class AlpacaStockBars1dIexRawStorage(MarketsTimeIndexMetaTableMixin, MarketsBase
         "adjustment": "raw",
     }
     __metatable_description__ = (
-        "Alpaca US equity OHLCV bars at 1d frequency from the iex feed with raw adjustment, "
-        "keyed by (time_index, asset_identifier). Preserves the generic bars CLI default table "
-        "without mixing it with SIP/all adjusted bars."
+        "One row per asset per US trading day. Daily stock prices (OHLCV bars) of US stocks "
+        "and ETFs, not adjusted for corporate actions, from Alpaca's IEX market-data feed, "
+        "which covers trades on the IEX exchange only, for the assets the stored price-update "
+        "configurations select. A day's bar is written by the first update that runs after the "
+        "following 00:00 UTC."
     )
+    __metatable_labels__ = _BAR_LABELS
     __time_index_name__: ClassVar[str] = "time_index"
     __cadence__: ClassVar[str] = "1d"
     __index_names__: ClassVar[list[str]] = ["time_index", ASSET_IDENTIFIER_DIMENSION]
 
     time_index: Mapped[datetime.datetime] = mapped_column(
-        DateTime(timezone=True),
-        nullable=False,
-        info={"label": "Time Index", "description": "UTC bar close timestamp."},
+        DateTime(timezone=True), nullable=False, info=_IEX_RAW_COLUMN_INFO["time_index"]
     )
     open_time: Mapped[datetime.datetime] = mapped_column(
-        DateTime(timezone=True),
-        nullable=False,
-        info={
-            "label": "Open Time",
-            "description": "UTC timestamp at which the Alpaca bar interval opened.",
-        },
+        DateTime(timezone=True), nullable=False, info=_IEX_RAW_COLUMN_INFO["open_time"]
     )
     asset_identifier: Mapped[str] = mapped_column(
         String(255),
         ForeignKey(_ASSET_IDENTIFIER_FK, ondelete="RESTRICT"),
         nullable=False,
-        info={
-            "label": "Asset Identifier",
-            "description": "Asset unique identifier from the Asset MetaTable.",
-        },
+        info=_IEX_RAW_COLUMN_INFO["asset_identifier"],
     )
     open: Mapped[float | None] = mapped_column(
-        Float, nullable=True, info={"label": "Open", "description": "Bar open price."}
+        Float, nullable=True, info=_IEX_RAW_COLUMN_INFO["open"]
     )
     high: Mapped[float | None] = mapped_column(
-        Float, nullable=True, info={"label": "High", "description": "Bar high price."}
+        Float, nullable=True, info=_IEX_RAW_COLUMN_INFO["high"]
     )
     low: Mapped[float | None] = mapped_column(
-        Float, nullable=True, info={"label": "Low", "description": "Bar low price."}
+        Float, nullable=True, info=_IEX_RAW_COLUMN_INFO["low"]
     )
     close: Mapped[float | None] = mapped_column(
-        Float, nullable=True, info={"label": "Close", "description": "Bar close price."}
+        Float, nullable=True, info=_IEX_RAW_COLUMN_INFO["close"]
     )
     volume: Mapped[float | None] = mapped_column(
-        Float,
-        nullable=True,
-        info={"label": "Volume", "description": "Reported traded share volume."},
+        Float, nullable=True, info=_IEX_RAW_COLUMN_INFO["volume"]
     )
     trade_count: Mapped[float | None] = mapped_column(
-        Float,
-        nullable=True,
-        info={"label": "Trade Count", "description": "Number of trades in the bar."},
+        Float, nullable=True, info=_IEX_RAW_COLUMN_INFO["trade_count"]
     )
     vwap: Mapped[float | None] = mapped_column(
-        Float,
-        nullable=True,
-        info={"label": "VWAP", "description": "Volume weighted average price in the bar."},
+        Float, nullable=True, info=_IEX_RAW_COLUMN_INFO["vwap"]
     )
 
 

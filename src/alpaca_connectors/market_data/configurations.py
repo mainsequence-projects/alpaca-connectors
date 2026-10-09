@@ -44,9 +44,13 @@ class AlpacaBarsConfigurationTable(
     __project_storage_concept__ = "bars_configuration"
     __markets_base_identifier__ = "AlpacaBarsConfiguration"
     __metatable_description__ = (
-        "Reusable Alpaca stock-bar configurations. Each row selects a registered Alpaca account, "
-        "one dynamic asset-source strategy, and one migrated frequency/feed/adjustment profile."
+        "One row per stored stock price-update configuration. Saved settings for downloading "
+        "stock prices (OHLCV bars) from Alpaca: the registered Alpaca brokerage account whose "
+        "keys to use, how to choose the assets to price (an explicit list, an asset universe or "
+        "the account's recent holdings) and the bar frequency, data feed and corporate-action "
+        "adjustment; created by operators of the Alpaca Connectors application."
     )
+    __metatable_labels__ = ["equities", "prices", "configuration", "alpaca"]
     __table_args__ = markets_table_args(
         "AlpacaBarsConfiguration",
         CheckConstraint(
@@ -70,18 +74,21 @@ class AlpacaBarsConfigurationTable(
         default=new_markets_uid,
         info={
             "label": "Configuration UID",
-            "description": "Stable UUID used to review and execute this stored configuration.",
+            "description": "Public UUID that identifies the configuration and selects it to run.",
         },
     )
     name: Mapped[str] = mapped_column(
         String(255),
         nullable=False,
-        info={"label": "Name", "description": "User-facing configuration name."},
+        info={"label": "Name", "description": "Display name of the configuration."},
     )
     description: Mapped[str | None] = mapped_column(
         Text,
         nullable=True,
-        info={"label": "Description", "description": "Optional operator-facing description."},
+        info={
+            "label": "Description",
+            "description": "Free-text note about the configuration; null when none was given.",
+        },
     )
     enabled: Mapped[bool] = mapped_column(
         Boolean,
@@ -89,7 +96,10 @@ class AlpacaBarsConfigurationTable(
         default=True,
         info={
             "label": "Enabled",
-            "description": "Disabled configurations remain reviewable but cannot run.",
+            "description": (
+                "Whether price updates may run the configuration; a disabled one can still be "
+                "reviewed."
+            ),
         },
     )
     account_uid: Mapped[uuid.UUID] = mapped_column(
@@ -98,15 +108,23 @@ class AlpacaBarsConfigurationTable(
         nullable=False,
         info={
             "label": "Account UID",
-            "description": "Registered Alpaca Account UID whose Secret names supply credentials.",
+            "description": (
+                "Main Sequence account UID of the registered Alpaca brokerage account whose API "
+                "keys authorize the price requests and, for account_holdings, whose holdings "
+                "choose the assets."
+            ),
         },
     )
     asset_source: Mapped[str] = mapped_column(
         String(32),
         nullable=False,
         info={
-            "label": "Asset Source",
-            "description": "Asset resolver: assets, universe, or account_holdings.",
+            "label": "Asset source",
+            "description": (
+                "How the assets to price are chosen: assets for an explicit list, universe for "
+                "an asset universe's current members, or account_holdings for the account's "
+                "latest holdings from the past 30 days."
+            ),
         },
     )
     universe_uid: Mapped[uuid.UUID | None] = mapped_column(
@@ -115,36 +133,60 @@ class AlpacaBarsConfigurationTable(
         nullable=True,
         info={
             "label": "Universe UID",
-            "description": "Registered AssetUniverse UID when the asset source is universe.",
+            "description": (
+                "UID of the asset universe whose current members are priced when the asset "
+                "source is universe; null for any other asset source."
+            ),
         },
     )
     frequency_id: Mapped[str] = mapped_column(
         String(16),
         nullable=False,
-        info={"label": "Frequency", "description": "Normalized Alpaca bar frequency."},
+        info={
+            "label": "Bar frequency",
+            "description": (
+                "Bar interval code, such as 1d for daily bars; with the feed and adjustment it "
+                "must name an existing price table, currently 1d/sip/all or 1d/iex/raw."
+            ),
+        },
     )
     feed: Mapped[str] = mapped_column(
         String(16),
         nullable=False,
-        info={"label": "Feed", "description": "Normalized Alpaca market-data feed."},
+        info={
+            "label": "Data feed",
+            "description": (
+                "Alpaca market-data feed code: sip for the consolidated feed of all US exchanges "
+                "or iex for the IEX exchange only."
+            ),
+        },
     )
     adjustment: Mapped[str] = mapped_column(
         String(16),
         nullable=False,
-        info={"label": "Adjustment", "description": "Normalized Alpaca adjustment mode."},
+        info={
+            "label": "Adjustment",
+            "description": (
+                "Corporate-action adjustment code: all for prices adjusted for splits, dividends "
+                "and other actions, or raw for unadjusted prices."
+            ),
+        },
     )
     created_at: Mapped[dt.datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
         default=utc_now,
-        info={"label": "Created At", "description": "UTC creation time."},
+        info={"label": "Created at", "description": "Time, in UTC, the configuration was created."},
     )
     updated_at: Mapped[dt.datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
         default=utc_now,
         onupdate=utc_now,
-        info={"label": "Updated At", "description": "UTC time of the latest change."},
+        info={
+            "label": "Updated at",
+            "description": "Time, in UTC, the configuration last changed.",
+        },
     )
 
 
@@ -158,9 +200,12 @@ class AlpacaBarsConfigurationAssetTable(
     __project_storage_concept__ = "bars_configuration_asset"
     __markets_base_identifier__ = "AlpacaBarsConfigurationAsset"
     __metatable_description__ = (
-        "Explicit Asset membership for Alpaca bar configurations. Rows exist only for "
-        "configurations whose asset_source is assets."
+        "One row per asset per stock price-update configuration. The explicit list of US stocks "
+        "and ETFs priced by each stored Alpaca price-update configuration that chooses its "
+        "assets by list, maintained with the configuration by operators of the Alpaca "
+        "Connectors application."
     )
+    __metatable_labels__ = ["equities", "prices", "configuration", "alpaca"]
     __table_args__ = markets_table_args(
         "AlpacaBarsConfigurationAsset",
         Index(None, "asset_uid"),
@@ -173,7 +218,7 @@ class AlpacaBarsConfigurationAssetTable(
         nullable=False,
         info={
             "label": "Configuration UID",
-            "description": "Parent AlpacaBarsConfiguration UID.",
+            "description": "UID of the price-update configuration that lists the asset.",
         },
     )
     asset_uid: Mapped[uuid.UUID] = mapped_column(
@@ -181,7 +226,10 @@ class AlpacaBarsConfigurationAssetTable(
         ForeignKey(f"{AssetTable.__table__.fullname}.uid", ondelete="RESTRICT"),
         primary_key=True,
         nullable=False,
-        info={"label": "Asset UID", "description": "Explicit registered Asset UID."},
+        info={
+            "label": "Asset UID",
+            "description": "Main Sequence asset UID of a stock or ETF the configuration prices.",
+        },
     )
 
 

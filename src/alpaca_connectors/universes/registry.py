@@ -34,9 +34,12 @@ class AssetUniverseTable(
     __project_storage_concept__ = "asset_universe"
     __markets_base_identifier__ = "AssetUniverse"
     __metatable_description__ = (
-        "Registered Alpaca connector asset universes. Each row owns lifecycle state and links one "
-        "explicit UniverseSource to one ms-markets AssetCategory materialization target."
+        "One row per registered asset universe. Stock universes built from an ETF's holdings: "
+        "each links one ETF holdings source to the asset category whose members each run "
+        "replaces with the fund's latest constituents, and records whether the universe is "
+        "active; registered by operators of the Alpaca Connectors application."
     )
+    __metatable_labels__ = ["etfs", "universes", "configuration", "alpaca"]
     __table_args__ = markets_table_args(
         "AssetUniverse",
         Index(None, "source_uid", unique=True),
@@ -48,19 +51,17 @@ class AssetUniverseTable(
         Uuid(as_uuid=True),
         primary_key=True,
         default=new_markets_uid,
-        info={
-            "label": "Universe UID",
-            "description": "Stable UUID identity of this registered Asset Universe.",
-        },
+        info={"label": "Universe UID", "description": "Public UUID that identifies the universe."},
     )
     source_uid: Mapped[uuid.UUID] = mapped_column(
         Uuid(as_uuid=True),
         ForeignKey(f"{UniverseSourceTable.__table__.fullname}.uid", ondelete="RESTRICT"),
         nullable=False,
         info={
-            "label": "Source UID",
+            "label": "Holdings source UID",
             "description": (
-                "Required UniverseSource UID containing the explicit symbol and extraction URL."
+                "UID of the ETF holdings source, the fund ticker and holdings page, the universe "
+                "is extracted from; each source backs at most one universe."
             ),
         },
     )
@@ -69,9 +70,10 @@ class AssetUniverseTable(
         ForeignKey(f"{AssetCategoryTable.__table__.fullname}.uid", ondelete="RESTRICT"),
         nullable=False,
         info={
-            "label": "Asset Category UID",
+            "label": "Asset category UID",
             "description": (
-                "Required ms-markets AssetCategory UID whose memberships materialize this universe."
+                "Main Sequence asset category UID whose members are the universe's current "
+                "constituents; each category backs at most one universe."
             ),
         },
     )
@@ -81,17 +83,16 @@ class AssetUniverseTable(
         default=True,
         info={
             "label": "Active",
-            "description": "Whether this registered universe may run and feed market-data jobs.",
+            "description": (
+                "Whether the universe may run and be selected by price-update configurations."
+            ),
         },
     )
     created_at: Mapped[dt.datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
         default=utc_now,
-        info={
-            "label": "Created At",
-            "description": "UTC time when this registered universe was created.",
-        },
+        info={"label": "Created at", "description": "Time, in UTC, the universe was registered."},
     )
     updated_at: Mapped[dt.datetime] = mapped_column(
         DateTime(timezone=True),
@@ -99,8 +100,8 @@ class AssetUniverseTable(
         default=utc_now,
         onupdate=utc_now,
         info={
-            "label": "Updated At",
-            "description": "UTC time of the latest registered-universe lifecycle change.",
+            "label": "Updated at",
+            "description": "Time, in UTC, the universe was last activated, deactivated or changed.",
         },
     )
 

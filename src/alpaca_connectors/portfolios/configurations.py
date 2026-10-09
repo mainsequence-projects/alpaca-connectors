@@ -63,9 +63,12 @@ class PortfolioRebalanceConfigurationTable(
     __project_storage_concept__ = "portfolio_rebalance_configuration"
     __markets_base_identifier__ = "PortfolioRebalanceConfiguration"
     __metatable_description__ = (
-        "Reusable persisted-calendar rebalance configurations. The strategy executes the "
-        "latest signal observed at or before an actual market session event."
+        "One row per portfolio rebalance rule. When an analytical portfolio trades to its "
+        "signal's target weights: at a market calendar's session open or close, every session "
+        "or weekly, optionally offset in time, using the latest weights observed at or before "
+        "that moment; created by operators of the Alpaca Connectors application."
     )
+    __metatable_labels__ = ["portfolios", "rebalancing", "configuration", "alpaca"]
     __table_args__ = markets_table_args(
         "PortfolioRebalanceConfiguration",
         CheckConstraint(
@@ -101,18 +104,32 @@ class PortfolioRebalanceConfigurationTable(
         Uuid(as_uuid=True),
         primary_key=True,
         default=new_markets_uid,
-        info={"label": "Configuration UID", "description": "Stable configuration identity."},
+        info={
+            "label": "Rebalance rule UID",
+            "description": "Public UUID that identifies the rebalance rule.",
+        },
     )
-    name: Mapped[str] = mapped_column(String(255), nullable=False)
-    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    name: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+        info={"label": "Name", "description": "Display name of the rebalance rule."},
+    )
+    description: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+        info={
+            "label": "Description",
+            "description": "Free-text note about the rule; null when none was given.",
+        },
+    )
     strategy: Mapped[str] = mapped_column(
         String(32),
         nullable=False,
         info={
             "label": "Strategy",
             "description": (
-                "CalendarEventSignal selects the latest signal observed at or before each "
-                "configured persisted-calendar event."
+                "Rebalance strategy code, always calendar_event_signal: trade to the latest "
+                "signal weights observed at or before each selected calendar event."
             ),
         },
     )
@@ -121,26 +138,78 @@ class PortfolioRebalanceConfigurationTable(
         nullable=False,
         info={
             "label": "Calendar",
-            "description": "Canonical persisted Calendar unique identifier.",
+            "description": (
+                "Unique identifier of the Main Sequence market calendar whose sessions supply "
+                "the events, such as NYSE."
+            ),
         },
     )
-    session_label: Mapped[str] = mapped_column(String(64), nullable=False)
+    session_label: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+        info={
+            "label": "Session",
+            "description": (
+                "Label of the calendar sessions whose events qualify, such as regular for the "
+                "regular trading session."
+            ),
+        },
+    )
     rebalance_event: Mapped[str] = mapped_column(
         String(32),
         nullable=False,
         info={
-            "label": "Market Event",
-            "description": "Actual persisted session boundary used as the execution time.",
+            "label": "Rebalance event",
+            "description": "Session boundary the portfolio trades at: market_open or market_close.",
         },
     )
-    event_offset_seconds: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    rebalance_cadence: Mapped[str] = mapped_column(String(32), nullable=False)
-    rebalance_weekday: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    event_offset_seconds: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        info={
+            "label": "Event offset",
+            "description": (
+                "Seconds added to the event time to get the trade time; negative trades before "
+                "the event and 0 trades at it."
+            ),
+        },
+    )
+    rebalance_cadence: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        info={
+            "label": "Rebalance cadence",
+            "description": (
+                "every_session to trade at every session's event, or weekly to trade once a "
+                "week on the rebalance weekday."
+            ),
+        },
+    )
+    rebalance_weekday: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        info={
+            "label": "Rebalance weekday",
+            "description": (
+                "Local weekday of the session used by a weekly cadence, 0 for Monday to 6 for "
+                "Sunday; ignored by every_session."
+            ),
+        },
+    )
     created_at: Mapped[dt.datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=utc_now
+        DateTime(timezone=True),
+        nullable=False,
+        default=utc_now,
+        info={"label": "Created at", "description": "Time, in UTC, the rule was created."},
     )
     updated_at: Mapped[dt.datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now
+        DateTime(timezone=True),
+        nullable=False,
+        default=utc_now,
+        onupdate=utc_now,
+        info={"label": "Updated at", "description": "Time, in UTC, the rule last changed."},
     )
 
 
@@ -154,10 +223,13 @@ class AlpacaETFPortfolioConfigurationTable(
     __project_storage_concept__ = "etf_portfolio_configuration"
     __markets_base_identifier__ = "AlpacaETFPortfolioConfiguration"
     __metatable_description__ = (
-        "Durable analytical ETF portfolio configurations composed from one signal "
-        "configuration, one Alpaca bars configuration, and one rebalance configuration. "
-        "The portfolio Job declared in the repository workflow runs them."
+        "One row per analytical ETF-tracking portfolio. Saved settings for a simulated "
+        "portfolio that follows an ETF's holdings weights and is valued with Alpaca stock "
+        "prices: its ETF weight signal, price-update configuration and rebalance rule, its "
+        "valuation and trading-fee settings, and whether the scheduled portfolio update "
+        "includes it; created by operators of the Alpaca Connectors application."
     )
+    __metatable_labels__ = ["etfs", "portfolios", "configuration", "alpaca"]
     __table_args__ = markets_table_args(
         "AlpacaETFPortfolioConfiguration",
         CheckConstraint("commission_fee >= 0", name="ck_etf_portfolio_commission_fee"),
@@ -197,10 +269,27 @@ class AlpacaETFPortfolioConfigurationTable(
         Uuid(as_uuid=True),
         primary_key=True,
         default=new_markets_uid,
-        info={"label": "Configuration UID", "description": "Stable configuration identity."},
+        info={
+            "label": "Configuration UID",
+            "description": "Public UUID that identifies the configuration and selects it to run.",
+        },
     )
-    name: Mapped[str] = mapped_column(String(255), nullable=False)
-    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    name: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+        info={
+            "label": "Name",
+            "description": "Display name of the configuration, also used as the portfolio name.",
+        },
+    )
+    description: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+        info={
+            "label": "Description",
+            "description": "Free-text description of the portfolio; null when none was given.",
+        },
+    )
     signal_configuration_uid: Mapped[uuid.UUID] = mapped_column(
         Uuid(as_uuid=True),
         ForeignKey(
@@ -209,8 +298,8 @@ class AlpacaETFPortfolioConfigurationTable(
         ),
         nullable=False,
         info={
-            "label": "Signal Configuration UID",
-            "description": "Existing Universe-backed ETF weight Signal configuration.",
+            "label": "Signal UID",
+            "description": "UID of the ETF weight signal whose target weights the portfolio follows.",
         },
     )
     bars_configuration_uid: Mapped[uuid.UUID] = mapped_column(
@@ -218,8 +307,11 @@ class AlpacaETFPortfolioConfigurationTable(
         ForeignKey(f"{AlpacaBarsConfigurationTable.__table__.fullname}.uid", ondelete="RESTRICT"),
         nullable=False,
         info={
-            "label": "Bars Configuration UID",
-            "description": "Existing Alpaca bars configuration used as the valuation source.",
+            "label": "Price configuration UID",
+            "description": (
+                "UID of the stock price-update configuration whose stored daily prices value the "
+                "portfolio."
+            ),
         },
     )
     rebalance_configuration_uid: Mapped[uuid.UUID] = mapped_column(
@@ -229,6 +321,10 @@ class AlpacaETFPortfolioConfigurationTable(
             ondelete="RESTRICT",
         ),
         nullable=False,
+        info={
+            "label": "Rebalance rule UID",
+            "description": "UID of the rebalance rule that decides when the portfolio trades.",
+        },
     )
     portfolio_uid: Mapped[uuid.UUID | None] = mapped_column(
         Uuid(as_uuid=True),
@@ -236,7 +332,10 @@ class AlpacaETFPortfolioConfigurationTable(
         nullable=True,
         info={
             "label": "Portfolio UID",
-            "description": "Materialized canonical ms-markets Portfolio identity.",
+            "description": (
+                "Main Sequence portfolio UID of the portfolio the configuration builds; null until "
+                "the first run creates it or after that portfolio is deleted."
+            ),
         },
     )
     job_uid: Mapped[uuid.UUID | None] = mapped_column(
@@ -245,32 +344,92 @@ class AlpacaETFPortfolioConfigurationTable(
         info={
             "label": "Job UID",
             "description": (
-                "Retired with the one-Job-per-configuration design (ADR 0013); never read."
+                "No longer used: UID of the dedicated Job an earlier design ran per "
+                "configuration; null on rows created since."
             ),
         },
     )
-    upsample_frequency_id: Mapped[str] = mapped_column(String(16), nullable=False)
-    intraday_bar_interpolation_rule: Mapped[str] = mapped_column(String(16), nullable=False)
-    valuation_column: Mapped[str] = mapped_column(String(64), nullable=False)
+    upsample_frequency_id: Mapped[str] = mapped_column(
+        String(16),
+        nullable=False,
+        info={
+            "label": "Upsample frequency",
+            "description": (
+                "Interval the prices are resampled to on the rebalance calendar before "
+                "valuation; only 1d (daily) is accepted."
+            ),
+        },
+    )
+    intraday_bar_interpolation_rule: Mapped[str] = mapped_column(
+        String(16),
+        nullable=False,
+        info={
+            "label": "Interpolation rule",
+            "description": (
+                "How resampled times without a bar get a price; only ffill (carry the last "
+                "price forward) is accepted."
+            ),
+        },
+    )
+    valuation_column: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+        info={
+            "label": "Valuation price",
+            "description": "Bar price field that values each position, such as close.",
+        },
+    )
     valuation_maximum_staleness_seconds: Mapped[int] = mapped_column(
         Integer,
         nullable=False,
         default=86_400,
         info={
-            "label": "Maximum Valuation Staleness",
+            "label": "Maximum price age",
             "description": (
-                "Maximum age in seconds of the latest valuation selected at an actual "
-                "portfolio observation timestamp. Alignment never creates timestamps."
+                "Oldest a price may be, in seconds, to value an asset at a portfolio observation "
+                "time; 86400 is one day."
             ),
         },
     )
-    fail_on_missing_prices: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
-    commission_fee: Mapped[float] = mapped_column(Float, nullable=False, default=0.00018)
+    fail_on_missing_prices: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=True,
+        info={
+            "label": "Fail on missing prices",
+            "description": (
+                "Whether a run fails when an asset has no price within the maximum price age at "
+                "an observation time."
+            ),
+        },
+    )
+    commission_fee: Mapped[float] = mapped_column(
+        Float,
+        nullable=False,
+        default=0.00018,
+        info={
+            "label": "Commission rate",
+            "description": (
+                "Trading cost per unit of turnover, as a fraction: each rebalance costs the sum of "
+                "absolute weight changes times this rate, so 0.00018 is 1.8 basis points."
+            ),
+        },
+    )
     created_at: Mapped[dt.datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=utc_now
+        DateTime(timezone=True),
+        nullable=False,
+        default=utc_now,
+        info={"label": "Created at", "description": "Time, in UTC, the configuration was created."},
     )
     updated_at: Mapped[dt.datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now
+        DateTime(timezone=True),
+        nullable=False,
+        default=utc_now,
+        onupdate=utc_now,
+        info={
+            "label": "Updated at",
+            "description": "Time, in UTC, the configuration last changed.",
+        },
     )
     scheduled: Mapped[bool] = mapped_column(
         Boolean,
@@ -281,10 +440,7 @@ class AlpacaETFPortfolioConfigurationTable(
         server_default=true(),
         info={
             "label": "Scheduled",
-            "description": (
-                "Whether the scheduled run of the shared portfolio Job includes this "
-                "configuration."
-            ),
+            "description": "Whether the scheduled portfolio update includes this configuration.",
         },
     )
 

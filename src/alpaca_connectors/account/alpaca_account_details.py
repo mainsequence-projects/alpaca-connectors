@@ -70,6 +70,65 @@ ACCOUNT_BALANCE_NUMERIC_COLUMNS: tuple[str, ...] = (
     "intraday_adjustments",
 )
 
+# Column label and meaning of each balance column; ``info`` adds the unit and what null means.
+_ACCOUNT_BALANCE_INFO: dict[str, tuple[str, str]] = {
+    "cash": ("Cash", "Cash balance, negative while the account borrows on margin"),
+    "equity": ("Equity", "Account equity: cash plus the market value of all positions"),
+    "last_equity": ("Previous close equity", "Account equity at the previous trading day's close"),
+    "long_market_value": ("Long market value", "Market value of all long positions"),
+    "short_market_value": (
+        "Short market value",
+        "Market value of all short positions, zero or negative",
+    ),
+    "position_market_value": ("Position market value", "Market value of all open positions"),
+    "buying_power": ("Buying power", "Buying power available for new orders"),
+    "regt_buying_power": (
+        "Reg T buying power",
+        "Overnight buying power under Regulation T margin rules",
+    ),
+    "daytrading_buying_power": (
+        "Day-trading buying power",
+        "Buying power available for day trades under pattern-day-trader rules",
+    ),
+    "non_marginable_buying_power": (
+        "Non-marginable buying power",
+        "Buying power for securities that cannot be bought on margin",
+    ),
+    "options_buying_power": ("Options buying power", "Buying power available for options trades"),
+    "effective_buying_power": (
+        "Effective buying power",
+        "Buying power Alpaca applies to the next order",
+    ),
+    "bod_dtbp": (
+        "Opening day-trading power",
+        "Day-trading buying power at the start of the trading day",
+    ),
+    "initial_margin": ("Initial margin", "Initial margin requirement of the open positions"),
+    "maintenance_margin": (
+        "Maintenance margin",
+        "Maintenance margin requirement of the open positions",
+    ),
+    "last_maintenance_margin": (
+        "Previous maintenance margin",
+        "Maintenance margin requirement at the previous trading day's close",
+    ),
+    "sma": (
+        "Special memorandum account",
+        "Special memorandum account (SMA) balance under Regulation T",
+    ),
+    "accrued_fees": ("Accrued fees", "Fees accrued and not yet charged to the account"),
+    "pending_reg_taf_fees": (
+        "Pending regulatory fees",
+        "SEC and FINRA trading activity (Reg/TAF) fees not yet charged",
+    ),
+    "pending_transfer_in": ("Pending transfers in", "Deposits started but not yet settled"),
+    "pending_transfer_out": ("Pending transfers out", "Withdrawals started but not yet settled"),
+    "intraday_adjustments": (
+        "Intraday adjustments",
+        "Cash adjustments applied during the current trading day",
+    ),
+}
+
 
 def _account_uid_pk_fk() -> Mapped[uuid.UUID]:
     """One-to-one detail link: primary key + foreign key to ``AccountTable.uid``."""
@@ -80,7 +139,9 @@ def _account_uid_pk_fk() -> Mapped[uuid.UUID]:
         nullable=False,
         info={
             "label": "Account UID",
-            "description": "Canonical AccountTable.uid for this detail row.",
+            "description": (
+                "Main Sequence account UID of the registered Alpaca account these details describe."
+            ),
         },
     )
 
@@ -90,6 +151,14 @@ class AlpacaAccountDetails(ProjectStorageNameMixin, AlpacaMarketsMetaTableMixin,
 
     __project_storage_concept__ = "acct_alpaca"
     __metatable_identifier__ = "AlpacaAccountDetails"
+    __metatable_description__ = (
+        "One row per Alpaca brokerage account registered in Main Sequence. Current status, "
+        "trading permissions, account configuration and balances (cash, equity, buying power, "
+        "margin and fees) of Alpaca paper and live trading accounts, read from the Alpaca "
+        "trading API when the account is registered or refreshed; API key values are never "
+        "stored."
+    )
+    __metatable_labels__ = ["brokerage", "accounts", "balances", "alpaca"]
     __metatable_extra_hash_components__: ClassVar[dict[str, str]] = {
         "storage_name": f"{PROJECT_NAMESPACE_SLUG}_alpaca_account_details",
     }
@@ -106,34 +175,46 @@ class AlpacaAccountDetails(ProjectStorageNameMixin, AlpacaMarketsMetaTableMixin,
     account_unique_identifier: Mapped[str] = mapped_column(
         String(255),
         nullable=False,
-        info={"label": "Account Unique Identifier", "description": "Account.unique_identifier."},
+        info={
+            "label": "Account identifier",
+            "description": (
+                "Main Sequence account unique identifier: the Alpaca account number followed by "
+                "__ALPACA for a live account or __ALPACA_PAPER for a paper account."
+            ),
+        },
     )
     alpaca_account_id: Mapped[str] = mapped_column(
         String(64),
         nullable=False,
-        info={"label": "Alpaca Account ID", "description": "Alpaca system account UUID (str)."},
+        info={"label": "Alpaca account ID", "description": "UUID Alpaca assigns to the account."},
     )
     account_number: Mapped[str] = mapped_column(
         String(64),
         nullable=False,
-        info={"label": "Account Number", "description": "Human Alpaca account number."},
+        info={
+            "label": "Account number",
+            "description": "Alpaca brokerage account number shown to the account holder.",
+        },
     )
     api_key_fingerprint: Mapped[str] = mapped_column(
         String(32),
         nullable=False,
         info={
-            "label": "API Key Fingerprint",
-            "description": "sha256(api_key)[:16]; never the raw key/secret.",
+            "label": "API key fingerprint",
+            "description": (
+                "First 16 hexadecimal characters of the SHA-256 hash of the Alpaca API key ID, "
+                "which recognizes a key without storing it; the secret key is never hashed."
+            ),
         },
     )
     api_key_secret_name: Mapped[str] = mapped_column(
         String(255),
         nullable=False,
         info={
-            "label": "API Key Secret Name",
+            "label": "API key secret name",
             "description": (
-                "Name of the Main Sequence Secret containing the Alpaca API key. "
-                "The credential value is never persisted in this table."
+                "Name of the Main Sequence Secret that holds the Alpaca API key ID; the key value "
+                "itself is never stored here."
             ),
         },
     )
@@ -141,10 +222,10 @@ class AlpacaAccountDetails(ProjectStorageNameMixin, AlpacaMarketsMetaTableMixin,
         String(255),
         nullable=False,
         info={
-            "label": "Secret Key Secret Name",
+            "label": "Secret key secret name",
             "description": (
-                "Name of the Main Sequence Secret containing the Alpaca secret key. "
-                "The credential value is never persisted in this table."
+                "Name of the Main Sequence Secret that holds the Alpaca secret key; the key value "
+                "itself is never stored here."
             ),
         },
     )
@@ -154,16 +235,22 @@ class AlpacaAccountDetails(ProjectStorageNameMixin, AlpacaMarketsMetaTableMixin,
         String(64),
         nullable=True,
         info={
-            "label": "API Key Secret UID",
-            "description": "UID of the Main Sequence Secret containing the Alpaca API key.",
+            "label": "API key secret UID",
+            "description": (
+                "UID of the Main Sequence Secret that holds the Alpaca API key ID; null for a "
+                "registration made before Secret UIDs were stored and not yet backfilled."
+            ),
         },
     )
     secret_key_secret_uid: Mapped[str | None] = mapped_column(
         String(64),
         nullable=True,
         info={
-            "label": "Secret Key Secret UID",
-            "description": "UID of the Main Sequence Secret containing the Alpaca secret key.",
+            "label": "Secret key secret UID",
+            "description": (
+                "UID of the Main Sequence Secret that holds the Alpaca secret key; null for a "
+                "registration made before Secret UIDs were stored and not yet backfilled."
+            ),
         },
     )
     credential_source: Mapped[str] = mapped_column(
@@ -172,10 +259,10 @@ class AlpacaAccountDetails(ProjectStorageNameMixin, AlpacaMarketsMetaTableMixin,
         # Rows written before ADR 0011, or by a release without this column, selected Secrets by name.
         server_default=text("'external'"),
         info={
-            "label": "Credential Source",
+            "label": "Credential source",
             "description": (
-                "'managed' when this application created and owns both Secrets from submitted "
-                "values; 'external' when existing Secrets were selected by name."
+                "managed when this application created and owns both Secrets from keys a person "
+                "entered, or external when existing Secrets were selected by name."
             ),
         },
     )
@@ -183,161 +270,304 @@ class AlpacaAccountDetails(ProjectStorageNameMixin, AlpacaMarketsMetaTableMixin,
         DateTime(timezone=True),
         nullable=True,
         info={
-            "label": "Credentials Updated At",
-            "description": "When the credential references or managed values last changed.",
+            "label": "Credentials updated at",
+            "description": (
+                "Time, in UTC, the Secret references or the managed key values last changed; "
+                "null when no change was recorded."
+            ),
         },
     )
     credentials_updated_by_user_uid: Mapped[str | None] = mapped_column(
         String(64),
         nullable=True,
         info={
-            "label": "Credentials Updated By",
-            "description": "Public UID of the user who last changed the credentials, if known.",
+            "label": "Credentials updated by",
+            "description": (
+                "Main Sequence user UID of the person who last changed the credentials; null "
+                "when unknown."
+            ),
         },
     )
     is_paper: Mapped[bool] = mapped_column(
         Boolean,
         nullable=False,
-        info={"label": "Is Paper", "description": "Paper vs live trading environment."},
+        info={
+            "label": "Paper account",
+            "description": "True for an Alpaca paper-trading account, false for a live account.",
+        },
     )
     # capture time of the current-financials snapshot held on this row.
     snapshot_time: Mapped[dt.datetime | None] = mapped_column(
         DateTime(timezone=True),
         nullable=True,
         info={
-            "label": "Snapshot Time",
-            "description": "When the current financials were captured.",
+            "label": "Snapshot time",
+            "description": (
+                "Time, in UTC, the status and balances on this row were read from Alpaca; null "
+                "when no read was recorded."
+            ),
         },
     )
     status: Mapped[str | None] = mapped_column(
         String(32),
         nullable=True,
-        info={"label": "Status", "description": "Alpaca account status (e.g. ACTIVE)."},
+        info={
+            "label": "Account status",
+            "description": (
+                "Alpaca account status code, such as ACTIVE, ONBOARDING, ACCOUNT_UPDATED or "
+                "ACCOUNT_CLOSED; null when Alpaca did not report it."
+            ),
+        },
     )
     crypto_status: Mapped[str | None] = mapped_column(
         String(32),
         nullable=True,
-        info={"label": "Crypto Status", "description": "Crypto trading status, if enabled."},
+        info={
+            "label": "Crypto status",
+            "description": (
+                "Alpaca crypto trading status code, using the account status codes; null when "
+                "Alpaca did not report it."
+            ),
+        },
     )
     currency: Mapped[str | None] = mapped_column(
         String(8),
         nullable=True,
-        info={"label": "Currency", "description": "Account currency (USD)."},
+        info={
+            "label": "Currency",
+            "description": (
+                "ISO 4217 code of the account currency, USD for Alpaca US accounts; null when "
+                "Alpaca did not report it."
+            ),
+        },
     )
     multiplier: Mapped[str | None] = mapped_column(
         String(8),
         nullable=True,
-        info={"label": "Multiplier", "description": "Margin multiplier (1/2/4)."},
+        info={
+            "label": "Margin multiplier",
+            "description": (
+                "Buying power multiplier Alpaca applies: 1 for a cash account, 2 for Reg T "
+                "margin, 4 for pattern-day-trader margin; null when Alpaca did not report it."
+            ),
+        },
     )
     pattern_day_trader: Mapped[bool | None] = mapped_column(
-        Boolean, nullable=True, info={"label": "Pattern Day Trader", "description": "PDT flag."}
+        Boolean,
+        nullable=True,
+        info={
+            "label": "Pattern day trader",
+            "description": (
+                "Whether Alpaca flags the account as a pattern day trader under FINRA rules; "
+                "null when Alpaca did not report it."
+            ),
+        },
     )
     daytrade_count: Mapped[int | None] = mapped_column(
         Integer,
         nullable=True,
-        info={"label": "Day Trade Count", "description": "Day trades in the last 5 trading days."},
+        info={
+            "label": "Day trade count",
+            "description": (
+                "Number of day trades in the last five trading days; null when Alpaca did not "
+                "report it."
+            ),
+        },
     )
     shorting_enabled: Mapped[bool | None] = mapped_column(
         Boolean,
         nullable=True,
-        info={"label": "Shorting Enabled", "description": "Whether shorting is permitted."},
+        info={
+            "label": "Shorting enabled",
+            "description": (
+                "Whether the account may sell short; null when Alpaca did not report it."
+            ),
+        },
     )
     trading_blocked: Mapped[bool | None] = mapped_column(
         Boolean,
         nullable=True,
-        info={"label": "Trading Blocked", "description": "Order placement blocked."},
+        info={
+            "label": "Trading blocked",
+            "description": (
+                "Whether Alpaca blocks the account from placing orders; null when Alpaca did not "
+                "report it."
+            ),
+        },
     )
     transfers_blocked: Mapped[bool | None] = mapped_column(
         Boolean,
         nullable=True,
-        info={"label": "Transfers Blocked", "description": "Money transfers blocked."},
+        info={
+            "label": "Transfers blocked",
+            "description": (
+                "Whether Alpaca blocks deposits and withdrawals; null when Alpaca did not report "
+                "it."
+            ),
+        },
     )
     account_blocked: Mapped[bool | None] = mapped_column(
         Boolean,
         nullable=True,
-        info={"label": "Account Blocked", "description": "All user activity prohibited."},
+        info={
+            "label": "Account blocked",
+            "description": (
+                "Whether Alpaca blocks all activity on the account; null when Alpaca did not "
+                "report it."
+            ),
+        },
     )
     trade_suspended_by_user: Mapped[bool | None] = mapped_column(
         Boolean,
         nullable=True,
-        info={"label": "Trade Suspended By User", "description": "User self-suspended trading."},
+        info={
+            "label": "Trading suspended by holder",
+            "description": (
+                "Whether the account holder suspended trading; null when Alpaca did not report it."
+            ),
+        },
     )
     options_approved_level: Mapped[int | None] = mapped_column(
         Integer,
         nullable=True,
-        info={"label": "Options Approved Level", "description": "Approved options level (0-3)."},
+        info={
+            "label": "Options approved level",
+            "description": (
+                "Options trading level Alpaca approved, from 0 (no options) to 3; null when "
+                "Alpaca did not report it."
+            ),
+        },
     )
     options_trading_level: Mapped[int | None] = mapped_column(
         Integer,
         nullable=True,
-        info={"label": "Options Trading Level", "description": "Effective options level (0-3)."},
+        info={
+            "label": "Options trading level",
+            "description": (
+                "Options trading level in effect, from 0 (no options) to 3; null when Alpaca did "
+                "not report it."
+            ),
+        },
     )
     balance_asof: Mapped[str | None] = mapped_column(
         String(16),
         nullable=True,
         info={
-            "label": "Balance As Of",
-            "description": "Date the previous-day balance figures are as of.",
+            "label": "Balance as of",
+            "description": (
+                "Date, as YYYY-MM-DD, that the previous-day figures such as previous close "
+                "equity refer to; null when Alpaca did not report it."
+            ),
         },
     )
     created_at: Mapped[dt.datetime | None] = mapped_column(
         DateTime(timezone=True),
         nullable=True,
-        info={"label": "Created At", "description": "Account creation timestamp."},
+        info={
+            "label": "Account opened at",
+            "description": (
+                "Time, in UTC, Alpaca created the brokerage account; null when Alpaca did not "
+                "report it."
+            ),
+        },
     )
     # Account configuration (GET /v2/account/configurations).
     dtbp_check: Mapped[str | None] = mapped_column(
         String(8),
         nullable=True,
-        info={"label": "DTBP Check", "description": "Day-trade buying-power check."},
+        info={
+            "label": "Buying power check",
+            "description": (
+                "Orders Alpaca checks against day-trading buying power: entry, exit or both; "
+                "null when Alpaca did not report it."
+            ),
+        },
     )
     pdt_check: Mapped[str | None] = mapped_column(
         String(8),
         nullable=True,
-        info={"label": "PDT Check", "description": "Pattern-day-trader check."},
+        info={
+            "label": "Pattern day-trader check",
+            "description": (
+                "Orders Alpaca checks against pattern-day-trader rules: entry, exit or both; "
+                "null when Alpaca did not report it."
+            ),
+        },
     )
     fractional_trading: Mapped[bool | None] = mapped_column(
         Boolean,
         nullable=True,
-        info={"label": "Fractional Trading", "description": "Fractional trading enabled."},
+        info={
+            "label": "Fractional trading",
+            "description": (
+                "Whether fractional-share orders are enabled; null when Alpaca did not report it."
+            ),
+        },
     )
     max_margin_multiplier: Mapped[str | None] = mapped_column(
         String(8),
         nullable=True,
-        info={"label": "Max Margin Multiplier", "description": "Max margin multiplier (1-4)."},
+        info={
+            "label": "Maximum margin multiplier",
+            "description": (
+                "Highest margin multiplier the account configuration allows, such as 1 for no "
+                "margin or 2; null when Alpaca did not report it."
+            ),
+        },
     )
     no_shorting: Mapped[bool | None] = mapped_column(
         Boolean,
         nullable=True,
-        info={"label": "No Shorting", "description": "Account is long-only."},
+        info={
+            "label": "Shorting disabled",
+            "description": (
+                "Whether the account configuration forbids short selling, making the account "
+                "long-only; null when Alpaca did not report it."
+            ),
+        },
     )
     suspend_trade: Mapped[bool | None] = mapped_column(
         Boolean,
         nullable=True,
-        info={"label": "Suspend Trade", "description": "New orders suspended."},
+        info={
+            "label": "Trading suspended",
+            "description": (
+                "Whether the account configuration suspends new orders; null when Alpaca did not "
+                "report it."
+            ),
+        },
     )
     trade_confirm_email: Mapped[str | None] = mapped_column(
         String(8),
         nullable=True,
         info={
-            "label": "Trade Confirm Email",
-            "description": "Trade-confirmation emails (all/none).",
+            "label": "Trade confirmation emails",
+            "description": (
+                "Which trade confirmations Alpaca emails: all or none; null when Alpaca did not "
+                "report it."
+            ),
         },
     )
     max_options_trading_level: Mapped[int | None] = mapped_column(
         Integer,
         nullable=True,
         info={
-            "label": "Max Options Trading Level",
-            "description": "Desired max options level (0-3).",
+            "label": "Maximum options level",
+            "description": (
+                "Highest options trading level the account holder wants enabled, from 0 to 3; "
+                "null when Alpaca did not report it."
+            ),
         },
     )
     raw_account_payload: Mapped[dict | None] = mapped_column(
         JSON,
         nullable=True,
         info={
-            "label": "Raw Account Payload",
-            "description": "Full raw account + configuration JSON.",
+            "label": "Raw account payload",
+            "description": (
+                "JSON object with the account and configuration records exactly as the Alpaca "
+                "trading API returned them; null when they were not captured."
+            ),
         },
     )
 
@@ -353,8 +583,11 @@ for _balance_column in ACCOUNT_BALANCE_NUMERIC_COLUMNS:
             _MONEY,
             nullable=True,
             info={
-                "label": _balance_column.replace("_", " ").title(),
-                "description": f"Current Alpaca account {_balance_column}.",
+                "label": _ACCOUNT_BALANCE_INFO[_balance_column][0],
+                "description": (
+                    f"{_ACCOUNT_BALANCE_INFO[_balance_column][1]}, in the account currency, at "
+                    "the snapshot time; null when Alpaca did not report it."
+                ),
             },
         ),
     )

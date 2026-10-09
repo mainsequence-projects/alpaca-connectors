@@ -70,9 +70,12 @@ class AlpacaAssetDetailsTable(
     __project_storage_concept__ = "asset_alpaca"
     __markets_base_identifier__ = "AlpacaAssetDetails"
     __metatable_description__ = (
-        "Required Alpaca provider identity and trading metadata for assets registered by the "
-        "Alpaca connector. The primary key is also a foreign key to AssetTable.uid."
+        "One row per asset registered from Alpaca. Security reference data for US stocks and "
+        "ETFs: the immutable Alpaca asset ID, ticker symbol, listing exchange, catalog status and "
+        "trading permissions, taken from the Alpaca trading asset catalog each time the asset is "
+        "registered."
     )
+    __metatable_labels__ = ["equities", "us", "reference-data", "alpaca"]
     __table_args__ = markets_table_args(
         "AlpacaAssetDetails",
         Index(None, "alpaca_asset_id", unique=True),
@@ -88,50 +91,151 @@ class AlpacaAssetDetailsTable(
         nullable=False,
         info={
             "label": "Asset UID",
-            "description": "Canonical Main Sequence AssetTable.uid for this detail row.",
+            "description": "Main Sequence asset UID of the registered asset these details describe.",
         },
     )
     alpaca_asset_id: Mapped[uuid.UUID] = mapped_column(
         Uuid(as_uuid=True),
         nullable=False,
         info={
-            "label": "Alpaca Asset ID",
-            "description": "Immutable UUID assigned by Alpaca to this asset.",
+            "label": "Alpaca asset ID",
+            "description": (
+                "Immutable UUID Alpaca assigns to the asset; the asset's Main Sequence unique "
+                "identifier is ALPACA:: followed by this UUID."
+            ),
         },
     )
     symbol: Mapped[str] = mapped_column(
         String(64),
         nullable=False,
-        info={"label": "Symbol", "description": "Current Alpaca trading symbol."},
+        info={
+            "label": "Symbol",
+            "description": (
+                "Upper-case ticker symbol Alpaca listed the asset under at the latest "
+                "registration, for example IVV; unlike the Alpaca asset ID it can change."
+            ),
+        },
     )
     name: Mapped[str | None] = mapped_column(
         String(255),
         nullable=True,
-        info={"label": "Name", "description": "Current Alpaca asset name."},
+        info={
+            "label": "Name",
+            "description": "Company or fund name Alpaca reports; null when Alpaca reports none.",
+        },
     )
     asset_class: Mapped[str] = mapped_column(
         String(32),
         nullable=False,
-        info={"label": "Asset Class", "description": "Alpaca asset class."},
+        info={
+            "label": "Asset class",
+            "description": "Alpaca asset class: us_equity, us_option, crypto or crypto_perp.",
+        },
     )
     exchange: Mapped[str | None] = mapped_column(
         String(32),
         nullable=True,
-        info={"label": "Exchange", "description": "Alpaca exchange code."},
+        info={
+            "label": "Exchange",
+            "description": (
+                "Alpaca listing exchange code, such as NASDAQ, NYSE, ARCA, AMEX, BATS or OTC; "
+                "null or empty when Alpaca reports none."
+            ),
+        },
     )
     status: Mapped[str] = mapped_column(
         String(32),
         nullable=False,
-        info={"label": "Status", "description": "Current Alpaca asset status."},
+        info={
+            "label": "Catalog status",
+            "description": (
+                "Status of the asset in the Alpaca catalog at the latest registration: active or "
+                "inactive."
+            ),
+        },
     )
-    tradable: Mapped[bool] = mapped_column(Boolean, nullable=False)
-    marginable: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
-    shortable: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
-    easy_to_borrow: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
-    fractionable: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
-    attributes: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
-    raw_payload: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
-    refreshed_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    tradable: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        info={
+            "label": "Tradable",
+            "description": "Whether Alpaca accepted orders for the asset at the latest registration.",
+        },
+    )
+    marginable: Mapped[bool | None] = mapped_column(
+        Boolean,
+        nullable=True,
+        info={
+            "label": "Marginable",
+            "description": (
+                "Whether Alpaca lets the asset be bought on margin; null when Alpaca did not "
+                "report it."
+            ),
+        },
+    )
+    shortable: Mapped[bool | None] = mapped_column(
+        Boolean,
+        nullable=True,
+        info={
+            "label": "Shortable",
+            "description": (
+                "Whether Alpaca allows short selling the asset; null when Alpaca did not report it."
+            ),
+        },
+    )
+    easy_to_borrow: Mapped[bool | None] = mapped_column(
+        Boolean,
+        nullable=True,
+        info={
+            "label": "Easy to borrow",
+            "description": (
+                "Whether Alpaca classifies the asset as easy to borrow for short selling; null "
+                "when Alpaca did not report it."
+            ),
+        },
+    )
+    fractionable: Mapped[bool | None] = mapped_column(
+        Boolean,
+        nullable=True,
+        info={
+            "label": "Fractionable",
+            "description": (
+                "Whether Alpaca accepts fractional-share orders for the asset; null when Alpaca "
+                "did not report it."
+            ),
+        },
+    )
+    attributes: Mapped[list[str]] = mapped_column(
+        JSON,
+        nullable=False,
+        default=list,
+        info={
+            "label": "Attributes",
+            "description": (
+                "JSON list of Alpaca asset attribute codes, such as ptp_no_exception, ipo or "
+                "has_options; an empty list when Alpaca reports none."
+            ),
+        },
+    )
+    raw_payload: Mapped[dict[str, Any] | None] = mapped_column(
+        JSON,
+        nullable=True,
+        info={
+            "label": "Raw payload",
+            "description": (
+                "Alpaca asset record exactly as the trading API returned it, as a JSON object; "
+                "null when it was not captured."
+            ),
+        },
+    )
+    refreshed_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        info={
+            "label": "Refreshed at",
+            "description": "Time, in UTC, these details were last read from the Alpaca catalog.",
+        },
+    )
 
 
 class AlpacaAssetDetails(MarketsMetaTableRow):

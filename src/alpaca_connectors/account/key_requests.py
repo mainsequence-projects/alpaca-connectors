@@ -50,6 +50,7 @@ class AccountKeyRequestTable(ProjectStorageNameMixin, AlpacaMarketsMetaTableMixi
         "account's API keys, started by the Alpaca Agent for the person it serves, with their "
         "status, expiry and resulting account; key values are never stored."
     )
+    __metatable_labels__ = ["brokerage", "accounts", "operations", "alpaca"]
     __table_args__ = markets_table_args(
         "AccountKeyRequest",
         Index(None, "requester_uid"),

@@ -64,10 +64,12 @@ class AssetRegistrationOperationTable(
     __project_storage_concept__ = "asset_registration_operation"
     __markets_base_identifier__ = "AssetRegistrationOperation"
     __metatable_description__ = (
-        "Asset-registration operation records at one row per submitted plan or execution request. "
-        "Rows retain ordered step progress, a sanitized terminal error or result, and timestamps so "
-        "API clients can poll user-visible progress across requests."
+        "One row per asset registration request. Progress and outcome of requests to plan or "
+        "register US stocks and ETFs from Alpaca as Main Sequence assets: who asked, each step's "
+        "state, the result or a sanitized error, and timestamps, recorded by the Alpaca "
+        "Connectors API while the request runs so that clients can follow it."
     )
+    __metatable_labels__ = ["equities", "reference-data", "operations", "alpaca"]
     __table_args__ = markets_table_args(
         "AssetRegistrationOperation",
         Index(None, "owner_uid"),
@@ -81,7 +83,7 @@ class AssetRegistrationOperationTable(
         default=new_markets_uid,
         info={
             "label": "Operation UID",
-            "description": "Stable public UUID used to poll this registration operation.",
+            "description": "Public UUID clients poll to follow the request.",
         },
     )
     owner_uid: Mapped[str | None] = mapped_column(
@@ -90,8 +92,8 @@ class AssetRegistrationOperationTable(
         info={
             "label": "Owner UID",
             "description": (
-                "Request-bound human user UID that owns this operation; null only for local "
-                "development calls without injected identity context."
+                "Main Sequence user UID of the person who submitted the request; null only for a "
+                "local development call made without a signed-in user."
             ),
         },
     )
@@ -100,7 +102,10 @@ class AssetRegistrationOperationTable(
         nullable=False,
         info={
             "label": "Action",
-            "description": "Registration action requested by the caller: plan or execute.",
+            "description": (
+                "plan to preview the registration without writing, or execute to register the "
+                "missing assets."
+            ),
         },
     )
     status: Mapped[str] = mapped_column(
@@ -108,15 +113,18 @@ class AssetRegistrationOperationTable(
         nullable=False,
         info={
             "label": "Status",
-            "description": "Current operation state: queued, running, succeeded, or failed.",
+            "description": "Request state: queued, running, succeeded or failed.",
         },
     )
     current_step: Mapped[str | None] = mapped_column(
         String(64),
         nullable=True,
         info={
-            "label": "Current Step",
-            "description": "Stable key of the running or most recently failed step.",
+            "label": "Current step",
+            "description": (
+                "Key of the step now running or of the step that failed, such as "
+                "load_alpaca_assets; null while queued, between steps and after success."
+            ),
         },
     )
     steps: Mapped[list[dict[str, Any]]] = mapped_column(
@@ -124,7 +132,11 @@ class AssetRegistrationOperationTable(
         nullable=False,
         info={
             "label": "Steps",
-            "description": "Ordered step states, messages, and timestamps shown to the caller.",
+            "description": (
+                "JSON list of the request's steps in order, each with its key, label, status "
+                "(pending, running, succeeded, failed or skipped), message and UTC start and end "
+                "times."
+            ),
         },
     )
     request: Mapped[dict[str, Any]] = mapped_column(
@@ -133,7 +145,8 @@ class AssetRegistrationOperationTable(
         info={
             "label": "Request",
             "description": (
-                "Validated non-secret registration inputs used to execute and explain this operation."
+                "JSON object with the validated registration inputs, such as the account UID and "
+                "ticker symbols; it never holds credential values."
             ),
         },
     )
@@ -142,7 +155,10 @@ class AssetRegistrationOperationTable(
         nullable=True,
         info={
             "label": "Result",
-            "description": "Terminal plan or execution response when the operation succeeds.",
+            "description": (
+                "JSON plan or registration result returned to the client; null until the request "
+                "succeeds."
+            ),
         },
     )
     error: Mapped[dict[str, Any] | None] = mapped_column(
@@ -150,7 +166,10 @@ class AssetRegistrationOperationTable(
         nullable=True,
         info={
             "label": "Error",
-            "description": "Sanitized public error code, message, and retryability after failure.",
+            "description": (
+                "JSON object with the public error code, message and whether a retry may succeed; "
+                "null unless the request failed."
+            ),
         },
     )
     created_at: Mapped[dt.datetime] = mapped_column(
@@ -158,16 +177,16 @@ class AssetRegistrationOperationTable(
         nullable=False,
         default=utc_now,
         info={
-            "label": "Created At",
-            "description": "UTC time at which the API accepted the operation.",
+            "label": "Created at",
+            "description": "Time, in UTC, the API accepted the request.",
         },
     )
     started_at: Mapped[dt.datetime | None] = mapped_column(
         DateTime(timezone=True),
         nullable=True,
         info={
-            "label": "Started At",
-            "description": "UTC time at which background execution began.",
+            "label": "Started at",
+            "description": "Time, in UTC, the request started running; null while queued.",
         },
     )
     updated_at: Mapped[dt.datetime] = mapped_column(
@@ -175,16 +194,18 @@ class AssetRegistrationOperationTable(
         nullable=False,
         default=utc_now,
         info={
-            "label": "Updated At",
-            "description": "UTC time of the latest operation or step transition.",
+            "label": "Updated at",
+            "description": "Time, in UTC, the request or one of its steps last changed state.",
         },
     )
     completed_at: Mapped[dt.datetime | None] = mapped_column(
         DateTime(timezone=True),
         nullable=True,
         info={
-            "label": "Completed At",
-            "description": "UTC time at which the operation succeeded or failed.",
+            "label": "Completed at",
+            "description": (
+                "Time, in UTC, the request succeeded or failed; null while queued or running."
+            ),
         },
     )
 
