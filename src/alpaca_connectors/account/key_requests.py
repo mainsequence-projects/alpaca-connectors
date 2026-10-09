@@ -45,10 +45,10 @@ class AccountKeyRequestTable(ProjectStorageNameMixin, AlpacaMarketsMetaTableMixi
     __project_storage_concept__ = "account_key_request"
     __markets_base_identifier__ = "AccountKeyRequest"
     __metatable_description__ = (
-        "Requests, one row each, for a person to type Alpaca API keys on the Alpaca site: to "
-        "register a new account or to replace a registered account's keys. Rows hold the person "
-        "the request belongs to, the requested account settings, the lifecycle state, and the "
-        "resulting account UID; they never hold a credential value or Secret reference."
+        "One row per request for a person to enter Alpaca API keys on the Alpaca Connectors "
+        "site. Requests to register a new Alpaca brokerage account or replace a registered "
+        "account's API keys, started by the Alpaca Agent for the person it serves, with their "
+        "status, expiry and resulting account; key values are never stored."
     )
     __table_args__ = markets_table_args(
         "AccountKeyRequest",
@@ -63,7 +63,7 @@ class AccountKeyRequestTable(ProjectStorageNameMixin, AlpacaMarketsMetaTableMixi
         default=new_markets_uid,
         info={
             "label": "Request UID",
-            "description": "Stable public UUID the Agent and the Alpaca site use for this request.",
+            "description": "Public UUID the Alpaca Agent and the Alpaca site use for the request.",
         },
     )
     requester_uid: Mapped[str] = mapped_column(
@@ -72,8 +72,8 @@ class AccountKeyRequestTable(ProjectStorageNameMixin, AlpacaMarketsMetaTableMixi
         info={
             "label": "Requester UID",
             "description": (
-                "UID of the person the request belongs to, as the platform named them on the "
-                "call that created it; only this person may submit its keys."
+                "Main Sequence user UID of the person the request belongs to; only this person "
+                "may submit its keys."
             ),
         },
     )
@@ -82,15 +82,15 @@ class AccountKeyRequestTable(ProjectStorageNameMixin, AlpacaMarketsMetaTableMixi
         nullable=False,
         info={
             "label": "Action",
-            "description": "register a new account, or rotate a registered account's keys.",
+            "description": "register for a new account, or rotate to replace a registered account's keys.",
         },
     )
     account_name: Mapped[str | None] = mapped_column(
         String(255),
         nullable=True,
         info={
-            "label": "Account Name",
-            "description": "Display name requested for a new account; null keeps Alpaca's default.",
+            "label": "Account name",
+            "description": "Display name requested for a new account; null when none was requested.",
         },
     )
     environment: Mapped[str] = mapped_column(
@@ -98,7 +98,7 @@ class AccountKeyRequestTable(ProjectStorageNameMixin, AlpacaMarketsMetaTableMixi
         nullable=False,
         info={
             "label": "Environment",
-            "description": "Alpaca environment the keys must belong to: paper or live.",
+            "description": "Alpaca trading environment the keys must belong to: paper or live.",
         },
     )
     account_uid: Mapped[str | None] = mapped_column(
@@ -107,8 +107,9 @@ class AccountKeyRequestTable(ProjectStorageNameMixin, AlpacaMarketsMetaTableMixi
         info={
             "label": "Account UID",
             "description": (
-                "The account whose keys a rotation replaces, or the account a completed "
-                "registration created."
+                "Main Sequence account UID: the account a rotation replaces keys for, or the "
+                "account a completed registration created; null for a registration not yet "
+                "completed."
             ),
         },
     )
@@ -117,29 +118,32 @@ class AccountKeyRequestTable(ProjectStorageNameMixin, AlpacaMarketsMetaTableMixi
         nullable=False,
         info={
             "label": "Status",
-            "description": "pending, completed, or cancelled; a pending request past expiry expired.",
+            "description": "pending, completed or cancelled; a pending request past its expiry is expired.",
         },
     )
     created_at: Mapped[dt.datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
         default=utc_now,
-        info={"label": "Created At", "description": "UTC time at which the request was created."},
+        info={"label": "Created at", "description": "Time the request was created, in UTC."},
     )
     expires_at: Mapped[dt.datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
         info={
-            "label": "Expires At",
-            "description": "UTC time after which the site no longer accepts keys for the request.",
+            "label": "Expires at",
+            "description": "Time, in UTC, after which keys are no longer accepted for the request.",
         },
     )
     completed_at: Mapped[dt.datetime | None] = mapped_column(
         DateTime(timezone=True),
         nullable=True,
         info={
-            "label": "Completed At",
-            "description": "UTC time at which the keys were accepted or the request was cancelled.",
+            "label": "Completed at",
+            "description": (
+                "Time, in UTC, the keys were accepted or the request was cancelled; null while "
+                "pending."
+            ),
         },
     )
 

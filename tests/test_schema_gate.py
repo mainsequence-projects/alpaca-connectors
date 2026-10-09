@@ -234,3 +234,28 @@ def test_api_deploys_only_after_the_migration_job_in_one_workflow() -> None:
         "needs": ["migrate"],
     }
     assert not (root / ".mainsequence/workflows/alpaca-connectors-migrations.yaml").exists()
+
+
+def test_every_resource_that_uses_metatables_declares_its_branch() -> None:
+    """Tables belong to a Team; each workload reaches MetaTables through its declared access."""
+    import yaml
+
+    root = JOBS.parents[1]
+    declared: dict[str, bool] = {}
+    for path in sorted((root / ".mainsequence/workflows").glob("*.yaml")):
+        workflow = yaml.safe_load(path.read_text())
+        assert workflow["api_version"] == "2.3.0", path.name
+        for resource in workflow["resources"]:
+            branches = (resource.get("access") or {}).get("branches") or []
+            declared[resource["key"]] = {"repository": "MetaTables", "level": "view"} in branches
+
+    # The Agent's tools run in the API, so it reads no tables and needs no MetaTables access.
+    assert declared.pop("alpaca-connectors-agent") is False
+    assert declared == {
+        "alpaca": True,
+        "alpaca-connectors-migrate": True,
+        "alpaca-etf-signal": True,
+        "alpaca-etf-portfolio": True,
+        "alpaca-bars-update": True,
+        "daily-stock-bars-holdings-ivv": True,
+    }

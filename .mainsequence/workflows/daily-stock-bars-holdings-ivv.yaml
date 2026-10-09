@@ -1,8 +1,12 @@
-api_version: 2.1.0
+api_version: 2.3.0
 name: alpaca-connectors-workflows
 resources:
 - key: daily-stock-bars-holdings-ivv
   kind: job
+  access:
+    branches:
+    - repository: MetaTables
+      level: view
   spec:
     name: Alpaca Stored Bar Configuration
     description: Execute the enabled bar configuration selected by ALPACA_BARS_CONFIGURATION_UID.

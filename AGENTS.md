@@ -239,6 +239,14 @@ Operational notes:
   the ms-markets schema is migrated only by the ms-markets deployment's `migrate-markets` Job; never
   run `metatables migrations upgrade` or `downgrade` against a hosted environment from a developer
   or agent session
+- tables belong to one platform Team per Environment (for example `alpaca-connectors-production`)
+  with Writer on the MetaTables namespace `mainsequence.markets`, which holds the project's tables
+  and the ms-markets tables it writes; its members are the workload Users of the migration Job,
+  the `alpaca` API, and the signal, portfolio and bars Jobs (`docs/operations/jobs.md`, Table Access
+  Through A Team). An Organization admin creates the Team and the grant in the platform and
+  MetaTables Security; never grant tables directly to a workload User. Every workflow resource that
+  uses MetaTables declares `access.branches: [{repository: MetaTables, level: view}]`; the
+  `harness_agent` uses only the API's MCP and declares none
 - during development apply revisions to the local runtime, which has no ms-markets deployment, with
   `metatables --local migrations upgrade --provider msm_migrations:migration head`, then
   `metatables --local migrations upgrade --provider alpaca_connectors.migrations:migration head`; every revision must keep

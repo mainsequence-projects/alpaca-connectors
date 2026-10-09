@@ -284,6 +284,33 @@ automatic deployment, revision retention, and the platform-provided static-site 
 A valid workflow or successful Git push is not proof of deployment; verify the ResourceRelease and
 its DeploymentRun separately.
 
+## Table Access Through A Team
+
+The project's tables, and the ms-markets tables it writes (Assets, Accounts, holdings, signal
+weights, portfolios), are in the MetaTables catalog namespace `mainsequence.markets`. Tables belong
+to a Team, never to one workload User, because workload Users change with each Environment and each
+recreated Job or release.
+
+In each Environment where the project runs:
+
+1. ms-markets must already be deployed and migrated there by its own deployment, which owns the
+   `mainsequence.markets` schema and its Team. The project's revisions reference its tables.
+2. An Organization admin creates one platform Team for the project, for example
+   `alpaca-connectors-production`, and in MetaTables Security grants it Writer on the
+   `mainsequence.markets` namespace.
+3. The Team's members are the workload Users of every resource that reads or writes the tables:
+   the `alpaca-connectors-migrate` Job, the `alpaca` FastAPI release, and the `alpaca-etf-signal`,
+   `alpaca-etf-portfolio`, `alpaca-bars-update` and `daily-stock-bars-holdings-ivv` Jobs. The
+   `alpaca-connectors-agent` Harness Agent reads no tables (its tools run in the API) and is not a
+   member. A resource's workload User exists once its declaration is applied; a recreated
+   resource, such as a renamed key, has a new workload User that needs membership again.
+
+Every one of those resources declares `access.branches: [{repository: MetaTables, level: view}]`
+in its workflow file. A migration that fails with `namespace_not_writable` or `table_not_editable`
+(403) names the `caller_user_uid` missing from the Team: add it, then run the migration Job again.
+Do not grant tables directly to a workload User, and do not run the Job as an Organization admin to
+get around a refusal.
+
 ## Operational Checks
 
 ```bash

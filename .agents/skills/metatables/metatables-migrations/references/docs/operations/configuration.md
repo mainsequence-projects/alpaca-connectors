@@ -31,7 +31,8 @@ Shared deployments use `local_mode_available: false`; the developer checkout use
 `true`. The launcher always runs Local; see [Local only](local-runtime.md#local-only).
 
 Configure the API’s SDK session for ordinary platform Secret access and supply
-trusted caller-verifier settings. Use the SDK's own configuration contract;
+the platform's caller-assertion trust configuration, which the SDK request identity
+reads ([ADR 0017](../adr/api/0017-hosted-request-identity.md)). Use the SDK's own configuration contract;
 MetaTables passes no user-supplied issuer, key URL, or target scope to verification.
 The [SDK capability check](../client/installation-and-connection.md) establishes
 interface availability, not deployment credentials or network readiness.

@@ -1,8 +1,12 @@
-api_version: 2.2.0
+api_version: 2.3.0
 name: alpaca-connectors-market-data
 resources:
 - key: alpaca-bars-update
   kind: job
+  access:
+    branches:
+    - repository: MetaTables
+      level: view
   spec:
     name: Alpaca Bars Update
     description: Execute one enabled stored Alpaca bar configuration selected by a per-run configuration_uid argument.

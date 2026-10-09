@@ -50,6 +50,10 @@ resources:
     revision_retention_count: 3
 - key: alpaca-connectors-migrate
   kind: job
+  access:
+    branches:
+    - repository: MetaTables
+      level: view
   spec:
     name: Alpaca Connectors Migrations
     description: Apply the alpaca_connectors MetaTable schema revisions before the API rolls out (ADR 0012).
@@ -68,6 +72,10 @@ resources:
 # A push re-applies the declared schedule. Both run after the 00:00 UTC daily bars Job.
 - key: alpaca-etf-signal
   kind: job
+  access:
+    branches:
+    - repository: MetaTables
+      level: view
   spec:
     name: Alpaca ETF Signal
     description: Run one ETF signal configuration (--configuration-uid) or start a run per scheduled one (--scheduled).
@@ -87,6 +95,10 @@ resources:
       tag_regex: null
 - key: alpaca-etf-portfolio
   kind: job
+  access:
+    branches:
+    - repository: MetaTables
+      level: view
   spec:
     name: Alpaca ETF Portfolio
     description: Run one ETF portfolio configuration (--configuration-uid) or start a run per scheduled one (--scheduled).
