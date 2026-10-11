@@ -106,12 +106,8 @@ def test_each_update_materializes_once_and_returns_one_batched_observation() -> 
 
 def test_unchanged_extractions_are_still_distinct_observations() -> None:
     signal = build_signal()
-    first = build_materialization(
-        observed_at=dt.datetime(2026, 9, 4, 8, 30, tzinfo=dt.UTC)
-    )
-    second = build_materialization(
-        observed_at=dt.datetime(2026, 9, 4, 9, 30, tzinfo=dt.UTC)
-    )
+    first = build_materialization(observed_at=dt.datetime(2026, 9, 4, 8, 30, tzinfo=dt.UTC))
+    second = build_materialization(observed_at=dt.datetime(2026, 9, 4, 9, 30, tzinfo=dt.UTC))
 
     with patch(
         "alpaca_connectors.universes.services.materialize_asset_universe",
@@ -122,9 +118,10 @@ def test_unchanged_extractions_are_still_distinct_observations() -> None:
 
     assert not first_frame.empty
     assert not second_frame.empty
-    assert first_frame.index.get_level_values("time_index")[0] != second_frame.index.get_level_values(
-        "time_index"
-    )[0]
+    assert (
+        first_frame.index.get_level_values("time_index")[0]
+        != second_frame.index.get_level_values("time_index")[0]
+    )
 
 
 def test_prepared_plan_is_transient_and_consumed_by_the_next_update() -> None:

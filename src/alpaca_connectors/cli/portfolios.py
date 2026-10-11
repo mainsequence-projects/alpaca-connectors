@@ -225,9 +225,7 @@ def run_update_command(args: argparse.Namespace) -> int:
             "rebalance_configuration_uid": args.rebalance_configuration_uid,
             "valuation_column": args.valuation_column,
             "commission_fee": args.commission_fee,
-            "valuation_maximum_staleness_seconds": (
-                args.valuation_maximum_staleness_seconds
-            ),
+            "valuation_maximum_staleness_seconds": (args.valuation_maximum_staleness_seconds),
             "fail_on_missing_prices": args.fail_on_missing_prices,
             "scheduled": args.scheduled,
         }.items()

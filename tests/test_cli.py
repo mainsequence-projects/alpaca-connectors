@@ -102,7 +102,9 @@ class CliTests(unittest.TestCase):
         )
         stdout = io.StringIO()
         with (
-            patch("alpaca_connectors.account.services.register_alpaca_account", return_value=result) as register,
+            patch(
+                "alpaca_connectors.account.services.register_alpaca_account", return_value=result
+            ) as register,
             contextlib.redirect_stdout(stdout),
         ):
             exit_code = main(
@@ -151,7 +153,9 @@ class CliTests(unittest.TestCase):
         stdout = io.StringIO()
         with (
             patch("alpaca_connectors.universes.get_asset_universe_view", return_value=universe),
-            patch("alpaca_connectors.universes.preview_asset_universe", return_value=plan) as preview,
+            patch(
+                "alpaca_connectors.universes.preview_asset_universe", return_value=plan
+            ) as preview,
             contextlib.redirect_stdout(stdout),
         ):
             exit_code = main(
@@ -182,7 +186,9 @@ class CliTests(unittest.TestCase):
                 "enabled": True,
             }
         )
-        with patch("alpaca_connectors.universes.create_universe_source", return_value=source) as create:
+        with patch(
+            "alpaca_connectors.universes.create_universe_source", return_value=source
+        ) as create:
             exit_code = main(
                 [
                     "universe-source",
@@ -253,7 +259,9 @@ class CliTests(unittest.TestCase):
         row = SimpleNamespace(
             model_dump=lambda mode=None: {"uid": "configuration-uid", "asset_source": "assets"}
         )
-        with patch("alpaca_connectors.market_data.create_bar_configuration", return_value=row) as create:
+        with patch(
+            "alpaca_connectors.market_data.create_bar_configuration", return_value=row
+        ) as create:
             exit_code = main(
                 [
                     "market-data",

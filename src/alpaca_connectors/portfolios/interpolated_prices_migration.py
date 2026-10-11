@@ -12,9 +12,7 @@ from metatables.migrations import (
 )
 
 DYNAMIC_INTERPOLATED_PRICES_STORAGES = dynamic_storage_models_from_env()
-_DYNAMIC_TABLE_NAMES = {
-    model.__table__.name for model in DYNAMIC_INTERPOLATED_PRICES_STORAGES
-}
+_DYNAMIC_TABLE_NAMES = {model.__table__.name for model in DYNAMIC_INTERPOLATED_PRICES_STORAGES}
 
 
 def _include_dynamic_objects(object_, name, type_, reflected, compare_to):
@@ -28,9 +26,7 @@ def _include_dynamic_objects(object_, name, type_, reflected, compare_to):
 
 migration = build_metatable_migration_provider(
     **SHARED_PROVIDER_KWARGS,
-    target_metadata=metadata_for_models(
-        [*DYNAMIC_INTERPOLATED_PRICES_STORAGES, AssetTable]
-    ),
+    target_metadata=metadata_for_models([*DYNAMIC_INTERPOLATED_PRICES_STORAGES, AssetTable]),
     metatable_models=DYNAMIC_INTERPOLATED_PRICES_STORAGES,
     include_object_hook=_include_dynamic_objects,
 )

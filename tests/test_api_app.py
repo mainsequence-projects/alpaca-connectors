@@ -218,7 +218,9 @@ class ApiAppTests(unittest.TestCase):
                 "alpaca_connectors.api.app.routers.assets.start_asset_registration_operation",
                 return_value=operation,
             ),
-            patch("alpaca_connectors.api.app.routers.assets.run_asset_registration_operation") as run_operation,
+            patch(
+                "alpaca_connectors.api.app.routers.assets.run_asset_registration_operation"
+            ) as run_operation,
         ):
             response = self.client.post(
                 "/v1/assets/registration/operations",
@@ -748,7 +750,9 @@ class ApiAppTests(unittest.TestCase):
         error = AccountHoldingsRegistryError(
             unresolved_symbols=["AAPL", "USD"],
         )
-        with patch("alpaca_connectors.api.app.routers.holdings.capture_holdings", side_effect=error):
+        with patch(
+            "alpaca_connectors.api.app.routers.holdings.capture_holdings", side_effect=error
+        ):
             response = self.client.post(
                 "/v1/accounts/account-uid/holdings/actions/capture",
                 json={},
@@ -885,7 +889,9 @@ class ApiAppTests(unittest.TestCase):
             "openfigi_unmatched_symbols": [],
         }
         with (
-            patch("alpaca_connectors.api.app.routers.universes.get_universe", return_value=universe),
+            patch(
+                "alpaca_connectors.api.app.routers.universes.get_universe", return_value=universe
+            ),
             patch(
                 "alpaca_connectors.api.app.routers.universes.run_universe",
                 return_value=result,
@@ -966,7 +972,9 @@ class ApiAppTests(unittest.TestCase):
             ],
         }
         with (
-            patch("alpaca_connectors.api.app.routers.universes.get_universe", return_value=universe),
+            patch(
+                "alpaca_connectors.api.app.routers.universes.get_universe", return_value=universe
+            ),
             patch(
                 "alpaca_connectors.api.app.routers.universes.preview_universe_run",
                 return_value=preview,
@@ -1053,8 +1061,12 @@ class ApiAppTests(unittest.TestCase):
         )
         inactive = universe.model_copy(update={"is_active": False})
         with (
-            patch("alpaca_connectors.api.app.routers.universes.get_universe", return_value=universe),
-            patch("alpaca_connectors.api.app.routers.universes.update_universe", return_value=inactive) as update,
+            patch(
+                "alpaca_connectors.api.app.routers.universes.get_universe", return_value=universe
+            ),
+            patch(
+                "alpaca_connectors.api.app.routers.universes.update_universe", return_value=inactive
+            ) as update,
         ):
             response = self.client.post(
                 "/v1/universes/actions/deactivate",
@@ -1075,7 +1087,9 @@ class ApiAppTests(unittest.TestCase):
             "Daily IVV bars (bars-configuration-uid)."
         )
         with (
-            patch("alpaca_connectors.api.app.routers.universes.get_universe", return_value=universe),
+            patch(
+                "alpaca_connectors.api.app.routers.universes.get_universe", return_value=universe
+            ),
             patch(
                 "alpaca_connectors.api.app.routers.universes.universe_delete_blockers",
                 return_value=[blocker],

@@ -134,7 +134,9 @@ class AssetRegistrationOperationTests(unittest.TestCase):
                 side_effect=fail_loading_catalog,
             ),
             patch("alpaca_connectors.api.app.services.assets.set_asset_registration_step"),
-            patch("alpaca_connectors.api.app.services.assets.fail_asset_registration_operation") as fail_operation,
+            patch(
+                "alpaca_connectors.api.app.services.assets.fail_asset_registration_operation"
+            ) as fail_operation,
         ):
             run_asset_registration_operation(
                 "11111111-1111-4111-8111-111111111111",

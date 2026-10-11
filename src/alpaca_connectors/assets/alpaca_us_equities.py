@@ -868,8 +868,7 @@ def resolve_alpaca_us_equity_registration_plan(
         timeout=timeout,
     )
     unresolved_symbols = sorted(
-        set(plan.missing_symbols_from_alpaca)
-        - existing_off_catalog_assets_by_symbol.keys()
+        set(plan.missing_symbols_from_alpaca) - existing_off_catalog_assets_by_symbol.keys()
     )
 
     return AlpacaEquityRegistrationResolution(
@@ -1126,9 +1125,7 @@ def register_alpaca_us_equity_assets(
             timeout=timeout,
         )
 
-    missing_from_alpaca = sorted(
-        set(registration_resolution.unresolved_symbols_from_alpaca)
-    )
+    missing_from_alpaca = sorted(set(registration_resolution.unresolved_symbols_from_alpaca))
     if missing_from_alpaca:
         raise ValueError(
             "Registration cannot execute because Alpaca did not resolve these symbols: "

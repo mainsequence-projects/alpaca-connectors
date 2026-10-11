@@ -409,7 +409,9 @@ def test_portfolio_detail_resolves_business_labels_and_value_history() -> None:
     }
 
     with (
-        patch.object(portfolio_service, "get_portfolio_configuration", return_value=portfolio_row()),
+        patch.object(
+            portfolio_service, "get_portfolio_configuration", return_value=portfolio_row()
+        ),
         patch.object(portfolio_service, "_responses", return_value=[response()]),
         patch.object(
             portfolio_service,

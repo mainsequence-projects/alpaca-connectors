@@ -336,9 +336,14 @@ def test_review_resolution_never_resolves_secret_values() -> None:
         patch("alpaca_connectors.market_data.services.storage_for", create=True),
         patch("alpaca_connectors.market_data.storage.storage_for", return_value=object()),
         patch("alpaca_connectors.market_data.services._dataset_from_storage", return_value=dataset),
-        patch("alpaca_connectors.market_data.services._asset_identifiers_from_uids", return_value=["A"]),
+        patch(
+            "alpaca_connectors.market_data.services._asset_identifiers_from_uids",
+            return_value=["A"],
+        ),
         patch("alpaca_connectors.market_data.alpaca_bars.AlpacaStockBarsNode", FakeNode),
-        patch("alpaca_connectors.market_data.services.resolve_registered_alpaca_credentials") as resolve_credentials,
+        patch(
+            "alpaca_connectors.market_data.services.resolve_registered_alpaca_credentials"
+        ) as resolve_credentials,
     ):
         _, summary = build_market_data_update(configuration_uid=configuration_uid)
 
@@ -417,7 +422,10 @@ def test_execute_uses_physical_bar_progress_instead_of_cached_updater_statistics
                 "is_paper": True,
             },
         ),
-        patch("alpaca_connectors.market_data.services.resolve_registered_alpaca_credentials", return_value=object()),
+        patch(
+            "alpaca_connectors.market_data.services.resolve_registered_alpaca_credentials",
+            return_value=object(),
+        ),
         patch("alpaca_connectors.market_data.services.build_alpaca_historical_data_client"),
         patch("alpaca_connectors.market_data.services.build_alpaca_trading_client"),
         patch("alpaca_connectors.market_data.storage.storage_for", return_value=storage),

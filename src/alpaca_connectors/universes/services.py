@@ -274,9 +274,7 @@ def materialize_asset_universe(
                     "Asset Universe registration plan lost the provider identity for "
                     f"{requested_symbol}. No category memberships were changed."
                 )
-            asset_identifiers_by_symbol[requested_symbol] = (
-                registered_reference.unique_identifier
-            )
+            asset_identifiers_by_symbol[requested_symbol] = registered_reference.unique_identifier
             continue
         asset_identifiers_by_symbol[requested_symbol] = build_alpaca_unique_identifier(
             provider_asset.alpaca_asset_id

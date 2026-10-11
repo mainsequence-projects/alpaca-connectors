@@ -119,12 +119,16 @@ def get_configuration_detail(
     if row is None:
         return None
     base = _responses([row])[0]
-    signal_configuration = signal_job_configurations_by_uids(
-        [row.signal_configuration_uid]
-    ).get(str(row.signal_configuration_uid))
+    signal_configuration = signal_job_configurations_by_uids([row.signal_configuration_uid]).get(
+        str(row.signal_configuration_uid)
+    )
     rebalance_configuration = get_rebalance_configuration(row.rebalance_configuration_uid)
     bars_configuration = get_bar_configuration(row.bars_configuration_uid)
-    if signal_configuration is None or rebalance_configuration is None or bars_configuration is None:
+    if (
+        signal_configuration is None
+        or rebalance_configuration is None
+        or bars_configuration is None
+    ):
         raise RuntimeError(
             f"Portfolio configuration {configuration_uid!s} has an unresolved required relationship."
         )
@@ -156,9 +160,7 @@ def get_configuration_detail(
     bars_account = account_details(bars_configuration.account_uid)
     if bars_configuration.asset_source == "universe":
         bars_universe = universe_details(bars_configuration.universe_uid)
-        asset_source_name = (
-            f"{bars_universe['display_name']} ({bars_universe['symbol']})"
-        )
+        asset_source_name = f"{bars_universe['display_name']} ({bars_universe['symbol']})"
         asset_count: int | None = int(bars_universe.get("asset_count", 0))
     elif bars_configuration.asset_source == "assets":
         asset_count = len(bars_configuration.asset_uids)
@@ -192,9 +194,7 @@ def get_configuration_detail(
     latest_close = (
         latest_observation.close
         if latest_observation is not None and latest_observation.close is not None
-        else (
-            latest_observation.calculated_close if latest_observation is not None else None
-        )
+        else (latest_observation.calculated_close if latest_observation is not None else None)
     )
     return PortfolioConfigurationDetailResponse.model_validate(
         {
@@ -243,9 +243,7 @@ def get_configuration_detail(
                 "backtest_price_column": history.backtest_price_column,
                 "observation_count": len(observations),
                 "total_observation_count": history.total_observation_count,
-                "history_window_truncated": (
-                    history.total_observation_count > len(observations)
-                ),
+                "history_window_truncated": (history.total_observation_count > len(observations)),
                 "latest_observation_at": (
                     latest_observation.time_index if latest_observation is not None else None
                 ),

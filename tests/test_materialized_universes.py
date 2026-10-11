@@ -77,7 +77,9 @@ def test_creation_persists_distinct_universe_source_and_category_uids_without_me
     with (
         patch("alpaca_connectors.runtime.start_markets_engine"),
         patch("msm.api.assets.AssetCategory.get_by_unique_identifier", return_value=None),
-        patch("alpaca_connectors.universes.sources.list_universe_sources", return_value=([source], 1)),
+        patch(
+            "alpaca_connectors.universes.sources.list_universe_sources", return_value=([source], 1)
+        ),
         patch(
             "alpaca_connectors.universes.materialized.get_asset_universe_by_source_uid",
             return_value=None,
@@ -228,7 +230,9 @@ def test_update_stores_lifecycle_on_asset_universe_not_category_metadata() -> No
             side_effect=[existing, updated],
         ),
         patch("msm.api.assets.AssetCategory.update") as update_category,
-        patch("alpaca_connectors.universes.materialized.update_asset_universe_state") as update_state,
+        patch(
+            "alpaca_connectors.universes.materialized.update_asset_universe_state"
+        ) as update_state,
     ):
         result = update_asset_universe("universe-uid", is_active=False)
 
@@ -409,9 +413,7 @@ def test_materialization_writes_only_the_category_linked_by_the_selected_univers
         timeout=30.0,
     )
     assert result.asset_uids == [asset_uid]
-    assert result.asset_identifiers_by_symbol == {
-        "AAPL": f"ALPACA::{alpaca_asset_id}"
-    }
+    assert result.asset_identifiers_by_symbol == {"AAPL": f"ALPACA::{alpaca_asset_id}"}
     assert result.component_weights_by_symbol == {"AAPL": 100.0}
     assert result.created_asset_uids_by_symbol == {"AAPL": str(asset_uid)}
 
@@ -502,7 +504,9 @@ def test_run_publishes_the_prepared_universe_through_the_signal() -> None:
     signal.run.return_value = (False, frame)
 
     with (
-        patch("alpaca_connectors.universes.services.preview_asset_universe", return_value=plan) as preview,
+        patch(
+            "alpaca_connectors.universes.services.preview_asset_universe", return_value=plan
+        ) as preview,
         patch(
             "alpaca_connectors.portfolios.alpaca_etf_signal.build_alpaca_etf_holdings_signal",
             return_value=signal,

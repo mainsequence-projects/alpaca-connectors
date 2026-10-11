@@ -51,9 +51,7 @@ def _normalize_observation_limit(value: int) -> int:
     if isinstance(value, bool) or not isinstance(value, int):
         raise ValueError("observation_limit must be an integer.")
     if value < 1 or value > MAX_SIGNAL_OBSERVATIONS:
-        raise ValueError(
-            f"observation_limit must be between 1 and {MAX_SIGNAL_OBSERVATIONS}."
-        )
+        raise ValueError(f"observation_limit must be between 1 and {MAX_SIGNAL_OBSERVATIONS}.")
     return value
 
 
@@ -87,9 +85,7 @@ def _matrix_from_rows(
     if not rows:
         return SignalObservationMatrix(signal_uid=signal_uid, time_indexes=(), assets=())
 
-    normalized_rows: list[
-        tuple[dt.datetime, str, float | None, str | None, str | None]
-    ] = []
+    normalized_rows: list[tuple[dt.datetime, str, float | None, str | None, str | None]] = []
     for row in rows:
         asset_identifier = str(row.get("asset_identifier") or "").strip()
         if not asset_identifier:

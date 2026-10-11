@@ -21,9 +21,7 @@ depends_on: Union[str, Sequence[str], None] = None
 def upgrade() -> None:
     """Upgrade schema."""
     table_name = "alpaca_connectors__etf_signal_job_configuration"
-    schedule_constraint = (
-        "ck__alpaca_connectors__etf_signal_job_configuration_871f2fa48b"
-    )
+    schedule_constraint = "ck__alpaca_connectors__etf_signal_job_configuration_871f2fa48b"
     op.drop_constraint(schedule_constraint, table_name, type_="check")
     op.add_column(
         table_name,
@@ -31,8 +29,7 @@ def upgrade() -> None:
     )
     op.execute(
         sa.text(
-            f"UPDATE {table_name} SET schedule_timezone = 'UTC' "
-            "WHERE schedule_type = 'crontab'"
+            f"UPDATE {table_name} SET schedule_timezone = 'UTC' WHERE schedule_type = 'crontab'"
         )
     )
     op.create_check_constraint(
@@ -50,9 +47,7 @@ def upgrade() -> None:
 def downgrade() -> None:
     """Downgrade schema."""
     table_name = "alpaca_connectors__etf_signal_job_configuration"
-    schedule_constraint = (
-        "ck__alpaca_connectors__etf_signal_job_configuration_871f2fa48b"
-    )
+    schedule_constraint = "ck__alpaca_connectors__etf_signal_job_configuration_871f2fa48b"
     op.drop_constraint(op.f(schedule_constraint), table_name, type_="check")
     op.drop_column(table_name, "schedule_timezone")
     op.create_check_constraint(

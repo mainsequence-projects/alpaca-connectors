@@ -233,12 +233,16 @@ def test_portfolio_resolution_uses_published_signal_and_selected_bars_profile() 
     )
 
     with (
-        patch("alpaca_connectors.portfolios.execution.get_portfolio_configuration", return_value=row),
+        patch(
+            "alpaca_connectors.portfolios.execution.get_portfolio_configuration", return_value=row
+        ),
         patch(
             "alpaca_connectors.portfolios.execution.validate_portfolio_references",
             return_value=(signal_configuration, bars_configuration, rebalance),
         ),
-        patch("alpaca_connectors.operations.signal_uid_for_configuration", return_value="signal-uid"),
+        patch(
+            "alpaca_connectors.operations.signal_uid_for_configuration", return_value="signal-uid"
+        ),
         patch(
             "alpaca_connectors.portfolios.execution.read_signal_observation_matrix",
             return_value=matrix,
@@ -299,7 +303,9 @@ def test_execution_updates_each_released_stage_without_tree_walk() -> None:
                 portfolio_row=portfolio_row,
             ),
         ),
-        patch("alpaca_connectors.portfolios.execution.update_portfolio_configuration_row") as update_row,
+        patch(
+            "alpaca_connectors.portfolios.execution.update_portfolio_configuration_row"
+        ) as update_row,
     ):
         result = execute_portfolio_configuration(CONFIGURATION_UID)
 

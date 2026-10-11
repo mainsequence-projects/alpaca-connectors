@@ -76,9 +76,7 @@ def _normalize_limit(value: int) -> int:
     if isinstance(value, bool) or not isinstance(value, int):
         raise ValueError("observation_limit must be an integer.")
     if value < 1 or value > MAX_PORTFOLIO_OBSERVATIONS:
-        raise ValueError(
-            f"observation_limit must be between 1 and {MAX_PORTFOLIO_OBSERVATIONS}."
-        )
+        raise ValueError(f"observation_limit must be between 1 and {MAX_PORTFOLIO_OBSERVATIONS}.")
     return value
 
 
@@ -275,7 +273,7 @@ def _history_from_rows(
             continue
         if time_index in seen_time_indexes:
             raise RuntimeError(
-                "Portfolio storage returned duplicate rows at " f"{time_index.isoformat()}."
+                f"Portfolio storage returned duplicate rows at {time_index.isoformat()}."
             )
         seen_time_indexes.add(time_index)
         observations.append(
@@ -305,9 +303,7 @@ def _history_from_rows(
         calendar_timezone=str(first.get("calendar_timezone") or "").strip() or None,
         calendar_valid_from=_normalize_date(first.get("calendar_valid_from")),
         calendar_valid_to=_normalize_date(first.get("calendar_valid_to")),
-        backtest_price_column=(
-            str(first.get("backtest_price_column") or "").strip() or None
-        ),
+        backtest_price_column=(str(first.get("backtest_price_column") or "").strip() or None),
         observations=annotated_observations,
         total_observation_count=total_observation_count,
         performance=performance,
@@ -341,9 +337,7 @@ def read_portfolio_history(
     statement = (
         select(
             PortfolioTable.unique_identifier.label("portfolio_identifier"),
-            PortfolioTable.backtest_table_price_column_name.label(
-                "backtest_price_column"
-            ),
+            PortfolioTable.backtest_table_price_column_name.label("backtest_price_column"),
             PortfolioMetadataTable.description.label("portfolio_description"),
             CalendarTable.display_name.label("calendar_name"),
             CalendarTable.calendar_type.label("calendar_type"),
@@ -355,9 +349,7 @@ def read_portfolio_history(
             PortfoliosStorage.return_.label("period_return"),
             PortfoliosStorage.calculated_close.label("calculated_close"),
             PortfoliosStorage.close_time.label("close_time"),
-            func.count(PortfoliosStorage.time_index)
-            .over()
-            .label("total_observation_count"),
+            func.count(PortfoliosStorage.time_index).over().label("total_observation_count"),
         )
         .select_from(PortfolioTable)
         .join(CalendarTable, CalendarTable.uid == PortfolioTable.calendar_uid)

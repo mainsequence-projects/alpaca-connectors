@@ -91,12 +91,8 @@ def _physical_dataset_update_statistics(storage: type):
     if not rows:
         return UpdateStatistics.return_empty()
 
-    index_min = {
-        str(row["asset_identifier"]): row["earliest_observation"] for row in rows
-    }
-    index_progress = {
-        str(row["asset_identifier"]): row["latest_observation"] for row in rows
-    }
+    index_min = {str(row["asset_identifier"]): row["earliest_observation"] for row in rows}
+    index_progress = {str(row["asset_identifier"]): row["latest_observation"] for row in rows}
     return UpdateStatistics(
         global_index_progress={
             "min": min(index_min.values()),

@@ -124,10 +124,7 @@ def test_portfolio_history_rejects_invalid_limits(limit: int) -> None:
 
 
 def test_portfolio_performance_calculates_standard_daily_statistics() -> None:
-    timestamps = [
-        dt.datetime(2026, 9, day, 20, tzinfo=dt.UTC)
-        for day in (1, 2, 3)
-    ]
+    timestamps = [dt.datetime(2026, 9, day, 20, tzinfo=dt.UTC) for day in (1, 2, 3)]
     observations = tuple(
         PortfolioValueObservation(
             time_index=time_index,

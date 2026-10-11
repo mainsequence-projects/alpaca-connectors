@@ -24,6 +24,7 @@ SIGNAL_IDENTITY_CLASS_IMPORT_PATH: dict[str, str] = {
     "qualname": "AlpacaETFHoldingsSignal",
 }
 
+
 class AlpacaETFHoldingsSignalConfig(PortfolioConfigBaseModel):
     """Runtime producer configuration for one Universe-backed signal.
 
@@ -135,7 +136,9 @@ class AlpacaETFHoldingsSignal(SignalWeights):
 
     def set_runtime_asset_list(self, asset_identifiers: list[str]) -> AlpacaETFHoldingsSignal:
         """Attach an already-published observation scope without changing signal identity."""
-        normalized = sorted({str(identifier).strip() for identifier in asset_identifiers if str(identifier).strip()})
+        normalized = sorted(
+            {str(identifier).strip() for identifier in asset_identifiers if str(identifier).strip()}
+        )
         if not normalized:
             raise ValueError("Runtime signal asset list must not be empty.")
         self._runtime_asset_list = normalized

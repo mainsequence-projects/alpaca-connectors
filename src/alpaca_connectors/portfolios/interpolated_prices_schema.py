@@ -13,9 +13,7 @@ from typing import Any
 
 from metatables.migrations import namespace_version_location
 
-DYNAMIC_INTERPOLATED_PRICES_SOURCES_ENV = (
-    "ALPACA_CONNECTORS_INTERPOLATED_PRICES_SOURCES"
-)
+DYNAMIC_INTERPOLATED_PRICES_SOURCES_ENV = "ALPACA_CONNECTORS_INTERPOLATED_PRICES_SOURCES"
 DYNAMIC_MIGRATION_PROVIDER = "alpaca_connectors.portfolios.interpolated_prices_migration:migration"
 UPSAMPLE_FREQUENCY_ID = "1d"
 INTERPOLATION_RULE = "ffill"
@@ -181,9 +179,7 @@ def registered_interpolated_prices_by_table_name(
     for row in rows:
         name = str(row.physical_table_name)
         if name in result:
-            raise RuntimeError(
-                f"Multiple TimeIndexMetaTables use interpolation table {name!r}."
-            )
+            raise RuntimeError(f"Multiple TimeIndexMetaTables use interpolation table {name!r}.")
         result[name] = row
     return result
 
@@ -256,8 +252,7 @@ def prepare_interpolated_prices_schema(
     missing_registered = sorted(set(table_names) - registered.keys())
     if missing_registered:
         raise RuntimeError(
-            "Dynamic migration completed without registering: "
-            + ", ".join(missing_registered)
+            "Dynamic migration completed without registering: " + ", ".join(missing_registered)
         )
     return _preparation_summary(specs, registered, created_revision=created_revision)
 

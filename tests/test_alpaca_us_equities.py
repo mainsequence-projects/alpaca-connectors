@@ -200,7 +200,9 @@ class AlpacaAssetRegistrationTests(unittest.TestCase):
     def test_bulk_identity_lookup_reuses_application_runtime(self) -> None:
         runtime = SimpleNamespace(context=object())
         with (
-            patch("alpaca_connectors.runtime.start_markets_engine", return_value=runtime) as start_engine,
+            patch(
+                "alpaca_connectors.runtime.start_markets_engine", return_value=runtime
+            ) as start_engine,
             patch(
                 "msm.repositories.base.compile_markets_statement",
                 return_value="compiled-operation",
@@ -391,7 +393,9 @@ class AlpacaAssetRegistrationTests(unittest.TestCase):
             query_existing_assets_fn=lambda *_args, **_kwargs: {},
             query_registered_symbols_fn=lambda *_args, **_kwargs: {},
         )
-        with patch("alpaca_connectors.assets.alpaca_us_equities._register_alpaca_assets_batch") as register_batch:
+        with patch(
+            "alpaca_connectors.assets.alpaca_us_equities._register_alpaca_assets_batch"
+        ) as register_batch:
             with self.assertRaisesRegex(
                 ValueError,
                 "Alpaca did not resolve these symbols: UNKNOWN",
