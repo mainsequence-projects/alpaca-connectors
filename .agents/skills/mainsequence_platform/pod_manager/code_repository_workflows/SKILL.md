@@ -59,16 +59,34 @@ the verified digest-pinned code repository image selected by the backend.
 ## File Contract
 
 For accepted idle-latency requirements, record the desired replica floor and
-its resource-cost rationale in existing deployment expectations. Current workflow
-API `2.3.0` accepts `min_scale` for FastAPI (`0` through `10`) and Harness Agents
-(`0` through `5`), default `0`. A floor of `1` keeps the deployed revision warm;
-it does not guarantee zero downtime or bypass readiness and runtime admission.
+its resource-cost rationale in existing deployment expectations; for accepted
+throughput requirements, record the desired replica ceiling and the per-replica
+capacity it assumes. Current workflow API `2.3.0` accepts `min_scale` (`0`
+through `50`, default `0`) and `max_scale` (`1` through `50`) for FastAPI and
+Harness Agents; `min_scale` never exceeds `max_scale`, and an omitted
+`max_scale` defaults to `10` for FastAPI and `5` for Harness Agents. A floor of
+`1` keeps the deployed revision warm; it does not guarantee zero downtime or
+bypass readiness and runtime admission. A ceiling only bounds how many replicas
+autoscaling may start; it does not reserve cluster capacity.
 The release owns this policy; the Agent Card, session runtime configuration,
 and workflow `env_vars` do not. PATCH/MCP updates save desired state and the next
 successful workflow-driven deployment applies its immutable revision snapshot.
-Update omission preserves the value and explicit zero resets it. Runtime release
-and bound Harness Agent summaries expose the desired value as a numeric stat,
-including zero; Static Sites and unbound Agents omit it.
+Update omission preserves each value and an explicit zero floor resets
+scale-to-zero. Runtime release and bound Harness Agent summaries expose both
+desired values as numeric stats, including a zero floor; Static Sites and
+unbound Agents omit them.
+
+For accepted per-replica capacity, record the number of requests one replica
+serves at once. Current workflow API `2.3.0` also accepts, for FastAPI and
+Harness Agents, `container_concurrency` (`1` through `1000`, the hard limit of
+requests in flight per replica), `concurrency_target` (`1` through `1000` and at
+most `container_concurrency`, the per-replica autoscaling target) and
+`timeout_seconds` (`1` through `600`). Each is optional: omitted on creation it
+keeps no limit, Knative's default target and the platform's 300-second
+timeout; on update omission preserves it and explicit null resets it. An open
+WebSocket counts as one request for its whole lifetime, so a FastAPI release
+that serves WebSockets sizes `container_concurrency` for its connections too.
+Total capacity is about `max_scale` x `container_concurrency`.
 
 - Every file requires `api_version`, `name`, and `resources`.
 - `2.3.0` is current. It accepts `job`, `fastapi`, `static_site`, and

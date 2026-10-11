@@ -69,6 +69,10 @@ For durable asynchronous work, use:
 ```
 
 `response_kind` is required for every controlled MCP call and has no default.
+A direct `message` must be answered within the platform limit of 90 seconds,
+counted from when the target receives it. The target then stops the turn and
+the call fails with `a2a_message_limit_exceeded`; no setting extends the limit.
+Use `task` for work that may take longer.
 Message mode forbids `completion_policy`. Task mode requires
 `completion_policy` equal to `poll` or `resume_caller`; `resume_caller`
 requires verified active caller-session proof. For an initial send,
@@ -319,8 +323,12 @@ This preserves request identity; it does not make direct `message` execution
 durably idempotent. A lost direct response is ambiguous and a resend may execute
 another turn. Select `task` when durable recovery is required.
 
-For a normal request, select `message`. For durable asynchronous work, select
-`task` only when `supported_response_kinds` contains `task`. Send the explicit
+For a normal request that is answered within the platform's 90-second Message
+limit, select `message`. For longer or durable asynchronous work, select
+`task` only when `supported_response_kinds` contains `task`. When the limit
+expires the runtime stops the turn and answers HTTP `504` with status
+`DEADLINE_EXCEEDED` and `ErrorInfo` reason `MESSAGE_RESPONSE_LIMIT_EXCEEDED`
+(domain `mainsequence.ai`). Send the explicit
 selection to the A2A v1 message endpoint returned in the atomic runtime-access
 bundle:
 
@@ -343,7 +351,7 @@ The complete direct-Message request envelope is:
   "message": {
     "messageId": "<stable-message-id>",
     "contextId": "<target-AgentSession.uid>",
-    "role": "ROLE_REQUESTER",
+    "role": "ROLE_USER",
     "parts": [
       {"text": "<bounded request>"}
     ]
@@ -370,31 +378,32 @@ contract.
 
 ### Requester and responder direction
 
-Model and serialize message direction directly as `requester` and `responder`.
-The Main Sequence Tau binding uses:
+The public A2A v1 boundary uses:
 
-- requester -> `ROLE_REQUESTER` on the wire;
-- responder -> `ROLE_RESPONDER` on the wire.
+- requester -> `ROLE_USER` on the wire;
+- responder -> `ROLE_AGENT` on the wire.
 
-These are Main Sequence binding values. A canonical A2A v1 adapter maps them to
-`ROLE_USER` and `ROLE_AGENT`, respectively, before emitting a v1 Message.
+The runtime adapter maps public `ROLE_USER` and `ROLE_AGENT` to the internal Tau
+binding directions `ROLE_REQUESTER` and `ROLE_RESPONDER`, respectively, and maps
+them back for public responses. Do not send internal binding values to the public
+endpoint or accept them as alternate response roles.
 
 These values are transport direction, not principal identity. An Agent calling another Agent is
-the requester for that exchange and sends `ROLE_REQUESTER`; it remains authenticated and audited
+the requester for that exchange and sends `ROLE_USER`; it remains authenticated and audited
 as an Agent through
 `caller_kind=agent`, the caller Agent and service UIDs, and the authorized
 parent-session UID. A human request uses the same requester wire direction but
 has `caller_kind=user`. Never infer, assert, or override caller identity from
 `message.role` or message metadata.
 
-Request messages serialize the direction as `ROLE_REQUESTER`; response messages serialize it as
-`ROLE_RESPONDER`. Do not emit or require the removed v0.3 `kind` discriminator on Message, Part,
+Request messages serialize the direction as `ROLE_USER`; response messages serialize it as
+`ROLE_AGENT`. Do not emit or require the removed v0.3 `kind` discriminator on Message, Part,
 or Task objects.
 
 ## Response Handling
 
 - For `message`, require a valid `message` result and consume only documented
-  response parts. The result must have the responder direction (`ROLE_RESPONDER`),
+  response parts. The result must have the public responder role (`ROLE_AGENT`),
   and its `contextId` must equal the target AgentSession UID.
   An empty successful answer is a runtime contract failure.
 - For `task`, require a valid `task` result and preserve its ID, context ID, and
@@ -404,11 +413,21 @@ or Task objects.
   error; never reinterpret it silently.
 - Validate strict JSON before using it as structured input.
 - Preserve the target session UID for the next turn in the same conversation.
-- Treat a timeout or disconnect as an ambiguous outcome. In direct `message`
-  mode, do not automatically resend because the first turn may have executed.
+- Treat a timeout or disconnect as an ambiguous outcome. A gateway `502` or
+  `504` received after the message was sent is also ambiguous and returns
+  `a2a_transport_outcome_ambiguous`. In direct `message` mode, do not
+  automatically resend because the first turn may have executed.
   Do not create a new target session or blindly send a new logical message.
 - Report target-agent failures without exposing credentials or internal
   transport details.
+- A target that did not answer a `message` within the 90-second platform limit
+  returns structured status 504 and `a2a_message_limit_exceeded`. The target
+  stopped the turn; work it started may have run. Move the work to `task`
+  instead of resending the same Message.
+- A canonical runtime HTTP rejection returns structured status 502 and
+  `a2a_runtime_rejected`, with the session/message and correlation identities.
+  Its durable audit records that rejection; inspect the result instead of
+  retrying the turn automatically.
 
 ## Delegation Boundaries
 

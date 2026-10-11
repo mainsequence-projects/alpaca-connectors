@@ -201,10 +201,11 @@ connection before relying on it.
 
 ## Current local compatibility review
 
-The installed and locked versions are Main Sequence **9.0.20**, TAU **2.0.11**, MetaTables
+The installed and locked versions are Main Sequence **9.0.22**, TAU **2.0.12**, MetaTables
 (`mainsequence-metatable`) **0.1.34**, and ms-markets **2.2.10**. These matched the latest stable
-published releases at this review. They were upgraded from 9.0.19, 2.0.10, 0.1.33, and 2.2.5
-respectively; no other dependency versions changed. `pyproject.toml` retains non-exact
+published releases verified directly against the package registry on 2026-10-11. The latest
+retry upgrades Main Sequence from 9.0.20 and TAU from 2.0.11; MetaTables and ms-markets were
+already current. No unrelated dependency versions changed. `pyproject.toml` retains non-exact
 compatibility ranges, while `uv.lock` and the exported `requirements.txt` record the resolution.
 
 Verification on these versions passed all 420 tests (plus 72 subtests), Ruff lint, actual API
@@ -219,7 +220,7 @@ verify that the real skill reader opens business skills and rejects application 
 those skills.
 
 The development skill bundles were explicitly refreshed from the installed packages: Main
-Sequence 9.0.20, TAU 2.0.11, MetaTables 0.1.34, and ms-markets 2.2.10. Each bundle's
+Sequence 9.0.22, TAU 2.0.12, MetaTables 0.1.34, and ms-markets 2.2.10. Each bundle's
 `PINNED_FROM.txt` records its matching version. The six repository-owned business skills were
 preserved.
 
@@ -244,7 +245,27 @@ source validation. No live Alpaca Agent was found before the new deployment, and
 communication was unverified at that pre-publication checkpoint. The later hosted evidence and
 remaining limitations are recorded below.
 
-### Hosted verification and upstream defects — 2026-10-11
+### Earlier hosted verification and upstream defects — 2026-10-11
+
+The following records the earlier failures, not the current retry status. All three linked
+upstream issues have since been closed. Canonical MCP repository, branch-with-workflow, and
+deployment-with-workflow reads now pass. The subsequent `8b5deaf` workflow completed successfully,
+including its migration Job and API deployment. SDK 9.0.22 also passes the isolated startup-state
+read-timeout regression: one bounded request returns an empty logger enrichment instead of
+aborting startup, without echoing the exception's credential-sensitive text.
+
+The updated platform contract deliberately limits a hosted direct **Message** to 90 seconds
+from receipt by the target. TAU 2.0.12 stops an over-limit turn and returns a structured
+`a2a_message_limit_exceeded` error; increasing a client timeout does not extend this limit.
+Use Task mode for longer work only when fresh Agent discovery advertises Task support. This
+Agent currently advertises Message only, so test short read operations separately and submit
+long bars, signal, and portfolio computations through the existing Job tools. Never replay a
+Message after an ambiguous transport outcome. Local TAU has no platform Message limit, so a
+local success alone does not establish hosted timing compatibility.
+
+After publishing an SDK update, inspect the new exact-commit workflow and both active release
+revisions before testing the deployed API and Agent; an earlier successful revision is not proof
+of the new dependency image. Preserve the migration gate and Team grants during this verification.
 
 The Environment's Team access was repaired without direct workload grants. The existing migration
 Job applied revisions `0015`–`0017`, and the subsequent exact-commit image → migration → API workflow
@@ -283,8 +304,8 @@ Harness, not successful long application-tool turns or the resolution of issue #
 That candidate's API rollout did not complete: migration JobRun
 `daaf2e1f-98ae-4587-85c9-649b4b8b6779` failed with a 10-second backend HTTP read timeout.
 The migration gate correctly blocked the API; the prior ready API revision continued serving.
-The corrected unknown-tool response is verified locally but has not yet been verified on the
-hosted API.
+At that checkpoint the corrected unknown-tool response was verified locally but had not yet been
+verified on the hosted API.
 
 A separate network-free regression reproduces an installed Main Sequence SDK 9.0.20 defect:
 logger bootstrap uses a raw 10-second Job startup-state GET, outside the ordinary SDK transport
