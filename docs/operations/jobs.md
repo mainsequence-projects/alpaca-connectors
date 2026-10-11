@@ -289,10 +289,13 @@ its DeploymentRun separately.
 
 ## Table Access Through A Team
 
-The project's tables, and the ms-markets tables it writes (Assets, Accounts, holdings, signal
-weights, portfolios), are in the MetaTables catalog namespace `mainsequence.markets`. Tables belong
-to a Team, never to one workload User, because workload Users change with each Environment and each
-recreated Job or release.
+The provider uses two MetaTables catalog namespaces: `alpaca-connectors` for its
+`alpaca_connectors.alembic_version` registry, and `mainsequence.markets` for the project tables
+and the ms-markets tables it writes (Assets, Accounts, holdings, signal weights, portfolios).
+Tables belong to a Team, never to one workload User, because workload Users change with each
+Environment and each recreated Job or release. The migration namespace and the table's catalog
+namespace are separate concepts; inspect the registered table rather than inferring its grant
+scope from the provider name.
 
 In each Environment where the project runs:
 
@@ -300,7 +303,9 @@ In each Environment where the project runs:
    `mainsequence.markets` schema and its Team. The project's revisions reference its tables.
 2. An Organization admin creates one platform Team for the project, for example
    `alpaca-connectors-production`, and in MetaTables Security grants it Writer on the
-   `mainsequence.markets` namespace.
+   `alpaca-connectors` and `mainsequence.markets` namespaces. Preserve existing namespace grants,
+   including the ms-markets owning Team; add the project's Team with the permission document's
+   current revision instead of replacing other owners.
 3. The Team's members are the workload Users of every resource that reads or writes the tables:
    the `alpaca-connectors-migrate` Job, the `alpaca` FastAPI release, and the `alpaca-etf-signal`,
    `alpaca-etf-portfolio`, `alpaca-bars-update` and `daily-stock-bars-holdings-ivv` Jobs. The
@@ -313,6 +318,12 @@ in its workflow file. A migration that fails with `namespace_not_writable` or `t
 (403) names the `caller_user_uid` missing from the Team: add it, then run the migration Job again.
 Do not grant tables directly to a workload User, and do not run the Job as an Organization admin to
 get around a refusal.
+
+Verify effective Writer access for that workload on both the Alembic registry and a project
+table before retrying. An Organization admin's ability to administer permissions does not by
+itself give the workload table access. A renamed API workflow key can create a new release and
+workload User after migration succeeds; add that new workload to the same Team before verifying
+API readiness. The Harness Agent still receives no direct table grant.
 
 ## Operational Checks
 
