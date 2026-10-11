@@ -644,9 +644,7 @@ def manage_etf_signal(arguments: Mapping[str, Any]) -> Any:
 
     operation = _operation(arguments, {"create", "delete", "run", "update"})
     if operation == "create":
-        return create_configuration(
-            _request_model(arguments, SignalJobConfigurationCreateRequest)
-        )
+        return create_configuration(_request_model(arguments, SignalJobConfigurationCreateRequest))
     configuration_uid = _required_text(arguments, "configuration_uid")
     if operation == "update":
         return update_configuration(
@@ -754,9 +752,7 @@ def manage_etf_portfolio(arguments: Mapping[str, Any]) -> Any:
 
     operation = _operation(arguments, {"create", "delete", "run", "update"})
     if operation == "create":
-        return create_configuration(
-            _request_model(arguments, PortfolioConfigurationCreateRequest)
-        )
+        return create_configuration(_request_model(arguments, PortfolioConfigurationCreateRequest))
     configuration_uid = _required_text(arguments, "configuration_uid")
     if operation == "update":
         return update_configuration(
@@ -814,7 +810,9 @@ PROJECT_AGENT_TOOLS: tuple[ProjectAgentTool, ...] = (
                 "list",
                 properties={**PAGE, **SEARCH, **ORDERING, "category_uid": _uid("AssetCategory")},
             ),
-            _operation_case("get", properties={"asset_uid": _uid("Asset")}, required=("asset_uid",)),
+            _operation_case(
+                "get", properties={"asset_uid": _uid("Asset")}, required=("asset_uid",)
+            ),
         ),
         execution_mode="parallel",
         handler=query_assets,
