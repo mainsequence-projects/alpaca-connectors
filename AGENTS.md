@@ -180,6 +180,8 @@ Project-to-agent boundary:
   by `api/agent/main.py` (`ms_tau_sdk.create_app()`, pinned `ms-tau-sdk` runtime dependency),
   declared `acts_for_requester: true`, with `mcp_applications: [{resource: alpaca}]`;
   `code_repository_coding_agent` is a retired kind the platform rejects
+- the Agent and the `alpaca` API name each other in their workflow `access.resources` at `view`:
+  the Agent calls the API's MCP, and the API finds the Agent for the site
 - the Agent calls project tools as `alpaca__call_tool` with `tool` set to an
   `alpaca_connectors.agent_tools` name (list them with `alpaca__list_tools`); each runs in the API
   with the permissions and identity of the person the Agent serves. Use the installed
@@ -240,7 +242,9 @@ Operational notes:
   `.mainsequence/workflows/alpaca-connectors-api.yaml` (`src/jobs/migrate_alpaca_connectors.py`;
   ADR 0012), which runs from the candidate image before the API deploys (`needs: [migrate]`) and
   applies only this project's provider; keep every deployed resource that reads project tables in
-  that file with its own `needs: [migrate]` deploy step;
+  that file with its own `needs: [migrate]` deploy step; the `harness_agent` deploys after the API
+  (`deploy_agent` needs `deploy_api`), so a failed migration stops it too; the two bars Jobs in
+  their own files stay outside the graph with automatic redeployment disabled;
   the ms-markets schema is migrated only by the ms-markets deployment's `migrate-markets` Job; never
   run `metatables migrations upgrade` or `downgrade` against a hosted environment from a developer
   or agent session
@@ -252,7 +256,7 @@ Operational notes:
   Through A Team). An Organization admin creates the Team and the grant in the platform and
   MetaTables Security; never grant tables directly to a workload User. Every workflow resource that
   uses MetaTables declares `access.branches: [{repository: MetaTables, level: view}]`; the
-  `harness_agent` uses only the API's MCP and declares none
+  `harness_agent` uses only the API's MCP and declares no MetaTables access
 - during development apply revisions to the local runtime, which has no ms-markets deployment, with
   `metatables --local migrations upgrade --provider msm_migrations:migration head`, then
   `metatables --local migrations upgrade --provider alpaca_connectors.migrations:migration head`; every revision must keep

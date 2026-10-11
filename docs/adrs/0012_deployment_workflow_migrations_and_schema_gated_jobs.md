@@ -13,6 +13,13 @@ signal and portfolio Jobs described below with two Jobs declared in
 launchers keep the schema gate, which still covers the gap between a push promoting their image and
 the migration Job finishing.
 
+On 2026-10-11 the Harness Agent joined the graph, which settles the first item under "Not yet
+gated by the graph" below. `agent_image` builds the Agent's image, and `deploy_agent` needs
+`deploy_api` and that image. A failed migration therefore stops the Agent as well as the API. The
+Agent still reads no tables itself. The two bars Jobs in their own workflow files stay outside
+the graph with automatic redeployment disabled. A push never promotes them, so they are promoted
+deliberately after their repository settles.
+
 ## Context
 
 Until now, project MetaTable revisions were applied by hand. AGENTS.md told operators to run

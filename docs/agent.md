@@ -183,12 +183,19 @@ serves, for at most 24 hours after that request. The retired `code_repository_co
 and its `command_center_icon`, `cpu_limit`, and `memory_limit` fields are rejected by the
 platform, so the workflow no longer declares an icon.
 
-The explicit execution chain builds an image, runs this project's migration Job, and then deploys
-the API. The Harness has automatic deployment but is not a step in that migration-gated chain;
-it accesses project data through the API, not directly. Verify both releases separately. The
+The explicit execution chain builds the API's image, runs this project's migration Job from it,
+and then deploys the API. The Harness is part of the same chain: `agent_image` builds its image and
+`deploy_agent` needs `deploy_api` and that image, so a new Agent revision never serves before the
+API whose MCP it calls, and a failed migration stops both. The Agent still accesses project data
+only through the API. Verify both releases separately. The
 account-key-entry link currently targets the development Command Center at `localhost:5173`;
 `ALPACA_CONNECTORS_SITE_URL` must point to the intended, person-accessible site before using this
 flow outside that development setup.
+
+The two resources name each other in their `access` blocks. The Agent has `view` on the `alpaca`
+release, the application it calls. The API has `view` on the Agent, so it can find the Agent that
+the Alpaca site opens. Both entries name resources declared on this branch, so any push may apply
+them; only `acts_for_requester` needed an Organization admin's push, and it is already on.
 
 The project keeps Uvicorn on the `0.52` line with a non-exact `>=0.52.4,<0.53` project range;
 `uv.lock` records the reproducible installed version.

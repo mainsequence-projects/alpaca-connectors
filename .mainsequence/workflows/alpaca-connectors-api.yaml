@@ -6,11 +6,15 @@ resources:
 - key: alpaca
   kind: fastapi
   # The API's own workload User: running this branch's Jobs needs edit, and every MetaTable is
-  # read through the MetaTables API on the MetaTables repository's branch.
+  # read through the MetaTables API on the MetaTables repository's branch. Viewing the Agent lets
+  # the project configuration find it at request time and return it to the site.
   access:
     branch: edit
     branches:
     - repository: MetaTables
+      level: view
+    resources:
+    - key: alpaca-connectors-agent
       level: view
   spec:
     source_path: api/app/main.py
@@ -30,10 +34,15 @@ resources:
     - name: ALPACA_CONNECTORS_SITE_URL
       value: http://localhost:5173/app/links/1b572c68-e4f5-4589-b17c-23d12f474130
 # The branch's one Harness Agent. It reaches every project tool through the `alpaca` API's MCP and
-# acts for the person whose request it serves (only an Organization admin's push enables this).
+# acts for the person whose request it serves (only an Organization admin's push enables this). It
+# reads no tables itself, so it needs no MetaTables access and is not a member of the table Team.
 - key: alpaca-connectors-agent
   kind: harness_agent
   acts_for_requester: true
+  access:
+    resources:
+    - key: alpaca
+      level: view
   spec:
     source_path: api/agent/main.py
     llm_provider: openai-codex
@@ -122,6 +131,8 @@ resources:
     automatic_redeployment:
       enabled: true
       tag_regex: null
+# The migration Job runs from the API's candidate image. The API deploys only after it succeeds,
+# and the Agent deploys from its own image only after the API whose MCP it uses.
 execution:
   steps:
     image:
@@ -134,3 +145,9 @@ execution:
       deploy: alpaca
       image_from: image
       needs: [migrate]
+    agent_image:
+      prepare_image: alpaca-connectors-agent
+    deploy_agent:
+      deploy: alpaca-connectors-agent
+      image_from: agent_image
+      needs: [deploy_api, agent_image]

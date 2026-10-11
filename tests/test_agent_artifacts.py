@@ -122,6 +122,25 @@ class AgentArtifactsTests(unittest.TestCase):
         for retired in ("command_center_icon", "cpu_limit", "memory_limit"):
             self.assertNotIn(retired, specification)
 
+    def test_the_api_and_the_agent_declare_view_access_to_each_other(self) -> None:
+        workflow = yaml.safe_load(WORKFLOW_PATH.read_text(encoding="utf-8"))
+        resources = {resource["key"]: resource for resource in workflow["resources"]}
+
+        # The API runs this branch's Jobs, reads MetaTables, and finds the Agent it returns to
+        # the site; the Agent calls the API's MCP and reads no tables itself.
+        self.assertEqual(
+            resources["alpaca"]["access"],
+            {
+                "branch": "edit",
+                "branches": [{"repository": "MetaTables", "level": "view"}],
+                "resources": [{"key": "alpaca-connectors-agent", "level": "view"}],
+            },
+        )
+        self.assertEqual(
+            resources["alpaca-connectors-agent"]["access"],
+            {"resources": [{"key": "alpaca", "level": "view"}]},
+        )
+
     def test_agent_workflow_disables_generic_tool_sources(self) -> None:
         workflow = yaml.safe_load(WORKFLOW_PATH.read_text(encoding="utf-8"))
         agent = next(item for item in workflow["resources"] if item["kind"] == "harness_agent")

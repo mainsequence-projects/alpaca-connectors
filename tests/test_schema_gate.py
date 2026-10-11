@@ -233,7 +233,33 @@ def test_api_deploys_only_after_the_migration_job_in_one_workflow() -> None:
         "image_from": "image",
         "needs": ["migrate"],
     }
+    # The Agent deploys from its own image, and only after the API whose MCP it uses, so it also
+    # waits for the migration.
+    assert steps["agent_image"] == {"prepare_image": "alpaca-connectors-agent"}
+    assert steps["deploy_agent"] == {
+        "deploy": "alpaca-connectors-agent",
+        "image_from": "agent_image",
+        "needs": ["deploy_api", "agent_image"],
+    }
+    assert set(steps) == {"image", "migrate", "deploy_api", "agent_image", "deploy_agent"}
     assert not (root / ".mainsequence/workflows/alpaca-connectors-migrations.yaml").exists()
+
+
+def test_bars_jobs_in_their_own_files_are_promoted_by_hand() -> None:
+    """The graph cannot reference another file, so these two Jobs are never promoted by a push."""
+    import yaml
+
+    root = JOBS.parents[1]
+    for name, key in (
+        ("alpaca-bars-update.yaml", "alpaca-bars-update"),
+        ("daily-stock-bars-holdings-ivv.yaml", "daily-stock-bars-holdings-ivv"),
+    ):
+        workflow = yaml.safe_load((root / ".mainsequence/workflows" / name).read_text())
+        [resource] = workflow["resources"]
+        assert resource["key"] == key
+        assert resource["kind"] == "job"
+        assert resource["spec"]["automatic_redeployment"] == {"enabled": False, "tag_regex": None}
+        assert "execution" not in workflow
 
 
 def test_every_resource_that_uses_metatables_declares_its_branch() -> None:
