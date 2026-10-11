@@ -134,11 +134,16 @@ def test_mcp_tool_errors_never_echo_the_arguments(local_caller, mcp_client) -> N
         assert SUBMITTED_SECRET not in json.dumps(result)
 
 
-def test_mcp_reports_an_unknown_tool(local_caller, mcp_client) -> None:
-    result, body = call_tool(mcp_client, "alpaca_place_order", {}, local_caller.headers)
+@pytest.mark.parametrize("tool_name", ["alpaca_place_order", SUBMITTED_SECRET])
+def test_mcp_reports_an_unknown_tool_without_echoing_its_name(
+    local_caller, mcp_client, tool_name
+) -> None:
+    result, body = call_tool(mcp_client, tool_name, {}, local_caller.headers)
 
     assert result["isError"] is True
     assert body["code"] == "unknown_tool"
+    assert tool_name not in json.dumps(result)
+    assert body["retryable"] is False
 
 
 def test_no_mcp_tool_accepts_alpaca_key_values() -> None:

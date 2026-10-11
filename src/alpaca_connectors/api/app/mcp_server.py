@@ -159,7 +159,11 @@ def build_mcp_server(
         definition = definitions.get(name)
         if definition is None:
             return _text_result(
-                {"code": "unknown_tool", "message": f"No tool named {name!r}.", "retryable": False},
+                {
+                    "code": "unknown_tool",
+                    "message": "The requested tool is not available.",
+                    "retryable": False,
+                },
                 is_error=True,
             )
         return await call_project_tool(definition, arguments)

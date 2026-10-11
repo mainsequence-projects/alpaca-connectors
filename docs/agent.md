@@ -102,8 +102,10 @@ There are three distinct identities in the execution path:
 The API verifies request identity before installing MCP; its worker-thread dispatch preserves that
 context. This is not a blanket claim of per-person filtering on every table. The application's
 release-access boundary, explicit ownership checks, and workload permissions all matter. API and
-Job workload users obtain table access through the Environment's Team and its
-`mainsequence.markets` namespace grant; the Harness needs no direct table grant to use these tools.
+Job workload users obtain table access through the Environment's Team. Its Writer grants cover
+`mainsequence.markets` and the separate `alpaca-connectors` namespace holding this project's
+Alembic version registry; the Harness needs no direct table grant to use these tools. See
+[Table Access Through A Team](operations/jobs.md#table-access-through-a-team).
 
 ## Operational Boundaries
 
@@ -205,7 +207,7 @@ published releases at this review. They were upgraded from 9.0.19, 2.0.10, 0.1.3
 respectively; no other dependency versions changed. `pyproject.toml` retains non-exact
 compatibility ranges, while `uv.lock` and the exported `requirements.txt` record the resolution.
 
-Verification on these versions passed all 419 tests (plus 72 subtests), Ruff lint, actual API
+Verification on these versions passed all 420 tests (plus 72 subtests), Ruff lint, actual API
 and Harness app imports, and TAU discovery of all six repository-owned skills without diagnostics.
 The MCP catalog contains nine read-only tools and eight mutation/multi-operation tools. This
 review does not certify a deployed Agent or hosted migration completion.
@@ -239,4 +241,36 @@ current catalog supports with `medium` thinking. Publishing the already-committe
 `api/agent/main.py` at commit `81388e5`; the complete workflow then passed the development
 backend's API 2.3.0 validation with no errors or warnings. No resource UID was supplied to bypass
 source validation. No live Alpaca Agent was found before the new deployment, and deployed
-communication remains unverified until the new release is ready and its A2A/MCP smoke test passes.
+communication was unverified at that pre-publication checkpoint. The later hosted evidence and
+remaining limitations are recorded below.
+
+### Hosted verification and upstream defects — 2026-10-11
+
+The Environment's Team access was repaired without direct workload grants. The existing migration
+Job applied revisions `0015`–`0017`, and the subsequent exact-commit image → migration → API workflow
+succeeded. Agent discovery reported **Alpaca Agent**, a current Harness runtime, the requested Luna
+model, and the declared Alpaca MCP application. The Harness was not added to the table-writer Team.
+
+The deployed Agent discovered all 17 project tools and successfully read project state, Accounts,
+and Universes. A distinct same-session follow-up returned the remembered results without repeating
+those operations. This proves deployed application-tool access and conversation continuity, not
+failure-free direct-Message delivery.
+
+Two fresh Message tests returned `a2a_transport_outcome_ambiguous` even though the runtime later
+completed successfully. The narrower test used two read-only tool calls; owner-scoped events
+recorded a successful 110-second turn, while the backend's canonical sender has a 90-second HTTP
+read cap. This independent sender deadline is tracked in
+[backend issue #936](https://github.com/Main-Sequence-Server-Side/tdag-django/issues/936).
+TAU's earlier per-call HTTP deadline defect is already fixed in the installed 2.0.11 release; it is
+not the same boundary. Do not replay an ambiguous Message or silently switch it to Task: this
+Agent advertises Message only.
+
+Canonical MCP repository and workflow-including deployment reads also reject otherwise valid
+REST results because their output schemas omit discovery metadata and workflow-step errors.
+[Backend issue #937](https://github.com/Main-Sequence-Server-Side/tdag-django/issues/937) records the
+reproduction and the exact rejected fields. These read failures are not evidence of a failed
+deployment. Both issues were filed after duplicate searches; no backend or TAU source was changed.
+
+The repository-owned unknown-tool error response has been hardened to omit client-supplied tool
+names, with HTTP-boundary regression coverage. This preserves the existing error code and does not
+change the supported tool catalog or introduce a retry mechanism.

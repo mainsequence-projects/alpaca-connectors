@@ -1,6 +1,6 @@
 """Structured project tools the Alpaca Agent uses through the API's MCP server.
 
-`alpaca_connectors.api.app.mcp` serves this catalog at the API's `/mcp` endpoint (ADR 0015), so
+`alpaca_connectors.api.app.mcp_server` serves this catalog at the API's `/mcp` endpoint (ADR 0015), so
 every call runs inside the API's verified request identity. The handlers deliberately reuse the
 same application-service layer as the REST routes and contain no second copy of the connector's
 business logic.
