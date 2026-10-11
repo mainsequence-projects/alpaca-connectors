@@ -92,7 +92,8 @@ ignore = ["E203", "E501"]
 known-first-party = ["mainsequence","metatables","alpaca_connectors"]
 
 [tool.uv.sources]
-etfhextractor = { git = "https://github.com/mainsequence-projects/etfholdingextractor" }
+# The ETF library is released only as Git tags; consumers pin the tag of the release they tested.
+etfhextractor = { git = "https://github.com/mainsequence-projects/etfholdingextractor", tag = "v0.4.4" }
 
 [dependency-groups]
 dev = [

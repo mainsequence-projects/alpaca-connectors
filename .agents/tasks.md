@@ -56,5 +56,6 @@
 
 - Main Sequence SDK 9, `mainsequence-metatable` 0.1, and ms-markets 2 are the current targets;
   MetaTables imports and migration commands use `metatables`.
-- `etfhextractor 0.4.1` remains an external, unpinned-in-pyproject Git dependency.
+- `etfhextractor 0.4.1` remained an external, unpinned-in-pyproject Git dependency; since
+  2026-10-11 its source is pinned to release tag `v0.4.4`.
 - The existing reviewed daily price job remains the only scheduled job.

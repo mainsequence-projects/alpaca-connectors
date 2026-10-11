@@ -72,7 +72,7 @@ cryptography==50.0.2
     #   secretstorage
 empyrical-reloaded==0.5.12
     # via alpaca-connectors
-etfhextractor @ git+https://github.com/mainsequence-projects/etfholdingextractor@5254ab890234be0fe90d6a2d2e80e0e855b9f1bf
+etfhextractor @ git+https://github.com/mainsequence-projects/etfholdingextractor@062f3f8a86881f112d9071f5076a1ee42ced86d3
     # via alpaca-connectors
 exchange-calendars==4.13.2
     # via pandas-market-calendars

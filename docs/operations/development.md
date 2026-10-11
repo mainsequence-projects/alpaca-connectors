@@ -24,7 +24,8 @@ system credential store, not in the CodeRepository `.env`. MetaTables schema com
 `metatables` CLI installed by `mainsequence-metatable`.
 
 Python 3.13 is required. `pyproject.toml` declares compatible ranges and intentionally does not pin
-exact dependency versions; `uv.lock` is the reproducible resolution.
+exact dependency versions; `uv.lock` is the reproducible resolution. The one exception is the
+`etfhextractor` Git source, which `[tool.uv.sources]` pins to its release tag (`v0.4.4`).
 
 Install Playwright support when a provider extraction path requires it:
 

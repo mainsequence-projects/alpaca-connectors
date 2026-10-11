@@ -154,4 +154,5 @@ committed, and synchronized; the current dirty checkout was not committed or pus
 `etfhextractor 0.4.1` is published at commit
 `036c8ba7f625f45dcb58e909ebf4eebbedbb5b97` with tag `v0.4.1`. This repository keeps the dependency
 source unpinned in `pyproject.toml`; `uv.lock` and exported `requirements.txt` capture that exact
-commit for reproducible builds.
+commit for reproducible builds. Since 2026-10-11, `pyproject.toml` pins the source to release tag
+`v0.4.4` (commit `062f3f8`).

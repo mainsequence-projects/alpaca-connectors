@@ -223,6 +223,9 @@ published releases verified directly against the package registry on 2026-10-11.
 retry upgrades Main Sequence from 9.0.20 and TAU from 2.0.11; MetaTables and ms-markets were
 already current. No unrelated dependency versions changed. `pyproject.toml` retains non-exact
 compatibility ranges, while `uv.lock` and the exported `requirements.txt` record the resolution.
+The `etfhextractor` Git source is pinned to release tag `v0.4.4` (commit `062f3f8`), which requires
+these same versions. No Alpaca workload reads or writes its only table, `DemoBarsTS`, so the
+migration Job does not apply its provider.
 
 Verification on these versions passed all 420 tests (plus 72 subtests), Ruff lint, actual API
 and Harness app imports, and TAU discovery of all six repository-owned skills without diagnostics.

@@ -7,8 +7,8 @@
 - `pyproject.toml` targets Python 3.13, Main Sequence SDK `>=9.0.2,<10`,
   `mainsequence-metatable>=0.1.6,<0.2`, and ms-markets `>=2,<3`. The committed `uv.lock` and
   `requirements.txt` are regenerated at release, once ms-markets 2 is published.
-- `pyproject.toml` uses compatible lower bounds and does not exactly pin Main Sequence packages
-  or the `etfhextractor` Git dependency.
+- `pyproject.toml` uses compatible lower bounds and does not exactly pin Main Sequence packages.
+  Its `etfhextractor` Git source is pinned to release tag `v0.4.4`.
 - The project capability boundaries are Project State, Assets, Universes, Market Data, Accounts,
   Holdings, Portfolios, and Operations.
 - Reusable application behavior lives under `src/`; the installed CLI and thin FastAPI routers
