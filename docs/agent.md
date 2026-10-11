@@ -210,7 +210,7 @@ compatibility ranges, while `uv.lock` and the exported `requirements.txt` record
 Verification on these versions passed all 420 tests (plus 72 subtests), Ruff lint, actual API
 and Harness app imports, and TAU discovery of all six repository-owned skills without diagnostics.
 The MCP catalog contains nine read-only tools and eight mutation/multi-operation tools. This
-review does not certify a deployed Agent or hosted migration completion.
+local review alone does not certify a deployed Agent or hosted migration completion.
 The MetaTables SDK compatibility check and installed dependency consistency check also passed.
 
 Tool-restriction regressions exercise the installed TAU runtime's catalog assembly with mocked
@@ -274,3 +274,22 @@ deployment. Both issues were filed after duplicate searches; no backend or TAU s
 The repository-owned unknown-tool error response has been hardened to omit client-supplied tool
 names, with HTTP-boundary regression coverage. This preserves the existing error code and does not
 change the supported tool catalog or introduce a retry mechanism.
+
+The follow-up candidate at `21a7f6c` built successfully and its Harness deployment succeeded.
+A fresh, short Message to the deployed Luna Agent returned the requested test marker in 32
+seconds. It intentionally called no tools, so it verifies basic Message delivery on the new
+Harness, not successful long application-tool turns or the resolution of issue #936.
+
+That candidate's API rollout did not complete: migration JobRun
+`daaf2e1f-98ae-4587-85c9-649b4b8b6779` failed with a 10-second backend HTTP read timeout.
+The migration gate correctly blocked the API; the prior ready API revision continued serving.
+The corrected unknown-tool response is verified locally but has not yet been verified on the
+hosted API.
+
+A separate network-free regression reproduces an installed Main Sequence SDK 9.0.20 defect:
+logger bootstrap uses a raw 10-second Job startup-state GET, outside the ordinary SDK transport
+budget, and propagates a read timeout before building the logger. This is tracked in
+[SDK issue #215](https://github.com/mainsequence-sdk/mainsequence-sdk/issues/215). The bounded
+Job logs do not identify the failed HTTP route, so the isolated regression establishes the SDK
+defect without claiming that the live call site is proven. No client monkey patch, authentication
+fallback, hosted developer migration, or migration-gate bypass was added.
