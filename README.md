@@ -37,11 +37,25 @@ project's top-level ontology.
 - `src/jobs/`: reviewed launchers for platform-managed execution.
 - `src/alpaca_connectors/api/`: FastAPI-only contracts, pagination, routing, and response shaping.
 - `api/app/main.py`: path-stable entry point for the deployed FastAPI resource (not in the wheel).
-- `.mainsequence/workflows/`: backend-validated Job and FastAPI deployment declarations.
+- `src/alpaca_connectors/agent_tools.py`: structured project tools served by the API's `/mcp`.
+- `api/agent/main.py`: TAU Harness Agent entry point (not in the wheel).
+- `.mainsequence/workflows/`: backend-validated Job, FastAPI, and Harness Agent deployment declarations.
 - `docs/`: architecture and operating instructions.
 
 The sibling Command Center static application consumes the FastAPI collection and discovery
 contracts without moving business logic into the frontend.
+
+## Alpaca Agent
+
+The **Alpaca Agent** is a TAU Harness over the existing application, not a second implementation.
+Its six business skills use 17 structured tools through the Alpaca API's MCP endpoint. REST, MCP,
+and CLI adapters reuse the same services; long bars, signal, and portfolio updates return JobRuns.
+Account key values are entered on the site, never in the Agent's conversation or tool arguments.
+
+See [Agent architecture and boundaries](docs/agent.md) for requester versus workload identity,
+deployment, timeouts, and the enforced exclusion of generic coding/shell and platform MCP tools.
+The Harness retains only skill-scoped reading and SDK A2A Task controls alongside the Alpaca
+application tools.
 
 ## Install And Migrate
 

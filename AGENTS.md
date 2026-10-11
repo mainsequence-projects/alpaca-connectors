@@ -184,6 +184,11 @@ Project-to-agent boundary:
   `alpaca_connectors.agent_tools` name (list them with `alpaca__list_tools`); each runs in the API
   with the permissions and identity of the person the Agent serves. Use the installed
   `alpaca-connectors` CLI in shell workflows; both must reuse the same project services
+- the deployed Harness exposes only the Alpaca application tools plus SDK skill-scoped reading
+  and A2A Task controls: keep `TAU_EXCLUDE_BASE_TOOLS=true` and
+  `TAU_EXCLUDE_MAINSEQUENCE_MCP=true` in its workflow `spec.env_vars`; never restore generic
+  filesystem, shell, or platform MCP tools. CLI instructions are for human/developer shell
+  workflows, not a shell fallback available to this restricted Harness
 - load read-only query tools in parallel and execute mutations sequentially
 - never expose an Organization Environment selector; the deployed CodeRepositoryBranch resolves it
   automatically

@@ -36,11 +36,17 @@ resources:
   acts_for_requester: true
   spec:
     source_path: api/agent/main.py
-    llm_provider: openai
-    llm_model: gpt-5.4
+    llm_provider: openai-codex
+    llm_model: gpt-5.6-luna
     llm_thinking: medium
     mcp_applications:
     - resource: alpaca
+    # Only Alpaca application tools; TAU retains skill-scoped reading and A2A Task controls.
+    env_vars:
+    - name: TAU_EXCLUDE_BASE_TOOLS
+      value: 'true'
+    - name: TAU_EXCLUDE_MAINSEQUENCE_MCP
+      value: 'true'
     cpu_request: 250m
     memory_request: 512Mi
     automatic_deployment: true

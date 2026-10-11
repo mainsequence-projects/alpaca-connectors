@@ -1,5 +1,15 @@
 # ADR 0019: MetaTables Analyst agent
 
+> Amendment (2026-10-09): Both Environment and Agent discovery allow 30 seconds for
+> the platform lookup, including credential renewal. Environment lookup failures
+> stay outside the one-hour cache, just like Agent lookup failures, so the next
+> request can restore the Analyst after a temporary platform outage. Successful
+> facts still expire normally; an expired verified result is never served on failure.
+> A hosted API also fails startup when its declared database is unavailable,
+> allowing the deployment's restart policy to retry instead of serving a replica
+> whose failed bootstrap cannot recover. Secret lookup allows 30 seconds and
+> distinguishes a missing Secret from a failed platform request in its message.
+>
 > Amendment (2026-10-08): The API names this branch's Analyst to applications.
 > `GET /runtime-context/` returns `hosted_agent` (`uid`, `name`, `status`) beside
 > `hosted_environment`: the Agent the API's own branch deploys, which the API finds with its
@@ -39,7 +49,7 @@ Status: Accepted.
 Implementation status: implemented on `development`; not yet deployed. Tests cover the
 tools against a stand-in catalog, `deep_search`, `describe_table` and `list_namespaces`
 through the client against the API, and the extension, card, workflow and vendored skills with
-ms-tau-sdk 2.0.8. A local `ms-tau` session and the hosted deployment have not run.
+ms-tau-sdk 2.0.9. A local `ms-tau` session and the hosted deployment have not run.
 
 Owner: this repository deploys the agent. The MetaTables API is unchanged; the agent
 is one more API client.
@@ -70,7 +80,7 @@ refuses anything else.
 
 | Part | Rule |
 | --- | --- |
-| Runtime | `ms-tau-sdk` 2.0.8, `openai-codex` / `gpt-5.6-luna`, thinking `medium`. |
+| Runtime | `ms-tau-sdk` 2.0.10, `openai-codex` / `gpt-5.6-luna`, thinking `medium`. |
 | Identity | The person each turn serves (ADR 0020); the agent's own identity holds no grants. |
 | Tools | The six tools below, served by the API over MCP when hosted (ADR 0021), and the SDK's skill-scoped `read`. No shell, file writes or Main Sequence MCP. |
 | Instructions | `.tau/SYSTEM.md` covers MetaTables; vendored `pg-aiguide` skills cover PostgreSQL and TimescaleDB. |
@@ -129,7 +139,7 @@ The agent card's two skills, `discover-tables` and `analyze-with-sql` in
 The skills of [timescale/pg-aiguide](https://github.com/timescale/pg-aiguide)
 (Apache-2.0) are vendored at commit `b236d35` with its license and notice, one
 directory per skill under `.tau/skills/`, because Tau discovers skills one level deep.
-The agent opens them through the skill-scoped `read`, which ms-tau-sdk 2.0.8 registers
+The agent opens them through the skill-scoped `read`, which ms-tau-sdk 2.0.9 registers
 when `TAU_EXCLUDE_BASE_TOOLS=true`. The directive takes precedence over them:
 
 - Discover tables through the MetaTables tools, not `pg_catalog`, which also lists

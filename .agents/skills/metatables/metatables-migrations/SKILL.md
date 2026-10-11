@@ -54,10 +54,13 @@ migrations. Read `docs/client/deploy-application-migrations.md`.
    Environment, the application's tables need an owning Team: one platform Team
    per Environment (for example `ledger-development`), whose members are the
    migration Job's workload User and the workload User of every resource that
-   reads or writes the tables. An Organization admin creates the application's
-   namespace in that Environment and grants the Team Writer on it. Tell the user
-   these steps; they are made in the platform and in MetaTables Security, not in
-   the repository.
+   reads or writes the tables. An Organization admin creates, in that
+   Environment, each namespace the provider registers tables in, and grants the
+   Team Writer on it. Recommend one namespace per application, owned by its Team;
+   it is not required (see "Namespaces and applications" in
+   `docs/security/ownership-and-sharing.md`).
+   Tell the user these steps; they are made in the platform and in MetaTables
+   Security, not in the repository.
 4. **Deploy.** The application's `.mainsequence/workflows/` file declares a
    migration Job that calls `upgrade_application` for each provider, in
    dependency order, from the candidate image. The Job and every resource that
@@ -83,8 +86,9 @@ Rules:
   with each Environment and each recreated Job; a new one needs Team membership
   only. Do not ask for direct table grants to a workload User, and do not run the
   Job as an Organization admin to get around a refusal.
-- Every table a provider registers goes in the Team's namespace. A table
-  registered in a namespace the caller already writes gets no grant of its own.
+- A table registered in a namespace the caller already writes gets no grant of
+  its own; the namespace's Writers own it. The Team needs Writer on every
+  namespace the provider uses.
 
 ## Source and runtime context
 
@@ -186,11 +190,42 @@ API Writer checks govern connection admission and provider catalog operations.
 The client reserves catalog entries, runs Alembic, closes its physical connection,
 and finalizes contracts through the API. Treat connection material as private.
 
-Python code can call `metatables.upgrade_application("ledger.migrations:migration")`;
-`src/metatables/examples/scripts/setup_metatables.py` shows the pattern, and the
-deployment migration Job uses the same call. Remove the retired
+Applications and consuming libraries use the same public Python entry point in
+an explicit setup function or deployment migration Job:
+
+```python
+from metatables import upgrade_application
+
+result = upgrade_application("ledger.migrations:migration")
+```
+
+`src/metatables/examples/scripts/setup_metatables.py` shows the pattern. Keep
+migration execution out of a library's import-time side effects. Remove the retired
 `application_migration_providers` setting and use Python references instead of aliases.
 Application migration histories remain separate from API system migrations.
+
+## Repeated runs and migration performance
+
+Use the shared `upgrade_application` path for every provider. Table-inventory and
+physical-inspection batching are automatic in the client/API implementation; no
+separate batching import, private backend helper or opt-in flag is needed.
+An unchanged Alembic revision still reconciles physical contracts and refreshes
+table descriptions, labels and column metadata. Do not skip finalization based
+only on `migrated=False` or equal revision heads: missing/unreadable tables must
+still fail, and only explicit removals may delete a catalog binding.
+
+For a slow migration, read the "Migration timings" section in
+`docs/client/deploy-application-migrations.md`. Enable INFO logging for
+`metatables.migrations.runner` to see preparation, database setup, table checks,
+Alembic, finalization and total duration. The API logs inspection and total time
+per finalization batch. Measure these separately from platform job scheduling
+and workflow coordination before attributing the delay to schema validation.
+
+Check the installed client and deployed API versions. Client optimizations need
+a package update and application image rebuild; API batching needs a shared API
+deployment. After installing a release containing the changes, refresh copied
+skills with `metatables copy-metatables-skills --path /path/to/application`.
+This command copies guidance; Python imports alone do not refresh it.
 
 ## Lifecycle invariants
 
@@ -236,6 +271,27 @@ Read `docs/operations/recovery-and-observability.md`.
 - Inspect partial DDL before retrying, especially on engines without transactional
   DDL. A finalization-only failure can be retried without reapplying committed
   revisions. Client DDL has no API executor journal.
+- Finalization sends at most 10 tables per request, the version table first, and
+  reports `Finalizing MetaTables 11-20 of 62.` for larger providers (client 0.1.28
+  and later). A run that stops partway leaves earlier batches active; rerun the
+  same upgrade to finalize the rest.
+- If the migration connection is refused with `provider_tables_misplaced`, provider
+  tables sit in the `metatables` catalog schema (MetaTables #50). Don't stamp, rerun or
+  hand-edit revisions. An administrator moves or drops those tables, then rerun.
+- If it is refused with `provider_tables_owner_unreachable`, the tables belong to a
+  retired role, named in `owners`. A database administrator runs
+  `REASSIGN OWNED BY <role> TO mt_owner;` in that database, then rerun.
+- If the client refuses because the connection "resolves unqualified names" outside the
+  default schema, it isn't the connection MetaTables issued. Use that connection, or set
+  `search_path` to the default schema.
+- If finalization reports `physical_table_missing`, a current table is absent and nothing
+  named it as removed. Its catalog binding is kept; check `other_schemas` and where your
+  revisions created it. Client 0.1.29 and later name tables removed from the models or
+  dropped by the run, such as on downgrade. Older clients fail this way after a removal or
+  downgrade, so upgrade the client.
+- `physical_table_inaccessible` means the table exists, but the MetaTables login can't
+  read all its columns or use its owner. Fix ownership or privileges; the stored contract
+  is kept.
 - Destructive catalog deletion is not migration recovery and never bypasses
   schema-management protection.
 

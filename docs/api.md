@@ -260,6 +260,11 @@ POST only, inside the same request identity as every route. `tools/list` returns
 `alpaca_connectors.agent_tools` catalog; `tools/call` validates the arguments against the tool's
 schema and runs it in the API. Results and errors are JSON text, and errors never quote arguments.
 
+These tools currently declare no MCP timeout metadata; TAU 2.0.11 therefore uses its default
+60-second tool deadline unless the Agent runtime overrides it. Job submission is asynchronous,
+but other synchronous mutations can outlive a caller's timeout. See
+[application-tool timeouts](agent.md#application-tool-timeouts) before retrying a write.
+
 Create and rotate record the acting user ([Authentication](#authentication)) as
 `credentials_updated_by_user_uid`: the person an Agent's call works for, otherwise the verified
 caller. Calls the API makes to Main Sequence, the Secret writes

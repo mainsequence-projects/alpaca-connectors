@@ -232,10 +232,12 @@ not accept a dataset UID, account override, asset-source override, bar-profile o
 name, credential value, hash namespace, or removed `force_update` option. Main Sequence records the
 two command arguments on the resulting JobRun.
 
-The workflow uses backend API `2.2.0`, has no schedule or configuration environment variable, and
-keeps automatic redeployment disabled. A recurring schedule needs a separate durable
-schedule-to-configuration design because the current schedule declaration does not bind per-run
-arguments.
+The workflow uses backend API `2.3.0`, has no schedule or configuration environment variable, and
+keeps automatic redeployment disabled. A push therefore does not promote this Job to the updated
+SDK image. Verify its image separately before relying on a hosted bars run. Workflow API `2.3.0`
+supports a durable `scheduled_command_args` vector; this on-demand declaration does not configure
+one. Any future recurring configuration must be explicitly declared in the workflow, not created
+or scheduled by application code.
 
 ### Run arguments
 
@@ -273,9 +275,10 @@ the generic Job has a ready image and one successful live update:
 - `src/jobs/run_daily_stock_bars_holdings_ivv.py`;
 - `.mainsequence/workflows/daily-stock-bars-holdings-ivv.yaml`.
 
-After that proof, explicitly disable and delete the old remote Job, then remove those two local
-files. Deleting the workflow file alone does not delete the platform Job. Do not treat both Jobs as
-active production paths.
+After that proof, explicitly retire the old Job and remove those two local files. Under the current
+workflow contract, pushing removal of a valid workflow-bound declaration deletes its platform Job
+and associated JobRuns; inspect the repository event's deletion result. Jobs without a workflow
+binding are not removed by this reconciliation. Do not treat both Jobs as active production paths.
 
 ## FastAPI Release
 

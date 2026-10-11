@@ -42,8 +42,9 @@ which the platform no longer accepts, so the Agent was not deploying.
 ### Keys are entered on the Alpaca site, for a request the Agent starts
 
 - The new `alpaca_account_key_request` tool creates an `AccountKeyRequest` for the person the call
-  works for: `register` (with the environment and an optional account name) or `rotate` (for one
-  account). It returns the site link (`ALPACA_CONNECTORS_SITE_URL`) and instructions for the
+  works for: `register` (with Alpaca live/paper mode and an optional account name) or `rotate` (for
+  one account). This is not an Organization Environment selector. It returns the site link
+  (`ALPACA_CONNECTORS_SITE_URL`) and instructions for the
   person. It accepts no key values.
 - Command Center opens the site at its navigation link and passes nothing from its own URL into
   the site, so the link cannot carry the request. Instead, the site's Accounts page lists the
@@ -64,7 +65,11 @@ which the platform no longer accepts, so the Agent was not deploying.
 
 - Through the Agent, a person can register an account or replace its keys, live or paper, without
   the keys ever entering the conversation.
-- Agent actions run with the person's permissions and are recorded as theirs.
+- Agent-to-API calls carry the person's delegated identity and are subject to application access;
+  API authorship and ownership use that verified person. Ordinary API-to-platform and MetaTables
+  calls still use the API workload principal and its grants, not automatically the person's
+  credentials. This distinction does not imply per-person row filtering for every resource (see
+  [Agent identity and authorization](../agent.md#identity-and-authorization)).
 - Renaming the API's workflow key recreates its release: it gets a new release UID, URL, and
   workload User. The workflow therefore declares the access the API needs (`branch: edit` to run
   this branch's Jobs, and `view` on the MetaTables repository's branch), and the Alpaca site refers

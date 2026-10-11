@@ -104,6 +104,9 @@ class AgentArtifactsTests(unittest.TestCase):
         self.assertEqual(resource["key"], "alpaca-connectors-agent")
         self.assertIs(resource["acts_for_requester"], True)
         specification = resource["spec"]
+        self.assertEqual(specification["llm_provider"], "openai-codex")
+        self.assertEqual(specification["llm_model"], "gpt-5.6-luna")
+        self.assertEqual(specification["llm_thinking"], "medium")
         # The same file's API serves the MCP; its key is the Agent's tool prefix.
         self.assertEqual(specification["mcp_applications"], [{"resource": "alpaca"}])
         self.assertRegex("alpaca", r"^[a-z][a-z0-9_]{0,39}$")
@@ -118,6 +121,14 @@ class AgentArtifactsTests(unittest.TestCase):
         )
         for retired in ("command_center_icon", "cpu_limit", "memory_limit"):
             self.assertNotIn(retired, specification)
+
+    def test_agent_workflow_disables_generic_tool_sources(self) -> None:
+        workflow = yaml.safe_load(WORKFLOW_PATH.read_text(encoding="utf-8"))
+        agent = next(item for item in workflow["resources"] if item["kind"] == "harness_agent")
+        env = {item["name"]: item["value"] for item in agent["spec"]["env_vars"]}
+        self.assertEqual(env["TAU_EXCLUDE_BASE_TOOLS"], "true")
+        self.assertEqual(env["TAU_EXCLUDE_MAINSEQUENCE_MCP"], "true")
+        self.assertEqual(agent["spec"]["mcp_applications"], [{"resource": "alpaca"}])
 
     def test_agent_entry_point_serves_the_object_create_app_returns(self) -> None:
         tree = ast.parse(AGENT_ENTRY_PATH.read_text(encoding="utf-8"))

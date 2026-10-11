@@ -3,8 +3,37 @@
 The repository exposes its existing operational capabilities as one Main Sequence Harness Agent.
 The agent is an additional project surface over the same reusable services used by the CLI and
 FastAPI application; it is not a second API and it does not duplicate connector logic. Its project
-tools are served by the API's MCP endpoint and run in the API as the person the Agent serves
+tools are served by the API's MCP endpoint with verified caller and requester identity
 ([ADR 0015](adrs/0015_agent_tools_on_the_api_mcp_and_site_key_entry.md)).
+
+## Architecture
+
+```text
+Person → Alpaca Agent (TAU Harness, A2A)
+                 │
+                 └→ alpaca__list_tools / alpaca__call_tool
+                                  │
+                         Alpaca API /mcp
+                                  │
+                         shared project services ← REST / CLI
+                                  │
+                 ┌────────────────┼─────────────────┐
+              Alpaca       ms-markets / MetaTables   workflow Jobs
+                                                     │
+                                              JobRun → services
+```
+
+The Agent interprets the request and selects a documented operation; it does not own connector
+state or implement extraction, registration, pricing, or portfolio calculations. The reusable
+Python services own that behavior. MetaTables hold the durable business configurations and
+observations. Workflow Jobs own schedules and compute; JobRuns record executions, not configuration.
+TAU owns the conversation, model invocation, A2A transport, and application-MCP connection.
+
+The source card is named **Alpaca Agent**. Its six skills cover Asset registration, Accounts and
+holdings, ETF Universes, stock bars, ETF weight signals, and analytical portfolios (including
+rebalance configurations). The configured model is `openai-codex / gpt-5.6-luna` with `medium`
+thinking, selected explicitly from the development backend's authenticated catalog.
+The source card advertises completed A2A messages; a returned JobRun UID is not an A2A Task.
 
 ## Repository Artifacts
 
@@ -20,8 +49,14 @@ tools are served by the API's MCP endpoint and run in the API as the person the 
   Agent icon, because the platform dropped that field.
 
 The platform builds the complete runtime A2A Agent Card at deployment. Concrete interfaces,
-security declarations, protocol versions, and runtime capabilities are intentionally absent from
-the repository source card.
+security declarations, and protocol versions are intentionally absent from the repository source
+card; it declares its supported response kind and business skills.
+
+There is no project `.tau/` override or in-process extension tool directory. TAU uses its packaged
+system instructions plus repository instructions and discovered skills. The installed loader
+discovers the six direct `.agents/skills/<capability>/SKILL.md` entries. The nested SDK and
+platform skill bundles are development guidance, not additional automatically loaded business
+skills.
 
 ## Tool Surface
 
@@ -54,6 +89,22 @@ MCP server runs the existing application services inside the API's request ident
 and ownership follow the person the Agent serves. Arguments are validated against each schema, and
 errors never quote them.
 
+### Identity and authorization
+
+There are three distinct identities in the execution path:
+
+| Boundary | Identity and authorization |
+| --- | --- |
+| Agent calls the API | TAU supplies the platform-verified Agent caller and requester, under `acts_for_requester`. The platform checks application access. |
+| API records ownership | `identity.acting_user_uid()` selects the verified requester, otherwise the caller. Key requests and operation ownership use that UID, never a UID supplied in arguments. |
+| API or Job accesses backing services | Ordinary downstream SDK and MetaTables calls use that process's workload principal and grants. They do not automatically inherit the incoming requester's credentials. |
+
+The API verifies request identity before installing MCP; its worker-thread dispatch preserves that
+context. This is not a blanket claim of per-person filtering on every table. The application's
+release-access boundary, explicit ownership checks, and workload permissions all matter. API and
+Job workload users obtain table access through the Environment's Team and its
+`mainsequence.markets` namespace grant; the Harness needs no direct table grant to use these tools.
+
 ## Operational Boundaries
 
 - The Organization Environment is derived from the deployed CodeRepositoryBranch and is never a
@@ -69,15 +120,55 @@ errors never quote them.
 - Bars, ETF signal, and ETF portfolio updates submit their existing Main Sequence Jobs and return a
   JobRun UID. Large updates do not execute inline in the agent session.
 - Destructive tool operations require exact `DELETE <uid>` confirmation.
-- The agent cannot place trades, submit orders, execute arbitrary SQL or shell commands, or create
-  unrelated platform releases.
+- The 17 Alpaca tools expose no trading, order submission, arbitrary SQL, shell execution, or
+  unrelated platform-release operations. Those are outside this application's supported scope.
+
+### Restricted runtime tool scope
+
+The Harness workflow sets both `TAU_EXCLUDE_BASE_TOOLS=true` and
+`TAU_EXCLUDE_MAINSEQUENCE_MCP=true`. These SDK settings remove generic filesystem reading,
+`write`, `edit`, `bash`, and the general Main Sequence MCP connection, tools, and resource prompt.
+This is a runtime tool restriction, not a prompt-only instruction.
+
+The model-facing catalog retains:
+
+- `alpaca__list_tools` and `alpaca__call_tool`, reaching only the declared Alpaca application's
+  17 project tools;
+- a restricted `read` that can open discovered skill files and their supporting files, not
+  arbitrary repository files or paths outside those skills;
+- SDK `task_request_input` and `task_request_authorization` controls for the Agent's own A2A
+  Task context. These are runtime controls, not general platform operations.
+
+No project extension tools are installed. Runtime authentication, requester delegation, and the
+Alpaca application's own platform access remain intact. The CLI examples in repository skills
+are for human/developer workflows; the restricted Harness has no shell fallback. If an Alpaca
+tool cannot perform a requested operation, the Agent must report that limitation.
+
+These settings are declared on the Harness resource only; they do not affect the API, CLI, or
+Jobs. A local launch must supply the same two settings explicitly. The hosted restriction takes
+effect only after the changed workflow is pushed and a new Agent revision becomes active;
+editing the workflow does not change an already deployed revision.
+
+### Application-tool timeouts
+
+TAU 2.0.11 honors a tool's MCP `_meta["mainsequence.ai/timeout-seconds/v1"]` value. An undeclared
+limit uses `TAU_MCP_TOOL_TIMEOUT_SECONDS`, which defaults to **60 seconds**, and no call may outlive
+its turn. The current Alpaca MCP catalog declares no per-tool limit and the workflow declares no
+override, so its calls use that default.
+
+Bars, signal, and portfolio update tools submit Jobs and return their JobRun UID for status checks.
+Some other mutations, including Asset registration, holdings capture, and Universe extraction,
+still execute synchronously in the API and can exceed the tool deadline. A timeout is not proof
+that a write failed or was rolled back: inspect operation status or the affected resource before
+retrying a mutation. The new timeout support does not automatically move these operations to Jobs.
 
 ## Deployment
 
 `.mainsequence/workflows/alpaca-connectors-api.yaml` declares the branch's one `harness_agent`
 on workflow API `2.3.0`, next to the `alpaca` API whose MCP it uses
-(`mcp_applications: [{resource: alpaca}]`); declarations in the same file are applied first, so
-the API is in place before the Agent registers it. Its `source_path`, `api/agent/main.py`, serves
+(`mcp_applications: [{resource: alpaca}]`). Same-file declarations establish that application
+reference; they do not themselves prove that either service is ready. Its `source_path`,
+`api/agent/main.py`, serves
 the object
 `ms_tau_sdk.create_app()` returns; the platform runs it from the ordinary CodeRepository image, so
 `ms-tau-sdk` is a runtime dependency in `pyproject.toml` and the exported `requirements.txt`. The
@@ -90,6 +181,13 @@ serves, for at most 24 hours after that request. The retired `code_repository_co
 and its `command_center_icon`, `cpu_limit`, and `memory_limit` fields are rejected by the
 platform, so the workflow no longer declares an icon.
 
+The explicit execution chain builds an image, runs this project's migration Job, and then deploys
+the API. The Harness has automatic deployment but is not a step in that migration-gated chain;
+it accesses project data through the API, not directly. Verify both releases separately. The
+account-key-entry link currently targets the development Command Center at `localhost:5173`;
+`ALPACA_CONNECTORS_SITE_URL` must point to the intended, person-accessible site before using this
+flow outside that development setup.
+
 The project keeps Uvicorn on the `0.52` line with a non-exact `>=0.52.4,<0.53` project range;
 `uv.lock` records the reproducible installed version.
 
@@ -98,3 +196,47 @@ Repository preparation and workflow validation do not alone prove a live Agent i
 push, verify the workflow action, exact-commit image chain, deployment run, Agent readiness, the
 `alpaca__list_tools` result (the 17-tool catalog), and that the API release advertises its MCP
 connection before relying on it.
+
+## Current local compatibility review
+
+The installed and locked versions are Main Sequence **9.0.20**, TAU **2.0.11**, MetaTables
+(`mainsequence-metatable`) **0.1.34**, and ms-markets **2.2.10**. These matched the latest stable
+published releases at this review. They were upgraded from 9.0.19, 2.0.10, 0.1.33, and 2.2.5
+respectively; no other dependency versions changed. `pyproject.toml` retains non-exact
+compatibility ranges, while `uv.lock` and the exported `requirements.txt` record the resolution.
+
+Verification on these versions passed all 419 tests (plus 72 subtests), Ruff lint, actual API
+and Harness app imports, and TAU discovery of all six repository-owned skills without diagnostics.
+The MCP catalog contains nine read-only tools and eight mutation/multi-operation tools. This
+review does not certify a deployed Agent or hosted migration completion.
+The MetaTables SDK compatibility check and installed dependency consistency check also passed.
+
+Tool-restriction regressions exercise the installed TAU runtime's catalog assembly with mocked
+backend/model I/O: only the Alpaca pair, skill reader, and A2A Task controls remain. They also
+verify that the real skill reader opens business skills and rejects application files outside
+those skills.
+
+The development skill bundles were explicitly refreshed from the installed packages: Main
+Sequence 9.0.20, TAU 2.0.11, MetaTables 0.1.34, and ms-markets 2.2.10. Each bundle's
+`PINNED_FROM.txt` records its matching version. The six repository-owned business skills were
+preserved.
+
+The authenticated local API smoke test initializes a real MCP session, discovers all 17 tools,
+and successfully reads project state, Accounts, and Universes against the migrated local
+MetaTables runtime. Invalid tool arguments produce a structured error without echoing their
+values. This verifies the API-to-MetaTables path, not the deployed Agent.
+
+A separate real local TAU conversation with `openai-codex / gpt-5.6-luna` passed both an initial
+Message and a follow-up using the returned context ID; the follow-up recalled the test word and
+the public conversation history contained all four messages. `/health`, `/ready`, and `/version`
+returned HTTP 200, with generic base and platform tools excluded. This unregistered local
+bootstrap does not resolve workflow `mcp_applications`, so these checks do not certify a model
+calling the Alpaca API. That integration must be verified on the deployed Harness.
+
+The pre-publication live check found that the development backend no longer advertises the
+former `openai / gpt-5.4` selection. The user selected `openai-codex / gpt-5.6-luna`, which the
+current catalog supports with `medium` thinking. Publishing the already-committed source indexed
+`api/agent/main.py` at commit `81388e5`; the complete workflow then passed the development
+backend's API 2.3.0 validation with no errors or warnings. No resource UID was supplied to bypass
+source validation. No live Alpaca Agent was found before the new deployment, and deployed
+communication remains unverified until the new release is ready and its A2A/MCP smoke test passes.
