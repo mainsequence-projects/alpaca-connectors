@@ -43,6 +43,8 @@ The source card advertises completed A2A messages; a returned JobRun UID is not 
 - `api/agent/main.py` is the Agent's entry point: the Tau runtime from `ms_tau_sdk.create_app()`.
 - `src/alpaca_connectors/api/app/mcp_server.py` serves the structured project tools from
   `alpaca_connectors.agent_tools` at the API's `/mcp`.
+- `src/alpaca_connectors/api/app/site_agent.py` finds this Agent when a request arrives, so the
+  project configuration can return it to the Alpaca site.
 - `.mainsequence/workflows/alpaca-connectors-api.yaml` declares the `alpaca` API with
   `mcp_enabled: true` and the `harness_agent` that uses it.
 - `.agents/alpaca-command-center-icon.png` is the Alpaca artwork. The workflow no longer declares an
@@ -196,6 +198,13 @@ The two resources name each other in their `access` blocks. The Agent has `view`
 release, the application it calls. The API has `view` on the Agent, so it can find the Agent that
 the Alpaca site opens. Both entries name resources declared on this branch, so any push may apply
 them; only `acts_for_requester` needed an Organization admin's push, and it is already on.
+
+The project configuration (`GET /v1/project-state/configuration`) uses that access. It finds the
+Agent when the request arrives and returns `agent_uid` with `organization_environment_uid`. The
+Alpaca site mounts its conversation from that answer, and neither UID is part of the site's build.
+A re-created Agent has a new UID: the push that re-creates it also re-applies the API's access, and
+the API's next answer names the new Agent, without a site rebuild. See
+[the API](api.md#project-state-and-the-sites-agent).
 
 The project keeps Uvicorn on the `0.52` line with a non-exact `>=0.52.4,<0.53` project range;
 `uv.lock` records the reproducible installed version.

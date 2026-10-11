@@ -48,6 +48,13 @@ class ProjectConfigurationResponse(BaseModel):
     universe_sources_are_user_managed: bool = True
     organization_environment_uid: str | None = None
     organization_environment_name: str | None = None
+    agent_uid: str | None = Field(
+        default=None,
+        description=(
+            "This branch's deployed Alpaca Agent, found when the request arrives; null when it is "
+            "not available. When set, organization_environment_uid is that Agent's Environment."
+        ),
+    )
     request_user_uid: str | None = None
     registered_account_count: int = 0
     has_registered_account: bool = False

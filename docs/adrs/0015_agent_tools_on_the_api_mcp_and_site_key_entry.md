@@ -5,6 +5,13 @@
 Accepted on 2026-10-08. Amends the "Tau tools and agent sessions" surface of
 [ADR 0011](0011_api_managed_alpaca_credential_secrets.md).
 
+On 2026-10-11 the API began returning this Agent to the Alpaca site, as the CRM API returns its
+assistant. The API and the Agent declare `view` on each other in the workflow's
+`access.resources`. `deploy_agent` needs `deploy_api`. `GET /v1/project-state/configuration`
+returns `agent_uid` and `organization_environment_uid`. The API finds the Agent when the request
+arrives, by the card's name, in the Environment and on the branch that the SDK context resolves.
+The site's build holds neither UID ([API](../api.md#project-state-and-the-sites-agent)).
+
 ## Context
 
 ADR 0011 lets the Alpaca site register an account from submitted API keys: the API validates them

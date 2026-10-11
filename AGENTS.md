@@ -169,6 +169,12 @@ FastAPI surface:
   two, and never take a person's UID from a request body, header, or tool argument
 - the API's workflow key is `alpaca`: it is the Agent's MCP tool prefix, so it must match
   `^[a-z][a-z0-9_]{0,39}$`; the Alpaca site names the release by repository and key, never by UID
+- the site gets the Agent from the API at request time: `GET /v1/project-state/configuration`
+  returns `agent_uid` and `organization_environment_uid` from one lookup in
+  `alpaca_connectors.api.app.site_agent`. The lookup takes the card's name, checks it against the
+  Environment and branch that the SDK context resolves, and requires a deployed runtime release.
+  It answers `agent_uid: null` rather than fail. Never put the Agent or its Environment in a site's
+  build environment
 
 Project-to-agent boundary:
 

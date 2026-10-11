@@ -13,6 +13,7 @@ from alpaca_connectors.universes import (
 )
 
 from ..schemas import ProjectConfigurationResponse
+from ..site_agent import resolve_site_agent
 
 
 def get_project_configuration(
@@ -25,15 +26,22 @@ def get_project_configuration(
     datasets = list_market_data_datasets()
     context = get_code_repository_context()
     branch = context.code_repository_branch
+    # The site opens its conversation with this pair, so both come from the one Agent lookup.
+    agent = resolve_site_agent()
     return ProjectConfigurationResponse(
         supported_component_providers=list(SUPPORTED_COMPONENT_PROVIDERS),
         migrated_market_data_profiles=[
             "/".join(triple) for triple in sorted(ALPACA_STOCK_BARS_STORAGE_BY_TRIPLE)
         ],
-        organization_environment_uid=context.organization_environment_uid,
+        organization_environment_uid=(
+            agent.organization_environment_uid
+            if agent is not None
+            else context.organization_environment_uid
+        ),
         organization_environment_name=(
             str(getattr(branch, "organization_environment_name", "") or "").strip() or None
         ),
+        agent_uid=agent.agent_uid if agent is not None else None,
         request_user_uid=request_user_uid,
         registered_account_count=account_count,
         has_registered_account=account_count > 0,

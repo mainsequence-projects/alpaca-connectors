@@ -81,6 +81,32 @@ collection and detail endpoints do not perform one backend request per Asset. Un
 publishes the extracted weights through the canonical `SignalWeightsStorage`. The linked category
 records membership only; weights do not become category-membership columns.
 
+## Project State And The Site's Agent
+
+The Alpaca site reads `GET /v1/project-state/configuration` on page load. Besides the migrated
+market-data profiles and the account, Universe-source and dataset counts, it names the Agent that
+the site's conversation opens:
+
+| Field | Value |
+| --- | --- |
+| `agent_uid` | This branch's deployed Alpaca Agent, or `null` when none can be named exactly |
+| `organization_environment_uid` | The branch's Organization Environment; when `agent_uid` is set, that Agent's own |
+| `organization_environment_name` | That Environment's name |
+
+The API finds the Agent when the request arrives (`alpaca_connectors.api.app.site_agent`), as the CRM
+API does. It lists Agents by the name in `.agents/agent_card.json`, then keeps the one that is in
+the Environment and on the CodeRepositoryBranch the SDK context resolves, and that has a deployed
+runtime release. Nothing comes from the request. The workflow gives the API `view` on the Agent
+(`access.resources`), which is what lets the hosted API see it.
+
+If the Agent is missing, ambiguous or not deployed, or the lookup fails, the answer carries
+`agent_uid: null` instead of failing the configuration. The site then shows its conversation as
+unavailable, and its other pages keep working.
+
+The site takes both UIDs from this one answer, never from its build or from the person's Command
+Center Environment. A re-created Agent has a new UID, and the API's next answer names it without a
+site rebuild. The `alpaca_project_state` MCP tool returns the same configuration.
+
 ## Signal And Portfolio Jobs
 
 Signal and portfolio configurations run on the two Jobs declared in
