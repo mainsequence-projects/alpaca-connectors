@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from collections.abc import Iterator
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -14,6 +16,15 @@ from alpaca_connectors.agent_tools import PROJECT_AGENT_TOOL_NAMES, PROJECT_AGEN
 PERSON_UID = "77777777-7777-4777-8777-777777777777"
 MCP_HEADERS = {"Accept": "application/json, text/event-stream", "Content-Type": "application/json"}
 SUBMITTED_SECRET = "SECRET-LOOKING-VALUE-9911"
+SKILLS_ROOT = Path(__file__).resolve().parents[1] / ".agents/skills/mcp_tools"
+SKILL_NAMES = {
+    "alpaca-account-workflow",
+    "alpaca-asset-registration",
+    "alpaca-etf-portfolios",
+    "alpaca-etf-weight-signals",
+    "alpaca-holdings-category",
+    "alpaca-stock-bars",
+}
 
 
 def requester(uid: str = PERSON_UID) -> dict[str, object]:
@@ -65,8 +76,124 @@ def test_mcp_lists_the_project_tool_catalog(local_caller, mcp_client) -> None:
     by_name = {tool["name"]: tool for tool in tools}
     for definition in PROJECT_AGENT_TOOLS:
         listed = by_name[definition.name]
+        assert listed["inputSchema"]["type"] == "object"
         assert listed["inputSchema"] == definition.parameters
         assert listed["annotations"]["readOnlyHint"] is (definition.execution_mode == "parallel")
+
+
+def test_mcp_preserves_legacy_initialization(local_caller, mcp_client) -> None:
+    response = rpc(
+        mcp_client,
+        "initialize",
+        {
+            "protocolVersion": "2025-11-25",
+            "capabilities": {},
+            "clientInfo": {"name": "alpaca-upgrade-test", "version": "1"},
+        },
+        local_caller.headers,
+    )
+
+    assert response.status_code == 200
+    result = response.json()["result"]
+    assert result["serverInfo"]["name"] == "alpaca"
+    assert "tools" in result["capabilities"]
+    assert not result["capabilities"].get("extensions")
+
+
+def test_modern_mcp_discovery_advertises_the_skills_extension(local_caller, mcp_client) -> None:
+    response = rpc(
+        mcp_client,
+        "server/discover",
+        {
+            "_meta": {
+                "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+                "io.modelcontextprotocol/clientCapabilities": {
+                    "extensions": {"io.modelcontextprotocol/skills": {}}
+                },
+            }
+        },
+        {
+            **local_caller.headers,
+            "MCP-Protocol-Version": "2026-07-28",
+            "Mcp-Method": "server/discover",
+        },
+    )
+    assert response.status_code == 200, response.text
+    result = response.json()["result"]
+    assert "io.modelcontextprotocol/skills" in result["capabilities"]["extensions"]
+
+
+def test_mcp_publishes_only_six_business_skills_with_exact_source_bytes(
+    local_caller, mcp_client
+) -> None:
+    response = rpc(mcp_client, "skills/list", {}, local_caller.headers)
+    assert response.status_code == 200
+    skills = response.json()["result"]["skills"]
+    assert {skill["frontmatter"]["name"] for skill in skills} == SKILL_NAMES
+    assert len(skills) == 6
+    resources = rpc(mcp_client, "resources/list", {}, local_caller.headers).json()["result"]
+    assert {resource["uri"] for resource in resources["resources"]} == {
+        f"skill://{name}/SKILL.md" for name in SKILL_NAMES
+    }
+
+    for skill in skills:
+        name = skill["frontmatter"]["name"]
+        uri = f"skill://{name}/SKILL.md"
+        payload = (SKILLS_ROOT / name / "SKILL.md").read_bytes()
+        assert skill["uri"] == uri
+        assert skill["resources"] == [
+            {
+                "uri": uri,
+                "digest": "sha256:" + hashlib.sha256(payload).hexdigest(),
+                "size": len(payload),
+            }
+        ]
+        manifest = rpc(mcp_client, "skills/get", {"uri": uri}, local_caller.headers)
+        assert manifest.json()["result"]["skill"] == skill
+        content = rpc(mcp_client, "resources/read", {"uri": uri}, local_caller.headers)
+        assert content.json()["result"]["contents"][0]["text"].encode("utf-8") == payload
+
+
+@pytest.mark.parametrize(
+    "uri",
+    [
+        "skill://mainsequence/maintenance/code_repository_maintenance/SKILL.md",
+        "skill://mainsequence_platform/agents/code_repository_to_agent/SKILL.md",
+        "skill://ms_tau_sdk/tau_project_customization/SKILL.md",
+        "skill://metatables/metatables-meta-tables/SKILL.md",
+        "skill://alpaca-account-workflow/../../mainsequence/PINNED_FROM.txt",
+    ],
+)
+@pytest.mark.parametrize("method", ["skills/get", "resources/read"])
+def test_mcp_does_not_serve_private_skill_files(local_caller, mcp_client, method, uri) -> None:
+    response = rpc(mcp_client, method, {"uri": uri}, local_caller.headers)
+    assert response.status_code == 200
+    assert "error" in response.json()
+    assert "result" not in response.json()
+
+
+@pytest.mark.parametrize(
+    ("method", "params"),
+    [
+        ("skills/list", {}),
+        ("skills/get", {"uri": "skill://alpaca-account-workflow/SKILL.md"}),
+        ("resources/read", {"uri": "skill://alpaca-account-workflow/SKILL.md"}),
+    ],
+)
+def test_mcp_skill_operations_require_authentication(local_caller, mcp_client, method, params):
+    assert rpc(mcp_client, method, params, {}).status_code == 401
+
+
+def test_published_skills_resolve_independently_of_the_working_directory(
+    local_caller, monkeypatch, tmp_path
+) -> None:
+    from alpaca_connectors.api.app.main import create_app
+
+    monkeypatch.chdir(tmp_path)
+    with patch("alpaca_connectors.runtime.start_markets_engine"):
+        with TestClient(create_app()) as client:
+            result = rpc(client, "skills/list", {}, local_caller.headers).json()["result"]
+    assert {skill["frontmatter"]["name"] for skill in result["skills"]} == SKILL_NAMES
 
 
 def test_mcp_refuses_a_request_without_an_authenticated_caller(local_caller, mcp_client) -> None:

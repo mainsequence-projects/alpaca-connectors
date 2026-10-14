@@ -80,6 +80,8 @@ def test_hosted_catalog_preserves_alpaca_but_excludes_generic_tools(tmp_path: Pa
             "read",
             "alpaca__list_tools",
             "alpaca__call_tool",
+            "alpaca__list_resources",
+            "alpaca__read_resource",
             "task_request_input",
             "task_request_authorization",
         }
@@ -100,19 +102,37 @@ def test_hosted_catalog_preserves_alpaca_but_excludes_generic_tools(tmp_path: Pa
         mcp.assert_not_awaited()
 
 
-def test_restricted_reader_can_read_skills_but_not_application_files(tmp_path: Path) -> None:
+def test_local_reader_does_not_expose_application_or_private_development_files(tmp_path: Path):
     skills, diagnostics = load_skills_with_diagnostics(
         tau_resource_paths(REPO_ROOT, state_home=tmp_path)
     )
     assert not diagnostics
-    assert len(skills) == 6
+    # TAU 2.0.14 serves application skills through its MCP resource tools, not the local index.
+    # Their real HTTP discovery and verified reads are covered in test_agent_mcp_skills.py.
+    assert skills == []
     reader = create_skill_read_tool(cwd=REPO_ROOT, skills=lambda: skills)
 
     async def read_paths():
-        result = await reader.execute_fn("read-skill", {"path": str(skills[0].path)})
-        assert result.content
         # Do not use a real credential file as the denial probe.
         with pytest.raises(ToolInputError, match="outside the available skills"):
             await reader.execute_fn("read-other", {"path": str(REPO_ROOT / "pyproject.toml")})
+        with pytest.raises(ToolInputError, match="outside the available skills"):
+            await reader.execute_fn(
+                "read-local-business",
+                {
+                    "path": str(
+                        REPO_ROOT / ".agents/skills/mcp_tools/alpaca-account-workflow/SKILL.md"
+                    )
+                },
+            )
+        with pytest.raises(ToolInputError, match="outside the available skills"):
+            await reader.execute_fn(
+                "read-private",
+                {
+                    "path": str(
+                        REPO_ROOT / ".agents/skills/ms_tau_sdk/tau_project_customization/SKILL.md"
+                    )
+                },
+            )
 
     anyio.run(read_paths)

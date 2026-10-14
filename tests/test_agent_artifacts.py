@@ -2,16 +2,21 @@ from __future__ import annotations
 
 import ast
 import json
+import re
 import struct
 import tomllib
 import unittest
 from pathlib import Path
 
+import jsonschema
 import yaml
+
+from alpaca_connectors.agent_tools import PROJECT_AGENT_TOOLS
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 AGENTS_PATH = REPO_ROOT / "AGENTS.md"
 SKILLS_ROOT = REPO_ROOT / ".agents" / "skills"
+MCP_SKILLS_ROOT = SKILLS_ROOT / "mcp_tools"
 AGENT_CARD_PATH = REPO_ROOT / ".agents" / "agent_card.json"
 ICON_PATH = REPO_ROOT / ".agents" / "alpaca-command-center-icon.png"
 PYPROJECT_PATH = REPO_ROOT / "pyproject.toml"
@@ -83,6 +88,32 @@ class AgentArtifactsTests(unittest.TestCase):
             self.assertTrue(skill["tags"])
             self.assertTrue(skill["examples"])
             self.assertTrue((REPO_ROOT / skill["path"]).is_file())
+
+    def test_business_skills_have_one_copy_in_the_selected_mcp_root(self) -> None:
+        paths = project_skill_paths()
+        self.assertEqual(len(paths), 6)
+        for path in paths:
+            skill = REPO_ROOT / path
+            self.assertEqual(skill.parent.parent, MCP_SKILLS_ROOT)
+            self.assertFalse(skill.is_symlink())
+            self.assertFalse(skill.parent.is_symlink())
+            frontmatter = yaml.safe_load(skill.read_text().split("---", 2)[1])
+            self.assertEqual(frontmatter["name"], skill.parent.name)
+            self.assertTrue(frontmatter["description"])
+        self.assertFalse((REPO_ROOT / ".tau" / "skills").exists())
+
+    def test_skill_call_examples_match_the_actual_tool_schemas(self) -> None:
+        catalog = {tool.name: tool.parameters for tool in PROJECT_AGENT_TOOLS}
+        for path in project_skill_paths():
+            content = (REPO_ROOT / path).read_text(encoding="utf-8")
+            examples = re.findall(r"```json\s*\n(.*?)\n```", content, re.DOTALL)
+            self.assertTrue(examples, path)
+            for example in examples:
+                with self.subTest(skill=path, example=example):
+                    call = json.loads(example)
+                    self.assertEqual(set(call), {"tool", "arguments"})
+                    self.assertIn(call["tool"], catalog)
+                    jsonschema.validate(call["arguments"], catalog[call["tool"]])
 
     def test_the_agent_gets_project_tools_only_from_the_api_mcp(self) -> None:
         # No in-process Tau tools: every project tool runs in the API, as the person it serves.

@@ -179,9 +179,15 @@ FastAPI surface:
 Project-to-agent boundary:
 
 - this repository exposes one Harness Agent through `.agents/agent_card.json`, six
-  repository-owned skills, and the project tools the API's MCP server serves from
-  `alpaca_connectors.api.app.mcp_server`; do not introduce a separate `agents/` runtime or
-  in-process `.tau/extensions` tools
+  repository-owned skills under `.agents/skills/mcp_tools/`, and the project tools the API's MCP
+  server serves from `alpaca_connectors.api.app.mcp_server`; do not introduce a separate `agents/`
+  runtime or in-process `.tau/extensions` tools
+- the API publishes only `.agents/skills/mcp_tools/` through the SDK's `skills_extension`;
+  these six MCP-usage skills have one authoritative copy, named to match their frontmatter.
+  Never publish the full `.agents/skills/` tree, copy them into `.tau/skills`, or expose managed
+  SDK/platform skills to the business Agent. With ms-tau-sdk>=2.0.14, discover them using
+  `alpaca__list_resources` and read their listed `skill://` files using `alpaca__read_resource`.
+  They remain application-owned MCP skills, not local TAU skills; add no custom loader or shim.
 - the Agent is the `harness_agent` in `.mainsequence/workflows/alpaca-connectors-api.yaml`, served
   by `api/agent/main.py` (`ms_tau_sdk.create_app()`, pinned `ms-tau-sdk` runtime dependency),
   declared `acts_for_requester: true`, with `mcp_applications: [{resource: alpaca}]`;

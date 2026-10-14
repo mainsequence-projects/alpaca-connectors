@@ -203,7 +203,7 @@ Implemented on 2026-10-03:
 - Revision `0015_add_account_credential_secret_references`.
 - `alpaca_connectors.api.app`: the `credentials` union, agent-only request models, the redacted 422 handler, the
   `alpaca_credentials_rejected` mapping, and the caller's user UID on create and update.
-- `AGENTS.md`, `README.md`, `docs/`, and `.agents/skills/account_workflow/` describe the new model.
+- `AGENTS.md`, `README.md`, `docs/`, and `.agents/skills/mcp_tools/alpaca-account-workflow/` describe the new model.
 - `src/alpaca_connectors/settings.py`: the unused `get_alpaca_api_key` / `get_alpaca_secret_key` global fallbacks and
   their tests are deleted.
 

@@ -9,6 +9,9 @@ The server is stateless and answers JSON. It lists `alpaca_connectors.agent_tool
 the same names and input schemas, validates arguments against them, and runs each handler in a
 worker thread that keeps the call's identity. Results and errors are JSON text; errors never echo
 arguments, so no submitted value reaches a response, a log, or the model.
+
+The SDK's skills extension publishes only ``.agents/skills/mcp_tools``. It owns discovery,
+manifests and file resources; managed SDK/platform skills are not exposed by this application.
 """
 
 from __future__ import annotations
@@ -16,8 +19,8 @@ from __future__ import annotations
 import dataclasses
 import datetime as dt
 import json
-from collections.abc import AsyncIterator, Callable, Mapping
-from contextlib import AbstractAsyncContextManager, asynccontextmanager
+from collections.abc import Callable, Mapping
+from contextlib import AbstractAsyncContextManager
 from decimal import Decimal
 from enum import Enum
 from typing import Any
@@ -26,18 +29,17 @@ from uuid import UUID
 import anyio.to_thread
 import jsonschema
 from mcp import types
-from mcp.server.lowlevel import Server
-from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
+from mcp.server.mcpserver import Context, MCPServer
 from mcp.server.transport_security import TransportSecuritySettings
 from pydantic import BaseModel, ValidationError
-from starlette.applications import Starlette
-from starlette.routing import Route
-from starlette.types import ASGIApp, Receive, Scope, Send
+from starlette.types import ASGIApp
 
 from alpaca_connectors.agent_tools import PROJECT_AGENT_TOOLS, ProjectAgentTool
+from mainsequence.server.mcp_skills import skills_extension
 
 MCP_SERVER_NAME = "alpaca"
 MCP_PATH = "/mcp"
+MCP_SKILLS_DIRECTORY = ".agents/skills/mcp_tools"
 
 
 def json_value(value: Any) -> Any:
@@ -109,7 +111,7 @@ def _text_result(payload: Any, *, is_error: bool) -> types.CallToolResult:
                 text=json.dumps(payload, indent=2, sort_keys=True, default=str),
             )
         ],
-        isError=is_error,
+        is_error=is_error,
     )
 
 
@@ -118,10 +120,10 @@ def mcp_tool(definition: ProjectAgentTool) -> types.Tool:
         name=definition.name,
         title=definition.label,
         description=definition.description,
-        inputSchema=definition.parameters,
+        input_schema=definition.parameters,
         annotations=types.ToolAnnotations(
             title=definition.label,
-            readOnlyHint=definition.execution_mode == "parallel",
+            read_only_hint=definition.execution_mode == "parallel",
         ),
     )
 
@@ -143,20 +145,27 @@ async def call_project_tool(
     return _text_result(json_value(result), is_error=False)
 
 
-def build_mcp_server(
-    tools: tuple[ProjectAgentTool, ...] = PROJECT_AGENT_TOOLS,
-) -> Server:
-    definitions = {definition.name: definition for definition in tools}
-    server: Server = Server(MCP_SERVER_NAME)
+class _ProjectMCPServer(MCPServer):
+    """Adapt the project's explicit schemas without inferring a second tool contract."""
 
-    @server.list_tools()
-    async def list_tools() -> list[types.Tool]:
-        return [mcp_tool(definition) for definition in definitions.values()]
+    def __init__(self, tools: tuple[ProjectAgentTool, ...]) -> None:
+        self._definitions = {definition.name: definition for definition in tools}
+        super().__init__(
+            MCP_SERVER_NAME,
+            extensions=[skills_extension(MCP_SKILLS_DIRECTORY)],
+        )
 
-    # Arguments are validated in call_project_tool, whose errors never quote them.
-    @server.call_tool(validate_input=False)
-    async def call_tool(name: str, arguments: dict[str, Any] | None) -> types.CallToolResult:
-        definition = definitions.get(name)
+    async def list_tools(self) -> list[types.Tool]:
+        return [mcp_tool(definition) for definition in self._definitions.values()]
+
+    async def call_tool(
+        self,
+        name: str,
+        arguments: dict[str, Any],
+        context: Context | None = None,
+    ) -> types.CallToolResult:
+        # Validate in call_project_tool so rejected inputs never appear in SDK error text.
+        definition = self._definitions.get(name)
         if definition is None:
             return _text_result(
                 {
@@ -168,17 +177,11 @@ def build_mcp_server(
             )
         return await call_project_tool(definition, arguments)
 
-    return server
 
-
-class _StreamableHTTPEndpoint:
-    """ASGI endpoint that hands each request to the session manager."""
-
-    def __init__(self, session_manager: StreamableHTTPSessionManager) -> None:
-        self._session_manager = session_manager
-
-    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        await self._session_manager.handle_request(scope, receive, send)
+def build_mcp_server(
+    tools: tuple[ProjectAgentTool, ...] = PROJECT_AGENT_TOOLS,
+) -> MCPServer:
+    return _ProjectMCPServer(tools)
 
 
 def build_mcp_application(
@@ -188,28 +191,21 @@ def build_mcp_application(
 
     Each application gets its own session manager, whose lifespan runs once.
     """
-    session_manager = StreamableHTTPSessionManager(
-        app=build_mcp_server(tools),
+    server = build_mcp_server(tools)
+    asgi_app = server.streamable_http_app(
+        streamable_http_path=MCP_PATH,
         json_response=True,
-        stateless=True,
+        stateless_http=True,
         # The request identity checks Origin and the platform routes the host.
-        security_settings=TransportSecuritySettings(enable_dns_rebinding_protection=False),
+        transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False),
     )
-    asgi_app = Starlette(
-        routes=[Route(MCP_PATH, endpoint=_StreamableHTTPEndpoint(session_manager))]
-    )
-
-    @asynccontextmanager
-    async def lifespan() -> AsyncIterator[None]:
-        async with session_manager.run():
-            yield
-
-    return asgi_app, lifespan
+    return asgi_app, server.session_manager.run
 
 
 __all__ = [
     "MCP_PATH",
     "MCP_SERVER_NAME",
+    "MCP_SKILLS_DIRECTORY",
     "build_mcp_application",
     "build_mcp_server",
     "call_project_tool",

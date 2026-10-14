@@ -30,7 +30,7 @@
       "examples": [
         "Plan registration for AAPL and NVDA through my registered Alpaca account."
       ],
-      "path": ".agents/skills/asset_registration/SKILL.md"
+      "path": ".agents/skills/mcp_tools/alpaca-asset-registration/SKILL.md"
     },
     {
       "id": "account-workflow",
@@ -46,7 +46,7 @@
         "Register my live Alpaca account; I have the API key and secret key.",
         "Register a paper account from these two Main Sequence Secret names and show its initial holdings."
       ],
-      "path": ".agents/skills/account_workflow/SKILL.md"
+      "path": ".agents/skills/mcp_tools/alpaca-account-workflow/SKILL.md"
     },
     {
       "id": "holdings-category",
@@ -60,7 +60,7 @@
       "examples": [
         "Preview and extract the components for this registered ETF Universe using my selected account."
       ],
-      "path": ".agents/skills/holdings_category/SKILL.md"
+      "path": ".agents/skills/mcp_tools/alpaca-holdings-category/SKILL.md"
     },
     {
       "id": "stock-bars",
@@ -74,7 +74,7 @@
       "examples": [
         "Resolve this daily Universe-backed bars configuration and run its update Job."
       ],
-      "path": ".agents/skills/stock_bars/SKILL.md"
+      "path": ".agents/skills/mcp_tools/alpaca-stock-bars/SKILL.md"
     },
     {
       "id": "etf-weight-signals",
@@ -88,7 +88,7 @@
       "examples": [
         "Create a daily ETF weight signal for this Universe and account, then run it once."
       ],
-      "path": ".agents/skills/etf_weight_signals/SKILL.md"
+      "path": ".agents/skills/mcp_tools/alpaca-etf-weight-signals/SKILL.md"
     },
     {
       "id": "etf-portfolios",
@@ -102,7 +102,7 @@
       "examples": [
         "Build and run an analytical ETF portfolio from this signal, bars configuration, and market-close rebalance rule."
       ],
-      "path": ".agents/skills/etf_portfolios/SKILL.md"
+      "path": ".agents/skills/mcp_tools/alpaca-etf-portfolios/SKILL.md"
     }
   ]
 }

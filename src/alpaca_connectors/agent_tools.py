@@ -95,7 +95,8 @@ def _operation_case(
 
 
 def _operations(*cases: dict[str, Any]) -> dict[str, Any]:
-    return {"oneOf": list(cases)}
+    # MCP requires an object input schema at the root, even for discriminated operations.
+    return {"type": "object", "oneOf": list(cases)}
 
 
 def _string(description: str) -> dict[str, Any]:
