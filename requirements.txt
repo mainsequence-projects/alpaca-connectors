@@ -165,7 +165,7 @@ linkify-it-py==2.2.0
     # via markdown-it-py
 loguru==0.7.3
     # via fastembed
-mainsequence==9.0.23
+mainsequence==9.0.24
     # via
     #   alpaca-connectors
     #   etfhextractor

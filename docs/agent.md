@@ -274,8 +274,10 @@ connection before relying on it.
 
 ## Current local compatibility review
 
-The installed and locked versions are Main Sequence **9.0.23**, TAU **2.0.14**, MetaTables
-(`mainsequence-metatable`) **0.1.34**, and ms-markets **2.2.10**. The requested Main Sequence,
+The installed and locked versions are Main Sequence **9.0.24**, TAU **2.0.14**, MetaTables
+(`mainsequence-metatable`) **0.1.34**, and ms-markets **2.2.10**. On 2026-10-14 only Main Sequence
+moved, from 9.0.23 to 9.0.24. That release stops scaffolding `AGENTS.md` and ships its guidance
+in the SDK skills. The requested Main Sequence,
 TAU, and MetaTables releases were checked against the package registry on 2026-10-13; MetaTables
 was already current. ms-markets was not upgraded in this maintenance pass. `pyproject.toml`
 retains non-exact compatibility ranges, while `uv.lock` and the exported `requirements.txt`
@@ -307,7 +309,7 @@ controls remain. Local HTTP tests additionally verify skill consumption through 
 private files and digest mismatches, and separate caller identities on consecutive calls.
 
 The requested development skill bundles were explicitly refreshed from the installed packages:
-Main Sequence 9.0.23, TAU 2.0.14, and MetaTables 0.1.34. The existing ms-markets 2.2.10 bundle
+Main Sequence 9.0.24 (on 2026-10-14), TAU 2.0.14, and MetaTables 0.1.34. The existing ms-markets 2.2.10 bundle
 was left unchanged. Each bundle's `PINNED_FROM.txt` records its matching version. The six
 repository-owned business skills remain single-copy; only the project-owned portion of `AGENTS.md`
 is updated to describe MCP skill consumption. These changes are recorded on `main`;

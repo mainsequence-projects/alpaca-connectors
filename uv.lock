@@ -54,7 +54,7 @@ requires-dist = [
     { name = "etfhextractor", git = "https://github.com/mainsequence-projects/etfholdingextractor?tag=v0.4.4" },
     { name = "fastapi", specifier = ">=0.135.3" },
     { name = "httpx", specifier = ">=0.28.1" },
-    { name = "mainsequence", extras = ["mcp"], specifier = ">=9.0.23,<10" },
+    { name = "mainsequence", extras = ["mcp"], specifier = ">=9.0.24,<10" },
     { name = "mainsequence-metatable", specifier = ">=0.1.34,<0.2" },
     { name = "mkdocs", specifier = ">=1.6.1" },
     { name = "mkdocs-material", specifier = ">=9.7.6" },
@@ -775,7 +775,7 @@ wheels = [
 
 [[package]]
 name = "mainsequence"
-version = "9.0.23"
+version = "9.0.24"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "cachetools" },
@@ -797,9 +797,9 @@ dependencies = [
     { name = "typer" },
     { name = "urllib3" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/cc/87/385ea14432d4f7f3d4593103434f492c0176aa26bd86b8067e5872fa79f4/mainsequence-9.0.23.tar.gz", hash = "sha256:c48fc2866d0446e442ef937c10019482a75de8525d6a5270ca14eab8b767050f", size = 358070, upload-time = "2026-10-12T16:23:22.013Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/29/e7/f2654a10b0d4d51d3386d9a5bd428f677f69e8fc0e11fc335c6a44d5b04a/mainsequence-9.0.24.tar.gz", hash = "sha256:8d38190f1f74b9721d4feb1e7d762fef3c0bd43b2999f12ac67d56cdb50c6253", size = 353955, upload-time = "2026-10-14T11:07:59.247Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/93/6c/100493dd6bec340be02e688b422f6a7a1bf8ef859b29a85ad9f2b1d54196/mainsequence-9.0.23-py3-none-any.whl", hash = "sha256:c5588dcac1b6f994e38b5d67121993163fdffc546b1b1247b561296340e48a48", size = 292525, upload-time = "2026-10-12T16:23:20.522Z" },
+    { url = "https://files.pythonhosted.org/packages/25/89/3b080fe48340b08ddcab79bd60e323e7b7041bf817671567f91a77f6c114/mainsequence-9.0.24-py3-none-any.whl", hash = "sha256:a61217125f56ce3dee3b8cb81f9f0f971150bfcd08461113888f3f1afb55c1d5", size = 287681, upload-time = "2026-10-14T11:07:57.18Z" },
 ]
 
 [package.optional-dependencies]
