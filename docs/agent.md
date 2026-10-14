@@ -37,6 +37,8 @@ The source card advertises completed A2A messages; a returned JobRun UID is not 
 
 ## Repository Artifacts
 
+- `.tau/SYSTEM.md` is the Agent's runtime prompt: its role, its Alpaca tools and skills, identity
+  and key-entry rules, confirmations, uncertain writes and refusals.
 - `AGENTS.md` defines the project boundary and safety rules.
 - `.agents/agent_card.json` contains stable source metadata and six repository-owned skills.
 - `.agents/skills/mcp_tools/` holds the six MCP-usage skills, with one authoritative copy each.
@@ -55,8 +57,9 @@ The platform builds the complete runtime A2A Agent Card at deployment. Concrete 
 security declarations, and protocol versions are intentionally absent from the repository source
 card; it declares its supported response kind and business skills.
 
-There is no project `.tau/` override or in-process extension tool directory. TAU uses its packaged
-system instructions plus repository instructions and discovered skills. The business skills now
+`.tau/SYSTEM.md` replaces TAU's packaged general-purpose prompt with the Alpaca Agent's runtime
+instructions, and TAU still adds `AGENTS.md` to every session as project context. There is no
+in-process extension tool directory, and no `.tau/AGENTS.md` or `.agents/AGENTS.md`. The business skills now
 live under `.agents/skills/mcp_tools/<skill-name>/SKILL.md`, and the Agent Card points to those
 same files. TAU 2.0.14 discovers and reads them through the application's authenticated MCP:
 `alpaca__list_resources` lists the six skills, and `alpaca__read_resource` reads a listed file
