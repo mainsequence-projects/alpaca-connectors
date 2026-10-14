@@ -33,6 +33,9 @@ Install Playwright support when a provider extraction path requires it:
 bash scripts/install_browser_runtime.sh
 ```
 
+The rules for running the CLI, the API and the Jobs against an environment are in the
+[Operator Guide](operator-guide.md).
+
 ## Verify
 
 ```bash

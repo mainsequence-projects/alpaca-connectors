@@ -51,7 +51,36 @@ class AgentArtifactsTests(unittest.TestCase):
         self.assertIn("## CodeRepository-Specific Instructions", content)
         self.assertIn("Project-to-agent boundary:", content)
         self.assertIn("alpaca_connectors.api.app.mcp_server", content)
-        self.assertIn("alpaca-connectors asset register", content)
+
+    def test_agents_md_is_a_short_developer_file_the_agent_also_reads(self) -> None:
+        # TAU adds AGENTS.md to every Agent session, so it holds only developer rules; the runtime
+        # prompt is .tau/SYSTEM.md, and the operator manual lives in docs/.
+        content = AGENTS_PATH.read_text(encoding="utf-8")
+        self.assertLess(len(content.splitlines()), 80)
+        for retired in (
+            "dual-mandate agent",
+            "mainsequence-agent-scaffold",
+            "code-repository update AGENTS.md",
+            "api_surfaces",
+        ):
+            self.assertNotIn(retired, content)
+        self.assertIn("Its runtime instructions are `.tau/SYSTEM.md`", content)
+        self.assertTrue((REPO_ROOT / ".tau" / "SYSTEM.md").is_file())
+
+        guide = REPO_ROOT / "docs" / "operations" / "operator-guide.md"
+        self.assertIn("docs/operations/operator-guide.md", content)
+        moved = guide.read_text(encoding="utf-8")
+        for heading in (
+            "## Supported Operator Surfaces",
+            "## Asset Registration",
+            "## Asset Universes And Holdings Categories",
+            "## Price Updates From Alpaca",
+            "## Operational Notes",
+        ):
+            self.assertIn(heading, moved)
+        self.assertIn("alpaca-connectors asset register", moved)
+        mkdocs = yaml.safe_load((REPO_ROOT / "mkdocs.yml").read_text(encoding="utf-8"))
+        self.assertIn("operations/operator-guide.md", str(mkdocs["nav"]))
 
     def test_agent_card_is_source_metadata_not_a_runtime_card(self) -> None:
         card = json.loads(AGENT_CARD_PATH.read_text(encoding="utf-8"))

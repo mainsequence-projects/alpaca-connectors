@@ -46,7 +46,6 @@ mainsequence login
 mainsequence refresh-token
 mainsequence code-repository current --debug
 mainsequence code-repository update-sdk --path .
-mainsequence code-repository update AGENTS.md --path .
 mainsequence code-repository update-agent-skills --path .
 metatables migrations current --provider src.migrations:migration
 metatables migrations revision --provider src.migrations:migration -m "describe change"

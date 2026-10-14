@@ -39,7 +39,9 @@ The source card advertises completed A2A messages; a returned JobRun UID is not 
 
 - `.tau/SYSTEM.md` is the Agent's runtime prompt: its role, its Alpaca tools and skills, identity
   and key-entry rules, confirmations, uncertain writes and refusals.
-- `AGENTS.md` defines the project boundary and safety rules.
+- `AGENTS.md` holds the short developer rules and the project boundary. TAU adds it to every
+  session too, so the CLI and operational rules live in the
+  [operator guide](operations/operator-guide.md).
 - `.agents/agent_card.json` contains stable source metadata and six repository-owned skills.
 - `.agents/skills/mcp_tools/` holds the six MCP-usage skills, with one authoritative copy each.
   The sibling SDK/platform skill bundles remain private development guidance.
@@ -297,7 +299,8 @@ declare their root object type. Tool names, operations, verified worker-thread i
 secret-safe errors are preserved. The MCP regression tests cover authenticated initialization,
 the complete catalog, delegated calls, and input/error redaction.
 
-Verification with TAU 2.0.14 passes all **461 tests plus 96 subtests**, application lint/formatting,
+Verification with Main Sequence 9.0.24 and TAU 2.0.14 passes all **464 tests plus 96 subtests**,
+application lint/formatting,
 the strict documentation build and installed dependency checks. The new real HTTP tests verify
 application-MCP skill discovery and digest-checked reads, private/traversal denial, altered-content
 rejection and caller isolation. The old local-index expectation is replaced with this released
@@ -314,8 +317,10 @@ private files and digest mismatches, and separate caller identities on consecuti
 The requested development skill bundles were explicitly refreshed from the installed packages:
 Main Sequence 9.0.24 (on 2026-10-14), TAU 2.0.14, and MetaTables 0.1.34. The existing ms-markets 2.2.10 bundle
 was left unchanged. Each bundle's `PINNED_FROM.txt` records its matching version. The six
-repository-owned business skills remain single-copy; only the project-owned portion of `AGENTS.md`
-is updated to describe MCP skill consumption. These changes are recorded on `main`;
+repository-owned business skills remain single-copy. On 2026-10-14 `AGENTS.md` lost the retired SDK
+block and was cut to its developer rules, the operator manual moved to the
+[operator guide](operations/operator-guide.md), and `.tau/SYSTEM.md` became the runtime prompt.
+These changes are recorded on `main`;
 this local verification did not change hosted schema or certify a deployment.
 
 The earlier 2026-10-11 authenticated local API smoke test initializes a real MCP session,
