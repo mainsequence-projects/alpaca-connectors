@@ -45,6 +45,19 @@ resources:
       level: view
   spec:
     source_path: api/agent/main.py
+    command_center_icon:
+      path: assets/agents/packer/idle.png
+      rendering: color
+      image_rendering: pixelated
+    command_center_animations:
+      poses:
+        thinking: {path: assets/agents/packer/thinking.png}
+        working: {path: assets/agents/packer/working.png}
+        trading: {path: assets/agents/packer/trading.png}
+        error: {path: assets/agents/packer/error.png}
+      tools:
+        - application: alpaca
+          pose: trading
     llm_provider: openai-codex
     llm_model: gpt-5.6-luna
     llm_thinking: medium
