@@ -27,9 +27,9 @@ SKILL_NAMES = {
 }
 
 
-def requester(uid: str = PERSON_UID) -> dict[str, object]:
-    """The platform's nested statement about the person an Agent's call works for."""
-    return {"sub": uid, "team_uids": [], "is_organization_admin": False}
+def requester(uid: str = PERSON_UID, **claims: object) -> dict[str, object]:
+    """The platform's identity-only statement about the person an Agent's call works for."""
+    return {"sub": uid, "is_organization_admin": False, **claims}
 
 
 @pytest.fixture
@@ -284,3 +284,22 @@ def test_no_mcp_tool_accepts_alpaca_key_values() -> None:
 
     names = set().union(*(property_names(tool.parameters) for tool in PROJECT_AGENT_TOOLS))
     assert not {"api_key", "secret_key", "credentials"} & names
+
+
+def test_an_agent_call_whose_requester_lists_teams_is_refused(hosted_caller, mcp_client) -> None:
+    """The requester statement is identity-only too (ADR-0052); a Team list is never trusted."""
+    with patch(
+        "alpaca_connectors.api.app.services.account_key_requests.start_registration_key_request",
+        side_effect=AssertionError("a refused requester reached the tool"),
+    ):
+        response = rpc(
+            mcp_client,
+            "tools/call",
+            {
+                "name": "alpaca_account_key_request",
+                "arguments": {"operation": "start_registration"},
+            },
+            hosted_caller.headers(requester=requester(team_uids=[])),
+        )
+
+    assert response.status_code == 401

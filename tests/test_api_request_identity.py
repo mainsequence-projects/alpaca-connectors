@@ -311,6 +311,8 @@ def test_no_caller_is_bound_outside_a_request() -> None:
         "expired",
         "numeric_user_id",
         "local_bearer_token",
+        "team_uids_claim",
+        "empty_team_uids_claim",
     ],
 )
 def test_hosted_requests_without_a_valid_assertion_never_reach_a_handler(
@@ -333,6 +335,11 @@ def test_hosted_requests_without_a_valid_assertion_never_reach_a_handler(
         headers = hosted_caller.headers(iat=now - 600, nbf=now - 600, exp=now - 480)
     elif case == "numeric_user_id":
         headers = {**hosted_caller.headers(), "X-User-ID": "7"}
+    elif case == "team_uids_claim":
+        # Assertions are identity-only since the platform's ADR-0052: a Team list is refused.
+        headers = hosted_caller.headers(team_uids=[OTHER_UID])
+    elif case == "empty_team_uids_claim":
+        headers = hosted_caller.headers(team_uids=[])
     else:
         headers = {"Authorization": "Bearer local-session-token"}
     app = create_app()

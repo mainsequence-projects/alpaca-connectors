@@ -102,37 +102,35 @@ def test_hosted_catalog_preserves_alpaca_but_excludes_generic_tools(tmp_path: Pa
         mcp.assert_not_awaited()
 
 
-def test_local_reader_does_not_expose_application_or_private_development_files(tmp_path: Path):
+def test_local_reader_serves_only_the_repository_skill_files(tmp_path: Path):
     skills, diagnostics = load_skills_with_diagnostics(
         tau_resource_paths(REPO_ROOT, state_home=tmp_path)
     )
     assert not diagnostics
-    # TAU 2.0.14 serves application skills through its MCP resource tools, not the local index.
-    # Their real HTTP discovery and verified reads are covered in test_agent_mcp_skills.py.
-    assert skills == []
+    # Since TAU 2.0.21 the runtime reads `.agents/skills/` at any depth: a folder without a
+    # SKILL.md groups skills (its tau_project_customization skill). The six business skills under
+    # mcp_tools/ and the copied development bundles are therefore local skills too, besides the
+    # application skills the API publishes through its MCP (test_agent_mcp_skills.py covers
+    # their real HTTP discovery and verified reads).
+    skill_files = {path.resolve() for path in (REPO_ROOT / ".agents/skills").rglob("SKILL.md")}
+    assert {Path(skill.path).resolve() for skill in skills} == skill_files
+    business = REPO_ROOT / ".agents/skills/mcp_tools/alpaca-account-workflow/SKILL.md"
+    assert business.resolve() in skill_files
     reader = create_skill_read_tool(cwd=REPO_ROOT, skills=lambda: skills)
 
     async def read_paths():
         # Do not use a real credential file as the denial probe.
-        with pytest.raises(ToolInputError, match="outside the available skills"):
-            await reader.execute_fn("read-other", {"path": str(REPO_ROOT / "pyproject.toml")})
-        with pytest.raises(ToolInputError, match="outside the available skills"):
-            await reader.execute_fn(
-                "read-local-business",
-                {
-                    "path": str(
-                        REPO_ROOT / ".agents/skills/mcp_tools/alpaca-account-workflow/SKILL.md"
-                    )
-                },
-            )
-        with pytest.raises(ToolInputError, match="outside the available skills"):
-            await reader.execute_fn(
-                "read-private",
-                {
-                    "path": str(
-                        REPO_ROOT / ".agents/skills/ms_tau_sdk/tau_project_customization/SKILL.md"
-                    )
-                },
-            )
+        for path in (
+            REPO_ROOT / "pyproject.toml",
+            REPO_ROOT / "AGENTS.md",
+            REPO_ROOT / ".tau/SYSTEM.md",
+            REPO_ROOT / ".agents/agent_card.json",
+            REPO_ROOT / ".agents/skills/ms_tau_sdk/PINNED_FROM.txt",
+            REPO_ROOT / "src/alpaca_connectors/settings.py",
+        ):
+            with pytest.raises(ToolInputError, match="outside the available skills"):
+                await reader.execute_fn("read-other", {"path": str(path)})
+        result = await reader.execute_fn("read-local-business", {"path": str(business)})
+        assert "name: alpaca-account-workflow" in result.content[0].text
 
     anyio.run(read_paths)

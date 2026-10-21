@@ -165,13 +165,13 @@ linkify-it-py==2.2.0
     # via markdown-it-py
 loguru==0.7.3
     # via fastembed
-mainsequence==9.0.24
+mainsequence==9.0.30
     # via
     #   alpaca-connectors
     #   etfhextractor
     #   mainsequence-metatable
     #   ms-markets
-mainsequence-metatable==0.1.35
+mainsequence-metatable==0.1.51
     # via
     #   alpaca-connectors
     #   etfhextractor
@@ -227,7 +227,7 @@ ms-markets==2.2.10
     # via
     #   alpaca-connectors
     #   etfhextractor
-ms-tau-sdk==2.0.14
+ms-tau-sdk==2.0.23
     # via alpaca-connectors
 msgpack==1.2.0
     # via alpaca-py

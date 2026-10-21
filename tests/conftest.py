@@ -175,8 +175,8 @@ def _assertion(key: ed25519.Ed25519PrivateKey, user: str, **changes: object) -> 
         "iat": now,
         "nbf": now,
         "exp": now + 120,
-        # mainsequence 9.0.19 requires the platform's statement about the caller.
-        "team_uids": [],
+        # The platform's statement about the caller is identity-only (ADR-0052): `sub` and
+        # `is_organization_admin`. An assertion that lists `team_uids` is refused.
         "is_organization_admin": False,
     }
     claims.update(changes)
