@@ -180,6 +180,12 @@ with:
 - `key_title`: a stable human-readable local host or harness identity; and
 - `public_key`: only the OpenSSH public key text.
 
+Adding a deploy key needs `code-repositories.add_deploy_key`: repository
+editor or owner, or editor of one of the repository's branches, held directly,
+through a Team or through an Organization Project. A branch or Project policy
+also makes the repository appear in `code_repository.list` and
+`code_repository.search`, without reaching its other branches.
+
 The tool delegates to the CodeRepository DRF action and returns an empty
 object on canonical success. It does not return repository credentials or
 provider metadata. Treat any MCP/DRF error as an incomplete access step and
@@ -346,7 +352,6 @@ Verify without revealing sensitive values:
 
 Then route work according to intent:
 
-- use `code-repository-design` for architecture and the CodeRepository Blueprint;
 - use the relevant repository or SDK execution skills for accepted MetaTable,
   TimeIndexTableUpdater, job, API, CLI, code-repository-to-agent, or static-site components;
 - use `code-repository-to-agent` only when the CodeRepository itself must become a coding

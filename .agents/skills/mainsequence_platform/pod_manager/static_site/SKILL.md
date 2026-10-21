@@ -60,7 +60,7 @@ This skill does not own:
 ## Optional Command Center Navigation Placement
 
 When deployment intent includes a Command Center link, use workflow API
-`2.2.0` or `2.3.0` and the backend template's nested `navigation_link` shape. Do not add a
+`3.0.0` and the backend template's nested `navigation_link` shape. Do not add a
 top-level link resource or create a personal link. The Organization automation
 identity that applies the workflow authorizes placement; its current
 exact-branch and complete affected-audience permissions must cover the
@@ -99,10 +99,6 @@ restores the exact-commit mask.
 A navigation authorization failure does not mean the Static Site deployment
 failed. Read the workflow result and correlated DeploymentRun warning. A
 malformed `navigation_link` block still invalidates the workflow file.
-
-A CodeRepository Blueprint may record why a static site exists and its deployment
-intent, but a Blueprint is not a DRF or MCP precondition for creating a static
-release.
 
 ## Use The Installed Command Center SDK Skill Bundle
 

@@ -7,8 +7,7 @@ description: Understand, enumerate, design, and review Main Sequence Organizatio
 
 Use this skill to determine which Organization Environment owns an operation or
 resource. Read mainsequence://platform/ontology first. Use the
-code-repository-design skill when the decision belongs in a repository
-Blueprint, and use the resource-release skill for deployment work.
+resource-release skill for deployment work.
 
 ## Canonical relation
 
@@ -175,18 +174,28 @@ CodeRepositoryBranch.organization_environment.
 ## Management surface
 
 The canonical DRF resource is OrganizationEnvironmentViewSet at
-/api/v1/organization-environments/. Organization-admin permission controls
-mutations. Runtime credentials may observe only their target-derived
-Environment and cannot mutate this resource. The read-only
-organization_environment.list MCP tool delegates to the same list action and
-adds no alternate visibility policy.
+/api/v1/organization-environments/. Working in an Environment is a policy:
+member (see it, work in it, and create Projects, Buckets, Constants, Secrets,
+model providers and repositories there) or observer (see it and work in it
+without creating anything). Both go to people and Teams, never to workload
+Users. Only Organization administrators give or remove them, create
+Environments, and change or delete them; the person who creates an
+Environment holds member. Admission never shows objects that are not shared
+with the caller. Read and give these policies with the access tools and
+resource_type organization-environments (access.get, access.my_actions,
+access.candidates, access.attach, access.detach, access.explain).
+Runtime credentials may observe only their target-derived Environment and
+cannot mutate this resource. The read-only organization_environment.list MCP
+tool delegates to the same list action and adds no alternate visibility
+policy.
 
 OrganizationProject is a separate Command Center grouping. It can organize
-branches only from its one exact Environment. Its view/edit grants cascade to
-those branches and their Jobs and ordinary releases at the same level, while
-Environment admission still applies. An Agent's backing release follows Agent
-sharing, and a release's backing Job follows its release. Granting edit to a
-workload through a Project trusts it to change code using those workloads' access.
+branches only from its one exact Environment. Its `reader` and `editor`
+policies pass down to those branches and from them to their Jobs and ordinary
+releases (`reader` gives `viewer`, `editor` gives `editor`), while Environment
+admission still applies. An Agent's backing release follows the Agent's
+policies, and a release's backing Job follows its release. Giving a workload
+`editor` through a Project trusts it to change code using those workloads' access.
 
 ## Stop conditions
 

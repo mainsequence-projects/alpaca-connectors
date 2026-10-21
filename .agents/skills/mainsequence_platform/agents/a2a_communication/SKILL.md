@@ -104,8 +104,8 @@ For a human caller, an explicit existing `agent_session_uid` is usable only
 when that User owns the session (or is a superuser). Organization administrators
 may inspect another User's conversation through the canonical read tools, but
 oversight access does not transfer session ownership or authorize sending a new
-message with that User's provider credentials. An Agent view or edit grant alone
-never authorizes cross-user conversation reads. Deployed Agent callers use exact caller-session proof for A2A provenance.
+message with that User's provider credentials. No Agent policy alone
+authorizes reading another person's conversation. Deployed Agent callers use exact caller-session proof for A2A provenance.
 Verified delegation selects the person with their ordinary permissions, including
 admin roles. Without delegation a workload uses its own rights. Invalid delegation
 is rejected and never falls back to workload grants.

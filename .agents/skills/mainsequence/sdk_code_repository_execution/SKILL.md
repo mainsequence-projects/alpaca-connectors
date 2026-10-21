@@ -1,6 +1,6 @@
 ---
 name: mainsequence-sdk-code-repository-execution
-description: Use the installed Main Sequence SDK and CLI for Git-derived CodeRepository context, version-matched contract authority, and selecting the relevant SDK or domain-package skill. Use for repository integration and SDK execution questions; use a platform-owned design skill when architecture or ontology is unresolved.
+description: Use the installed Main Sequence SDK and CLI for Git-derived CodeRepository context, version-matched contract authority, and selecting the relevant SDK or domain-package skill. Use for repository integration and SDK execution questions.
 ---
 
 # Main Sequence SDK CodeRepository Execution
@@ -28,11 +28,8 @@ create, copy, update, or remove it.
 
 Use skill descriptions to select the domain involved in the request. This skill
 is not a mandatory first step for maintenance, audits, or already-scoped domain
-work. A platform design skill is useful when product architecture, ontology, or
-the CodeRepository Blueprint is unresolved; select it from the installed
-platform catalog rather than assuming its filesystem path.
-Use that catalog to select platform-owned CodeRepository-to-Agent setup and
-other platform capabilities as well.
+work. Use the installed platform catalog to select platform-owned
+CodeRepository-to-Agent setup and other platform capabilities.
 
 - Environment repair, authentication, explicitly requested updates, dependency
   sync, and Git publishing:
@@ -43,7 +40,7 @@ other platform capabilities as well.
   `.agents/skills/mainsequence/application_surfaces/api_surfaces/SKILL.md`
 - Jobs, schedules, images, resources, releases, and Artifacts:
   `.agents/skills/mainsequence/platform_operations/orchestration_and_releases/SKILL.md`
-- RBAC, sharing, constants, secrets, and acting for a requester:
+- RBAC, access policies, constants, secrets, and acting for a requester:
   `.agents/skills/mainsequence/platform_operations/access_control_and_sharing/SKILL.md`
 - Recorded model calls, structured extraction, provider options, history, and replay:
   `.agents/skills/mainsequence/mainsequence-inference/SKILL.md`

@@ -1,6 +1,6 @@
 ---
 name: resource-release
-description: Declare ResourceReleases in repository workflows, then configure, deploy, inspect, and delete existing releases through canonical MCP operations.
+description: Declare ResourceReleases in repository workflows, then configure, deploy, inspect, and delete existing releases through canonical MCP operations, and find and connect the project MCP servers a person can use.
 ---
 
 # Main Sequence Resource Release
@@ -24,7 +24,7 @@ collection POST and the former `resource_release.create` MCP tool are retired.
 For accepted idle-latency requirements, record the desired replica floor and
 its resource-cost rationale in existing deployment expectations; for accepted
 throughput requirements, record the desired replica ceiling and the per-replica
-capacity it assumes. Current workflow API `2.3.0` accepts `min_scale` (`0`
+capacity it assumes. Workflow API `3.0.0` accepts `min_scale` (`0`
 through `50`, default `0`) and `max_scale` (`1` through `50`) for FastAPI and
 Harness Agents; `min_scale` never exceeds `max_scale`, and an omitted
 `max_scale` defaults to `10` for FastAPI and `5` for Harness Agents. A floor of
@@ -40,7 +40,7 @@ desired values as numeric stats, including a zero floor; Static Sites and
 unbound Agents omit them.
 
 For accepted per-replica capacity, record the number of requests one replica
-serves at once. Current workflow API `2.3.0` also accepts, for FastAPI and
+serves at once. Workflow API `3.0.0` also accepts, for FastAPI and
 Harness Agents, `container_concurrency` (`1` through `1000`, the hard limit of
 requests in flight per replica), `concurrency_target` (`1` through `1000` and at
 most `container_concurrency`, the per-replica autoscaling target) and
@@ -222,7 +222,7 @@ FastAPI and Harness Agent releases. Define project business routes normally;
 the launcher injects this reserved endpoint outside project middleware, and
 `ms-tau-sdk` supplies the Harness Agent readiness predicate. Backend capability
 evidence decides whether Knative uses that HTTP path or the temporary TCP
-compatibility probe. Keep ResourceRelease workflows and Blueprints focused on
+compatibility probe. Keep ResourceRelease workflows focused on
 the application contract because the platform owns this runtime infrastructure.
 
 For a platform-deployed FastAPI release, obtain usable runtime access through
@@ -310,7 +310,7 @@ and application path. Django owns exact source and image resolution and the
 initial deployment. The creation response or release UID is not proof that
 the first deployment is active; inspect the DeploymentRun and active revision.
 
-Workflow APIs `2.0.0` through `2.3.0` accept target-owned non-secret
+Workflow API `3.0.0` accepts target-owned non-secret
 `env_vars` for runtime releases. Omission preserves, an empty list clears,
 and a present list replaces the mapping. Static Sites use
 `build_environment` instead.
@@ -332,7 +332,7 @@ not derive the value from a CodeRepositoryBranch or
 `OrganizationEnvironment`. Retrieve the backend workflow template when
 authoring a workflow; do not copy the development value into production.
 
-Pass the canonical field on create, partial update, or an API `2.2.0` or `2.3.0`
+Pass the canonical field on create, partial update, or an API `3.0.0`
 code-repository workflow declaration only when an explicit override is intended.
 Creation omission uses the platform default. Update or workflow-reconciliation
 omission preserves the stored policy. An explicitly submitted `[]` denies all
@@ -410,8 +410,8 @@ infer an origin, user, Organization, branch, environment, target URL, or token
 claim. The target FastAPI release must explicitly admit that source through its
 current `cors_allowed_origins` policy.
 
-Issuance and every delegated validation require an active user with current
-view access to both releases, servable/routable release state, same-Organization
+Issuance and every delegated validation require an active user who may
+currently call both releases (`resource-releases.invoke`), servable/routable release state, same-Organization
 ownership, an exact Origin match, exact target identity, and current CORS
 admission. The releases do not need to share a CodeRepositoryBranch or
 OrganizationEnvironment. CORS remains browser admission and never
@@ -665,62 +665,102 @@ Stop and ask for direction when:
 ## FastAPI MCP capability
 
 A FastAPI API may expose an application-owned authenticated `/mcp` alongside its
-HTTP routes. Workflow API `2.3.0` accepts `spec.mcp_enabled` (boolean, default
+HTTP routes. Workflow API `3.0.0` accepts `spec.mcp_enabled` (boolean, default
 false). The flag is desired release configuration, fingerprinted and snapshotted
 in immutable revisions; only the ready active revision advertises a connection.
-Workflow omission resets desired state; PATCH omission preserves it.
-`resource_release.mcp_endpoints` lists the FastAPI MCP endpoints you can see
-with their `mcp_connection`. Present each release name with its
-`organization_environment_name`; keep `organization_environment_uid` and the
-release UID for exact tool calls, using them for display disambiguation only
-when names are still ambiguous. `resource_release.list` accepts the same
-`mcp_available=true` filter and returns nullable `mcp_connection` metadata, also
-present on detail. A cold runtime may have an
-active connection; this is not a live-health guarantee.
+Workflow omission resets desired state; PATCH omission preserves it. A cold
+runtime may have an active connection; this is not a live-health guarantee.
 
 Call this project endpoint **FastAPI MCP** and the central platform endpoint
-**Django MCP**. Direct clients use the FastAPI MCP URL and shared Django OAuth
-login, without Command Center or a preconfigured Django MCP. Existing access and
-refresh JWT types are bound to that project resource; they do not authorize
-central platform operations. Discovery does not install client configuration.
+**Django MCP**. Existing access and refresh JWT types are bound to the project
+resource; they do not authorize central platform operations. Discovery does not
+install client configuration.
 
 The application owns tools, business authorization and FastAPI/MCP lifespan;
-shared REST/MCP/harness functions are optional project design. No registry,
+shared REST/MCP/harness functions are an optional application design choice. No registry,
 generated REST adapter, Tau adapter or separate runtime is required. Existing
 Main Sequence SDK ADR 0038 owns MCP hosting and ADR 0036 owns request identity;
 use the installed version's instructions. Backend support alone does not prove
 that the deployed application has the mount or compatible SDK/launcher/gateway.
 
-### Connect a client to a project
+### Find the MCP servers a person can use
 
-1. Discover with `resource_release.mcp_endpoints`, using the intended
-   branch/name filters, or inspect a known release with `resource_release.get`. Retain `mcp_connection.url`, `transport`,
-   `resource_metadata_url`, `organization_environment_uid`, `organization_environment_name` and
-   `active_revision_uid`. Use the returned URL exactly; do not build a hostname
-   or substitute the desired revision. A known canonical project URL also
-   allows direct registration without a Django MCP connection.
-2. If `mcp_connection` is null, inspect the desired flag, active revision and
-   DeploymentRun. Enabling `mcp_enabled` does not mount a server or immediately
-   activate it. Push the implemented application and declaration through the
-   normal workflow, then re-read the active connection. A failed desired
-   deployment preserves the previous active capability; disabling takes effect
-   when the corresponding revision activates. Rollback follows its snapshot.
-3. When asked to configure a client, use that client's supported connection
-   interface with the returned URL and Streamable HTTP. Discovery itself does
-   not install connections. Preserve unrelated client settings; never put
-   credentials in configuration text or conversation content.
-4. Let the client follow the `401` challenge to Django's resource metadata and
-   shared browser login. Signing in alone does not approve a client: the person
-   reviews the client, callback host, resource and requested access, then allows
-   or denies consent. The client owns OAuth/PKCE and credential storage; no
-   pasted token, callback code, Command Center session or central MCP login is
-   required. A project OAuth credential is bound to that exact project and
-   cannot be used for another project or general platform operations.
-5. Validate initialization and read-only tool discovery before claiming the
-   connection works. Protected requests can activate a cold runtime; public
-   authentication discovery cannot. Follow bounded startup retry guidance for
-   safe discovery. After a business tool may have executed, inspect its result
-   or application idempotency contract before retrying, especially mutations.
+When someone asks which other MCP servers, project tools or applications they
+can use from their assistant, call `resource_release.mcp_endpoints`. It returns
+only the FastAPI MCP endpoints that person can see whose ready active revision
+declares MCP, each with `resource_release_uid`, `name`,
+`code_repository_branch_uid` and `mcp_connection`. Filter with `name`,
+`code_repository_branch_uid` or `search` when the person names a project, and
+page with `limit` and `offset`.
+
+Present each endpoint by release name and `organization_environment_name`. Keep
+`resource_release_uid` and `organization_environment_uid` for exact tool calls;
+show them only when names are still ambiguous. Use `mcp_connection.url` exactly:
+never build a hostname, change the path or substitute a desired revision.
+`resource_release.list` with `mcp_available=true` and `resource_release.get`
+return the same `mcp_connection`. An empty result means nothing is available to
+this person now, not that no project declares MCP.
+
+If `mcp_connection` is null for a release the person expects, inspect the
+desired flag, active revision and DeploymentRun. Enabling `mcp_enabled` does not
+mount a server or immediately activate it. Push the implemented application and
+declaration through the normal workflow, then re-read the active connection. A
+failed desired deployment preserves the previous active capability; disabling
+takes effect when the corresponding revision activates. Rollback follows its
+snapshot.
+
+### Connect a client
+
+A client needs only `mcp_connection.url` and Streamable HTTP. It finds the login
+by itself: the release origin serves the protected-resource metadata at
+`/.well-known/oauth-protected-resource/mcp`, the same document the `401`
+challenge on `/mcp` points to, and that document names Django as the
+authorization server. The client registers itself with Django and opens the Main
+Sequence browser login. Signing in alone does not approve the client: the person
+reviews the client, callback host, resource and requested access, then allows or
+denies consent. The client owns OAuth, PKCE and credential storage. No Django
+MCP connection, Command Center session, pasted token or callback code is needed,
+and the assistant never handles credentials.
+
+Give the person the steps for their client, using a short lowercase name such as
+the release name:
+
+- Codex CLI: `codex mcp add <name> --url <mcp_connection.url>`, then
+  `codex mcp login <name>`. In `~/.codex/config.toml` the whole entry is
+  `[mcp_servers.<name>]` with `url = "<mcp_connection.url>"`.
+- Codex app: add a Streamable HTTP server with that URL, leave the bearer-token
+  and header fields empty, then authenticate.
+- Another MCP client: add a remote Streamable HTTP server with that URL and start
+  its OAuth sign-in. If the client cannot find the login from the URL alone,
+  report the client, its version and the error.
+
+Configure the URL only. Do not add `--oauth-resource` or `oauth_resource`, a
+bearer-token environment variable, or a static `Authorization` header. The
+client already sends the `resource` from the metadata and Django accepts exactly
+one; a static credential bypasses the person's own sign-in and consent. Edit
+only the entry being added and preserve unrelated client settings. Never put
+credentials in configuration text or conversation content.
+
+A project OAuth credential is bound to that exact project. It cannot call
+another project or general platform operations, and refresh keeps the same
+project.
+
+### Verify and troubleshoot
+
+Validate initialization and read-only tool discovery before claiming the
+connection works. Protected requests can activate a cold runtime; login
+discovery cannot. Follow bounded startup retry guidance for safe discovery.
+After a business tool may have executed, inspect its result or application
+idempotency contract before retrying, especially mutations.
+
+| Symptom | Meaning and action |
+| --- | --- |
+| `Registration failed … 401` for `<release host>/register`, before a browser opens | The client found no login metadata on the release origin. Re-read `mcp_connection`; if it is present, report the release URL and client version. It is not a permission problem. |
+| Sign-in ends with `invalid_request: resource must appear exactly once` | Remove `--oauth-resource` or `oauth_resource` from the client entry and sign in again. |
+| Sign-in ends with `invalid_target` | The URL is not the exact current `mcp_connection.url`, or MCP is no longer available on that release. |
+| `401` on `/mcp` after signing in | The credential expired or was revoked; sign in again with the client. |
+| `403` | Inspect current release, Environment, Origin or delegation permissions instead of bypassing them. |
+| `503` with `runtime_starting` | The runtime is starting. Retry safe discovery after `Retry-After`; this does not prove a tool ran or failed. |
 
 The supported initial profile is stateless, bounded JSON over canonical
 `POST /mcp`. Stateful sessions, subscriptions, resumable streams and MCP task
@@ -730,9 +770,6 @@ or public-ingress rules to make `/mcp` anonymous. Browser preflight follows the
 platform's separate CORS handling. Native clients may omit `Origin`; any supplied
 Origin must be a concrete origin admitted by the release's effective CORS policy.
 
-`401` means authenticate with the client; `403` means inspect current release,
-Environment, Origin or delegation permissions instead of bypassing them. A
-startup/service-unavailable response does not prove a tool ran or failed safely.
 Release access admits the connection; project tools still authorize the effective
 person or workload using verified request context, including inside mounted ASGI
 and concurrent/threaded tool execution. REST route dependencies alone do not

@@ -1,6 +1,6 @@
 ---
 name: code-repository-workflows
-description: Create and validate backend-managed API 2.3.0 deployment declarations and optional Job dependencies under .mainsequence/workflows for Jobs, FastAPI applications, Static Sites, and the one branch-owned Harness Agent.
+description: Create and validate backend-managed API 3.0.0 deployment declarations and optional Job dependencies under .mainsequence/workflows for Jobs, FastAPI applications, Static Sites, and the one branch-owned Harness Agent.
 ---
 
 # Main Sequence CodeRepository Workflows
@@ -61,7 +61,7 @@ the verified digest-pinned code repository image selected by the backend.
 For accepted idle-latency requirements, record the desired replica floor and
 its resource-cost rationale in existing deployment expectations; for accepted
 throughput requirements, record the desired replica ceiling and the per-replica
-capacity it assumes. Current workflow API `2.3.0` accepts `min_scale` (`0`
+capacity it assumes. Workflow API `3.0.0` accepts `min_scale` (`0`
 through `50`, default `0`) and `max_scale` (`1` through `50`) for FastAPI and
 Harness Agents; `min_scale` never exceeds `max_scale`, and an omitted
 `max_scale` defaults to `10` for FastAPI and `5` for Harness Agents. A floor of
@@ -77,7 +77,7 @@ desired values as numeric stats, including a zero floor; Static Sites and
 unbound Agents omit them.
 
 For accepted per-replica capacity, record the number of requests one replica
-serves at once. Current workflow API `2.3.0` also accepts, for FastAPI and
+serves at once. Workflow API `3.0.0` also accepts, for FastAPI and
 Harness Agents, `container_concurrency` (`1` through `1000`, the hard limit of
 requests in flight per replica), `concurrency_target` (`1` through `1000` and at
 most `container_concurrency`, the per-replica autoscaling target) and
@@ -89,12 +89,16 @@ that serves WebSockets sizes `container_concurrency` for its connections too.
 Total capacity is about `max_scale` x `container_concurrency`.
 
 - Every file requires `api_version`, `name`, and `resources`.
-- `2.3.0` is current. It accepts `job`, `fastapi`, `static_site`, and
-  `harness_agent`.
+- `3.0.0` is the only supported version; a file of any other version is
+  refused before anything of it is applied, so a repository switches its
+  files to `3.0.0` before its next push. It accepts `job`, `fastapi`,
+  `static_site`, and `harness_agent`. To switch a `2.3.0` file, set
+  `api_version: "3.0.0"` and replace each `access` level with the policy it
+  gave (see Declared Access).
 - Older supported versions accept only their backend-advertised kinds. They do
   not accept `harness_agent`.
 - Every resource requires a stable `key`, supported `kind`, and typed `spec`.
-  A `2.3.0` `job`, `fastapi` or `harness_agent` resource may also declare its
+  A `job`, `fastapi` or `harness_agent` resource may also declare its
   workload's `access` (see Declared Access).
 - A declaration owns its target. On the next push of the branch head, these
   delete the target:
@@ -158,7 +162,7 @@ presentation fallbacks.
 Example:
 
 ```yaml
-api_version: "2.3.0"
+api_version: "3.0.0"
 name: repository-runtime
 resources:
   - key: repository-harness-agent
@@ -188,8 +192,49 @@ Supported `harness_agent.spec` fields are:
 - `automatic_deployment`;
 - `automatic_redeployment`;
 - `revision_retention_count`;
-- `cpu_request`, `memory_request`, `gpu_request`, `gpu_type`, and `spot`; and
+- `cpu_request`, `memory_request`, `gpu_request`, `gpu_type`, and `spot`;
+- `command_center_icon`; and
 - `env_vars`.
+
+`command_center_icon` sources the Agent's Command Center icon from the same
+repository. It is `null` or `{path, rendering}` with optional
+`image_rendering`: `path` is a safe repository-relative POSIX path to an SVG,
+PNG or WebP file of at most 64 KiB, square and at most 128 px per side (clients
+draw it at 20 to 32 px and embed it; a bigger file is refused with its size),
+and `rendering` is `mask` (monochrome,
+follows the theme color) or `color` (keeps the logo's colors). Never guess
+`rendering`. A `color` icon may be an animated PNG (APNG): at most 120 frames,
+each at least 20 ms, square 32 to 128 px; frame 0 is the still shown in lists,
+so make it the rest pose. For pixel art add `image_rendering: pixelated`
+(only with `color`) so it scales with sharp pixels. Omitting the field keeps
+the current icon and `null` removes it. A malformed object or unsafe path
+invalidates the file; a missing or invalid file only returns an `agent_icon_*`
+warning and the Agent still deploys. Keep the icon file beside, never inside,
+`.agents/agent_card.json`:
+
+```yaml
+    command_center_icon:
+      path: .agents/command-center-icon.svg
+      rendering: color
+```
+
+`command_center_animations` adds pose sprites and tool rules: `poses` maps up
+to 12 names (`^[a-z][a-z0-9_]{0,31}$`, never `idle`) to exactly `{path}`, drawn
+like the icon and under the same 128 px and 64 KiB limits per pose file; `tools` lists `{application, pose}` where `application` is a
+`resource` key of this spec's `mcp_applications`. Command Center shows the
+rule's pose while that application's tools run, `working` for other tools,
+`thinking` while the agent thinks and `error` after a failed tool. Omission
+keeps them, `null` removes them, and a missing pose file only warns:
+
+```yaml
+    command_center_animations:
+      poses:
+        working: {path: .agents/sprites/working.png}
+        reading: {path: .agents/sprites/reading.png}
+      tools:
+        - application: tutorial_api
+          pose: reading
+```
 
 Never put any of the following in that spec:
 
@@ -248,7 +293,7 @@ generic `resource_release` wrapper or put `release_kind` in the spec.
 Complete FastAPI workflow example for an OAuth callback and webhook:
 
 ```yaml
-api_version: "2.3.0"
+api_version: "3.0.0"
 name: provider-api
 resources:
   - key: provider-api
@@ -430,7 +475,7 @@ the first applies; on the development branch only the second:
 
 ```yaml
 # .mainsequence/workflows/api-production.yaml
-api_version: "2.3.0"
+api_version: "3.0.0"
 name: api-production
 scope:
   environments: [production]
@@ -447,7 +492,7 @@ resources:
 
 ```yaml
 # .mainsequence/workflows/api-development.yaml
-api_version: "2.3.0"
+api_version: "3.0.0"
 name: api-development
 scope:
   environments: [development]  # the development Environment's exact name
@@ -537,12 +582,14 @@ release's backing Job runs as its release's User; static sites have none.
   authority only when it acts for its requester (below).
 - It starts with no access. It reaches only what it created, what its
   declaration grants and what a person grants it by hand.
-- Its managers are the people with edit on the workload, directly or through
-  its branch, and Organization admins. They grant it access up to their own
-  level and hold the creator's rights on what it creates.
-- An Agent's backing release follows the Agent's sharing; a release's backing
-  Job follows the release. Edit access lets an editor change code that uses the
-  workload's grants. Repository, branch or Project access reaches the Jobs and
+- Its managers are the people who hold the workload's `manage_workload`: a
+  Job's or release's `editor` or `owner`, directly or passed down from its
+  branch, an Agent's `editor` or `owner` for its release, and Organization
+  admins. They give it policies whose actions they hold and hold the creator's
+  rights on what it creates.
+- An Agent's backing release follows the Agent's policies; a release's backing
+  Job follows the release. An `editor` can change code that uses the
+  workload's access. Repository, branch or Project access reaches the Jobs and
   releases it declares, subject to those backing-owner rules. Grant broad edit
   access only when that trust is intended. A workload with edit on another
   workload is still not its manager and cannot grant it access.
@@ -608,42 +655,65 @@ by hand.
 
 ## Declared Access
 
-A `2.3.0` `job`, `fastapi` or `harness_agent` resource declares the access its
-workload requires:
+A `job`, `fastapi` or `harness_agent` resource declares the access its
+workload requires. Each entry names the policy the workload gets:
 
 ```yaml
 access:
-  branch: view                # this branch and what follows it
+  branch: reader              # this branch and what follows it
   branches:
     - repository: Pricing     # that repository's branch in this Environment
-      level: view
+      policy: reader
   secrets:
     - name: METATABLES_RUNTIME_DB_URI
-      level: view
+      policy: value_reader
   constants:
     - name: REGION
-      level: view
+      policy: reader
   buckets:
     - name: metatables-exports
-      level: edit
-  artifacts:
-    - bucket: metatables-exports
-      name: schema.json
-      level: view
+      policy: editor
   agents:
     - name: Analyst
-      level: view
+      policy: user
   model_providers:
     - provider: openai-codex  # a built-in provider's configured credential
       custom_id: team-openai
-      level: view
+      policy: user
     - provider: acme-gateway  # a custom endpoint, by its identifier alone
-      level: view
+      policy: user
   resources:
     - key: migrate-system     # another resource of the same file
-      level: view
+      policy: runner
 ```
 
+- `policy` names a policy of the object's type that a workload can hold;
+  `branch` takes the policy's name. Choose the smallest one the workload
+  needs, and read each policy's texts with `access.catalog` first:
+  - a branch (`branch`, `branches`): `reader`, `editor`, `owner`;
+  - a Secret: `reader` (not the value), `value_reader` (the current value),
+    `editor`, `owner`;
+  - a Constant: `reader`, `editor`, `owner`;
+  - a Bucket: `reader`, `contributor` (browse and upload), `editor` (also
+    rename, move folders and delete), `owner`;
+  - an Agent (`agents`, or a `harness_agent` resource under `resources`):
+    `user` (use it), `viewer` (also its logs and Tasks), `operator` (also
+    cancel its work), `editor`, `owner`;
+  - a release (a `fastapi` or `static_site` resource under `resources`):
+    `user` (call it), `viewer` (also its logs), `editor`, `owner`;
+  - a Job (a `job` resource under `resources`): `viewer` (it and its runs),
+    `runner` (also run and stop it), `editor`, `owner`;
+  - an Artifact: `viewer` (read and download it), `editor` (also overwrite
+    and delete it), `owner`;
+  - a model-provider credential or custom endpoint: `user` (use it),
+    `editor` (also change or revoke it), `owner`.
+  `owner` also decides who has access to the object.
+- Validation refuses `level` ("level is replaced by policy in api_version
+  3.0.0."), an entry without `policy`, and a policy the type does not have;
+  the error lists the type's policies. A `2.3.0` level becomes: `view` gives
+  `reader` on a branch or a Constant, `value_reader` on a Secret,
+  `contributor` on a Bucket, `user` on a model provider and `viewer` on an
+  Agent, a release, a Job or an Artifact; `edit` gives `editor`.
 - Workflow files stay UID-free: every object is named in the branch's
   Environment. Secrets, Constants, Buckets and Agents by name, Artifacts by
   Bucket and name, configured model providers as code selects them, other
@@ -666,41 +736,47 @@ access:
   repository's Jobs or releases, such as an application that calls the
   MetaTables API (`repository: MetaTables`), declares that repository's branch
   in the same Environment under `branches`, by the repository's exact name,
-  case included. The grant reaches the Jobs and releases declared on that
+  case included. The binding reaches the Jobs and releases declared on that
   branch. A repository with no branch in this Environment fails with
   `not_found`, a name that matches two branches with `ambiguous_name`, and the
   declaring repository with `own_branch`.
-- The push's resolved person grants an entry when they have edit on the
-  workload and hold the declared level on the object. A push with no resolved
-  person grants only the branch, what is declared on it, and objects its
-  workloads created; never another repository's branch.
+- The push's resolved person grants an entry when they manage the workload
+  (`manage_workload` on it) and hold every action of the entry's policy on
+  the object.
+  Importing a repository, or setting it up, carries the authority of the
+  person who started it the same way. A push or sync with no resolved person
+  grants only the branch, what is declared on it, and objects its workloads
+  created; never another repository's branch, and never `owner`.
 - The declaration gates the resource. It is checked before anything of the
-  resource is applied, and its grants are written before the deployment
+  resource is applied, and its bindings are written before the deployment
   starts. When an entry cannot be granted, the resource fails with
   `reason: declared_access_not_granted` and `access.not_granted` entries with
-  a `reason`; nothing of it is created, changed or deployed. Fix the
-  declaration, or get the access from a person who holds it, and push again.
+  the entry's `target`, `policy` and a `reason`; nothing of it is created,
+  changed or deployed. Fix the declaration, or get the access from a person
+  who holds it, and push again.
 - A named resource of the same file is applied first; resources that name each
-  other are applied and rolled back together.
-- The declaration owns the grants it applied: later pushes re-apply them,
-  removing an entry removes its grant, and a grant made by hand at the declared
-  level or higher is never changed.
+  other are applied and rolled back together. An Agent named both under
+  `agents` and by its Harness Agent resource's key gets one binding, with the
+  policy that includes the other entry's.
+- The declaration owns the bindings it applied: later pushes re-apply them,
+  removing an entry removes its binding, changing it to a policy the binding
+  includes needs no authority while any other change needs it again, and a
+  binding made by hand that includes the declared policy is never changed.
 - Access a workload uses without declaring it fails when the workload reaches
   the object; a person who manages the workload grants it.
-- To grant by hand, read `workload_user_uid`, the public UID of the User the
-  workload runs as, from its Job, release or Agent (`job.get`,
-  `resource_release.get`, `agent.get`), and pass it as `user_uid` to the
-  object's `add-to-view` or `add-to-edit` sharing action. Over MCP this is
-  `agent.add_to_view`, `agent.add_to_edit`, `code_repository.add_to_view` or
-  `code_repository.add_to_edit`. Every other object has no MCP grant tool; use
-  its REST action, `POST /api/v1/<objects>/<uid>/add-to-view/` (or
-  `add-to-edit/`) with body `{"user_uid": "<workload_user_uid>"}`, where
-  `<objects>` is `secrets`, `constants`, `buckets`, `artifacts`, `jobs`,
-  `resource-releases`, `code-repository-branches` or
-  `organization-projects`. Prefer the declaration, which keeps the grant across
-  pushes. The manager grants up to their own
-  level on the object; the object's creator may grant it too when they can
-  view the workload. Directories and candidate lists offer workload Users only
+- To give access by hand, read `workload_user_uid`, the public UID of the User
+  the workload runs as, from its Job, release or Agent (`job.get`,
+  `resource_release.get`, `agent.get`), and attach a policy with
+  `access.attach`: the object's `resource_type` (`constants`, `secrets`,
+  `buckets`, `artifacts`, `jobs`, `resource-releases`, `agents`,
+  `model-provider-credentials`, `custom-model-providers`,
+  `code-repositories`, `code-repository-branches` or `organization-projects`),
+  its `object_uid`, the `policy` (any of the type's policies listed above, or
+  `reader` or `editor` on a repository or a Project), `principal_type` `user`
+  and the `workload_user_uid` as `principal_uid`. An Agent's release takes its
+  policies on the Agent. Prefer the declaration, which keeps the binding across pushes. The
+  manager gives policies whose actions they hold on the object; the object's
+  owner may give it too when they can view the workload. Directories and candidate lists offer workload Users only
   when asked with `identity_type=workload`, and only those the caller can view.
   `workload_user_uid` is `null` for a release's backing Job,
   which runs as its release's workload User, for a static site, and for an
@@ -776,31 +852,34 @@ those owners and do not replace their execution lifecycle.
 ## FastAPI MCP capability
 
 A FastAPI API may expose an application-owned authenticated `/mcp` alongside its
-HTTP routes. Workflow API `2.3.0` accepts `spec.mcp_enabled` (boolean, default
+HTTP routes. Workflow API `3.0.0` accepts `spec.mcp_enabled` (boolean, default
 false). The flag is desired release configuration, fingerprinted and snapshotted
 in immutable revisions; only the ready active revision advertises a connection.
 Workflow omission resets desired state; PATCH omission preserves it.
-`resource_release.list` accepts `mcp_available=true` and returns nullable
+`resource_release.mcp_endpoints` lists the FastAPI MCP endpoints a person can
+use; `resource_release.list` accepts `mcp_available=true` and returns nullable
 `mcp_connection` metadata, also present on detail. A cold runtime may have an
 active connection; this is not a live-health guarantee.
 
 Call this project endpoint **FastAPI MCP** and the central platform endpoint
-**Django MCP**. Direct clients use the FastAPI MCP URL and shared Django OAuth
-login, without Command Center or a preconfigured Django MCP. Existing access and
+**Django MCP**. Direct clients need only the FastAPI MCP URL: the release origin
+serves the login metadata, and clients sign in through shared Django OAuth,
+without Command Center or a preconfigured Django MCP. Existing access and
 refresh JWT types are bound to that project resource; they do not authorize
 central platform operations. Discovery does not install client configuration.
 
 The application owns tools, business authorization and FastAPI/MCP lifespan;
-shared REST/MCP/harness functions are optional project design. No registry,
+shared REST/MCP/harness functions are an optional application design choice. No registry,
 generated REST adapter, Tau adapter or separate runtime is required. The SDK's
 MCP hosting/context integration is owned by its existing ADR 0038, with caller
-identity owned by ADR 0036; both are linked from platform ADR-0050. Verify launcher compatibility, live gateway challenges and
-client startup behavior before enabling a project; backend support alone does
-not prove that the deployed application has the mount.
+identity owned by ADR 0036; both are linked from platform ADR-0050. Verify
+launcher compatibility and client startup behavior before enabling a project;
+backend support alone does not prove that the deployed application has the
+mount.
 
-Use `resource-release` FastAPI MCP capability for the connection procedure,
-browser consent, supported stateless POST transport, Origin checks and safe
-startup retry. The flag cannot be combined with anonymous `/mcp` public ingress.
+Use the `resource-release` skill's FastAPI MCP sections to find endpoints and
+connect clients, including browser consent, supported stateless POST transport,
+Origin checks and safe startup retry. The flag cannot be combined with anonymous `/mcp` public ingress.
 Installing a mount and composing its startup/shutdown belongs to the application
 and its version-matched SDK. Do not set protected `FASTAPI_MCP_ENABLED` in
 `env_vars`; the platform projects it from the immutable revision. Verify the

@@ -19,8 +19,7 @@ requirements. Verify that the installed Tau version supports this registration
 and delegation contract; backend bootstrap data alone does not install the tools.
 
 Use this skill to turn an existing Main Sequence CodeRepository into a
-repository-backed Harness Agent. Start with `code-repository-design` to obtain
-an accepted architecture and CodeRepository Blueprint when design work remains.
+repository-backed Harness Agent.
 
 The calling agent inspects and edits the repository. MCP supplies platform
 meaning and approved operations.
@@ -219,7 +218,7 @@ capabilities, and the supported response-kind intersection.
 For accepted idle-latency requirements, record the desired replica floor and
 its resource-cost rationale in existing deployment expectations; for accepted
 throughput requirements, record the desired replica ceiling and the per-replica
-capacity it assumes. Current workflow API `2.3.0` accepts `min_scale` (`0`
+capacity it assumes. Workflow API `3.0.0` accepts `min_scale` (`0`
 through `50`, default `0`) and `max_scale` (`1` through `50`) for FastAPI and
 Harness Agents; `min_scale` never exceeds `max_scale`, and an omitted
 `max_scale` defaults to `10` for FastAPI and `5` for Harness Agents. A floor of
@@ -235,7 +234,7 @@ desired values as numeric stats, including a zero floor; Static Sites and
 unbound Agents omit them.
 
 For accepted per-replica capacity, record the number of requests one replica
-serves at once. Current workflow API `2.3.0` also accepts, for FastAPI and
+serves at once. Workflow API `3.0.0` also accepts, for FastAPI and
 Harness Agents, `container_concurrency` (`1` through `1000`, the hard limit of
 requests in flight per replica), `concurrency_target` (`1` through `1000` and at
 most `container_concurrency`, the per-replica autoscaling target) and
@@ -288,13 +287,24 @@ creates itself. Only the workflow file sets these values.
 Place plain runtime configuration values in `env_vars`. Store protected values
 through the platform's Secret and Constant facilities.
 
+To give the Agent a Command Center icon, commit an SVG, PNG or WebP file beside
+the Agent Card, for example `.agents/command-center-icon.svg`, and declare
+`command_center_icon: {path: .agents/command-center-icon.svg, rendering: color}`
+in the `harness_agent` spec. Use `rendering: mask` for a monochrome glyph that
+should follow the theme color. A small animated pixel-art sprite works as a
+`color` APNG (frame 0 is its still, at least 32 x 32 px) with
+`image_rendering: pixelated`. Add `command_center_animations` with pose sprites
+(`thinking`, `working`, `error`, or your own names) and `tools` rules that map
+each declared application to the pose its tools should show. Never put the icon, its bytes or a URL in
+`.agents/agent_card.json`.
+
 The Agent runs as its own workload User, with no access until it is granted.
 Declare the objects it needs under the resource's `access`, or grant them by
 hand; the code-repository-workflows skill (Workload Identity, Declared Access)
 explains both. An Agent accesses Secrets through ordinary effective-user permissions.
-Anyone with edit on the Agent can change code that uses its access; granting
-access therefore trusts those editors. Its backing release follows the Agent's
-sharing. Read `resource-release` Runtime authentication and recovery before
+Anyone who holds `editor` or `owner` on the Agent can change code that uses its
+access; giving access therefore trusts those editors. Its backing release
+follows the Agent's policies and takes none of its own. Read `resource-release` Runtime authentication and recovery before
 upgrading or redeploying pinned runtime SDK dependencies.
 
 ## Validation

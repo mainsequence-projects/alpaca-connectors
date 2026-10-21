@@ -26,8 +26,13 @@ second SDK-specific prompt override or companion append file. Other resources fo
 version pinned by the installed SDK.
 
 `.agents/skills/ms_tau_sdk/` is different: it contains managed development instructions for coding
-agents working on the repository. It is not loaded as the runtime's `.tau` behavior and must not be
-used as application configuration.
+agents working on the repository. It is not the runtime's `.tau` behavior and must not be used as
+application configuration.
+
+Tau reads skills in `.tau/skills/` and `.agents/skills/` at any depth: a folder without a
+`SKILL.md` groups skills, such as `.agents/skills/mcp_tools/<skill>/SKILL.md`, the folder an
+application can publish with the mainsequence SDK's skills publisher. The managed skills in
+`.agents/skills/ms_tau_sdk/` are read too.
 
 ## Extension ownership
 
@@ -74,7 +79,7 @@ Task controls requires an actual Task context and is specified by ADR 0015.
 The A2A Task controls are `task_request_input` and `task_request_authorization`. They remain
 available in every mode for the agent's own Task; extensions must not register those names.
 Register project tools under `.tau/extensions/` and verify the effective catalog after loading.
-With base tools excluded, the skill-scoped `read` keeps `.tau/skills/` available: it opens a
+With base tools excluded, the skill-scoped `read` keeps the project skills available: it opens a
 discovered skill's `SKILL.md` and the files in its directory, such as `references/*.md`, and
 rejects every other path, including symlinks that resolve outside the skill. Tau lists the skills
 in the system prompt because a tool named `read` exists. Extensions must not register `read` in
@@ -153,10 +158,13 @@ async def revenue_by_region(tool_call_id, arguments, signal=None, on_update=None
     return AgentToolResult(content=[TextContent(text=json.dumps(answer.json()["rows"]))])
 ```
 
-- `current_requester()` returns the person the turn serves, with `uid` and `team_uids`, or
-  `None`. The platform names that person when the turn starts, whoever called; it is `None` when
-  the platform names nobody, in local mode, and in code outside a turn. Only it names the
-  requester: never take a person's UID from tool arguments, the prompt, history, or a header.
+- `current_requester()` returns the person the turn serves, with `uid` and
+  `await in_teams(team_uids, *, max_age_seconds=None)`, or `None`. `in_teams()` answers while the
+  person is the verified caller of the turn's request (see `tau_security_and_access`, "Checking the
+  person's teams"); the person carries no team list. The platform names that person when the turn
+  starts, whoever called; it is `None` when the platform names nobody, in local mode, and in code
+  outside a turn. Only it names the requester: never take a person's UID from tool arguments, the
+  prompt, history, or a header.
 - `platform_client()` returns a client. `await client.request("GET", "/api/v1/...")` calls a
   platform API path, and `await client.call_release(release_uid, method, path, ...)` calls another
   platform application. Both return an `httpx.Response`.
@@ -175,8 +183,8 @@ Rules for tools that act for the requester:
   credentials itself. A tool never reads, logs, stores, or forwards them, passes a path rather than
   a URL, and never sets `Authorization` or an `X-MainSequence-*` header.
 - A delegated call uses the person's ordinary permissions, including administrative ones; any other
-  call uses the Agent's own. Each operation decides what it needs. Never infer write permission
-  from view access.
+  call uses the Agent's own. Each operation decides what it needs: never infer that a call may
+  change an object because it may read it.
 - Return to the model only business results, such as rows, numbers, and names. Never return the
   response object, its headers, a token, a proof, or a raw error body.
 - Keep nothing for another turn or another person. The delegation ends with the turn, and a task
@@ -198,8 +206,8 @@ separate authority. Prompt injection can cause unintended changes, sharing, or d
 person's permissions, and completed writes can outlast the delegation. Only Organization admins
 enable this authority.
 
-For a complete example, a tool that uses a person's Secret without exposing it, and how sharing
-decides what a delegated call can reach, use `tau_security_and_access`.
+For a complete example, a tool that uses a person's Secret without exposing it, and how policies
+decide what a delegated call can reach, use `tau_security_and_access`.
 
 ## Validation
 

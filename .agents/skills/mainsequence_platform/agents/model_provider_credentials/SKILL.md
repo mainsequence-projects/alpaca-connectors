@@ -62,8 +62,10 @@ Never substitute a new name merely to work around a permission error.
 Without a name, reads/execution prefer the User's original owned record, then
 the earliest shared record; legacy sign-in/revoke writes address the first owned
 record. An existing session retains its exact credential UID when selection is
-omitted. A name containing `default` is just a name. A use/view grant permits
-runtime delivery, not sign-in changes or revocation; those require edit access.
+omitted. A name containing `default` is just a name. The `user` policy (`use`)
+permits runtime delivery, not sign-in changes or revocation: signing in again
+needs `update` and revoking needs `revoke` (`editor` or `owner`), and a refusal
+is `403` `missing_action` naming the policies that would allow it.
 If the Environment is unresolved, select one through the Environment workflow.
 Do not cross a deployed runtime's target-derived Environment.
 
@@ -122,11 +124,15 @@ The revised feature names and shares existing configured records using
 `custom_id`; it does not add account/subscription models. Sign-in start and revoke
 accept optional `custom_id` and `organization_environment_uid`. Names are scoped
 to the Environment. Existing sessions retain their exact credential UID.
-Use live tool discovery and never invent a sharing tool or a successful grant.
-The Command Center provider details screen uses the existing sharing controls;
-this MCP skill does not expose credential delivery or generic HTTP tools.
+Use live tool discovery and never invent a tool or a successful grant.
+Credentials and custom endpoints are decided by their policies (ADR-0053): read
+and give them with the access tools, `resource_type`
+`model-provider-credentials` or `custom-model-providers` (`access.get`,
+`access.my_actions`, `access.attach` with policy `user`, `editor` or `owner`,
+`access.detach`). The Command Center provider details screen uses its Access
+panel; this MCP skill does not expose credential delivery or generic HTTP tools.
 
-Before helping with a supported sharing action, explain:
+Before helping give a policy on a configured record (`access.attach`), explain:
 
 > Sharing this configured provider lets recipients receive and copy its
 > credentials in their own runtime, including local Tau. Only share with people
@@ -140,24 +146,28 @@ Before helping with a supported sharing action, explain:
 
 This applies to people, teams and workload Users, including their runtime/code
 operators. Organization admins hold the same access without a share. Existing Environment, object and session authorization still applies.
-Sharing one configured record does not grant access to other credentials for
-the same provider. There is no separate local-use permission.
+A policy on one configured record does not give access to other credentials
+for the same provider. There is no separate local-use permission.
 
 A workflow file can share a configured record with its own workload's User by
 declaring it under `access.model_providers` (code-repository-workflows skill,
 Declared Access): a built-in provider's credential by `provider` and
-`custom_id`, a custom endpoint by `provider` alone. Give the same disclosure
-before helping write that declaration, and add that every later push to the
-branch keeps the share.
+`custom_id`, a custom endpoint by `provider` alone. The declaration writes a
+binding with the policy the entry names (`policy: user`, `editor` or `owner`).
+Give the same
+disclosure before helping write that declaration, and add that every later
+push to the branch keeps the binding.
 
-Reuse the user's existing authorization and the normal sharing flow. This
-policy does not add a confirmation requirement. Command Center must show the
-disclosure before Share is submitted and retain it in the configured provider's
-details. Identify the selected name, owner, Environment and recipient.
+Reuse the user's existing authorization and the access routes. This policy
+does not add a confirmation requirement. Command Center must show the
+disclosure (the `user` policy's impact text) before a policy is given and
+retain it in the configured provider's details. Identify the selected name,
+owner, Environment and recipient.
 
 The recipient's authorized runtime can receive credentials; MCP results,
 model-visible conversations, logs and ordinary read responses cannot. Never
-fetch keys to demonstrate the policy or claim unsharing recalls delivered tokens.
+fetch keys to demonstrate the policy or claim that removing a policy recalls
+delivered tokens.
 The canonical disclosure is in
 `docs/agents/providers/model_provider_credentials.md`; its owning ADR remains
 `docs/platform/adr/adr-0049-shareable-model-provider-accounts.md`.

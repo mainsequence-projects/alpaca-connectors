@@ -148,7 +148,7 @@ person, read `User.get_by_uid(uid)`: a workload identity has `identity_type`
 endpoint's application policy using the verified user UID.
 
 To list the people, Teams and workloads the caller can see, for example to
-offer sharing candidates, read inside `reads_as_caller()` from
+offer access candidates, read inside `reads_as_caller()` from
 `mainsequence.server.fastapi`: `User.filter`, `User.get_by_uid`, `Team.filter`
 and `Team.get_by_uid` then answer with the caller's visibility, and workload
 rows carry `managed_by_caller`. Outside a signed HTTP request it raises
@@ -160,6 +160,50 @@ connection is active. See the version-matched
 [FastAPI identity documentation](https://mainsequence-sdk.github.io/mainsequence-sdk/knowledge/fastapi/)
 for the lifecycle and trust contract.
 
+### Team membership
+
+The application owns its team policies. Check whether the caller belongs to
+the teams a policy names with `in_teams()`. Never take team facts from the
+request body, a header, a query parameter or the assertion:
+
+```python
+from fastapi import HTTPException
+from mainsequence.client import User
+
+
+@app.post("/teams/{team_uid}/reports")
+def publish_report(team_uid: str) -> dict[str, str]:
+    caller = User.get_logged_user()
+    # A write: ask the platform now instead of reusing an older answer.
+    if team_uid not in caller.in_teams([team_uid], max_age_seconds=0):
+        raise HTTPException(status_code=403, detail="Only the team's members can publish.")
+    return {"team_uid": team_uid, "published_by": caller.uid}
+```
+
+- `in_teams(team_uids, *, max_age_seconds=None)` returns the subset of
+  `team_uids` the person is an active member of, as a `frozenset` of canonical
+  UIDs; an empty set means none. Unknown and inactive teams are left out. It
+  works on `User.get_logged_user()` and `User.get_requester()`, asks only about
+  that request's caller or requester, and sends longer lists in calls of at
+  most 100 teams.
+- How long an answer may be reused is the application's choice.
+  `install_request_identity(app, team_membership_cache_seconds=60)` reuses an
+  answer across requests while it is younger than 60 seconds; the default, `0`,
+  reuses it only within its request. `max_age_seconds` sets the lifetime for
+  one call, and `max_age_seconds=0` always asks the platform: use it before a
+  write or anything that must see a removal at once.
+- It raises `RequestIdentityError` outside a signed HTTP request, in local mode
+  and on WebSockets, and the SDK's API error when the platform cannot answer.
+  Let the request fail: never read an exception as "member" or "not a member".
+- It calls the platform when it has no answer to reuse, and that call blocks.
+  Call it from a `def` handler, or from an `async def` handler with
+  `await asyncio.to_thread(caller.in_teams, team_uids)`, which keeps the
+  request's identity.
+- The identity has no `team_uids`; the platform signs no team list. Code
+  written for releases that had it reads `in_teams()` instead.
+- Membership is not team administration and not a grant on an object: check
+  the exact object and action as well.
+
 ### Requester-bound calls
 
 Another application, for example an Agent, can call the API while it works for
@@ -167,9 +211,10 @@ a person: the requester. The platform signs the requester into the caller
 assertion it sends to the API, and the SDK verifies it before the handler runs.
 `User.get_logged_user()` still returns the caller, the acting application.
 `User.get_requester()` returns the requester, the checked delegation, with the
-person's own `uid`, `team_uids` and `is_organization_admin`, or `None` when the
-call carries no delegation. A requester-bound call carries the person's
-ordinary permissions, including administrative ones.
+person's own `uid` and `is_organization_admin`, or `None` when the call carries
+no delegation. `in_teams()` on the requester answers for the person's teams
+([Team membership](#team-membership)). A requester-bound call carries the
+person's ordinary permissions, including administrative ones.
 
 Each handler decides whether it needs a person. One that needs a person fails
 with its own error when there is none; one where the person is optional
@@ -191,7 +236,7 @@ def require_requester() -> RequestUserIdentity:
 @app.get("/team-reports/{team_uid}")
 def team_report(team_uid: str) -> dict[str, str]:
     requester = require_requester()
-    if not (requester.is_organization_admin or team_uid in requester.team_uids):
+    if not (requester.is_organization_admin or requester.in_teams([team_uid])):
         raise HTTPException(status_code=403, detail="The requester cannot read this report.")
     return {"team_uid": team_uid, "requested_by": requester.uid}
 
@@ -205,8 +250,8 @@ def acting_identity() -> RequestUserIdentity:
   caller on any other. Never combine the caller's grants with the person's,
   and never fall back to the caller's rights when the person may not.
 - Before a write, check the exact object and action; the example's
-  team-membership check is not a general edit, run, share or delete grant. The
-  getter verifies identity, not operation permission.
+  team-membership check is not a general grant to edit, run, delete or give
+  access. The getter verifies identity, not operation permission.
 - Never parse the assertion, headers or MCP `_meta`, never read a person's UID
   from the request body, a header or a query parameter, and never let a caller
   name whom it acts for. Anyone can write a UID there. Only the signed
