@@ -184,9 +184,11 @@ Organization Environment and its result recorded here before the status becomes 
 
 1. The API runtime principal is allowed to create, update and delete Secrets.
 2. A Secret created by the API runtime can be read by every runtime that resolves account
-   credentials: the API itself and the bars, signal, portfolio and holdings Jobs. If any Job runs as
-   a different principal, the API must grant that principal or its team `view` on each managed Secret
-   at creation, and this ADR must name it.
+   credentials: the API itself and the bars, signal, portfolio and holdings Jobs. Each Job runs as
+   its own workload User, and reading a value needs the Secret's `value_reader` policy. A workload
+   never grants another workload (platform access rule since 2026-10-20), so the API cannot attach
+   `value_reader` to a Job's workload User. The Secret's owner attaches it to a Team that contains
+   those Jobs; code may do the same only for a Team the API belongs to. No code does this today.
 3. `Secret.patch` (or the SDK's equivalent) updates a value in place. If it does not, rotation
    becomes delete-then-create under the same name, run only after the new pair has been validated
    against Alpaca. The window during which Jobs may fail must be documented.

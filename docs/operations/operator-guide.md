@@ -127,15 +127,15 @@ skills are described in [the Agent page](../agent.md).
   the ms-markets schema is migrated only by the ms-markets deployment's `migrate-markets` Job; never
   run `metatables migrations upgrade` or `downgrade` against a hosted environment from a developer
   or agent session
-- tables belong to one platform Team per Environment (for example `alpaca-connectors-production`)
-  with Writer on both MetaTables catalog namespaces: `alpaca-connectors` for this provider's
+- the project uses two MetaTables catalog namespaces: `alpaca-connectors` for this provider's
   Alembic registry, and `mainsequence.markets` for the project's tables and the ms-markets tables
-  it writes; its members are the workload Users of the migration Job,
-  the `alpaca` API, and the signal, portfolio and bars Jobs
-  ([Table Access Through A Team](jobs.md#table-access-through-a-team)). An Organization admin creates the Team and the grant in the platform and
-  MetaTables Security; never grant tables directly to a workload User. Every workflow resource that
-  uses MetaTables declares `access.branches: [{repository: MetaTables, level: view}]`; the
-  `harness_agent` uses only the API's MCP and declares no MetaTables access
+  it writes; a person owns each namespace, and the owner grants each workload its MetaTables role
+  (`data_viewer`, `data_writer` or `editor`, never `owner`), directly or through the Environment's
+  Team (for example `alpaca-connectors-production`) for the roles its members share
+  ([Table Access And MetaTables Roles](jobs.md#table-access-and-metatables-roles)). Every
+  workflow resource that uses MetaTables declares
+  `access.branches: [{repository: MetaTables, policy: reader}]`; the `harness_agent` uses only the
+  API's MCP and declares no MetaTables access
 - during development apply revisions to the local runtime, which has no ms-markets deployment, with
   `metatables --local migrations upgrade --provider msm_migrations:migration head`, then
   `metatables --local migrations upgrade --provider alpaca_connectors.migrations:migration head`; every revision must keep

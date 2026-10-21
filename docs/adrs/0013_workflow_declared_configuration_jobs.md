@@ -9,6 +9,10 @@ It amends the one-Job-per-configuration decisions of
 Jobs in [ADR 0012](0012_deployment_workflow_migrations_and_schema_gated_jobs.md). The hosted checks
 under [Verification](#verification) are still open.
 
+Amended on 2026-10-21: the scheduled runs moved to two dispatcher Jobs
+([decision 8](#8-dispatcher-jobs-hold-the-schedules)). Under workflow API 3.0.0 starting a run of a
+Job needs `runner` on it, and a Job cannot declare access to itself.
+
 ## Context
 
 ADR 0007 gave each signal configuration, and ADR 0008 each portfolio configuration, a dedicated Main
@@ -61,7 +65,8 @@ So `enabled` already means "include this configuration in the scheduled runs".
 ### 1. Two declared Jobs
 
 `.mainsequence/workflows/alpaca-connectors-api.yaml` declares one Job per configuration kind,
-outside `execution.steps`:
+outside `execution.steps`. Since 2026-10-21 the crontabs and `scheduled_command_args` below belong
+to the kind's dispatcher Job instead ([decision 8](#8-dispatcher-jobs-hold-the-schedules)):
 
 | Key | Name | Execution path | Daily crontab (UTC) |
 |---|---|---|---|
@@ -89,7 +94,9 @@ Each entry point runs the ADR 0012 schema gate first and then takes exactly one 
 - `--configuration-uid <uid>` executes that configuration. A signal runs one Universe update, and a
   portfolio bootstraps the portfolio runtime and runs its graph.
 - `--scheduled` is the scheduled run. It starts one `--configuration-uid` run for each configuration
-  whose scheduled flag is set.
+  whose scheduled flag is set. Since 2026-10-21 only the dispatcher's entry point takes it
+  (`src/jobs/dispatch_alpaca_etf_signal.py`, `src/jobs/dispatch_alpaca_etf_portfolio.py`), and the
+  kind's entry point takes only `--configuration-uid`.
   - It skips a configuration that has a pending or running run, and a portfolio whose preflight is
     blocked.
   - A failed start does not stop the other starts, but the scheduled run then exits 1.
@@ -137,11 +144,14 @@ configuration became inactive can still be paused.
 ### 5. Responses
 
 Configuration responses report the kind's declared Job as `job_uid` and `job`, which carries its
-schedule (including the timezone), compute, image status and automatic deployment.
+schedule (including the timezone), compute, image status and automatic deployment. Since
+2026-10-21 the schedule is the kind's dispatcher's, the Job whose scheduled run starts the
+configuration runs.
 
-- Both fields are null until a push creates the Job on the branch.
+- Both fields are null until a push creates the Job on the branch. The schedule is null while the
+  dispatcher does not exist.
 - A signal's `lifecycle_state` is computed: `provisioning` before the push, then `ready` when the
-  signal is scheduled and the Job has a schedule, and `paused` otherwise.
+  signal is scheduled and the dispatcher has a schedule, and `paused` otherwise.
 - Signal responses drop:
   - the stored schedule and compute fields;
   - `last_error`;
@@ -172,6 +182,31 @@ No code creates a Job or writes a Job's schedule. `tests/test_configuration_jobs
 rejecting any `<…Job>.create(...)` or `<…job>.patch(...)` call and any use of `create_schedule` in
 `src/` and `api/`.
 
+### 8. Dispatcher Jobs hold the schedules
+
+Decided on 2026-10-21 (upgrade plan decision D3), when the workflow moved to API 3.0.0. A Job's
+scheduled run that starts runs of the same Job needs `runner` on that Job, and a workflow resource
+cannot declare access to itself (`self_reference`). Each kind therefore gets a dispatcher Job in
+the same file:
+
+| Key | Name | Execution path | Daily crontab (UTC) | Declared access |
+|---|---|---|---|---|
+| `alpaca-etf-signal-dispatcher` | `Alpaca ETF Signal Dispatcher` | `src/jobs/dispatch_alpaca_etf_signal.py` | `30 0 * * *` | `runner` on `alpaca-etf-signal`, MetaTables `reader` |
+| `alpaca-etf-portfolio-dispatcher` | `Alpaca ETF Portfolio Dispatcher` | `src/jobs/dispatch_alpaca_etf_portfolio.py` | `0 2 * * *` | `runner` on `alpaca-etf-portfolio`, MetaTables `reader` |
+
+- A dispatcher carries the crontab and `scheduled_command_args: ["--scheduled"]`, with the same
+  compute as the kind's Job and outside `execution.steps`. Its entry point runs the schema gate
+  and then `dispatch_scheduled_configurations`, unchanged from decision 2.
+- The kind's Job keeps manual runs only. A push changes only the fields a declaration states, so
+  the Job declares `task_schedule: null` and `scheduled_command_args: []`, which remove the schedule
+  earlier pushes attached.
+- The API declares `runner` on the two Jobs it starts and `viewer` on the two dispatchers, whose
+  schedule it reports. It keeps branch `editor` only for the `alpaca-bars-update` Job that
+  `alpaca-bars-update.yaml` declares, because `access.resources` can name only resources of the
+  same file.
+- A dispatcher reads the configurations (and, for portfolios, the preflight inputs) through
+  MetaTables, so its workload User needs `data_viewer` on both namespaces.
+
 ## Consequences
 
 - **Creating a configuration no longer touches the platform.** It succeeds before the Jobs exist.
@@ -183,10 +218,14 @@ rejecting any `<…Job>.create(...)` or `<…job>.patch(...)` call and any use o
 - **History depth is shared.** A configuration's run history and latest status come from the Job's
   500 newest runs.
 - **Each configuration run is its own JobRun**, with its own status, logs and arguments. The
-  scheduled run belongs to no configuration, so `/v1/operations/job-runs/{uid}` returns it with
-  `configuration_uid: null`.
-- **The scheduled run starts runs of its own Job from inside that Job.** It uses the Job runtime's
-  credentials, which act as their user within the Environment.
+  scheduled run belongs to no configuration. Since decision 8 it is a run of the dispatcher Job,
+  which `/v1/operations/job-runs/{uid}` does not return; scheduled runs recorded on the kind's Job
+  before then are still returned with `configuration_uid: null`.
+- **The scheduled run starts runs of the kind's Job from inside the dispatcher Job.** It uses the
+  dispatcher runtime's credentials, which act as its workload User within the Environment, and that
+  User's `runner` policy on the kind's Job. The first design ran the dispatch inside the kind's own
+  Job, which needed `runner` on itself; workflow API 3.0.0 cannot declare that, so its scheduled
+  runs could not start configuration runs (decision 8).
 - **A run can start before the schema is migrated.** The Jobs are outside the graph, so a push may
   promote their image before the migration Job finishes. The schema gate turns a run in that window
   into a clean skip. The next scheduled run does the work, but a manual run in that window ends as
@@ -249,9 +288,15 @@ rejecting any `<…Job>.create(...)` or `<…job>.patch(...)` call and any use o
   - The new storage code then read, filtered and paused both kinds through the API, and the schema
     gate reported no provider behind.
   - A downgrade to 0015 and a second upgrade to head kept the rows.
+- **Workflow API 3.0.0 (decision 8), 2026-10-21.** `validate-workflow` on the development server's
+  `main` branch returned `valid: true` for all three files, with no errors or warnings. Its
+  normalized document keeps `task_schedule: null` and `scheduled_command_args: []` on the two
+  Jobs. A `resources` entry that names `alpaca-bars-update` from this file is refused with
+  `unknown_resource`, which is why the API keeps branch `editor`.
 - **Not verified:**
   - the push that creates the two Jobs and runs the migration Job;
-  - a hosted manual run, the scheduled run, and `run-job` called from inside a Job runtime;
+  - a hosted manual run, the scheduled run, and `run-job` called from inside a Job runtime (now
+    the dispatchers');
   - that the hosted runtime passes run arguments to the script. On 2026-09-03 it did not
     ([Jobs And Scheduling](../operations/jobs.md#run-arguments)). PodDeploymentOrchestrator
     `09e5ab4` (2026-09-13) fixed this, and tdag-django `01f475a86` appends `JobRun.command_args`

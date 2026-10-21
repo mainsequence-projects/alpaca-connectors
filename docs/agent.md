@@ -114,10 +114,10 @@ There are three distinct identities in the execution path:
 The API verifies request identity before installing MCP; its worker-thread dispatch preserves that
 context. This is not a blanket claim of per-person filtering on every table. The application's
 release-access boundary, explicit ownership checks, and workload permissions all matter. API and
-Job workload users obtain table access through the Environment's Team. Its Writer grants cover
-`mainsequence.markets` and the separate `alpaca-connectors` namespace holding this project's
-Alembic version registry; the Harness needs no direct table grant to use these tools. See
-[Table Access Through A Team](operations/jobs.md#table-access-through-a-team).
+Job workload users hold MetaTables roles on `mainsequence.markets` and on the separate
+`alpaca-connectors` namespace holding this project's Alembic version registry, granted by each
+namespace's owner; the Harness needs no table role to use these tools. See
+[Table Access And MetaTables Roles](operations/jobs.md#table-access-and-metatables-roles).
 
 ## Operational Boundaries
 
@@ -151,7 +151,10 @@ The model-facing catalog retains:
 - `alpaca__list_resources` and `alpaca__read_resource`, reaching only the skills/resources that
   same application advertises and verifying listed skill-file digests before returning content;
 - a restricted `read` that can open discovered skill files and their supporting files, not
-  arbitrary repository files or paths outside those skills;
+  arbitrary repository files or paths outside those skills. Since TAU 2.0.21 the runtime discovers
+  every `SKILL.md` under `.agents/skills/` at any depth, so that index, which the prompt also
+  lists, covers the six business skills and the copied Main Sequence, platform, MetaTables,
+  ms-markets and TAU development bundles;
 - SDK `task_request_input` and `task_request_authorization` controls for the Agent's own A2A
   Task context. These are runtime controls, not general platform operations.
 
@@ -208,12 +211,18 @@ with the legacy protocol. These operations use the current call's application ac
 cross-person catalog. Only advertised resources or listed skill files are read.
 
 The earlier grouped-local-discovery issue [TAU #99](https://github.com/mainsequence-sdk/ms-tau-sdk/issues/99)
-is closed. The solution used here is MCP consumption of the single nested directory, not recursive
-local loading. Tests now exercise the real SDK application connector and resource tools over local
-HTTP: all six files must be returned byte-for-byte with verified digests, private/traversal URIs
-must be refused, and altered content must never reach the model. A separate local-reader test
-confirms that private development files and MCP-only business files are not exposed through local
-filesystem reading. This does not certify a deployed revision or a live model conversation.
+is closed. The solution used here is MCP consumption of the single nested directory. Tests now
+exercise the real SDK application connector and resource tools over local HTTP: all six files must
+be returned byte-for-byte with verified digests, private/traversal URIs must be refused, and
+altered content must never reach the model. This does not certify a deployed revision or a live
+model conversation.
+
+TAU 2.0.21 added recursive local loading: a folder without a `SKILL.md` groups skills, and the
+managed `.agents/skills/ms_tau_sdk/` skills are read too (its `tau_project_customization` skill).
+The Agent therefore also reads the six business skills and the copied development bundles
+locally, through its restricted `read`. A local-reader test pins that index to the repository's
+`SKILL.md` files and checks that every other file, such as `pyproject.toml`, `AGENTS.md` or
+`.tau/SYSTEM.md`, is still refused.
 
 ### Application-tool timeouts
 
@@ -231,7 +240,7 @@ retrying a mutation. The new timeout support does not automatically move these o
 ## Deployment
 
 `.mainsequence/workflows/alpaca-connectors-api.yaml` declares the branch's one `harness_agent`
-on workflow API `2.3.0`, next to the `alpaca` API whose MCP it uses
+on workflow API `3.0.0`, next to the `alpaca` API whose MCP it uses
 (`mcp_applications: [{resource: alpaca}]`). Same-file declarations establish that application
 reference; they do not themselves prove that either service is ready. Its `source_path`,
 `api/agent/main.py`, serves
@@ -244,8 +253,10 @@ workflow enables automatic deployment and accepts every pushed commit through
 The resource declares `acts_for_requester: true`. Only an Organization admin's push enables it;
 the Agent then calls the platform with the ordinary permissions of the person whose request it
 serves, for at most 24 hours after that request. The retired `code_repository_coding_agent` kind
-and its `command_center_icon`, `cpu_limit`, and `memory_limit` fields are rejected by the
-platform, so the workflow no longer declares an icon.
+and its `cpu_limit` and `memory_limit` fields are rejected by the platform. The `harness_agent`
+declares its Command Center icon and poses (`command_center_icon`, `command_center_animations`)
+from `assets/agents/packer/`; the platform refuses an icon file over 128 x 128 px or 64 KiB and
+then keeps its default robot without failing the deployment.
 
 The explicit execution chain builds the API's image, runs this project's migration Job from it,
 and then deploys the API. The Harness is part of the same chain: `agent_image` builds its image and
@@ -256,10 +267,13 @@ account-key-entry link currently targets the development Command Center at `loca
 `ALPACA_CONNECTORS_SITE_URL` must point to the intended, person-accessible site before using this
 flow outside that development setup.
 
-The two resources name each other in their `access` blocks. The Agent has `view` on the `alpaca`
-release, the application it calls. The API has `view` on the Agent, so it can find the Agent that
-the Alpaca site opens. Both entries name resources declared on this branch, so any push may apply
-them; only `acts_for_requester` needed an Organization admin's push, and it is already on.
+The two resources name each other in their `access` blocks with the smallest policy each needs.
+The Agent has `user` on the `alpaca` release (see it and call it): its own calls to the API's MCP;
+a call it makes for a person uses that person's access. The API has `user` on the Agent (see it
+and use it), so it can find the Agent that the Alpaca site opens. Under workflow API 2.3.0 both
+entries were `view`, which the platform converted to `viewer`; the 3.0.0 file lowers them. Both
+entries name resources declared on this branch, so any push may apply them; only
+`acts_for_requester` needed an Organization admin's push, and it is already on.
 
 The project configuration (`GET /v1/project-state/configuration`) uses that access. It finds the
 Agent when the request arrives and returns `agent_uid` with `organization_environment_uid`. The
@@ -279,16 +293,24 @@ connection before relying on it.
 
 ## Current local compatibility review
 
-The installed and locked versions are Main Sequence **9.0.24**, TAU **2.0.14**, MetaTables
-(`mainsequence-metatable`) **0.1.35**, and ms-markets **2.2.10**. On 2026-10-14 Main Sequence
-moved from 9.0.23 to 9.0.24 and MetaTables from 0.1.34 to 0.1.35. The Main Sequence release stops
-scaffolding `AGENTS.md` and ships its guidance in the SDK skills; the MetaTables release changes
-only its docs and skills. The requested Main Sequence,
-TAU, and MetaTables releases were checked against the package registry on 2026-10-13; MetaTables
-was already current. ms-markets was not upgraded in this maintenance pass. `pyproject.toml`
-retains non-exact compatibility ranges, while `uv.lock` and the exported `requirements.txt`
-record the resolution. The SDK upgrade also moves the official MCP dependency from **1.30.0**
-to **2.3.0**, with its required transport dependencies.
+The installed and locked versions are Main Sequence **9.0.30**, TAU **2.0.23**, MetaTables
+(`mainsequence-metatable`) **0.1.51**, and ms-markets **2.2.10** (2026-10-21).
+
+- Since 2026-10-15 the platform's caller assertions carry only the caller's identity (`sub` and
+  `is_organization_admin`, no `team_uids`). The hosted API on Main Sequence 9.0.22 answered every
+  signed call with 401, and the Agent on TAU 2.0.12 refused every caller. Main Sequence 9.0.27
+  and TAU 2.0.17 dropped `team_uids` from their verifiers.
+- MetaTables 0.1.51 is the first client that works with Main Sequence 9.0.30, so the two move
+  together.
+- TAU 2.0.22 makes a Task act for the person who asked for it and return its answer, and 2.0.23
+  keeps the last batch of a Task's answer.
+
+`pyproject.toml` keeps non-exact compatibility ranges (`mainsequence[mcp]>=9.0.30,<10`,
+`mainsequence-metatable>=0.1.51,<0.2`, `ms-tau-sdk>=2.0.23,<3`), while `uv.lock` and the exported
+`requirements.txt` record the resolution. ms-markets was not upgraded. On 2026-10-14 Main Sequence
+had moved from 9.0.23 to 9.0.24, which stopped scaffolding `AGENTS.md` and ships its guidance in
+the SDK skills, and MetaTables from 0.1.34 to 0.1.35. The earlier SDK upgrade moved the official
+MCP dependency from **1.30.0** to **2.3.0**, with its required transport dependencies.
 The `etfhextractor` Git source is pinned to release tag `v0.4.4` (commit `062f3f8`), which requires
 compatible versions. No Alpaca workload reads or writes its only table, `DemoBarsTS`, so the
 migration Job does not apply its provider.
@@ -300,8 +322,8 @@ declare their root object type. Tool names, operations, verified worker-thread i
 secret-safe errors are preserved. The MCP regression tests cover authenticated initialization,
 the complete catalog, delegated calls, and input/error redaction.
 
-Verification with Main Sequence 9.0.24 and TAU 2.0.14 passes all **464 tests plus 96 subtests**,
-application lint/formatting,
+Verification with Main Sequence 9.0.30, MetaTables 0.1.51 and TAU 2.0.23 passes all
+**478 tests plus 101 subtests**, application lint/formatting,
 the strict documentation build and installed dependency checks. The new real HTTP tests verify
 application-MCP skill discovery and digest-checked reads, private/traversal denial, altered-content
 rejection and caller isolation. The old local-index expectation is replaced with this released
@@ -312,12 +334,16 @@ The MetaTables SDK compatibility check and installed dependency consistency chec
 
 Tool-restriction regressions exercise the installed TAU runtime's catalog assembly with mocked
 backend/model I/O: only the four Alpaca application tools, restricted local reader, and A2A Task
-controls remain. Local HTTP tests additionally verify skill consumption through MCP, refusal of
-private files and digest mismatches, and separate caller identities on consecutive calls.
+controls remain. The local reader indexes only the repository's `SKILL.md` files. Local HTTP tests
+additionally verify skill consumption through MCP, refusal of private files and digest
+mismatches, and separate caller identities on consecutive calls. Hosted caller tests sign
+identity-only assertions, and an assertion or requester statement that lists `team_uids` is
+refused with 401.
 
-The requested development skill bundles were explicitly refreshed from the installed packages:
-Main Sequence 9.0.24 (on 2026-10-14), TAU 2.0.14, and MetaTables 0.1.35 (on 2026-10-14). The existing ms-markets 2.2.10 bundle
-was left unchanged. Each bundle's `PINNED_FROM.txt` records its matching version. The six
+The requested development skill bundles were explicitly refreshed from the installed packages on
+2026-10-21: Main Sequence 9.0.30, TAU 2.0.23 and MetaTables 0.1.51, and the platform skills from
+the development backend's catalog, which no longer ships `code_repository_design`. The existing
+ms-markets 2.2.10 bundle was left unchanged. Each bundle's `PINNED_FROM.txt` records its matching version. The six
 repository-owned business skills remain single-copy. On 2026-10-14 `AGENTS.md` lost the retired SDK
 block and was cut to its developer rules, the operator manual moved to the
 [operator guide](operations/operator-guide.md), and `.tau/SYSTEM.md` became the runtime prompt.

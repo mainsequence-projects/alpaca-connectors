@@ -3,20 +3,23 @@
 ## Signal And Portfolio Jobs
 
 Signal and portfolio configurations run on two Jobs declared in
-`.mainsequence/workflows/alpaca-connectors-api.yaml`, one per kind
+`.mainsequence/workflows/alpaca-connectors-api.yaml`, one per kind, and two dispatcher Jobs in the
+same file start their scheduled runs
 ([ADR 0013](../adrs/0013_workflow_declared_configuration_jobs.md)). No code creates a Job: since
 `mainsequence` 9.0.2 only a workflow declaration can, and the push that carries a declaration creates
 its Job.
 
-| Key | Display name | Daily schedule | Scheduled argument |
+| Key | Display name | Daily schedule | Arguments |
 |---|---|---|---|
-| `alpaca-etf-signal` | `Alpaca ETF Signal` | `30 0 * * *` UTC | `--scheduled` |
-| `alpaca-etf-portfolio` | `Alpaca ETF Portfolio` | `0 2 * * *` UTC | `--scheduled` |
+| `alpaca-etf-signal` | `Alpaca ETF Signal` | none | `--configuration-uid <uid>` per run |
+| `alpaca-etf-portfolio` | `Alpaca ETF Portfolio` | none | `--configuration-uid <uid>` per run |
+| `alpaca-etf-signal-dispatcher` | `Alpaca ETF Signal Dispatcher` | `30 0 * * *` UTC | `--scheduled` |
+| `alpaca-etf-portfolio-dispatcher` | `Alpaca ETF Portfolio Dispatcher` | `0 2 * * *` UTC | `--scheduled` |
 
-Both run after the 00:00 UTC daily bars Job and after the US equity close. Their compute is
-0.25 CPU, 0.5 GiB and 3600 seconds, and every push promotes their image. No `execution.steps` entry
-references them, so a push may promote their image before the migration Job finishes; the schema
-gate in each entry point turns a run in that window into a clean skip
+The dispatchers run after the 00:00 UTC daily bars Job and after the US equity close. All four Jobs
+use 0.25 CPU, 0.5 GiB and 3600 seconds, and every push promotes their image. No `execution.steps`
+entry references them, so a push may promote their image before the migration Job finishes; the
+schema gate in each entry point turns a run in that window into a clean skip
 ([ADR 0012](../adrs/0012_deployment_workflow_migrations_and_schema_gated_jobs.md)).
 
 How they run:
@@ -30,11 +33,16 @@ How they run:
   image is not ready, which includes the image build after each push. A signal run needs an active
   Universe and Account. A portfolio run needs an allowed preflight: its linked configurations must
   exist and be enabled, and its signal must have published observations.
-- **The scheduled run executes nothing itself.** It starts one `--configuration-uid` run for each
-  configuration whose scheduled flag is true.
+- **The scheduled run belongs to the dispatcher and executes nothing itself.** Each dispatcher
+  starts one `--configuration-uid` run of its kind's Job for each configuration whose scheduled flag
+  is true. It may, because it declares `runner` on that Job. The kind's Job cannot start its own
+  runs: starting a run needs `runner` on the Job, and a Job cannot declare access to itself
+  (`self_reference`).
   - It skips configurations with a pending or running run, and portfolios whose preflight is
     blocked.
   - It prints what it launched, skipped and failed, and fails if any start failed.
+  - The kind's Job accepts only `--configuration-uid`; a run with `--scheduled` fails with a usage
+    error.
 - **`scheduled` is the only per-configuration operational setting**, and it defaults to true.
   - For a signal, `POST /v1/signal-jobs/{uid}/actions/pause` and `resume` set it. Signal rows store
     it in the `enabled` column.
@@ -42,14 +50,21 @@ How they run:
   - A configuration left out of the scheduled run can still be run manually.
 - **Schedule and compute belong to the declarations.** To change them, edit the workflow file and
   push. A push re-applies the declared schedule, so a schedule edited on the platform lasts only
-  until the next push. Requests that still send schedule or compute settings get 422.
-- **Run history comes from each Job's 500 newest runs.** Configuration responses report the Job as
-  `job_uid` and `job`, both null until the push creates it. Run lists and
+  until the next push. A push changes only the fields a declaration states, so the two
+  configuration Jobs declare `task_schedule: null` and empty `scheduled_command_args`: that removes
+  the schedule earlier pushes gave them. Requests that still send schedule or compute settings get
+  422.
+- **Run history comes from each Job's 500 newest runs.** Configuration responses report the kind's
+  Job as `job_uid` and `job`, with its dispatcher's schedule. Both are null until the push creates
+  the Job, and the schedule is null while the dispatcher is missing. Run lists and
   `/v1/operations/job-runs/{uid}` find a configuration's runs by their `--configuration-uid`
-  argument.
+  argument. Dispatcher runs are not configuration runs, so that route does not return them.
 
-The scheduled run starts other runs of its own Job from inside a Job. This has not yet been checked
-on a hosted runtime: confirm it on the first scheduled run after the push.
+A dispatcher starts runs of another Job from inside a Job runtime, with its own workload's
+`runner` policy. This has not yet been checked on a hosted runtime: confirm it on the first
+scheduled runs after the push (00:30 and 02:00 UTC). Each dispatcher's workload User also needs its
+MetaTables roles before then
+([Table Access And MetaTables Roles](#table-access-and-metatables-roles)).
 
 ### Cleanup Of Per-Configuration Jobs
 
@@ -65,7 +80,8 @@ On each platform branch, after the push that creates the two declared Jobs:
 
 1. List the candidates from a checkout of the branch:
    `mainsequence code-repository jobs list --filter "name__contains=Alpaca ETF"`.
-   - The two declared Jobs are named exactly `Alpaca ETF Signal` and `Alpaca ETF Portfolio`.
+   - The four declared Jobs are named exactly `Alpaca ETF Signal`, `Alpaca ETF Portfolio`,
+     `Alpaca ETF Signal Dispatcher` and `Alpaca ETF Portfolio Dispatcher`.
    - A per-configuration Job is named `Alpaca ETF Signal — <configuration name> [<UID prefix>]` or
      `Alpaca ETF Portfolio — <configuration name> [<UID prefix>]`.
    - On 2026-10-05 the `main` branch on the development server had two:
@@ -74,7 +90,7 @@ On each platform branch, after the push that creates the two declared Jobs:
 2. Delete each per-configuration Job in the platform UI, or with
    `uv run python -c "from mainsequence.client import Job; Job.destroy_by_uid('<Job UID>')"`.
    The `mainsequence` 9.0.5 CLI has no Job delete command. Deleting a Job also deletes its JobRuns.
-3. Check that the list from step 1 shows only the two declared Jobs.
+3. Check that the list from step 1 shows only the four declared Jobs.
 
 ### Cleanup Of The Duplicate Migration Job
 
@@ -232,12 +248,18 @@ not accept a dataset UID, account override, asset-source override, bar-profile o
 name, credential value, hash namespace, or removed `force_update` option. Main Sequence records the
 two command arguments on the resulting JobRun.
 
-The workflow uses backend API `2.3.0`, has no schedule or configuration environment variable, and
-keeps automatic redeployment disabled. A push therefore does not promote this Job to the updated
-SDK image. Verify its image separately before relying on a hosted bars run. Workflow API `2.3.0`
-supports a durable `scheduled_command_args` vector; this on-demand declaration does not configure
-one. Any future recurring configuration must be explicitly declared in the workflow, not created
-or scheduled by application code.
+The workflow uses workflow API `3.0.0`, has no schedule or configuration environment variable,
+and keeps automatic redeployment disabled. A push therefore does not promote this Job to the
+updated SDK image. Verify its image separately before relying on a hosted bars run. Workflow API
+`3.0.0` supports a durable `scheduled_command_args` vector; this on-demand declaration does not
+configure one. Any future recurring configuration must be explicitly declared in the workflow, not
+created or scheduled by application code.
+
+The API starts this Job through its branch `editor` policy. A workflow file's `access.resources`
+can name only resources of the same file (`unknown_resource`), so the API cannot declare `runner`
+on this Job alone while the Job lives in `alpaca-bars-update.yaml`. Moving the declaration into
+`alpaca-connectors-api.yaml` would create a new Job, because the backend identifies a workflow
+target by its file and key ([duplicate migration Job](#cleanup-of-the-duplicate-migration-job)).
 
 ### Run arguments
 
@@ -280,6 +302,11 @@ workflow contract, pushing removal of a valid workflow-bound declaration deletes
 and associated JobRuns; inspect the repository event's deletion result. Jobs without a workflow
 binding are not removed by this reconciliation. Do not treat both Jobs as active production paths.
 
+The declaration sets no `ALPACA_BARS_CONFIGURATION_UID`, and a push changes no environment
+variable it does not declare. Unless the variable was set on the Job outside the workflow, every
+00:00 UTC run fails before the schema gate with "ALPACA_BARS_CONFIGURATION_UID must identify an
+enabled stored bar configuration."
+
 ## FastAPI Release
 
 `.mainsequence/workflows/alpaca-connectors-api.yaml` declares the registered FastAPI resource with
@@ -287,43 +314,53 @@ automatic deployment, revision retention, and the platform-provided static-site 
 A valid workflow or successful Git push is not proof of deployment; verify the ResourceRelease and
 its DeploymentRun separately.
 
-## Table Access Through A Team
+## Table Access And MetaTables Roles
 
 The provider uses two MetaTables catalog namespaces: `alpaca-connectors` for its
 `alpaca_connectors.alembic_version` registry, and `mainsequence.markets` for the project tables
-and the ms-markets tables it writes (Assets, Accounts, holdings, signal weights, portfolios).
-Tables belong to a Team, never to one workload User, because workload Users change with each
-Environment and each recreated Job or release. The migration namespace and the table's catalog
-namespace are separate concepts; inspect the registered table rather than inferring its grant
-scope from the provider name.
+and the ms-markets tables it writes (Assets, Accounts, holdings, signal weights, portfolios). The
+project tables stay in `mainsequence.markets`: moving them would change the catalog identities
+that AGENTS.md freezes. The migration namespace and the table's catalog namespace are separate
+concepts; inspect the registered table rather than inferring its grant scope from the provider
+name.
+
+Since MetaTables 0.1.46 (its ADR 0024) access is a role on a namespace or a table. `data_viewer`
+reads rows, `data_writer` also writes rows, `editor` also registers and changes tables, and `owner`
+also decides who has access. A namespace role covers the namespace's tables. A person, or a Team of
+people, owns each namespace; a workload never owns one, never grants, and never creates a table
+outside a namespace. Both namespaces predate roles: an Organization admin granted their first
+owner, and that owner grants every role below. The Writer grant Team `alpaca-connectors-production`
+held on both namespaces became `editor`, which every member of the Team inherits.
 
 In each Environment where the project runs:
 
 1. ms-markets must already be deployed and migrated there by its own deployment, which owns the
-   `mainsequence.markets` schema and its Team. The project's revisions reference its tables.
-2. An Organization admin creates one platform Team for the project, for example
-   `alpaca-connectors-production`, and in MetaTables Security grants it Writer on the
-   `alpaca-connectors` and `mainsequence.markets` namespaces. Preserve existing namespace grants,
-   including the ms-markets owning Team; add the project's Team with the permission document's
-   current revision instead of replacing other owners.
-3. The Team's members are the workload Users of every resource that reads or writes the tables:
-   the `alpaca-connectors-migrate` Job, the `alpaca` FastAPI release, and the `alpaca-etf-signal`,
-   `alpaca-etf-portfolio`, `alpaca-bars-update` and `daily-stock-bars-holdings-ivv` Jobs. The
-   `alpaca-connectors-agent` Harness Agent reads no tables (its tools run in the API) and is not a
-   member. A resource's workload User exists once its declaration is applied; a recreated
-   resource, such as a renamed key, has a new workload User that needs membership again.
+   `mainsequence.markets` schema. The project's revisions reference its tables.
+2. Each workload holds these roles. A workload User exists once its declaration is applied, and a
+   recreated resource, such as a renamed key, has a new workload User that needs its roles again.
 
-Every one of those resources declares `access.branches: [{repository: MetaTables, level: view}]`
-in its workflow file. A migration that fails with `namespace_not_writable` or `table_not_editable`
-(403) names the `caller_user_uid` missing from the Team: add it, then run the migration Job again.
-Do not grant tables directly to a workload User, and do not run the Job as an Organization admin to
-get around a refusal.
+   | Workload | `alpaca-connectors` | `mainsequence.markets` |
+   |---|---|---|
+   | `alpaca-connectors-migrate` | `editor` | `editor`: it registers the project tables there |
+   | `alpaca` API | none | `data_writer`, plus table `editor` on the AssetSnapshot, AccountHoldings and SignalWeights storages, whose ms-markets updaters it runs in-process |
+   | `alpaca-etf-signal` | `data_viewer` (schema gate) | `data_writer`, plus table `editor` on the AssetSnapshot and SignalWeights storages |
+   | `alpaca-etf-portfolio` | `data_viewer` | `data_writer`, plus table `editor` on InterpolatedPrices, PortfolioCalendarEvents and the PortfolioRebalance, PortfolioWeights and Portfolios storages |
+   | `alpaca-bars-update`, `daily-stock-bars-holdings-ivv` | `data_viewer` | `data_viewer`, plus table `editor` on `alpaca_stock_bars_1d_sip_all` and `alpaca_stock_bars_1d_iex_raw` |
+   | `alpaca-etf-signal-dispatcher`, `alpaca-etf-portfolio-dispatcher` | `data_viewer` | `data_viewer` |
+   | `alpaca-connectors-agent` | none | none: its tools run in the API |
 
-Verify effective Writer access for that workload on both the Alembic registry and a project
-table before retrying. An Organization admin's ability to administer permissions does not by
-itself give the workload table access. A renamed API workflow key can create a new release and
-workload User after migration succeeds; add that new workload to the same Team before verifying
-API readiness. The Harness Agent still receives no direct table grant.
+   Shared roles can stay on the Team, with its person owner as a member, so a recreated workload
+   needs only membership. Grant the `editor` roles directly. Keep the Team's converted `editor`
+   until the direct roles exist, then lower it.
+3. Every one of those resources except the Agent declares
+   `access.branches: [{repository: MetaTables, policy: reader}]` in its workflow file. A migration
+   that fails with `namespace_access_required`, `namespace_not_writable` or `table_not_editable`
+   (403) names the `caller_user_uid` that lacks a role: the owner grants it. A manual run of the
+   migration Job then applies the revisions, but only another push deploys the API that waited for
+   them. Do not run the Job as an Organization admin to get around a refusal.
+
+An Organization admin's ability to administer the platform does not by itself give a workload
+table access. The Harness Agent receives no table role.
 
 ## Operational Checks
 

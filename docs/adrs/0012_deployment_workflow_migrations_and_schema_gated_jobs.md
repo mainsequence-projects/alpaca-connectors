@@ -138,9 +138,10 @@ The exact file layout, `api_version` and resource kinds come from the branch's
 FastAPI release and coding agent must keep their current resource identities.
 
 The platform constrains this. An `execution` step may reference only resources declared in the same
-workflow file, and `api_version` 2.3.0, which the graph needs, accepts only the kinds `fastapi`,
+workflow file, and the workflow API the graph needs (`api_version` 2.3.0 when this was decided,
+3.0.0 since the platform made it the only version on 2026-10-18) accepts only the kinds `fastapi`,
 `harness_agent`, `job` and `static_site`. A resource therefore joins the graph only once its
-declaration lives in the migration workflow file with a 2.3.0 kind; see
+declaration lives in the migration workflow file with one of those kinds; see
 [Implementation Status](#implementation-status).
 
 ### 3. Launchers that the graph cannot gate check the schema first
@@ -187,8 +188,8 @@ Implemented on 2026-10-03:
   `msm_migrations:migration` and our provider (`GATED_PROVIDERS`). If the ms-markets deployment has
   not yet migrated to the version this image pins, Jobs skip instead of failing.
 - `.mainsequence/workflows/alpaca-connectors-api.yaml` declares the API and that Job in one file
-  at `api_version` 2.3.0, with the graph: prepare the image from the API, run the migration Job, then
-  deploy the API with `needs: [migrate]`. It keeps the workflow `name` and the API `key`; the API
+  at `api_version` 2.3.0 (3.0.0 since 2026-10-21), with the graph: prepare the image from the API,
+  run the migration Job, then deploy the API with `needs: [migrate]`. It keeps the workflow `name` and the API `key`; the API
   moves from `kind: resource_release` (`resource_uid`) to `kind: fastapi` with
   `source_path: api/app/main.py`, the pattern ms-markets uses for its own API (its commit `29dc96b`
   made the same conversion). An earlier standalone migrations workflow, which ran the Job but gated
@@ -228,8 +229,9 @@ first deployment of this file.
 
 Results recorded on 2026-10-03:
 
-1. **Workflow template:** done. The graph exists at `api_version` 2.3.0; steps must reference
-   same-file resources; `resource_release` is not a 2.3.0 kind. `alpaca-connectors-api.yaml`, with
+1. **Workflow template:** done. The graph exists at `api_version` 2.3.0 and is unchanged at 3.0.0,
+   the only version since 2026-10-18; steps must reference same-file resources; `resource_release`
+   is not a kind of either version. `alpaca-connectors-api.yaml`, with
    the API as `kind: fastapi` behind `needs: [migrate]`, validates. **Open:** whether converting
    the API to `kind: fastapi` keeps its release.
 2. **API-created Jobs:** partly done. One signal Job and one portfolio Job exist on `main`, both

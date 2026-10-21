@@ -6,8 +6,9 @@ Accepted on 2026-10-08. Amends the "Tau tools and agent sessions" surface of
 [ADR 0011](0011_api_managed_alpaca_credential_secrets.md).
 
 On 2026-10-11 the API began returning this Agent to the Alpaca site, as the CRM API returns its
-assistant. The API and the Agent declare `view` on each other in the workflow's
-`access.resources`. `deploy_agent` needs `deploy_api`. `GET /v1/project-state/configuration`
+assistant. The API and the Agent declare access to each other in the workflow's
+`access.resources`: `view` under workflow API 2.3.0, `user` since the move to 3.0.0 on 2026-10-21.
+`deploy_agent` needs `deploy_api`. `GET /v1/project-state/configuration`
 returns `agent_uid` and `organization_environment_uid`. The API finds the Agent when the request
 arrives, by the card's name, in the Environment and on the branch that the SDK context resolves.
 The site's build holds neither UID ([API](../api.md#project-state-and-the-sites-agent)).
@@ -78,9 +79,10 @@ which the platform no longer accepts, so the Agent was not deploying.
   credentials. This distinction does not imply per-person row filtering for every resource (see
   [Agent identity and authorization](../agent.md#identity-and-authorization)).
 - Renaming the API's workflow key recreates its release: it gets a new release UID, URL, and
-  workload User. The workflow therefore declares the access the API needs (`branch: edit` to run
-  this branch's Jobs, and `view` on the MetaTables repository's branch), and the Alpaca site refers
-  to the API by repository and key instead of a pinned UID. Access granted to the old release by
+  workload User. The workflow therefore declares the access the API needs (since workflow API
+  3.0.0: branch `editor` to run the bars Job another workflow file declares, `runner` on the signal
+  and portfolio Jobs, and `reader` on the MetaTables repository's branch), and the Alpaca site
+  refers to the API by repository and key instead of a pinned UID. Access granted to the old release by
   hand, such as external Secrets an account selected by name, must be granted to the new workload
   User again. Managed Secrets the previous release created must be shared with it. The
   `Production` Environment had no Alpaca tables registered when this was decided, so it had no

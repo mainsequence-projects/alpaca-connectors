@@ -21,12 +21,14 @@ Repository rules:
   comes from `etfhextractor`. The CLI, routes and Jobs only orchestrate; add no one-off scripts.
 - Only `.mainsequence/workflows/*.yaml` creates Jobs and sets their schedules; code never does.
   A configuration run (`operations/configuration_jobs.py`) selects it with `--configuration-uid`;
-  JobRuns never own configuration. `src/jobs/` launchers run by path and are bound to live Jobs,
-  so never move them. Every launcher except the migration Job starts with `skip_if_schema_behind`.
+  JobRuns never own configuration. A Job cannot declare access to itself, so each kind's dispatcher
+  Job, holding `runner` on it, starts the scheduled runs (ADR 0013). `src/jobs/` launchers run by
+  path and are bound to live Jobs, so never move them. Every launcher except the migration Job
+  starts with `skip_if_schema_behind`.
 - Hosted schema changes come only from the workflow's migration Job (ADR 0012); never run
   `metatables migrations upgrade` or `downgrade` against a hosted environment. Revisions add first
-  and drop later. Use `metatables` for MetaTables interfaces. Tables belong to the Environment's
-  Team, never to one workload User.
+  and drop later. Use `metatables` for MetaTables interfaces. A person owns each namespace;
+  workloads hold MetaTables roles (`data_viewer`, `data_writer`, `editor`), never `owner`.
 
 FastAPI surface:
 
@@ -52,8 +54,8 @@ Project-to-agent boundary:
   `.agents/skills/` tree, copy skills into `.tau/skills`, or expose SDK or platform skills.
 - The `harness_agent` in `alpaca-connectors-api.yaml` serves `api/agent/main.py`
   (`ms_tau_sdk.create_app()`) with `acts_for_requester: true` and
-  `mcp_applications: [{resource: alpaca}]`. It deploys after the API, the two name each other in
-  `access.resources`, and `TAU_EXCLUDE_BASE_TOOLS` and `TAU_EXCLUDE_MAINSEQUENCE_MCP` stay `true`.
+  `mcp_applications: [{resource: alpaca}]`. It deploys after the API, the two hold `user` on
+  each other, and `TAU_EXCLUDE_BASE_TOOLS` and `TAU_EXCLUDE_MAINSEQUENCE_MCP` stay `true`.
 - Tool invariants:
   - No tool or CLI command takes Alpaca key values. Only the HTTP account create and rotate routes
     do, to store managed Secrets (ADR 0011), and nothing echoes, logs or persists them. The

@@ -96,7 +96,7 @@ the site's conversation opens:
 The API finds the Agent when the request arrives (`alpaca_connectors.api.app.site_agent`), as the CRM
 API does. It lists Agents by the name in `.agents/agent_card.json`, then keeps the one that is in
 the Environment and on the CodeRepositoryBranch the SDK context resolves, and that has a deployed
-runtime release. Nothing comes from the request. The workflow gives the API `view` on the Agent
+runtime release. Nothing comes from the request. The workflow gives the API `user` on the Agent
 (`access.resources`), which is what lets the hosted API see it.
 
 If the Agent is missing, ambiguous or not deployed, or the lookup fails, the answer carries

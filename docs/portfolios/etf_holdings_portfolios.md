@@ -14,7 +14,9 @@ The implementation lives in:
 - `src/alpaca_connectors/portfolios/configurations.py`: calculation-only Portfolio and Rebalance MetaTables
 - `src/alpaca_connectors/portfolios/execution.py`: reference resolution and portfolio graph execution
 - `src/alpaca_connectors/operations/configuration_jobs.py`: runs on the workflow-declared portfolio Job
-- `src/jobs/run_alpaca_etf_portfolio.py`: entry point of that Job (`--configuration-uid` or `--scheduled`)
+- `src/jobs/run_alpaca_etf_portfolio.py`: entry point of that Job (`--configuration-uid`)
+- `src/jobs/dispatch_alpaca_etf_portfolio.py`: entry point of the dispatcher Job whose daily
+  scheduled run (`--scheduled`) starts the portfolio Job's runs
 - `src/alpaca_connectors/api/app/routers/portfolio_configurations.py`: thin HTTP CRUD and run surface
 - `src/alpaca_connectors/cli/portfolios.py`: thin CLI CRUD and run surface
 
@@ -143,8 +145,9 @@ the shared project migration history, and verifies every resulting `TimeIndexMet
 portfolio execution only checks and attaches those tables; it never creates schema.
 
 There is no environment argument. The CodeRepositoryBranch runtime resolves its Environment. A
-portfolio run carries `--configuration-uid <uid>`; the Job's scheduled run carries `--scheduled` and
-starts one such run per scheduled configuration whose preflight passes.
+portfolio run carries `--configuration-uid <uid>`. The portfolio dispatcher Job's scheduled run
+carries `--scheduled` and starts one such run per scheduled configuration whose preflight passes;
+the portfolio Job cannot start its own runs, because a Job cannot declare access to itself.
 
 ## API
 
