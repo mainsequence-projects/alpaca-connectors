@@ -1,21 +1,34 @@
-api_version: 2.3.0
+api_version: "3.0.0"
 name: alpaca-connectors-api
 resources:
 # The key is also the Agent's MCP tool prefix (`alpaca__list_tools`, `alpaca__call_tool`), so it
 # must match ^[a-z][a-z0-9_]{0,39}$ (ADR 0015). The Alpaca site names this release by this key.
 - key: alpaca
   kind: fastapi
-  # The API's own workload User: running this branch's Jobs needs edit, and every MetaTable is
-  # read through the MetaTables API on the MetaTables repository's branch. Viewing the Agent lets
-  # the project configuration find it at request time and return it to the site.
+  # The API's own workload User. `access.resources` can name only this file's resources, and the
+  # API also runs `alpaca-bars-update` (operations/bar_updates.py), which alpaca-bars-update.yaml
+  # declares; no branch policy smaller than `editor` runs a Job, so the branch entry stays until
+  # that Job is declared here. The resource entries are what the API needs on its own: `runner`
+  # on the signal and portfolio Jobs it lists and starts, `viewer` on their dispatchers, whose
+  # schedule the configuration responses report (operations/configuration_jobs.py), and `user` on
+  # the Agent, which the project configuration finds and returns to the site (site_agent.py).
+  # Every MetaTable is read through the MetaTables API on the MetaTables repository's branch.
   access:
-    branch: edit
+    branch: editor
     branches:
     - repository: MetaTables
-      level: view
+      policy: reader
     resources:
     - key: alpaca-connectors-agent
-      level: view
+      policy: user
+    - key: alpaca-etf-signal
+      policy: runner
+    - key: alpaca-etf-portfolio
+      policy: runner
+    - key: alpaca-etf-signal-dispatcher
+      policy: viewer
+    - key: alpaca-etf-portfolio-dispatcher
+      policy: viewer
   spec:
     source_path: api/app/main.py
     automatic_deployment: true
@@ -34,15 +47,16 @@ resources:
     - name: ALPACA_CONNECTORS_SITE_URL
       value: http://localhost:5173/app/links/1b572c68-e4f5-4589-b17c-23d12f474130
 # The branch's one Harness Agent. It reaches every project tool through the `alpaca` API's MCP and
-# acts for the person whose request it serves (only an Organization admin's push enables this). It
-# reads no tables itself, so it needs no MetaTables access and is not a member of the table Team.
+# acts for the person whose request it serves (only an Organization admin's push enables this).
+# `user` on the API covers its own calls to the API's MCP; delegated calls use the person's access.
+# It reads no tables itself, so it needs no MetaTables access and is not a member of the table Team.
 - key: alpaca-connectors-agent
   kind: harness_agent
   acts_for_requester: true
   access:
     resources:
     - key: alpaca
-      level: view
+      policy: user
   spec:
     source_path: api/agent/main.py
     command_center_icon:
@@ -81,7 +95,7 @@ resources:
   access:
     branches:
     - repository: MetaTables
-      level: view
+      policy: reader
   spec:
     name: Alpaca Connectors Migrations
     description: Apply the alpaca_connectors MetaTable schema revisions before the API rolls out (ADR 0012).
@@ -93,21 +107,68 @@ resources:
     automatic_redeployment:
       enabled: true
       tag_regex: null
-# One shared Job per configuration kind (ADR 0013). The API starts a manual run with
-# `--configuration-uid <uid>`; the scheduled run (`--scheduled`) starts one such run for every
-# configuration whose scheduled flag is set. No step references them, so a push promotes their
-# image without waiting for the migration; their launchers' schema gate (ADR 0012) covers that gap.
-# A push re-applies the declared schedule. Both run after the 00:00 UTC daily bars Job.
+# One shared Job per configuration kind (ADR 0013). The API, the CLI and the kind's dispatcher
+# below start a run with `--configuration-uid <uid>`. These Jobs have no schedule: the scheduled
+# run starts runs of the kind's Job, and a Job cannot declare access to itself. A push changes only
+# the fields a declaration states, so `task_schedule: null` and the empty `scheduled_command_args`
+# remove the schedule earlier pushes set. No step references the four Jobs, so a push promotes
+# their image without waiting for the migration; their launchers' schema gate (ADR 0012) covers
+# that gap.
 - key: alpaca-etf-signal
   kind: job
   access:
     branches:
     - repository: MetaTables
-      level: view
+      policy: reader
   spec:
     name: Alpaca ETF Signal
-    description: Run one ETF signal configuration (--configuration-uid) or start a run per scheduled one (--scheduled).
+    description: Run one ETF signal configuration (--configuration-uid).
     execution_path: src/jobs/run_alpaca_etf_signal.py
+    cpu_request: '0.25'
+    memory_request: '0.5'
+    max_runtime_seconds: 3600
+    spot: false
+    task_schedule: null
+    scheduled_command_args: []
+    automatic_redeployment:
+      enabled: true
+      tag_regex: null
+- key: alpaca-etf-portfolio
+  kind: job
+  access:
+    branches:
+    - repository: MetaTables
+      policy: reader
+  spec:
+    name: Alpaca ETF Portfolio
+    description: Run one ETF portfolio configuration (--configuration-uid).
+    execution_path: src/jobs/run_alpaca_etf_portfolio.py
+    cpu_request: '0.25'
+    memory_request: '0.5'
+    max_runtime_seconds: 3600
+    spot: false
+    task_schedule: null
+    scheduled_command_args: []
+    automatic_redeployment:
+      enabled: true
+      tag_regex: null
+# The kinds' daily scheduled runs (ADR 0013). Each dispatcher's scheduled run (`--scheduled`) reads
+# the scheduled configurations and starts one run of its kind's Job per configuration, through
+# `runner` on that Job (operations/configuration_jobs.py). A push re-applies the declared schedule.
+# Both run after the 00:00 UTC daily bars Job.
+- key: alpaca-etf-signal-dispatcher
+  kind: job
+  access:
+    branches:
+    - repository: MetaTables
+      policy: reader
+    resources:
+    - key: alpaca-etf-signal
+      policy: runner
+  spec:
+    name: Alpaca ETF Signal Dispatcher
+    description: Start one Alpaca ETF Signal run per scheduled signal configuration (--scheduled).
+    execution_path: src/jobs/dispatch_alpaca_etf_signal.py
     cpu_request: '0.25'
     memory_request: '0.5'
     max_runtime_seconds: 3600
@@ -121,16 +182,19 @@ resources:
     automatic_redeployment:
       enabled: true
       tag_regex: null
-- key: alpaca-etf-portfolio
+- key: alpaca-etf-portfolio-dispatcher
   kind: job
   access:
     branches:
     - repository: MetaTables
-      level: view
+      policy: reader
+    resources:
+    - key: alpaca-etf-portfolio
+      policy: runner
   spec:
-    name: Alpaca ETF Portfolio
-    description: Run one ETF portfolio configuration (--configuration-uid) or start a run per scheduled one (--scheduled).
-    execution_path: src/jobs/run_alpaca_etf_portfolio.py
+    name: Alpaca ETF Portfolio Dispatcher
+    description: Start one Alpaca ETF Portfolio run per scheduled portfolio configuration (--scheduled).
+    execution_path: src/jobs/dispatch_alpaca_etf_portfolio.py
     cpu_request: '0.25'
     memory_request: '0.5'
     max_runtime_seconds: 3600

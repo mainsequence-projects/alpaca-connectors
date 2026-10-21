@@ -155,7 +155,7 @@ class AgentArtifactsTests(unittest.TestCase):
     def test_agent_workflow_declares_a_harness_agent_that_acts_for_its_requester(self) -> None:
         workflow = yaml.safe_load(WORKFLOW_PATH.read_text(encoding="utf-8"))
 
-        self.assertEqual(workflow["api_version"], "2.3.0")
+        self.assertEqual(workflow["api_version"], "3.0.0")
         resources = {resource["key"]: resource for resource in workflow["resources"]}
         agents = [item for item in resources.values() if item["kind"] == "harness_agent"]
         self.assertEqual(len(agents), 1)
@@ -179,26 +179,55 @@ class AgentArtifactsTests(unittest.TestCase):
         self.assertEqual(
             specification["automatic_redeployment"], {"enabled": True, "tag_regex": None}
         )
-        for retired in ("command_center_icon", "cpu_limit", "memory_limit"):
+        for retired in ("cpu_limit", "memory_limit"):
             self.assertNotIn(retired, specification)
 
-    def test_the_api_and_the_agent_declare_view_access_to_each_other(self) -> None:
+    def test_agent_icon_and_poses_fit_the_platform_icon_limits(self) -> None:
+        # The platform refuses an agent icon over 128 x 128 px or 64 KiB (`agent_icon_invalid`)
+        # and keeps its default robot, while the deployment still succeeds.
+        workflow = yaml.safe_load(WORKFLOW_PATH.read_text(encoding="utf-8"))
+        agent = next(item for item in workflow["resources"] if item["kind"] == "harness_agent")
+        specification = agent["spec"]
+        animations = specification["command_center_animations"]
+        paths = [specification["command_center_icon"]["path"]] + [
+            pose["path"] for pose in animations["poses"].values()
+        ]
+        self.assertEqual(set(animations["poses"]), {"thinking", "working", "trading", "error"})
+        self.assertEqual(animations["tools"], [{"application": "alpaca", "pose": "trading"}])
+        for path in paths:
+            with self.subTest(icon=path):
+                payload = (REPO_ROOT / path).read_bytes()
+                self.assertLessEqual(len(payload), 64 * 1024)
+                self.assertEqual(payload[:8], b"\x89PNG\r\n\x1a\n")
+                width, height = struct.unpack(">II", payload[16:24])
+                self.assertLessEqual((width, height), (128, 128))
+                self.assertEqual(width, height)
+
+    def test_the_api_and_the_agent_declare_user_access_to_each_other(self) -> None:
         workflow = yaml.safe_load(WORKFLOW_PATH.read_text(encoding="utf-8"))
         resources = {resource["key"]: resource for resource in workflow["resources"]}
 
         # The API runs this branch's Jobs, reads MetaTables, and finds the Agent it returns to
-        # the site; the Agent calls the API's MCP and reads no tables itself.
+        # the site; the Agent calls the API's MCP and reads no tables itself. `branch: editor`
+        # stays only for the bars Job of alpaca-bars-update.yaml, which no `resources` entry of
+        # this file can name.
         self.assertEqual(
             resources["alpaca"]["access"],
             {
-                "branch": "edit",
-                "branches": [{"repository": "MetaTables", "level": "view"}],
-                "resources": [{"key": "alpaca-connectors-agent", "level": "view"}],
+                "branch": "editor",
+                "branches": [{"repository": "MetaTables", "policy": "reader"}],
+                "resources": [
+                    {"key": "alpaca-connectors-agent", "policy": "user"},
+                    {"key": "alpaca-etf-signal", "policy": "runner"},
+                    {"key": "alpaca-etf-portfolio", "policy": "runner"},
+                    {"key": "alpaca-etf-signal-dispatcher", "policy": "viewer"},
+                    {"key": "alpaca-etf-portfolio-dispatcher", "policy": "viewer"},
+                ],
             },
         )
         self.assertEqual(
             resources["alpaca-connectors-agent"]["access"],
-            {"resources": [{"key": "alpaca", "level": "view"}]},
+            {"resources": [{"key": "alpaca", "policy": "user"}]},
         )
 
     def test_agent_workflow_disables_generic_tool_sources(self) -> None:

@@ -68,7 +68,11 @@ def _responses(rows: list[Any]) -> list[PortfolioConfigurationResponse]:
                     **row.model_dump(mode="json"),
                     "signal_uid": signal_uid_for_configuration(signal_configuration),
                     "rebalance_strategy": rebalance_configuration.strategy,
-                    **job_fields(state.job, state.latest_runs.get(str(row.uid))),
+                    **job_fields(
+                        state.job,
+                        state.latest_runs.get(str(row.uid)),
+                        dispatcher=state.dispatcher,
+                    ),
                 }
             )
         )

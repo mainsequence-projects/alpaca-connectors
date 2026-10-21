@@ -37,7 +37,7 @@ from .configuration_jobs import accepted_run, job_fields, lifecycle_state
 
 
 def _response(
-    row: Any, *, job: Any | None, latest_run: Any | None
+    row: Any, *, job: Any | None, latest_run: Any | None, dispatcher: Any | None = None
 ) -> SignalJobConfigurationResponse:
     return SignalJobConfigurationResponse.model_validate(
         {
@@ -48,8 +48,8 @@ def _response(
             "universe_uid": str(row.universe_uid),
             "account_uid": str(row.account_uid),
             "scheduled": row.scheduled,
-            **job_fields(job, latest_run),
-            "lifecycle_state": lifecycle_state(job, scheduled=row.scheduled),
+            **job_fields(job, latest_run, dispatcher=dispatcher),
+            "lifecycle_state": lifecycle_state(job, scheduled=row.scheduled, dispatcher=dispatcher),
             "created_at": row.created_at,
             "updated_at": row.updated_at,
         }
@@ -57,12 +57,18 @@ def _response(
 
 
 def _responses(rows: list[Any]) -> list[SignalJobConfigurationResponse]:
-    """Shape rows with one Job lookup and one bounded scan of the Job's newest runs."""
+    """Shape rows with one lookup of the Job and its dispatcher and one bounded scan of the
+    Job's newest runs."""
     if not rows:
         return []
     state = configuration_job_state("signal", [row.uid for row in rows])
     return [
-        _response(row, job=state.job, latest_run=state.latest_runs.get(str(row.uid)))
+        _response(
+            row,
+            job=state.job,
+            latest_run=state.latest_runs.get(str(row.uid)),
+            dispatcher=state.dispatcher,
+        )
         for row in rows
     ]
 

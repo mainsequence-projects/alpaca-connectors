@@ -1,12 +1,16 @@
 """Workflow-declared signal and portfolio Jobs for ETF configurations (ADR 0013).
 
-`.mainsequence/workflows/alpaca-connectors-api.yaml` declares one Job per configuration kind. A
-manual run carries ``--configuration-uid <uid>`` and executes that configuration. The scheduled run
-carries ``--scheduled`` and starts one ``--configuration-uid`` run for every scheduled
-configuration, so each configuration run is its own JobRun. The backend cannot filter JobRuns by
-their arguments, so runs map back to their configuration through ``JobRun.command_args`` over a
-bounded scan of the Job's newest runs. No code here creates a Job or changes its schedule: since
-mainsequence 9.0.2 only a workflow declaration creates a Job, and a push re-applies its schedule.
+`.mainsequence/workflows/alpaca-connectors-api.yaml` declares one Job per configuration kind and
+one dispatcher Job per kind. A run of the kind's Job carries ``--configuration-uid <uid>`` and
+executes that configuration; the API, the CLI and the dispatcher start such runs. The dispatcher
+holds the daily schedule: its scheduled run carries ``--scheduled`` and starts one
+``--configuration-uid`` run for every scheduled configuration, so each configuration run is its own
+JobRun. The scheduled run cannot live on the kind's Job, because starting runs of a Job needs
+``runner`` on it and a Job cannot declare access to itself; the dispatcher declares ``runner`` on
+the kind's Job. The backend cannot filter JobRuns by their arguments, so runs map back to their
+configuration through ``JobRun.command_args`` over a bounded scan of the Job's newest runs. No code
+here creates a Job or changes its schedule: since mainsequence 9.0.2 only a workflow declaration
+creates a Job, and a push re-applies its schedule.
 """
 
 from __future__ import annotations
@@ -35,6 +39,10 @@ SIGNAL_JOB_NAME = "Alpaca ETF Signal"
 PORTFOLIO_JOB_NAME = "Alpaca ETF Portfolio"
 ALPACA_ETF_SIGNAL_EXECUTION_PATH = "src/jobs/run_alpaca_etf_signal.py"
 ALPACA_ETF_PORTFOLIO_EXECUTION_PATH = "src/jobs/run_alpaca_etf_portfolio.py"
+SIGNAL_DISPATCHER_JOB_NAME = "Alpaca ETF Signal Dispatcher"
+PORTFOLIO_DISPATCHER_JOB_NAME = "Alpaca ETF Portfolio Dispatcher"
+ALPACA_ETF_SIGNAL_DISPATCHER_EXECUTION_PATH = "src/jobs/dispatch_alpaca_etf_signal.py"
+ALPACA_ETF_PORTFOLIO_DISPATCHER_EXECUTION_PATH = "src/jobs/dispatch_alpaca_etf_portfolio.py"
 CONFIGURATION_UID_ARGUMENT = "--configuration-uid"
 SCHEDULED_ARGUMENT = "--scheduled"
 RUNNING_JOB_STATUSES = frozenset({"PENDING", "QUEUED", "RUNNING", "STARTED"})
@@ -44,21 +52,35 @@ RUN_SCAN_LIMIT = 500
 
 @dataclass(frozen=True, slots=True)
 class ConfigurationJobSpec:
+    """The kind's Job, which runs one configuration, and the dispatcher that schedules it."""
+
     kind: ConfigurationKind
     workflow_key: str
     name: str
     execution_path: str
+    dispatcher_workflow_key: str
+    dispatcher_name: str
+    dispatcher_execution_path: str
 
 
 JOB_SPECS: dict[str, ConfigurationJobSpec] = {
     "signal": ConfigurationJobSpec(
-        "signal", "alpaca-etf-signal", SIGNAL_JOB_NAME, ALPACA_ETF_SIGNAL_EXECUTION_PATH
+        "signal",
+        "alpaca-etf-signal",
+        SIGNAL_JOB_NAME,
+        ALPACA_ETF_SIGNAL_EXECUTION_PATH,
+        "alpaca-etf-signal-dispatcher",
+        SIGNAL_DISPATCHER_JOB_NAME,
+        ALPACA_ETF_SIGNAL_DISPATCHER_EXECUTION_PATH,
     ),
     "portfolio": ConfigurationJobSpec(
         "portfolio",
         "alpaca-etf-portfolio",
         PORTFOLIO_JOB_NAME,
         ALPACA_ETF_PORTFOLIO_EXECUTION_PATH,
+        "alpaca-etf-portfolio-dispatcher",
+        PORTFOLIO_DISPATCHER_JOB_NAME,
+        ALPACA_ETF_PORTFOLIO_DISPATCHER_EXECUTION_PATH,
     ),
 }
 
@@ -90,10 +112,12 @@ class ConfigurationJobRun:
 
 @dataclass(frozen=True, slots=True)
 class ConfigurationJobState:
-    """The kind's declared Job (None before a push creates it) and latest run per configuration."""
+    """The kind's declared Job and dispatcher (None before a push creates them) and the latest
+    run per configuration."""
 
     job: Any | None
     latest_runs: dict[str, ConfigurationJobRun]
+    dispatcher: Any | None = None
 
 
 def _canonical_uid(value: Any, *, label: str) -> str:
@@ -121,20 +145,30 @@ def _image_ready(job: Any) -> bool:
     return str(value or "").strip().lower() == "ready"
 
 
-def resolve_configuration_job(kind: ConfigurationKind) -> Any | None:
-    """Return this branch's declared Job for ``kind``, or None until a push creates it."""
+def _resolve_declared_job(name: str, execution_path: str) -> Any | None:
     from alpaca_connectors.operations.platform_jobs import PlatformJob
 
-    spec = JOB_SPECS[kind]
-    jobs = list(PlatformJob.filter(name=spec.name, timeout=60))
+    jobs = list(PlatformJob.filter(name=name, timeout=60))
     if not jobs:
         return None
     if len(jobs) > 1:
-        raise RuntimeError(f"More than one branch Job is named {spec.name!r}.")
+        raise RuntimeError(f"More than one branch Job is named {name!r}.")
     job = jobs[0]
-    if job.execution_path != spec.execution_path:
-        raise RuntimeError(f"The {spec.name!r} Job does not run {spec.execution_path!r}.")
+    if job.execution_path != execution_path:
+        raise RuntimeError(f"The {name!r} Job does not run {execution_path!r}.")
     return job
+
+
+def resolve_configuration_job(kind: ConfigurationKind) -> Any | None:
+    """Return this branch's declared Job for ``kind``, or None until a push creates it."""
+    spec = JOB_SPECS[kind]
+    return _resolve_declared_job(spec.name, spec.execution_path)
+
+
+def resolve_dispatcher_job(kind: ConfigurationKind) -> Any | None:
+    """Return the dispatcher that holds the schedule of ``kind``, or None until a push creates it."""
+    spec = JOB_SPECS[kind]
+    return _resolve_declared_job(spec.dispatcher_name, spec.dispatcher_execution_path)
 
 
 def require_configuration_job(kind: ConfigurationKind) -> Any:
@@ -225,11 +259,13 @@ def _latest_runs(
 def configuration_job_state(
     kind: ConfigurationKind, configuration_uids: Iterable[Any]
 ) -> ConfigurationJobState:
-    """Resolve the kind's Job and the newest run of each listed configuration."""
+    """Resolve the kind's Job, its dispatcher and the newest run of each listed configuration."""
     wanted = {_canonical_uid(value, label="Configuration UID") for value in configuration_uids}
     job = resolve_configuration_job(kind)
     latest = _latest_runs(job, wanted, kind) if job is not None else {}
-    return ConfigurationJobState(job=job, latest_runs=latest)
+    return ConfigurationJobState(
+        job=job, latest_runs=latest, dispatcher=resolve_dispatcher_job(kind)
+    )
 
 
 def list_configuration_runs(
@@ -346,9 +382,10 @@ def _active_configuration_uids(job: Any) -> set[str]:
 
 
 def dispatch_scheduled_configurations(kind: ConfigurationKind) -> dict[str, Any]:
-    """Start one run per scheduled configuration of ``kind``: all the scheduled run does.
+    """Start one run of the kind's Job per scheduled configuration: all the dispatcher does.
 
-    A configuration with a pending or running run is skipped, and so is a portfolio whose
+    The dispatcher's scheduled run calls this; it holds ``runner`` on the kind's Job. A
+    configuration with a pending or running run is skipped, and so is a portfolio whose
     preflight is blocked. One failed start does not stop the others.
     """
     job = require_configuration_job(kind)
@@ -404,33 +441,51 @@ def _configuration_uid_argument(value: str) -> str:
 
 
 def build_job_argument_parser(kind: ConfigurationKind) -> argparse.ArgumentParser:
+    """Arguments of the kind's Job: exactly one configuration to execute."""
     spec = JOB_SPECS[kind]
     parser = argparse.ArgumentParser(
         prog=spec.execution_path,
-        description=f"Run {kind} configurations as the {spec.name!r} Job.",
+        description=f"Run one {kind} configuration as the {spec.name!r} Job.",
     )
-    mode = parser.add_mutually_exclusive_group(required=True)
-    mode.add_argument(
+    parser.add_argument(
         CONFIGURATION_UID_ARGUMENT,
         dest="configuration_uid",
         type=_configuration_uid_argument,
+        required=True,
         help=f"Execute this {kind} configuration.",
     )
-    mode.add_argument(
+    return parser
+
+
+def build_dispatcher_argument_parser(kind: ConfigurationKind) -> argparse.ArgumentParser:
+    """Arguments of the kind's dispatcher: its scheduled run's ``--scheduled`` and nothing else."""
+    spec = JOB_SPECS[kind]
+    parser = argparse.ArgumentParser(
+        prog=spec.dispatcher_execution_path,
+        description=f"Start one {spec.name!r} run per scheduled {kind} configuration.",
+    )
+    parser.add_argument(
         SCHEDULED_ARGUMENT,
         action="store_true",
-        help=f"Start one run per scheduled {kind} configuration (the Job's scheduled run).",
+        required=True,
+        help=f"Start one run per scheduled {kind} configuration (the dispatcher's scheduled run).",
     )
     return parser
+
+
+def run_dispatcher_job(
+    kind: ConfigurationKind, argv: Sequence[str] | None = None
+) -> dict[str, Any]:
+    """Entry point of the kind's dispatcher Job: the scheduled dispatch."""
+    build_dispatcher_argument_parser(kind).parse_args(argv)
+    return dispatch_scheduled_configurations(kind)
 
 
 def run_configuration_job(
     kind: ConfigurationKind, argv: Sequence[str] | None = None
 ) -> dict[str, Any]:
-    """Entry point of both Jobs: one configuration, or the scheduled dispatch."""
+    """Entry point of the kind's Job: execute the configuration ``--configuration-uid`` selects."""
     args = build_job_argument_parser(kind).parse_args(argv)
-    if args.scheduled:
-        return dispatch_scheduled_configurations(kind)
     if kind == "signal":
         from alpaca_connectors.operations.signal_jobs import execute_signal_configuration
 
@@ -447,7 +502,9 @@ def run_configuration_job(
 
 
 __all__ = [
+    "ALPACA_ETF_PORTFOLIO_DISPATCHER_EXECUTION_PATH",
     "ALPACA_ETF_PORTFOLIO_EXECUTION_PATH",
+    "ALPACA_ETF_SIGNAL_DISPATCHER_EXECUTION_PATH",
     "ALPACA_ETF_SIGNAL_EXECUTION_PATH",
     "CONFIGURATION_UID_ARGUMENT",
     "ConfigurationJobRun",
@@ -455,11 +512,14 @@ __all__ = [
     "ConfigurationJobState",
     "ConfigurationJobSubmission",
     "JOB_SPECS",
+    "PORTFOLIO_DISPATCHER_JOB_NAME",
     "PORTFOLIO_JOB_NAME",
     "RUN_SCAN_LIMIT",
     "SCHEDULED_ARGUMENT",
+    "SIGNAL_DISPATCHER_JOB_NAME",
     "SIGNAL_JOB_NAME",
     "WORKFLOW_PATH",
+    "build_dispatcher_argument_parser",
     "build_job_argument_parser",
     "configuration_command_args",
     "configuration_job_state",
@@ -475,5 +535,7 @@ __all__ = [
     "require_configuration_job",
     "require_portfolio_preflight",
     "resolve_configuration_job",
+    "resolve_dispatcher_job",
     "run_configuration_job",
+    "run_dispatcher_job",
 ]

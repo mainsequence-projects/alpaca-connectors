@@ -1,4 +1,5 @@
-"""ADR 0013: signal and portfolio configurations run on two workflow-declared Jobs."""
+"""ADR 0013: signal and portfolio configurations run on two workflow-declared Jobs, whose
+scheduled runs two dispatcher Jobs start."""
 
 from __future__ import annotations
 
@@ -17,10 +18,14 @@ import yaml
 
 from alpaca_connectors.operations import configuration_jobs
 from alpaca_connectors.operations.configuration_jobs import (
+    ALPACA_ETF_PORTFOLIO_DISPATCHER_EXECUTION_PATH,
     ALPACA_ETF_PORTFOLIO_EXECUTION_PATH,
+    ALPACA_ETF_SIGNAL_DISPATCHER_EXECUTION_PATH,
     ALPACA_ETF_SIGNAL_EXECUTION_PATH,
     JOB_SPECS,
+    PORTFOLIO_DISPATCHER_JOB_NAME,
     PORTFOLIO_JOB_NAME,
+    SIGNAL_DISPATCHER_JOB_NAME,
     SIGNAL_JOB_NAME,
     WORKFLOW_PATH,
     ConfigurationJobState,
@@ -31,6 +36,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 JOBS = PROJECT_ROOT / "src" / "jobs"
 SIGNAL_JOB_UID = "99999999-9999-4999-8999-999999999999"
 PORTFOLIO_JOB_UID = "88888888-8888-4888-8888-888888888888"
+SIGNAL_DISPATCHER_UID = "77777777-7777-4777-8777-777777777771"
+PORTFOLIO_DISPATCHER_UID = "77777777-7777-4777-8777-777777777772"
 A = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 B = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
 C = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
@@ -73,6 +80,21 @@ def _portfolio_job(**overrides) -> FakeJob:
         "uid": PORTFOLIO_JOB_UID,
         "name": PORTFOLIO_JOB_NAME,
         "execution_path": ALPACA_ETF_PORTFOLIO_EXECUTION_PATH,
+        **overrides,
+    }
+    return FakeJob(**values)
+
+
+def _dispatcher(kind: str = "signal", **overrides) -> FakeJob:
+    """The kind's dispatcher Job, which holds the schedule of the kind's Job."""
+    values = {
+        "uid": SIGNAL_DISPATCHER_UID if kind == "signal" else PORTFOLIO_DISPATCHER_UID,
+        "name": SIGNAL_DISPATCHER_JOB_NAME if kind == "signal" else PORTFOLIO_DISPATCHER_JOB_NAME,
+        "execution_path": (
+            ALPACA_ETF_SIGNAL_DISPATCHER_EXECUTION_PATH
+            if kind == "signal"
+            else ALPACA_ETF_PORTFOLIO_DISPATCHER_EXECUTION_PATH
+        ),
         **overrides,
     }
     return FakeJob(**values)
@@ -274,10 +296,25 @@ def test_runs_map_back_to_configurations_through_their_arguments(platform) -> No
 
 def test_configuration_state_before_the_push_has_no_job_and_no_runs(platform) -> None:
     state = configuration_jobs.configuration_job_state("portfolio", [A])
-    assert state == ConfigurationJobState(job=None, latest_runs={})
+    assert state == ConfigurationJobState(job=None, latest_runs={}, dispatcher=None)
     assert (
         configuration_jobs.list_configuration_runs(SimpleNamespace(uid=A), kind="portfolio") == []
     )
+
+
+def test_configuration_state_names_the_dispatcher_that_schedules_the_job(platform) -> None:
+    job, dispatcher = _portfolio_job(), _dispatcher("portfolio")
+    platform.jobs = [job, dispatcher, _dispatcher("signal")]
+
+    state = configuration_jobs.configuration_job_state("portfolio", [A])
+
+    assert (state.job, state.dispatcher) == (job, dispatcher)
+    assert configuration_jobs.resolve_dispatcher_job("portfolio") is dispatcher
+    assert {"name": PORTFOLIO_DISPATCHER_JOB_NAME, "timeout": 60} in platform.job_queries
+
+    platform.jobs = [job, _dispatcher("portfolio", execution_path="src/jobs/other.py")]
+    with pytest.raises(RuntimeError, match="does not run"):
+        configuration_jobs.resolve_dispatcher_job("portfolio")
 
 
 def test_job_run_lookup_owns_only_runs_of_this_branch_jobs(platform) -> None:
@@ -356,15 +393,53 @@ def test_scheduled_run_needs_the_declared_job(platform, monkeypatch) -> None:
     "argv",
     [
         [],
+        ["--scheduled"],
         ["--configuration-uid", A, "--scheduled"],
         ["--configuration-uid", "not-a-uid"],
         ["--universe-uid", A],
     ],
 )
-def test_job_entry_points_accept_exactly_one_mode(argv) -> None:
+def test_job_entry_points_run_exactly_one_configuration(argv) -> None:
+    # The scheduled run belongs to the dispatcher: a Job cannot declare `runner` on itself.
     for kind in ("signal", "portfolio"):
         with pytest.raises(SystemExit):
             configuration_jobs.build_job_argument_parser(kind).parse_args(argv)
+        parsed = configuration_jobs.build_job_argument_parser(kind).parse_args(
+            ["--configuration-uid", A.upper()]
+        )
+        assert parsed.configuration_uid == A
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [[], ["--configuration-uid", A], ["--scheduled", "--configuration-uid", A]],
+)
+def test_dispatcher_entry_points_take_only_the_scheduled_argument(argv) -> None:
+    for kind in ("signal", "portfolio"):
+        with pytest.raises(SystemExit):
+            configuration_jobs.build_dispatcher_argument_parser(kind).parse_args(argv)
+        assert (
+            configuration_jobs.build_dispatcher_argument_parser(kind)
+            .parse_args(["--scheduled"])
+            .scheduled
+        )
+
+
+def test_dispatcher_job_starts_the_scheduled_runs_of_its_kind(monkeypatch) -> None:
+    dispatched = []
+    monkeypatch.setattr(
+        configuration_jobs,
+        "dispatch_scheduled_configurations",
+        lambda kind: dispatched.append(kind) or {"kind": kind, "failed": []},
+    )
+
+    assert configuration_jobs.run_dispatcher_job("portfolio", ["--scheduled"])["kind"] == (
+        "portfolio"
+    )
+    assert dispatched == ["portfolio"]
+    with pytest.raises(SystemExit):
+        configuration_jobs.run_configuration_job("signal", ["--scheduled"])
+    assert dispatched == ["portfolio"]
 
 
 def _launcher(name: str):
@@ -415,9 +490,12 @@ def test_portfolio_entry_point_executes_the_selected_configuration(monkeypatch, 
 
 @pytest.mark.parametrize(
     ("launcher", "kind"),
-    [("run_alpaca_etf_signal.py", "signal"), ("run_alpaca_etf_portfolio.py", "portfolio")],
+    [
+        ("dispatch_alpaca_etf_signal.py", "signal"),
+        ("dispatch_alpaca_etf_portfolio.py", "portfolio"),
+    ],
 )
-def test_scheduled_entry_point_fails_when_a_start_fails(
+def test_dispatcher_entry_point_fails_when_a_start_fails(
     monkeypatch, capsys, launcher, kind
 ) -> None:
     main = _launcher(launcher)
@@ -434,21 +512,30 @@ def test_scheduled_entry_point_fails_when_a_start_fails(
     assert json.loads(capsys.readouterr().out)["kind"] == kind
 
 
-@pytest.mark.parametrize("launcher", ["run_alpaca_etf_signal.py", "run_alpaca_etf_portfolio.py"])
-def test_entry_points_check_the_schema_before_any_work(monkeypatch, launcher) -> None:
+@pytest.mark.parametrize(
+    ("launcher", "argv"),
+    [
+        ("run_alpaca_etf_signal.py", ["--configuration-uid", A]),
+        ("run_alpaca_etf_portfolio.py", ["--configuration-uid", A]),
+        ("dispatch_alpaca_etf_signal.py", ["--scheduled"]),
+        ("dispatch_alpaca_etf_portfolio.py", ["--scheduled"]),
+    ],
+)
+def test_entry_points_check_the_schema_before_any_work(monkeypatch, launcher, argv) -> None:
     main = _launcher(launcher)
     calls = []
     monkeypatch.setattr(
         "alpaca_connectors.migrations.schema_gate.skip_if_schema_behind",
         lambda label: calls.append(label) or True,
     )
-    monkeypatch.setattr(
-        configuration_jobs,
-        "run_configuration_job",
-        lambda *args: pytest.fail("ran work while the schema was behind"),
-    )
+    for work in ("run_configuration_job", "run_dispatcher_job"):
+        monkeypatch.setattr(
+            configuration_jobs,
+            work,
+            lambda *args: pytest.fail("ran work while the schema was behind"),
+        )
 
-    assert main(["--scheduled"]) == 0
+    assert main(argv) == 0
     assert calls and calls[0].startswith("Alpaca ETF")
 
 
@@ -549,14 +636,16 @@ def _signal_row(uid: str, *, scheduled: bool):
 def test_signal_responses_report_the_declared_job_and_lifecycle(monkeypatch) -> None:
     from alpaca_connectors.api.app.services import signal_jobs as service
 
-    job = FakeJob(
+    # The Job has no schedule of its own; its dispatcher's schedule is the one reported.
+    job = FakeJob()
+    dispatcher = _dispatcher(
         task_schedule={
             "schedule": {"type": "crontab", "expression": "30 0 * * *", "timezone": "UTC"}
         }
     )
     run = configuration_jobs._shape_run(_run("a-run", A, status="RUNNING"), "signal")
     rows = [_signal_row(A, scheduled=True), _signal_row(B, scheduled=False)]
-    states = {"signal": ConfigurationJobState(job=job, latest_runs={A: run})}
+    states = {"signal": ConfigurationJobState(job=job, latest_runs={A: run}, dispatcher=dispatcher)}
     monkeypatch.setattr(
         service,
         "configuration_job_state",
@@ -572,6 +661,13 @@ def test_signal_responses_report_the_declared_job_and_lifecycle(monkeypatch) -> 
     assert (first.scheduled, second.scheduled) == (True, False)
     assert (first.lifecycle_state, second.lifecycle_state) == ("ready", "paused")
     assert (first.latest_run_status, second.latest_run_status) == ("RUNNING", None)
+
+    # Without a dispatcher nothing schedules the Job, so a scheduled configuration is paused.
+    states["signal"] = ConfigurationJobState(job=job, latest_runs={})
+    (unscheduled,) = service._responses(rows[:1])
+    assert unscheduled.job_uid == SIGNAL_JOB_UID
+    assert unscheduled.job.schedule_expression is None
+    assert unscheduled.lifecycle_state == "paused"
 
     states.clear()
     (provisioning,) = service._responses(rows[:1])
@@ -604,11 +700,14 @@ def test_portfolio_responses_report_the_declared_job(monkeypatch) -> None:
             "updated_at": NOW,
         }
     )
-    job = _portfolio_job(task_schedule={"schedule": {"type": "crontab", "expression": "0 2 * * *"}})
+    job = _portfolio_job()
+    dispatcher = _dispatcher(
+        "portfolio", task_schedule={"schedule": {"type": "crontab", "expression": "0 2 * * *"}}
+    )
     monkeypatch.setattr(
         service,
         "configuration_job_state",
-        lambda kind, uids: ConfigurationJobState(job=job, latest_runs={}),
+        lambda kind, uids: ConfigurationJobState(job=job, latest_runs={}, dispatcher=dispatcher),
     )
     monkeypatch.setattr(
         service, "signal_job_configurations_by_uids", lambda uids: {B: SimpleNamespace(uid=B)}
@@ -815,7 +914,7 @@ def test_no_code_creates_jobs_or_writes_their_schedules() -> None:
         assert "create_schedule" not in path.read_text(encoding="utf-8"), path
 
 
-def test_workflow_declares_one_job_per_kind_outside_the_steps() -> None:
+def test_workflow_declares_one_job_and_one_dispatcher_per_kind_outside_the_steps() -> None:
     workflow = yaml.safe_load((PROJECT_ROOT / WORKFLOW_PATH).read_text(encoding="utf-8"))
     resources = {resource["key"]: resource for resource in workflow["resources"]}
     referenced = {
@@ -824,23 +923,51 @@ def test_workflow_declares_one_job_per_kind_outside_the_steps() -> None:
         for key, value in step.items()
         if key in {"prepare_image", "run_job", "deploy"}
     }
+    metatables = [{"repository": "MetaTables", "policy": "reader"}]
+    api_entries = resources["alpaca"]["access"]["resources"]
 
     for kind, expression in (("signal", "30 0 * * *"), ("portfolio", "0 2 * * *")):
         spec = JOB_SPECS[kind]
         resource = resources[spec.workflow_key]
-        assert resource["kind"] == "job"
-        assert spec.workflow_key not in referenced
-        assert resource["spec"]["name"] == spec.name
-        assert resource["spec"]["execution_path"] == spec.execution_path
-        assert (PROJECT_ROOT / spec.execution_path).is_file()
-        assert resource["spec"]["task_schedule"] == {
+        dispatcher = resources[spec.dispatcher_workflow_key]
+        for key, declared, name, path in (
+            (spec.workflow_key, resource, spec.name, spec.execution_path),
+            (
+                spec.dispatcher_workflow_key,
+                dispatcher,
+                spec.dispatcher_name,
+                spec.dispatcher_execution_path,
+            ),
+        ):
+            assert declared["kind"] == "job"
+            assert key not in referenced
+            assert declared["spec"]["name"] == name
+            assert declared["spec"]["execution_path"] == path
+            assert (PROJECT_ROOT / path).is_file()
+            assert declared["spec"]["automatic_redeployment"] == {
+                "enabled": True,
+                "tag_regex": None,
+            }
+            assert (
+                declared["spec"]["cpu_request"],
+                declared["spec"]["memory_request"],
+                declared["spec"]["max_runtime_seconds"],
+                declared["spec"]["spot"],
+            ) == ("0.25", "0.5", 3600, False)
+        # The Job runs only when started; a push changes only the fields a declaration states,
+        # so the explicit null and empty list remove the schedule earlier pushes set.
+        assert resource["spec"]["task_schedule"] is None
+        assert resource["spec"]["scheduled_command_args"] == []
+        assert resource["access"] == {"branches": metatables}
+        # The dispatcher holds the schedule and may only run (and see) the kind's Job.
+        assert dispatcher["spec"]["task_schedule"] == {
             "schedule": {"type": "crontab", "expression": expression, "timezone": "UTC"}
         }
-        assert resource["spec"]["scheduled_command_args"] == ["--scheduled"]
-        assert resource["spec"]["automatic_redeployment"] == {"enabled": True, "tag_regex": None}
-        assert (
-            resource["spec"]["cpu_request"],
-            resource["spec"]["memory_request"],
-            resource["spec"]["max_runtime_seconds"],
-            resource["spec"]["spot"],
-        ) == ("0.25", "0.5", 3600, False)
+        assert dispatcher["spec"]["scheduled_command_args"] == ["--scheduled"]
+        assert dispatcher["access"] == {
+            "branches": metatables,
+            "resources": [{"key": spec.workflow_key, "policy": "runner"}],
+        }
+        # The API starts and lists the kind's runs and reports the dispatcher's schedule.
+        assert {"key": spec.workflow_key, "policy": "runner"} in api_entries
+        assert {"key": spec.dispatcher_workflow_key, "policy": "viewer"} in api_entries

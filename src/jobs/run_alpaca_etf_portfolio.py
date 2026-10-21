@@ -1,9 +1,9 @@
 """Entry point of the workflow-declared `alpaca-etf-portfolio` Job (ADR 0013).
 
-`--configuration-uid <uid>` executes one portfolio configuration; `--scheduled` (the Job's
-scheduled run) starts one run per scheduled portfolio configuration whose preflight passes. The
-schema gate (ADR 0012) comes first, before any runtime bootstrap. Executing a configuration
-bootstraps the complete portfolio runtime before it reads any configuration.
+`--configuration-uid <uid>` executes one portfolio configuration. The API, the CLI and the
+`alpaca-etf-portfolio-dispatcher` Job's scheduled run start these runs; the Job has no schedule of
+its own. The schema gate (ADR 0012) comes first, before any runtime bootstrap. Executing a
+configuration bootstraps the complete portfolio runtime before it reads any configuration.
 """
 
 from __future__ import annotations

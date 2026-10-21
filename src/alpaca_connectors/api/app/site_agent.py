@@ -9,7 +9,7 @@ in the API's next answer, without a site rebuild.
 The lookup follows the CRM API's (`src/crm/assistant_runtime.py`). It selects the Agent that the
 source Agent Card names, in the Organization Environment and on the CodeRepositoryBranch that the
 SDK context resolves for this process, with a deployed runtime release. Nothing comes from the
-request, the workflow file, or the browser. The workflow gives the API's workload `view` on the
+request, the workflow file, or the browser. The workflow gives the API's workload `user` on the
 Agent (`access.resources`), which is what lets the hosted API see it.
 
 A failure means "no Agent", never a failed configuration: the site then shows the conversation as

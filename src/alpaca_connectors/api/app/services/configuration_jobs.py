@@ -1,7 +1,9 @@
 """API shaping of the workflow-declared signal and portfolio Jobs (ADR 0013).
 
-Configuration responses report the kind's declared Job as ``job_uid`` and ``job`` (its live
-schedule, compute and image). Both are null until a push creates the Job on the branch.
+Configuration responses report the kind's declared Job as ``job_uid`` and ``job``: its compute and
+image, with the live schedule of the kind's dispatcher Job, whose scheduled run starts the Job's
+scheduled runs. Both are null until a push creates the Job on the branch, and the schedule is null
+while no dispatcher exists.
 """
 
 from __future__ import annotations
@@ -60,14 +62,15 @@ def schedule_payload(job: Any) -> dict[str, Any]:
     }
 
 
-def job_response(job: Any | None) -> ConfigurationJobResponse | None:
+def job_response(job: Any | None, dispatcher: Any | None = None) -> ConfigurationJobResponse | None:
+    """The kind's Job, with the schedule of the dispatcher that starts its scheduled runs."""
     if job is None:
         return None
     image_status = getattr(job, "image_status", None)
     image_status = getattr(image_status, "value", image_status)
     return ConfigurationJobResponse(
         uid=str(job.uid),
-        **schedule_payload(job),
+        **schedule_payload(dispatcher),
         cpu_request=(str(job.cpu_request) if job.cpu_request is not None else None),
         memory_request=(str(job.memory_request) if job.memory_request is not None else None),
         max_runtime_seconds=job.max_runtime_seconds,
@@ -77,21 +80,27 @@ def job_response(job: Any | None) -> ConfigurationJobResponse | None:
     )
 
 
-def job_fields(job: Any | None, latest_run: Any | None) -> dict[str, Any]:
-    """The shared Job and a configuration's newest run, as response fields."""
+def job_fields(
+    job: Any | None, latest_run: Any | None, *, dispatcher: Any | None = None
+) -> dict[str, Any]:
+    """The shared Job, its dispatcher's schedule and a configuration's newest run."""
     return {
         "job_uid": str(job.uid) if job is not None else None,
-        "job": job_response(job),
+        "job": job_response(job, dispatcher),
         "latest_run_status": latest_run.status if latest_run is not None else None,
         "latest_run_at": latest_run.execution_start if latest_run is not None else None,
     }
 
 
-def lifecycle_state(job: Any | None, *, scheduled: bool) -> str:
-    """``provisioning`` before the push creates the Job, then ``ready`` or ``paused``."""
+def lifecycle_state(job: Any | None, *, scheduled: bool, dispatcher: Any | None = None) -> str:
+    """``provisioning`` before the push creates the Job, then ``ready`` or ``paused``.
+
+    ``ready`` means the configuration is scheduled and the dispatcher that starts the Job's
+    scheduled runs has a schedule.
+    """
     if job is None:
         return "provisioning"
-    if scheduled and getattr(job, "task_schedule", None):
+    if scheduled and getattr(dispatcher, "task_schedule", None):
         return "ready"
     return "paused"
 

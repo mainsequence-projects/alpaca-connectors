@@ -1,7 +1,8 @@
 """Entry point of the workflow-declared `alpaca-etf-signal` Job (ADR 0013).
 
-`--configuration-uid <uid>` executes one signal configuration; `--scheduled` (the Job's scheduled
-run) starts one run per scheduled signal configuration. The schema gate (ADR 0012) comes first.
+`--configuration-uid <uid>` executes one signal configuration. The API, the CLI and the
+`alpaca-etf-signal-dispatcher` Job's scheduled run start these runs; the Job has no schedule of
+its own. The schema gate (ADR 0012) comes first.
 """
 
 from __future__ import annotations
