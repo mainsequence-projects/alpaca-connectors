@@ -34,8 +34,7 @@ REGISTRATION = {
     "is_paper": False,
     "account_is_active": True,
     "credential_source": "managed",
-    "api_key_secret_name": "ALPACA_CONNECTORS__123__ALPACA__API_KEY",
-    "secret_key_secret_name": "ALPACA_CONNECTORS__123__ALPACA__SECRET_KEY",
+    "credentials_stored": True,
 }
 
 

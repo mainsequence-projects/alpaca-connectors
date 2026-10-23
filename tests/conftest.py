@@ -223,3 +223,21 @@ def hosted_caller(monkeypatch: pytest.MonkeyPatch, clean_identity_environment: N
         classmethod(lambda cls: from_environment(cls, fetch_jwks=discover_keys)),
     )
     return caller
+
+
+@pytest.fixture
+def keyring():
+    """Inject a keyring for the ``ALPACA_CONNECTORS_DATA_KEY`` Secret without the platform.
+
+    Account keys are sealed by ``metatables.EncryptedString`` (ADR 0017); tests that write or read
+    them use this ring and never reach a Main Sequence Secret.
+    """
+
+    from metatables.encryption import Keyring, set_keyring_source
+
+    ring = Keyring.new("test")
+    set_keyring_source(lambda name: ring.render())
+    try:
+        yield ring
+    finally:
+        set_keyring_source(None)

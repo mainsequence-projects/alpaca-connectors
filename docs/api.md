@@ -43,7 +43,7 @@ process restarts; the shared in-memory operation repository is intentionally not
 | --- | --- |
 | Project State | `GET /health`, `GET /v1/project-state/capabilities`, `GET /v1/project-state/configuration` |
 | Assets | `GET /v1/assets`, `GET /v1/assets/{asset_uid}`, synchronous registration plan/execute, and observable registration operations |
-| Accounts | `GET/POST /v1/accounts`, `GET /v1/accounts/secret-references`, `POST /v1/accounts/registration/preflight`, `GET/PATCH/DELETE /v1/accounts/{account_uid}`, refresh and bulk actions; the signed-in person's key requests under `/v1/accounts/key-requests` |
+| Accounts | `GET/POST /v1/accounts`, `POST /v1/accounts/registration/preflight`, `GET/PATCH/DELETE /v1/accounts/{account_uid}`, refresh and bulk actions; the signed-in person's key requests under `/v1/accounts/key-requests` |
 | Holdings | list/get and capture under `/v1/accounts/{account_uid}/holdings`; `/latest` lists only the newest immutable snapshot |
 | Execution | submit (with preflight), sync and cancel order batches, and list recorded orders, under `/v1/accounts/{account_uid}/orders` |
 | Universe Sources | Explicit extraction-configuration CRUD and read-only source preview under `/v1/universe-sources` |
@@ -278,8 +278,8 @@ GET  /v1/assets/registration/operations/{operation_uid}
 ```
 
 The start request contains `action` (`plan` or `execute`) and the validated registration request.
-That request requires `account_uid`; the backend uses the selected registered account's stored
-Main Sequence Secret references for Alpaca access and never accepts credential values.
+That request requires `account_uid`; the backend opens the selected registered account's stored
+keys for Alpaca access and never accepts credential values.
 The API returns `202 Accepted` with a stable operation UID and an ordered step list. Clients poll the
 GET route using the returned `poll_after_ms` value. Poll responses use `Cache-Control: no-store`.
 
@@ -304,28 +304,30 @@ platform Job. A process termination can therefore leave an accepted operation in
 ## Credentials And Identity
 
 Account registration, preflight, and `PATCH` requests carry a `credentials` object discriminated
-by `source` ([ADR 0011](adrs/0011_api_managed_alpaca_credential_secrets.md)):
+by `source` ([ADR 0017](adrs/0017_encrypted_account_credentials.md)):
 
 - `{"source": "managed", "api_key": "...", "secret_key": "..."}`: the API validates the values
-  against Alpaca and stores them in the application-managed Secrets
-  `ALPACA_CONNECTORS__<Account.unique_identifier>__API_KEY` / `__SECRET_KEY`. Both fields are
-  `writeOnly` `password` strings in OpenAPI and are never returned. The static site uses only this
-  shape.
+  against Alpaca and stores them encrypted on the account row (`credential_source: managed`).
+  Both fields are `writeOnly` `password` strings in OpenAPI and are never returned. The static
+  site uses only this shape.
 - `{"source": "external", "api_key_secret_name": "...", "secret_key_secret_name": "..."}`:
-  existing Secrets the API only reads.
+  existing Main Sequence Secrets the API reads once, as its workload, to import the keys
+  (`credential_source: imported`). The names are not kept and the Secrets are never changed.
 
 `PATCH` without `credentials` changes only the name or active state and never reads credentials.
-Rotation must authenticate as the registered Alpaca account. Preflight reports the managed Secret
-names and whether each would be created or updated, and writes nothing. Responses expose
-`credential_source`, both Secret names and UIDs, and `credentials_updated_at`/`_by_user_uid`; never
-values or the key fingerprint. `DELETE` reports `deleted_secrets` and `warnings`.
+Rotation must authenticate as the registered Alpaca account and replaces the stored keys in one
+write. Preflight reports the identity, holdings and `credential_source` and writes nothing.
+Responses expose `credential_source`, `credentials_stored` and
+`credentials_updated_at`/`_by_user_uid`; never values, Secret names or the key fingerprint.
+`DELETE` deletes the row and its keys; it still reports `deleted_secrets` and `warnings`, which
+are empty unless the registration predated revision `0018`.
 
-Alpaca rejecting the keys returns `400 alpaca_credentials_rejected` without provider text. Every
-`422` response lists only `loc`, `msg`, and `type`: FastAPI's default body echoes the rejected
-`input`, which could be a credential.
-
-`GET /v1/accounts/secret-references` returns only Main Sequence Secret names visible to the API
-runtime, for clients that use the `external` shape. It never serializes Secret values.
+Alpaca rejecting the keys returns `400 alpaca_credentials_rejected` without provider text. A
+registration whose keys have not been migrated yet returns `409 account_credentials_missing`; an
+API runtime that cannot read the `ALPACA_CONNECTORS_DATA_KEY` Secret returns
+`503 credential_key_unavailable`, naming the Secret and nothing else. Every `422` response lists
+only `loc`, `msg`, and `type`: FastAPI's default body echoes the rejected `input`, which could be
+a credential.
 
 ### Account Key Requests
 
@@ -361,7 +363,7 @@ but other synchronous mutations can outlive a caller's timeout. See
 
 Create and rotate record the acting user ([Authentication](#authentication)) as
 `credentials_updated_by_user_uid`: the person an Agent's call works for, otherwise the verified
-caller. Calls the API makes to Main Sequence, the Secret writes
+caller. Calls the API makes to Main Sequence and MetaTables, the encrypted key writes
 included, run as the API's runtime principal. There is no trusted browser user UID. Governed
 MetaTable operations declare read/write scope; the Resource Release is the deployed application
 access boundary.

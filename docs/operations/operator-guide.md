@@ -23,9 +23,8 @@ skills are described in [the Agent page](../agent.md).
 ## Asset Registration
 
 - use `alpaca-connectors asset register`
-- require `--account-uid`; provider access resolves the Main Sequence Secrets referenced by that
-  registered Alpaca account, and the workflow never accepts credential values or global fallback
-  credentials
+- require `--account-uid`; provider access opens the keys stored encrypted on that registered
+  Alpaca account, and the workflow never accepts credential values or global fallback credentials
 - dry run is the default; pass `--execute` only when you want to write missing assets into Main
   Sequence
 - use required `--symbols` for exact symbol registration; asset registration does not expand ETF
@@ -101,12 +100,13 @@ skills are described in [the Agent page](../agent.md).
   or `alpaca-connectors` runs that need authenticated platform access; the SDK keeps the session
   in the operating-system credential store, never in `.env`
 - before live platform checks, run `mainsequence refresh-token`
-- account registration references two Main Sequence Secrets by UID: `managed` Secrets the API
-  created from submitted values (named `ALPACA_CONNECTORS__<Account.unique_identifier>__...` and
-  deleted with the registration) or `external` Secrets selected by name (never modified); live
-  holdings and price updates resolve them by UID at execution time
-- registrations that predate Secret UID storage need the reviewed one-time
-  `alpaca-connectors account backfill-secret-uids --execute` after the `0015` migration
+- account registration stores the Alpaca keys encrypted on the account row
+  ([ADR 0017](../adrs/0017_encrypted_account_credentials.md)): `managed` when a person entered
+  them, `imported` when they were copied once from Main Sequence Secrets selected by name; live
+  holdings and price updates open them at execution time with the
+  [account key Secret](#account-key-secret)
+- registrations that predate revision `0018` need the one-off `alpaca-credential-migration` Job
+  (or `alpaca-connectors account migrate-credentials --execute`) once per Environment
 - account registration and holdings capture resolve the whole position set from one Alpaca catalog
   request and use bulk Main Sequence identity lookup and registration operations
 - if a stored bar configuration resolves an asset that is missing or ambiguous in Alpaca, fix its
@@ -142,3 +142,49 @@ skills are described in [the Agent page](../agent.md).
   the previously deployed release working (add first, drop or rename in a later release)
 - every launcher under `src/jobs/` except the migration Job starts with
   `alpaca_connectors.migrations.schema_gate.skip_if_schema_behind`
+
+## Account Key Secret
+
+Every Alpaca account's API key and secret key are stored in application-encrypted columns of the
+account table ([ADR 0017](../adrs/0017_encrypted_account_credentials.md), MetaTables ADR 0025).
+The connector seals and opens them with a keyring held by one Environment Secret,
+`ALPACA_CONNECTORS_DATA_KEY`, which the workflow files grant as `value_reader` to the API, the bars
+Jobs, the signal Job and the credential migration Job. Without it those workloads fail every
+Alpaca call with `credential_key_unavailable`; nothing is ever written or read in plaintext.
+
+Create the Secret once per Environment, before the first registration or the credential
+migration. The command prints the keyring; store its output as the Secret's value in Command
+Center or with the CLI, and never commit or log it:
+
+```bash
+.venv/bin/metatables encryption new-keyring
+```
+
+```bash
+mainsequence secrets create ALPACA_CONNECTORS_DATA_KEY
+```
+
+Rotate the key in three steps. `rotate` reads the current ring through the signed-in session and
+prints the same ring with a new active key, so rows written under the old key still open; after
+every row has been rewritten the old key can be dropped from the ring:
+
+```bash
+.venv/bin/metatables encryption rotate ALPACA_CONNECTORS_DATA_KEY
+```
+
+Store the printed ring as the Secret's new value, then rewrite the account table under the active
+key with the table's MetaTable UID (`alpaca_connectors__acct_alpaca`; `--dry-run` counts the rows
+still under old keys):
+
+```bash
+.venv/bin/metatables encryption re-encrypt --table <ACCOUNT_TABLE_UID>
+```
+
+Finally store the ring without the old key. A lost keyring loses every stored key: the platform's
+Secret backup is the recovery path, and the keys can always be entered again on the site.
+
+Registrations made before revision `0018` keep their keys in the Main Sequence Secrets they
+referenced until the one-off `alpaca-credential-migration` Job runs. Start it with a dry run, read
+its summary (counts, Secret names and reasons, never values), then run it with `--execute`; it is
+idempotent and retries the deletion of managed Secrets it could not delete. A registration it
+blocks (fingerprint mismatch, unreadable Secret) is repaired by rotating its keys on the site.

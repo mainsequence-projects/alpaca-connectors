@@ -28,8 +28,8 @@ SIGNAL_IDENTITY_CLASS_IMPORT_PATH: dict[str, str] = {
 class AlpacaETFHoldingsSignalConfig(PortfolioConfigBaseModel):
     """Runtime producer configuration for one Universe-backed signal.
 
-    ``universe_uid`` is business identity. ``account_uid`` resolves Alpaca Secret names
-    and registers assets at execution time. The owning signal Job configuration persists
+    ``universe_uid`` is business identity. ``account_uid`` opens the Alpaca keys stored on
+    that account and registers assets at execution time. The owning signal Job configuration persists
     both values, while ms-markets deliberately excludes ``signal_configuration`` from the
     canonical ``SignalWeights`` update hash. ``account_uid`` is additionally excluded from
     the final signal UID.

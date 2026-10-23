@@ -129,19 +129,51 @@ class CliTests(unittest.TestCase):
             account_name=None,
         )
 
-    def test_account_backfill_secret_uids_is_a_dry_run_by_default(self) -> None:
+    def test_account_migrate_credentials_is_a_dry_run_by_default(self) -> None:
         stdout = io.StringIO()
         with (
             patch(
-                "alpaca_connectors.account.services.backfill_account_secret_uids",
-                return_value={"execute": False, "pending": 0},
-            ) as backfill,
+                "alpaca_connectors.account.credential_migration.migrate_account_credentials",
+                return_value={"execute": False, "registrations": 0},
+            ) as migrate,
             contextlib.redirect_stdout(stdout),
         ):
-            exit_code = main(["account", "backfill-secret-uids"])
+            exit_code = main(["account", "migrate-credentials"])
 
         self.assertEqual(exit_code, 0)
-        backfill.assert_called_once_with(execute=False)
+        migrate.assert_called_once_with(execute=False)
+        self.assertNotIn("backfill-secret-uids", str(build_parser().format_help()))
+
+    def test_account_update_imports_keys_only_from_both_secret_names(self) -> None:
+        from alpaca_connectors.account.credentials import AlpacaSecretNames
+
+        with patch(
+            "alpaca_connectors.account.services.update_account_registration",
+            return_value={"account_uid": "account-uid"},
+        ) as update:
+            with self.assertRaises(SystemExit):
+                main(["account", "update", "account-uid", "--api-key-secret-name", "ONLY_ONE"])
+            update.assert_not_called()
+            with contextlib.redirect_stdout(io.StringIO()):
+                exit_code = main(
+                    [
+                        "account",
+                        "update",
+                        "account-uid",
+                        "--api-key-secret-name",
+                        "NEW_API_KEY",
+                        "--secret-key-secret-name",
+                        "NEW_SECRET_KEY",
+                    ]
+                )
+
+        self.assertEqual(exit_code, 0)
+        update.assert_called_once_with(
+            "account-uid",
+            account_name=None,
+            credential_secret_names=AlpacaSecretNames("NEW_API_KEY", "NEW_SECRET_KEY"),
+            account_is_active=None,
+        )
 
     def test_universe_run_uses_registered_universe_uid(self) -> None:
         plan = SimpleNamespace(summary=lambda: {"etf_ticker": "IVV"}, has_blockers=lambda: False)

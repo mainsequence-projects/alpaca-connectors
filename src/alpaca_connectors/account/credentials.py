@@ -1,39 +1,52 @@
-"""Alpaca credential references and application-managed credential Secrets.
+"""Alpaca account credentials, stored as application-encrypted columns (ADR 0017).
 
-An account registration references exactly two Main Sequence Secrets (ADR 0011):
+An account registration carries its Alpaca API key and secret key on ``AlpacaAccountDetails`` in
+the ``api_key`` and ``secret_key`` columns, which are ``metatables.EncryptedString`` columns
+sealed in this process under the ``ALPACA_CONNECTORS_DATA_KEY`` Secret (MetaTables ADR 0025). A
+value is accepted from a person (``managed``) or copied once from Main Sequence Secrets selected
+by name (``imported``); either way the plaintext exists only in process memory, between the
+request and the compiled statement that encrypts it, and again between the row read and the
+Alpaca client constructor.
 
-- ``managed`` Secrets are created by this application from values a user submitted, use the
-  deterministic ``ALPACA_CONNECTORS__<Account.unique_identifier>__...`` names, and follow the
-  registration's lifecycle;
-- ``external`` Secrets were selected by name and are only ever read.
-
-Values are resolved only at the provider boundary, kept in memory for the client constructor, and
-never returned or persisted outside Main Sequence Secrets.
+Reading needs the Secret: a process without it fails with the MetaTables error that names the
+Secret. There is no plaintext fallback, and a stored value that is not an envelope is refused.
 """
 
 from __future__ import annotations
 
+import datetime as dt
 import logging
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from alpaca_connectors.platform_secrets import (
-    PlatformSecretAccessError,
-    delete_platform_secret,
-    read_platform_secret_value_by_uid,
-    resolve_platform_secret_uid,
-    upsert_platform_secret,
-)
+from alpaca_connectors.settings import CREDENTIAL_SECRET_NAME
 
 logger = logging.getLogger(__name__)
 
+# Keys a person entered through the API or the site.
 CREDENTIAL_SOURCE_MANAGED = "managed"
+# Keys copied once from Main Sequence Secrets selected by name (CLI, Agent, or the migration).
+CREDENTIAL_SOURCE_IMPORTED = "imported"
+# Transition only: a registration made before revision 0018 whose keys still live in Secrets.
 CREDENTIAL_SOURCE_EXTERNAL = "external"
-CREDENTIAL_SOURCES = (CREDENTIAL_SOURCE_MANAGED, CREDENTIAL_SOURCE_EXTERNAL)
+CREDENTIAL_SOURCES = (
+    CREDENTIAL_SOURCE_MANAGED,
+    CREDENTIAL_SOURCE_IMPORTED,
+    CREDENTIAL_SOURCE_EXTERNAL,
+)
 
-# Reserved for Secrets this application creates; never used for a user-selected Secret.
+# Names of the Secrets this application created before ADR 0017; never a valid import source.
 MANAGED_SECRET_PREFIX = "ALPACA_CONNECTORS__"
+
+# The encrypted columns, and the transition columns the first stored keys clear.
+STORED_CREDENTIAL_COLUMNS = ("api_key", "secret_key")
+LEGACY_SECRET_REFERENCE_COLUMNS = (
+    "api_key_secret_name",
+    "secret_key_secret_name",
+    "api_key_secret_uid",
+    "secret_key_secret_uid",
+)
 
 _MAX_CREDENTIAL_VALUE_LENGTH = 256
 
@@ -45,8 +58,18 @@ class AlpacaCredentialsRejectedError(ValueError):
         super().__init__("Alpaca rejected the supplied credentials.")
 
 
-class AccountSecretReferenceError(ValueError):
-    """A registration does not carry the Secret UIDs required to resolve its credentials."""
+class AccountCredentialsMissingError(LookupError):
+    """A registration has no stored keys: made before revision 0018 and not migrated yet."""
+
+    def __init__(self, account_uid: str) -> None:
+        super().__init__(
+            f"Alpaca account registration {account_uid!s} has no stored keys yet. Run the "
+            "Alpaca credential migration Job, or rotate the account's keys."
+        )
+
+
+class StoredCredentialError(RuntimeError):
+    """A stored key column holds something this application did not seal; it is never used."""
 
 
 def normalize_secret_name(value: str, *, field_name: str) -> str:
@@ -63,7 +86,7 @@ def normalize_secret_name(value: str, *, field_name: str) -> str:
 
 @dataclass(frozen=True, slots=True)
 class AlpacaSecretNames:
-    """Names of the two Main Sequence Secrets used by an Alpaca account."""
+    """Names of two Main Sequence Secrets to import an account's keys from, once."""
 
     api_key_secret_name: str
     secret_key_secret_name: str
@@ -95,28 +118,7 @@ class ResolvedAlpacaCredentials:
     secret_key: str
 
 
-@dataclass(frozen=True, slots=True)
-class AlpacaSecretReferences:
-    """Durable references to the two Secrets an account registration resolves."""
-
-    api_key_secret_name: str
-    secret_key_secret_name: str
-    api_key_secret_uid: str
-    secret_key_secret_uid: str
-    credential_source: str
-
-    def detail_values(self) -> dict[str, str]:
-        """``AlpacaAccountDetails`` column values for these references."""
-        return {
-            "api_key_secret_name": self.api_key_secret_name,
-            "secret_key_secret_name": self.secret_key_secret_name,
-            "api_key_secret_uid": self.api_key_secret_uid,
-            "secret_key_secret_uid": self.secret_key_secret_uid,
-            "credential_source": self.credential_source,
-        }
-
-
-# Registration and plan inputs: existing Secrets by name, or values to store as managed Secrets.
+# Registration and plan inputs: values a person submitted, or Secrets to import them from.
 AlpacaCredentialInput = AlpacaSecretNames | ResolvedAlpacaCredentials
 
 
@@ -139,64 +141,162 @@ def submitted_alpaca_credentials(*, api_key: str, secret_key: str) -> ResolvedAl
     return ResolvedAlpacaCredentials(api_key=values["api_key"], secret_key=values["secret_key"])
 
 
-def managed_secret_names(account_unique_identifier: str) -> AlpacaSecretNames:
-    """Deterministic names of the managed Secrets for one Account identity."""
-    identifier = (account_unique_identifier or "").strip()
-    if not identifier:
-        raise ValueError("account_unique_identifier must be a non-empty string.")
-    return AlpacaSecretNames(
-        api_key_secret_name=f"{MANAGED_SECRET_PREFIX}{identifier}__API_KEY",
-        secret_key_secret_name=f"{MANAGED_SECRET_PREFIX}{identifier}__SECRET_KEY",
-    )
+def import_alpaca_credentials_from_secrets(names: AlpacaSecretNames) -> ResolvedAlpacaCredentials:
+    """Read both named Secrets once, as this workload; the names are never stored."""
+    from alpaca_connectors.platform_secrets import read_platform_secret_value
 
-
-def resolve_alpaca_secret_references(secret_names: AlpacaSecretNames) -> AlpacaSecretReferences:
-    """Resolve user-selected (external) Secret names to their UIDs."""
-    for name in (secret_names.api_key_secret_name, secret_names.secret_key_secret_name):
+    for name in (names.api_key_secret_name, names.secret_key_secret_name):
         if name.startswith(MANAGED_SECRET_PREFIX):
-            # A managed Secret's lifecycle belongs to its own registration; referencing it as
-            # external would let a later rotation or removal break this account.
+            # Secrets this application created before ADR 0017 belong to the registration the
+            # credential migration copies them into; importing one elsewhere would copy a key
+            # the migration then deletes.
             raise ValueError(
-                f"Secret {name!r} uses the reserved {MANAGED_SECRET_PREFIX!r} prefix; select a "
-                "Secret that this application does not manage."
+                f"Secret {name!r} uses the reserved {MANAGED_SECRET_PREFIX!r} prefix; it belongs "
+                "to the registration the credential migration copies it into."
             )
-    return AlpacaSecretReferences(
-        api_key_secret_name=secret_names.api_key_secret_name,
-        secret_key_secret_name=secret_names.secret_key_secret_name,
-        api_key_secret_uid=resolve_platform_secret_uid(secret_names.api_key_secret_name),
-        secret_key_secret_uid=resolve_platform_secret_uid(secret_names.secret_key_secret_name),
-        credential_source=CREDENTIAL_SOURCE_EXTERNAL,
+    return submitted_alpaca_credentials(
+        api_key=read_platform_secret_value(names.api_key_secret_name),
+        secret_key=read_platform_secret_value(names.secret_key_secret_name),
     )
 
 
-def registered_secret_references(registration: Mapping[str, Any]) -> AlpacaSecretReferences:
-    """Return the stored Secret references of one account registration."""
-    api_key_secret_uid = registration.get("api_key_secret_uid")
-    secret_key_secret_uid = registration.get("secret_key_secret_uid")
-    if not api_key_secret_uid or not secret_key_secret_uid:
-        raise AccountSecretReferenceError(
-            f"Alpaca account registration {registration.get('account_uid')!s} has no stored "
-            "Secret UIDs. Run `alpaca-connectors account backfill-secret-uids --execute`."
+def resolve_credential_input(
+    credentials: AlpacaCredentialInput,
+) -> tuple[ResolvedAlpacaCredentials, str]:
+    """Return usable values and the ``credential_source`` they are recorded with."""
+    if isinstance(credentials, AlpacaSecretNames):
+        return import_alpaca_credentials_from_secrets(credentials), CREDENTIAL_SOURCE_IMPORTED
+    return credentials, CREDENTIAL_SOURCE_MANAGED
+
+
+def stored_credential_values(
+    credentials: ResolvedAlpacaCredentials,
+    *,
+    source: str,
+    updated_at: dt.datetime,
+    actor_user_uid: str | None,
+) -> dict[str, Any]:
+    """``AlpacaAccountDetails`` column values that store these keys.
+
+    The values are plaintext here and are encrypted by the model's column type when the
+    statement that carries them is compiled; the transition Secret references end with them.
+    """
+    from alpaca_connectors.account import api_key_fingerprint
+
+    if source not in (CREDENTIAL_SOURCE_MANAGED, CREDENTIAL_SOURCE_IMPORTED):
+        raise ValueError(f"Unsupported credential source {source!r}.")
+    return {
+        "api_key": credentials.api_key,
+        "secret_key": credentials.secret_key,
+        "api_key_fingerprint": api_key_fingerprint(credentials.api_key),
+        "credential_source": source,
+        "credentials_updated_at": updated_at,
+        "credentials_updated_by_user_uid": actor_user_uid,
+        **{column: None for column in LEGACY_SECRET_REFERENCE_COLUMNS},
+    }
+
+
+def registration_columns() -> list[Any]:
+    """The detail columns a registration read returns: every column except the encrypted ones.
+
+    The read-only ``credentials_stored`` flag reports whether the keys are stored, without
+    carrying them.
+    """
+    from alpaca_connectors.account.alpaca_account_details import AlpacaAccountDetails
+    from metatables import EncryptedString
+
+    table = AlpacaAccountDetails.__table__
+    columns = [
+        column.label(column.key)
+        for column in table.columns
+        if not isinstance(column.type, EncryptedString)
+    ]
+    columns.append(
+        (table.c.api_key.isnot(None) & table.c.secret_key.isnot(None)).label("credentials_stored")
+    )
+    return columns
+
+
+def write_stored_credentials(
+    context: Any,
+    *,
+    account_uid: str,
+    values: Mapping[str, Any],
+) -> None:
+    """Update one registration's credential columns through the model, so values are sealed.
+
+    Unlike ``update_model`` this keeps ``None`` values, which is how the transition Secret
+    references are cleared.
+    """
+    from msm.repositories.base import compile_markets_statement, execute_markets_operation
+    from sqlalchemy import update
+
+    from alpaca_connectors.account.alpaca_account_details import AlpacaAccountDetails
+
+    table = AlpacaAccountDetails.__table__
+    statement = (
+        update(AlpacaAccountDetails)
+        .where(table.c.account_uid == account_uid)
+        .values({getattr(AlpacaAccountDetails, key): value for key, value in values.items()})
+    )
+    execute_markets_operation(
+        compile_markets_statement(statement, context=context, operation="update"),
+        context=context,
+    )
+
+
+def _open_stored_value(column: Any, value: Any, *, account_uid: str) -> str:
+    from metatables.encryption import is_envelope
+
+    if value is None:
+        raise AccountCredentialsMissingError(account_uid)
+    if not is_envelope(value):
+        raise StoredCredentialError(
+            f"Alpaca account registration {account_uid!s} holds a {column.name} value that this "
+            "application did not encrypt; it is not used. Rotate the account's keys."
         )
-    return AlpacaSecretReferences(
-        api_key_secret_name=str(registration["api_key_secret_name"]),
-        secret_key_secret_name=str(registration["secret_key_secret_name"]),
-        api_key_secret_uid=str(api_key_secret_uid),
-        secret_key_secret_uid=str(secret_key_secret_uid),
-        credential_source=str(registration.get("credential_source") or CREDENTIAL_SOURCE_EXTERNAL),
+    opened = column.type.process_result_value(value, None)
+    if not isinstance(opened, str) or not opened:
+        raise StoredCredentialError(
+            f"Alpaca account registration {account_uid!s} holds an empty {column.name}."
+        )
+    return opened
+
+
+def read_registered_alpaca_credentials(account_uid: str) -> ResolvedAlpacaCredentials:
+    """Read one registration's sealed keys and open them in this process.
+
+    The compiled select carries the envelopes back; the column type opens them with the keyring
+    the ``ALPACA_CONNECTORS_DATA_KEY`` Secret holds. A process that cannot read that Secret fails
+    with ``metatables.EncryptionError``, which names the Secret and nothing else.
+    """
+    from msm.api.base import operation_result_rows
+    from msm.repositories.base import compile_markets_statement, execute_markets_operation
+    from sqlalchemy import select
+
+    from alpaca_connectors.account.alpaca_account_details import AlpacaAccountDetails
+    from alpaca_connectors.runtime import account_runtime_models, start_markets_engine
+
+    runtime = start_markets_engine(models=account_runtime_models())
+    table = AlpacaAccountDetails.__table__
+    statement = (
+        select(table.c.api_key, table.c.secret_key)
+        .where(table.c.account_uid == account_uid)
+        .limit(1)
     )
-
-
-def resolve_alpaca_credentials(references: AlpacaSecretReferences) -> ResolvedAlpacaCredentials:
-    """Resolve both referenced Secrets immediately before constructing an Alpaca client."""
+    rows = operation_result_rows(
+        execute_markets_operation(
+            compile_markets_statement(statement, context=runtime.context, operation="select"),
+            context=runtime.context,
+        )
+    )
+    if not rows:
+        raise LookupError(f"Alpaca account registration {account_uid!s} does not exist.")
+    row = rows[0]
     return ResolvedAlpacaCredentials(
-        api_key=read_platform_secret_value_by_uid(
-            references.api_key_secret_uid,
-            secret_name=references.api_key_secret_name,
-        ),
-        secret_key=read_platform_secret_value_by_uid(
-            references.secret_key_secret_uid,
-            secret_name=references.secret_key_secret_name,
+        api_key=_open_stored_value(table.c.api_key, row.get("api_key"), account_uid=account_uid),
+        secret_key=_open_stored_value(
+            table.c.secret_key, row.get("secret_key"), account_uid=account_uid
         ),
     )
 
@@ -204,105 +304,8 @@ def resolve_alpaca_credentials(references: AlpacaSecretReferences) -> ResolvedAl
 def resolve_registered_alpaca_credentials(
     registration: Mapping[str, Any],
 ) -> ResolvedAlpacaCredentials:
-    """Resolve the credentials of one stored account registration by Secret UID."""
-    return resolve_alpaca_credentials(registered_secret_references(registration))
-
-
-@dataclass(frozen=True, slots=True)
-class ManagedSecretWrite:
-    """Result of storing managed credentials: the references and the Secrets newly created."""
-
-    references: AlpacaSecretReferences
-    created: tuple[tuple[str, str], ...]  # (uid, name) pairs created by this write
-
-
-def plan_managed_secret_writes(account_unique_identifier: str) -> list[dict[str, str]]:
-    """Read-only: report whether each managed Secret would be created or updated."""
-    from alpaca_connectors.platform_secrets import PlatformSecretNotFoundError
-
-    names = managed_secret_names(account_unique_identifier)
-    writes = []
-    for name in (names.api_key_secret_name, names.secret_key_secret_name):
-        try:
-            resolve_platform_secret_uid(name)
-            action = "update"
-        except PlatformSecretNotFoundError:
-            action = "create"
-        writes.append({"name": name, "action": action})
-    return writes
-
-
-def store_managed_alpaca_credentials(
-    account_unique_identifier: str,
-    credentials: ResolvedAlpacaCredentials,
-) -> ManagedSecretWrite:
-    """Create or overwrite the two managed Secrets for one Account identity."""
-    names = managed_secret_names(account_unique_identifier)
-    created: list[tuple[str, str]] = []
-    try:
-        api_key_uid, api_key_created = upsert_platform_secret(
-            names.api_key_secret_name,
-            credentials.api_key,
-        )
-        if api_key_created:
-            created.append((api_key_uid, names.api_key_secret_name))
-        secret_key_uid, secret_key_created = upsert_platform_secret(
-            names.secret_key_secret_name,
-            credentials.secret_key,
-        )
-        if secret_key_created:
-            created.append((secret_key_uid, names.secret_key_secret_name))
-    except Exception:
-        delete_secrets_best_effort(created)
-        raise
-    return ManagedSecretWrite(
-        references=AlpacaSecretReferences(
-            api_key_secret_name=names.api_key_secret_name,
-            secret_key_secret_name=names.secret_key_secret_name,
-            api_key_secret_uid=api_key_uid,
-            secret_key_secret_uid=secret_key_uid,
-            credential_source=CREDENTIAL_SOURCE_MANAGED,
-        ),
-        created=tuple(created),
-    )
-
-
-def delete_secrets_best_effort(
-    secrets: list[tuple[str, str]] | tuple[tuple[str, str], ...],
-) -> tuple[list[str], list[str]]:
-    """Delete ``(uid, name)`` managed Secrets; return ``(deleted_names, warnings)``."""
-    deleted = []
-    warnings = []
-    for secret_uid, secret_name in secrets:
-        if not secret_name.startswith(MANAGED_SECRET_PREFIX):
-            # Defence in depth: only application-managed Secrets are ever deleted.
-            warnings.append(f"Secret {secret_name!r} is not application-managed and was kept.")
-            continue
-        try:
-            delete_platform_secret(secret_uid, secret_name=secret_name)
-        except PlatformSecretAccessError:
-            logger.warning("Could not delete managed Main Sequence Secret %s", secret_name)
-            warnings.append(f"Managed Secret {secret_name!r} could not be deleted.")
-        else:
-            deleted.append(secret_name)
-    return deleted, warnings
-
-
-def delete_managed_alpaca_secrets(
-    references: AlpacaSecretReferences,
-) -> tuple[list[str], list[str]]:
-    """Delete a registration's managed Secrets; external Secrets are never deleted.
-
-    Returns ``(deleted_names, warnings)``.
-    """
-    if references.credential_source != CREDENTIAL_SOURCE_MANAGED:
-        return [], []
-    return delete_secrets_best_effort(
-        [
-            (references.api_key_secret_uid, references.api_key_secret_name),
-            (references.secret_key_secret_uid, references.secret_key_secret_name),
-        ]
-    )
+    """Open the stored keys of one account registration immediately before building a client."""
+    return read_registered_alpaca_credentials(str(registration["account_uid"]))
 
 
 def read_alpaca_account_or_reject(client: Any) -> Any:
@@ -343,29 +346,30 @@ def build_alpaca_historical_data_client(*, credentials: ResolvedAlpacaCredential
 
 
 __all__ = [
+    "CREDENTIAL_SECRET_NAME",
     "CREDENTIAL_SOURCES",
     "CREDENTIAL_SOURCE_EXTERNAL",
+    "CREDENTIAL_SOURCE_IMPORTED",
     "CREDENTIAL_SOURCE_MANAGED",
+    "LEGACY_SECRET_REFERENCE_COLUMNS",
     "MANAGED_SECRET_PREFIX",
-    "AccountSecretReferenceError",
+    "STORED_CREDENTIAL_COLUMNS",
+    "AccountCredentialsMissingError",
     "AlpacaCredentialInput",
     "AlpacaCredentialsRejectedError",
     "AlpacaSecretNames",
-    "AlpacaSecretReferences",
-    "ManagedSecretWrite",
     "ResolvedAlpacaCredentials",
+    "StoredCredentialError",
     "build_alpaca_historical_data_client",
     "build_alpaca_trading_client",
-    "delete_managed_alpaca_secrets",
-    "delete_secrets_best_effort",
-    "managed_secret_names",
+    "import_alpaca_credentials_from_secrets",
     "normalize_secret_name",
-    "plan_managed_secret_writes",
     "read_alpaca_account_or_reject",
-    "registered_secret_references",
-    "resolve_alpaca_credentials",
-    "resolve_alpaca_secret_references",
+    "read_registered_alpaca_credentials",
+    "registration_columns",
+    "resolve_credential_input",
     "resolve_registered_alpaca_credentials",
-    "store_managed_alpaca_credentials",
+    "stored_credential_values",
     "submitted_alpaca_credentials",
+    "write_stored_credentials",
 ]

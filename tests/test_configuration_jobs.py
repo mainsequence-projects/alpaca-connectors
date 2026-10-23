@@ -958,7 +958,14 @@ def test_workflow_declares_one_job_and_one_dispatcher_per_kind_outside_the_steps
         # so the explicit null and empty list remove the schedule earlier pushes set.
         assert resource["spec"]["task_schedule"] is None
         assert resource["spec"]["scheduled_command_args"] == []
-        assert resource["access"] == {"branches": metatables}
+        # The signal Job registers constituents through the configuration's account, so it opens
+        # that account's stored keys (ADR 0017); the portfolio Job never calls Alpaca.
+        secrets = (
+            {"secrets": [{"name": "ALPACA_CONNECTORS_DATA_KEY", "policy": "value_reader"}]}
+            if kind == "signal"
+            else {}
+        )
+        assert resource["access"] == {"branches": metatables, **secrets}
         # The dispatcher holds the schedule and may only run (and see) the kind's Job.
         assert dispatcher["spec"]["task_schedule"] == {
             "schedule": {"type": "crontab", "expression": expression, "timezone": "UTC"}

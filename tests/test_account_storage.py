@@ -22,8 +22,11 @@ class AccountStorageTests(unittest.TestCase):
             "alpaca_account_id",
             "account_number",
             "api_key_fingerprint",
-            "api_key_secret_name",
-            "secret_key_secret_name",
+            "api_key",
+            "secret_key",
+            "credential_source",
+            "credentials_updated_at",
+            "credentials_updated_by_user_uid",
             "is_paper",
             "status",
             "multiplier",
@@ -36,6 +39,18 @@ class AccountStorageTests(unittest.TestCase):
             "raw_account_payload",
         ):
             self.assertIn(column, table.columns, f"missing {column}")
+
+    def test_the_keys_are_stored_in_encrypted_text_columns(self) -> None:
+        from metatables import EncryptedString
+
+        table = AlpacaAccountDetails.__table__
+        for column in ("api_key", "secret_key"):
+            self.assertIsInstance(table.columns[column].type, EncryptedString)
+            self.assertEqual(table.columns[column].type.secret, "ALPACA_CONNECTORS_DATA_KEY")
+            self.assertTrue(table.columns[column].nullable)
+        # Transition columns from ADR 0011 stay nullable until a later revision drops them.
+        for column in ("api_key_secret_name", "secret_key_secret_name"):
+            self.assertTrue(table.columns[column].nullable)
 
     def test_details_has_current_financials_as_numeric_columns(self) -> None:
         # Current account financials live on the detail row (no bespoke time-series table); the

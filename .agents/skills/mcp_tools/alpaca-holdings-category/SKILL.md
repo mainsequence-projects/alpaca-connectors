@@ -16,7 +16,7 @@ No shell or direct MetaTable-write fallback exists.
 - A registered Universe links a source and an AssetCategory through durable foreign keys.
   Creation performs no extraction or ETF seed-ticker registration.
 - The category holds current registered component Assets, not source identity/configuration.
-- An Alpaca `account_uid` is extraction input only, resolving Secret references and registering
+- An Alpaca `account_uid` is extraction input only, opening the account's stored keys and registering
   missing constituents. Never assign an Account to a Universe.
 - Each successful extraction publishes one complete observed weight frame under the stable
   Universe-backed signal, even when unchanged. Observation time is not guaranteed economic

@@ -9,17 +9,15 @@ from msm.constants import ASSET_TYPE_CURRENCY, ASSET_TYPE_CURRENCY_DEFINITION
 
 from alpaca_connectors.account import api_key_fingerprint
 from alpaca_connectors.account.credentials import (
-    CREDENTIAL_SOURCE_EXTERNAL,
+    CREDENTIAL_SOURCE_IMPORTED,
     CREDENTIAL_SOURCE_MANAGED,
+    LEGACY_SECRET_REFERENCE_COLUMNS,
     AlpacaCredentialsRejectedError,
     AlpacaSecretNames,
-    AlpacaSecretReferences,
-    ManagedSecretWrite,
     ResolvedAlpacaCredentials,
-    managed_secret_names,
 )
+from alpaca_connectors.account.legacy_secrets import LegacySecretReferences
 from alpaca_connectors.account.services import (
-    backfill_account_secret_uids,
     build_account_balance_values,
     build_account_detail_values,
     ensure_cash_currency_asset,
@@ -86,48 +84,30 @@ def _stub_positions() -> list[SimpleNamespace]:
 
 
 def _stub_registration() -> dict[str, object]:
+    """A registration whose keys are stored on the row (ADR 0017)."""
     return {
         "uid": "acc-uid-1",
         "account_uid": "acc-uid-1",
         "unique_identifier": "010203ABCD__ALPACA_PAPER",
         "alpaca_account_id": "expected-alpaca-id",
-        "api_key_secret_name": "OLD_API_KEY",
-        "secret_key_secret_name": "OLD_SECRET_KEY",
-        "api_key_secret_uid": "old-api-uid",
-        "secret_key_secret_uid": "old-secret-uid",
-        "credential_source": CREDENTIAL_SOURCE_EXTERNAL,
+        "credential_source": CREDENTIAL_SOURCE_MANAGED,
+        "credentials_stored": True,
+        "api_key_fingerprint": "abc123",
+        **{column: None for column in LEGACY_SECRET_REFERENCE_COLUMNS},
         "is_paper": True,
     }
 
 
-def _external_references(
-    api_key_secret_name: str = "ALPACA_PAPER_API_KEY",
-    secret_key_secret_name: str = "ALPACA_PAPER_SECRET_KEY",
-) -> AlpacaSecretReferences:
-    return AlpacaSecretReferences(
-        api_key_secret_name=api_key_secret_name,
-        secret_key_secret_name=secret_key_secret_name,
-        api_key_secret_uid=f"{api_key_secret_name}-uid",
-        secret_key_secret_uid=f"{secret_key_secret_name}-uid",
-        credential_source=CREDENTIAL_SOURCE_EXTERNAL,
-    )
-
-
-def _managed_write(identifier: str = "010203ABCD__ALPACA_PAPER") -> ManagedSecretWrite:
-    names = managed_secret_names(identifier)
-    return ManagedSecretWrite(
-        references=AlpacaSecretReferences(
-            api_key_secret_name=names.api_key_secret_name,
-            secret_key_secret_name=names.secret_key_secret_name,
-            api_key_secret_uid="managed-api-uid",
-            secret_key_secret_uid="managed-secret-uid",
-            credential_source=CREDENTIAL_SOURCE_MANAGED,
-        ),
-        created=(
-            ("managed-api-uid", names.api_key_secret_name),
-            ("managed-secret-uid", names.secret_key_secret_name),
-        ),
-    )
+def _legacy_registration() -> dict[str, object]:
+    """A registration made before revision 0018 that still references managed Secrets."""
+    return {
+        **_stub_registration(),
+        "credentials_stored": False,
+        "api_key_secret_name": "ALPACA_CONNECTORS__010203ABCD__ALPACA_PAPER__API_KEY",
+        "secret_key_secret_name": "ALPACA_CONNECTORS__010203ABCD__ALPACA_PAPER__SECRET_KEY",
+        "api_key_secret_uid": "managed-api-uid",
+        "secret_key_secret_uid": "managed-secret-uid",
+    }
 
 
 EXTERNAL_NAMES = AlpacaSecretNames(
@@ -135,6 +115,19 @@ EXTERNAL_NAMES = AlpacaSecretNames(
     secret_key_secret_name="ALPACA_PAPER_SECRET_KEY",
 )
 SUBMITTED = ResolvedAlpacaCredentials(api_key="PKSUBMITTED", secret_key="SKSUBMITTED")
+IMPORTED = ResolvedAlpacaCredentials(api_key="PKTEST", secret_key="SKTEST")
+
+
+def _imported(credentials=IMPORTED):
+    """Patch the one-time import of Secret names so no Main Sequence Secret is read."""
+    return patch(
+        "alpaca_connectors.account.services.resolve_credential_input",
+        side_effect=lambda value: (
+            (credentials, CREDENTIAL_SOURCE_IMPORTED)
+            if isinstance(value, AlpacaSecretNames)
+            else (value, CREDENTIAL_SOURCE_MANAGED)
+        ),
+    )
 
 
 def test_latest_holdings_set_query_is_account_scoped_and_deterministic() -> None:
@@ -222,8 +215,6 @@ class AccountServiceShapingTests(unittest.TestCase):
             ),
             unique_identifier="010203ABCD__ALPACA_PAPER",
             key_fingerprint="abc123",
-            api_key_secret_name="ALPACA_PAPER_API_KEY",
-            secret_key_secret_name="ALPACA_PAPER_SECRET_KEY",
             is_paper=True,
         )
         self.assertEqual(values["status"], "ACTIVE")
@@ -231,8 +222,9 @@ class AccountServiceShapingTests(unittest.TestCase):
         self.assertEqual(values["fractional_trading"], True)
         self.assertEqual(values["options_trading_level"], 2)
         self.assertEqual(values["api_key_fingerprint"], "abc123")
-        self.assertEqual(values["api_key_secret_name"], "ALPACA_PAPER_API_KEY")
-        self.assertEqual(values["secret_key_secret_name"], "ALPACA_PAPER_SECRET_KEY")
+        # The keys themselves are added by stored_credential_values, never here.
+        self.assertNotIn("api_key", values)
+        self.assertNotIn("secret_key", values)
         # current financials are merged onto the same detail row
         self.assertEqual(str(values["cash"]), "1000.50")
         self.assertEqual(str(values["equity"]), "2500.00")
@@ -529,14 +521,7 @@ class AccountServiceShapingTests(unittest.TestCase):
         client = StubTradingClient(_stub_account(), [], raw={"cash": "1000.50"})
         with (
             patch("alpaca_connectors.runtime.start_markets_engine"),
-            patch(
-                "alpaca_connectors.account.services.resolve_alpaca_secret_references",
-                return_value=_external_references(),
-            ),
-            patch(
-                "alpaca_connectors.account.services.resolve_alpaca_credentials",
-                return_value=ResolvedAlpacaCredentials(api_key="PKTEST", secret_key="SKTEST"),
-            ),
+            _imported(),
             patch("alpaca_connectors.account.services.cash_asset_exists", return_value=False),
             patch("alpaca_connectors.account.services.ensure_cash_currency_asset") as ensure_cash,
         ):
@@ -545,40 +530,27 @@ class AccountServiceShapingTests(unittest.TestCase):
         self.assertEqual(plan["cash_asset_identifiers_to_ensure"], ["USD"])
         self.assertEqual(plan["would_write_holdings"], 1)
         self.assertEqual(plan["unresolved_symbols"], [])
-        self.assertEqual(plan["credential_source"], CREDENTIAL_SOURCE_EXTERNAL)
-        self.assertEqual(plan["secret_writes"], [])
+        self.assertEqual(plan["credential_source"], CREDENTIAL_SOURCE_IMPORTED)
+        self.assertNotIn("secret_writes", plan)
+        self.assertNotIn("ALPACA_PAPER_API_KEY", str(plan))
+        self.assertNotIn("PKTEST", str(plan))
         ensure_cash.assert_not_called()
 
-    def test_managed_plan_reports_secret_writes_without_storing_values(self) -> None:
+    def test_managed_plan_reports_the_source_without_storing_or_showing_values(self) -> None:
         client = StubTradingClient(_stub_account(), [], raw={"cash": "1000.50"})
-        planned_writes = [
-            {"name": "ALPACA_CONNECTORS__010203ABCD__ALPACA_PAPER__API_KEY", "action": "create"},
-            {"name": "ALPACA_CONNECTORS__010203ABCD__ALPACA_PAPER__SECRET_KEY", "action": "create"},
-        ]
         with (
             patch("alpaca_connectors.runtime.start_markets_engine"),
             patch("alpaca_connectors.account.services.cash_asset_exists", return_value=True),
-            patch(
-                "alpaca_connectors.account.services.plan_managed_secret_writes",
-                return_value=planned_writes,
-            ) as plan_writes,
-            patch("alpaca_connectors.account.services.store_managed_alpaca_credentials") as store,
-            patch(
-                "alpaca_connectors.account.services.resolve_alpaca_secret_references"
-            ) as resolve_names,
+            patch("alpaca_connectors.account.services.write_stored_credentials") as write,
+            patch("msm.repositories.crud.upsert_model") as upsert_model,
         ):
             plan = plan_alpaca_account(credentials=SUBMITTED, client=client)
 
-        store.assert_not_called()
-        resolve_names.assert_not_called()
-        plan_writes.assert_called_once_with("010203ABCD__ALPACA_PAPER")
+        write.assert_not_called()
+        upsert_model.assert_not_called()
         self.assertEqual(plan["credential_source"], CREDENTIAL_SOURCE_MANAGED)
-        self.assertEqual(
-            plan["api_key_secret_name"],
-            "ALPACA_CONNECTORS__010203ABCD__ALPACA_PAPER__API_KEY",
-        )
-        self.assertEqual(plan["secret_writes"], planned_writes)
         self.assertNotIn("PKSUBMITTED", str(plan))
+        self.assertNotIn("SKSUBMITTED", str(plan))
 
     def test_holdings_plan_treats_missing_cash_asset_as_an_execution_write(self) -> None:
         from alpaca_connectors.holdings.services import plan_alpaca_account_holdings
@@ -630,19 +602,9 @@ class RegisterAlpacaAccountTests(unittest.TestCase):
             patch("alpaca_connectors.runtime.start_markets_engine", return_value=runtime),
             patch("msm.api.accounts.Account", fake_account),
             patch("msm.repositories.crud.upsert_model", upsert_model),
+            _imported(),
             patch(
-                "alpaca_connectors.account.services.resolve_alpaca_secret_references",
-                return_value=_external_references(),
-            ),
-            patch(
-                "alpaca_connectors.account.services.resolve_alpaca_credentials",
-                return_value=ResolvedAlpacaCredentials(
-                    api_key="PKTEST",
-                    secret_key="SKTEST",
-                ),
-            ),
-            patch(
-                "alpaca_connectors.account.services._previous_managed_references", return_value=None
+                "alpaca_connectors.account.services._previous_legacy_references", return_value=None
             ),
             patch(
                 "alpaca_connectors.holdings.services.resolve_complete_account_holdings_rows",
@@ -681,18 +643,20 @@ class RegisterAlpacaAccountTests(unittest.TestCase):
         self.assertEqual(detail_kwargs["conflict_columns"], ("account_uid",))
         self.assertEqual(str(detail_kwargs["values"]["cash"]), "1000.50")
         self.assertEqual(str(detail_kwargs["values"]["equity"]), "2500.00")
+        # The keys travel in the same upsert as the rest of the row; the model's encrypted
+        # columns seal them when the statement is compiled, and no Secret name is kept.
+        self.assertEqual(detail_kwargs["values"]["api_key"], "PKTEST")
+        self.assertEqual(detail_kwargs["values"]["secret_key"], "SKTEST")
         self.assertEqual(
-            detail_kwargs["values"]["api_key_secret_name"],
-            "ALPACA_PAPER_API_KEY",
+            detail_kwargs["values"]["api_key_fingerprint"], api_key_fingerprint("PKTEST")
         )
-        self.assertEqual(
-            detail_kwargs["values"]["api_key_secret_uid"],
-            "ALPACA_PAPER_API_KEY-uid",
-        )
-        self.assertEqual(detail_kwargs["values"]["credential_source"], CREDENTIAL_SOURCE_EXTERNAL)
+        self.assertEqual(detail_kwargs["values"]["credential_source"], CREDENTIAL_SOURCE_IMPORTED)
         self.assertEqual(detail_kwargs["values"]["credentials_updated_by_user_uid"], "user-uid")
-        self.assertNotIn("PKTEST", str(detail_kwargs["values"]))
-        self.assertNotIn("SKTEST", str(detail_kwargs["values"]))
+        for column in LEGACY_SECRET_REFERENCE_COLUMNS:
+            self.assertIsNone(detail_kwargs["values"][column])
+        self.assertNotIn("ALPACA_PAPER_API_KEY", str(detail_kwargs["values"]))
+        self.assertEqual(result.credential_source, CREDENTIAL_SOURCE_IMPORTED)
+        self.assertFalse(hasattr(result, "api_key_secret_name"))
 
         resolve_holdings.assert_called_once()
         self.assertEqual(publish_holdings.call_args.kwargs["rows"], resolved_rows)
@@ -709,14 +673,7 @@ class RegisterAlpacaAccountTests(unittest.TestCase):
             patch("alpaca_connectors.runtime.start_markets_engine", return_value=runtime),
             patch("msm.api.accounts.Account", fake_account),
             patch("msm.repositories.crud.upsert_model") as upsert_model,
-            patch(
-                "alpaca_connectors.account.services.resolve_alpaca_secret_references",
-                return_value=_external_references(),
-            ),
-            patch(
-                "alpaca_connectors.account.services.resolve_alpaca_credentials",
-                return_value=ResolvedAlpacaCredentials(api_key="PKTEST", secret_key="SKTEST"),
-            ),
+            _imported(),
             patch(
                 "alpaca_connectors.holdings.services.resolve_complete_account_holdings_rows",
                 side_effect=registry_error,
@@ -736,50 +693,35 @@ class RegisterAlpacaAccountTests(unittest.TestCase):
         upsert_model.assert_not_called()
         publish_holdings.assert_not_called()
 
-    def test_secret_name_rotation_rejects_a_different_alpaca_account(self) -> None:
-        current = {
-            "uid": "acc-uid-1",
-            "account_uid": "acc-uid-1",
-            "alpaca_account_id": "expected-alpaca-id",
-            "api_key_secret_name": "OLD_API_KEY",
-            "secret_key_secret_name": "OLD_SECRET_KEY",
-            "is_paper": True,
-        }
+    def test_import_rotation_rejects_a_different_alpaca_account(self) -> None:
         candidate_client = SimpleNamespace(
             get_account=lambda: SimpleNamespace(id="different-alpaca-id")
         )
         with (
             patch(
-                "alpaca_connectors.account.services.get_account_registration", return_value=current
+                "alpaca_connectors.account.services.get_account_registration",
+                return_value=_stub_registration(),
             ),
             patch(
                 "alpaca_connectors.runtime.start_markets_engine",
                 return_value=SimpleNamespace(context=None),
             ),
-            patch(
-                "alpaca_connectors.account.services.resolve_alpaca_secret_references",
-                return_value=_external_references("NEW_API_KEY", "NEW_SECRET_KEY"),
-            ),
-            patch(
-                "alpaca_connectors.account.services.resolve_alpaca_credentials",
-                return_value=ResolvedAlpacaCredentials(api_key="rotated", secret_key="secret"),
-            ),
+            _imported(ResolvedAlpacaCredentials(api_key="rotated", secret_key="secret")),
             patch(
                 "alpaca_connectors.account.services.build_alpaca_trading_client",
                 return_value=candidate_client,
             ),
-            patch("msm.repositories.crud.update_model") as update_model,
+            patch("alpaca_connectors.account.services.write_stored_credentials") as write,
         ):
             with self.assertRaisesRegex(ValueError, "different Alpaca account"):
                 update_account_registration(
                     "acc-uid-1",
-                    api_key_secret_name="NEW_API_KEY",
-                    secret_key_secret_name="NEW_SECRET_KEY",
+                    credential_secret_names=AlpacaSecretNames("NEW_API_KEY", "NEW_SECRET_KEY"),
                 )
 
-        update_model.assert_not_called()
+        write.assert_not_called()
 
-    def test_deactivation_with_unchanged_secret_names_skips_credential_validation(self) -> None:
+    def test_name_and_active_changes_never_read_or_write_credentials(self) -> None:
         fake_account = MagicMock()
         with (
             patch(
@@ -791,62 +733,25 @@ class RegisterAlpacaAccountTests(unittest.TestCase):
                 return_value=SimpleNamespace(context=None),
             ),
             patch("msm.api.accounts.Account", fake_account),
-            patch(
-                "alpaca_connectors.account.services.resolve_alpaca_credentials"
-            ) as resolve_credentials,
+            patch("alpaca_connectors.account.services.resolve_credential_input") as resolve,
             patch("alpaca_connectors.account.services.build_alpaca_trading_client") as build_client,
-            patch("msm.repositories.crud.update_model") as update_model,
+            patch("alpaca_connectors.account.services.write_stored_credentials") as write,
         ):
             result = update_account_registration(
                 "acc-uid-1",
-                api_key_secret_name="OLD_API_KEY",
-                secret_key_secret_name="OLD_SECRET_KEY",
+                account_name="Renamed",
                 account_is_active=False,
             )
 
-        fake_account.update.assert_called_once_with("acc-uid-1", {"account_is_active": False})
-        resolve_credentials.assert_not_called()
+        fake_account.update.assert_called_once_with(
+            "acc-uid-1", {"account_name": "Renamed", "account_is_active": False}
+        )
+        resolve.assert_not_called()
         build_client.assert_not_called()
-        update_model.assert_not_called()
+        write.assert_not_called()
         self.assertEqual(result["account_uid"], "acc-uid-1")
 
-    def test_unchanged_or_whitespace_padded_secret_names_skip_credential_resolution(self) -> None:
-        for names in (
-            {"api_key_secret_name": "OLD_API_KEY", "secret_key_secret_name": "OLD_SECRET_KEY"},
-            {
-                "api_key_secret_name": " OLD_API_KEY ",
-                "secret_key_secret_name": "\tOLD_SECRET_KEY\n",
-            },
-            {"api_key_secret_name": "OLD_API_KEY"},
-        ):
-            fake_account = MagicMock()
-            with (
-                self.subTest(names=names),
-                patch(
-                    "alpaca_connectors.account.services.get_account_registration",
-                    return_value=_stub_registration(),
-                ),
-                patch(
-                    "alpaca_connectors.runtime.start_markets_engine",
-                    return_value=SimpleNamespace(context=None),
-                ),
-                patch("msm.api.accounts.Account", fake_account),
-                patch(
-                    "alpaca_connectors.account.services.resolve_alpaca_credentials"
-                ) as resolve_credentials,
-                patch(
-                    "alpaca_connectors.account.services.build_alpaca_trading_client"
-                ) as build_client,
-                patch("msm.repositories.crud.update_model") as update_model,
-            ):
-                update_account_registration("acc-uid-1", **names)
-
-                resolve_credentials.assert_not_called()
-                build_client.assert_not_called()
-                update_model.assert_not_called()
-                fake_account.update.assert_not_called()
-
-    def test_changing_one_secret_name_still_validates_and_records_fingerprint(self) -> None:
+    def test_import_rotation_validates_then_stores_the_imported_keys(self) -> None:
         credentials = ResolvedAlpacaCredentials(api_key="rotated", secret_key="secret")
         candidate_client = SimpleNamespace(
             get_account=lambda: SimpleNamespace(id="expected-alpaca-id")
@@ -858,67 +763,44 @@ class RegisterAlpacaAccountTests(unittest.TestCase):
             ),
             patch(
                 "alpaca_connectors.runtime.start_markets_engine",
-                return_value=SimpleNamespace(context=None),
+                return_value=SimpleNamespace(context="context"),
             ),
-            patch(
-                "alpaca_connectors.account.services.resolve_alpaca_secret_references",
-                return_value=_external_references("NEW_API_KEY", "OLD_SECRET_KEY"),
-            ) as resolve_names,
-            patch(
-                "alpaca_connectors.account.services.resolve_alpaca_credentials",
-                return_value=credentials,
-            ),
+            _imported(credentials) as resolve,
             patch(
                 "alpaca_connectors.account.services.build_alpaca_trading_client",
                 return_value=candidate_client,
             ) as build_client,
-            patch("msm.repositories.crud.update_model") as update_model,
+            patch("alpaca_connectors.account.services.write_stored_credentials") as write,
             patch(
-                "alpaca_connectors.account.services.delete_managed_alpaca_secrets"
-            ) as delete_managed,
+                "alpaca_connectors.account.services.delete_legacy_managed_secrets"
+            ) as delete_legacy,
         ):
             update_account_registration(
                 "acc-uid-1",
-                api_key_secret_name="NEW_API_KEY",
-                secret_key_secret_name="OLD_SECRET_KEY",
+                credential_secret_names=AlpacaSecretNames("NEW_API_KEY", "OLD_SECRET_KEY"),
                 actor_user_uid="user-uid",
             )
 
-        resolve_names.assert_called_once_with(
-            AlpacaSecretNames(
-                api_key_secret_name="NEW_API_KEY",
-                secret_key_secret_name="OLD_SECRET_KEY",
-            )
-        )
+        resolve.assert_called_once_with(AlpacaSecretNames("NEW_API_KEY", "OLD_SECRET_KEY"))
         build_client.assert_called_once_with(credentials=credentials, paper=True)
-        values = dict(update_model.call_args.kwargs["values"])
+        write.assert_called_once()
+        self.assertEqual(write.call_args.args, ("context",))
+        self.assertEqual(write.call_args.kwargs["account_uid"], "acc-uid-1")
+        values = dict(write.call_args.kwargs["values"])
         self.assertIsNotNone(values.pop("credentials_updated_at"))
         self.assertEqual(
             values,
             {
-                "api_key_secret_name": "NEW_API_KEY",
-                "secret_key_secret_name": "OLD_SECRET_KEY",
-                "api_key_secret_uid": "NEW_API_KEY-uid",
-                "secret_key_secret_uid": "OLD_SECRET_KEY-uid",
-                "credential_source": CREDENTIAL_SOURCE_EXTERNAL,
+                "api_key": "rotated",
+                "secret_key": "secret",
                 "api_key_fingerprint": api_key_fingerprint("rotated"),
+                "credential_source": CREDENTIAL_SOURCE_IMPORTED,
                 "credentials_updated_by_user_uid": "user-uid",
+                **{column: None for column in LEGACY_SECRET_REFERENCE_COLUMNS},
             },
         )
-        # External to external never deletes anything.
-        delete_managed.assert_not_called()
-
-
-def _managed_registration() -> dict[str, object]:
-    names = managed_secret_names("010203ABCD__ALPACA_PAPER")
-    return {
-        **_stub_registration(),
-        "api_key_secret_name": names.api_key_secret_name,
-        "secret_key_secret_name": names.secret_key_secret_name,
-        "api_key_secret_uid": "managed-api-uid",
-        "secret_key_secret_uid": "managed-secret-uid",
-        "credential_source": CREDENTIAL_SOURCE_MANAGED,
-    }
+        # A migrated registration references no Secret, so nothing is deleted.
+        delete_legacy.assert_not_called()
 
 
 class _RejectingTradingClient(StubTradingClient):
@@ -931,19 +813,27 @@ class _RejectingTradingClient(StubTradingClient):
         )
 
 
+def _legacy_managed_references() -> LegacySecretReferences:
+    legacy = _legacy_registration()
+    return LegacySecretReferences(
+        api_key_secret_name=str(legacy["api_key_secret_name"]),
+        secret_key_secret_name=str(legacy["secret_key_secret_name"]),
+        api_key_secret_uid="managed-api-uid",
+        secret_key_secret_uid="managed-secret-uid",
+        credential_source=CREDENTIAL_SOURCE_MANAGED,
+    )
+
+
 class ManagedCredentialRegistrationTests(unittest.TestCase):
     def _register(self, client, **patches):
-        """Run a managed registration with storage, holdings and Secret writes mocked."""
+        """Run a managed registration with storage and holdings mocked."""
         events: list[str] = []
         fake_account = MagicMock()
         fake_account.upsert.side_effect = patches.get(
             "account_upsert",
             lambda **kwargs: events.append("account") or SimpleNamespace(uid="acc-uid-1"),
         )
-        upsert_model = MagicMock()
-        store = MagicMock(
-            side_effect=lambda *args: events.append("secrets") or _managed_write(),
-        )
+        upsert_model = MagicMock(side_effect=lambda *args, **kwargs: events.append("detail"))
         with (
             patch(
                 "alpaca_connectors.runtime.start_markets_engine",
@@ -959,13 +849,15 @@ class ManagedCredentialRegistrationTests(unittest.TestCase):
                 "alpaca_connectors.holdings.services.publish_resolved_account_holdings_snapshot",
                 return_value=SimpleNamespace(holdings_rows=1, unresolved_symbols=[]),
             ),
-            patch("alpaca_connectors.account.services.store_managed_alpaca_credentials", store),
             patch(
-                "alpaca_connectors.account.services.delete_secrets_best_effort"
-            ) as delete_created,
+                "alpaca_connectors.account.services._previous_legacy_references",
+                return_value=patches.get("previous_references"),
+            ),
             patch(
-                "alpaca_connectors.account.services.resolve_alpaca_secret_references"
-            ) as resolve_names,
+                "alpaca_connectors.account.services.delete_legacy_managed_secrets",
+                return_value=patches.get("deleted", ([], [])),
+            ) as delete_legacy,
+            patch("alpaca_connectors.platform_secrets.read_platform_secret_value") as read_secret,
         ):
             outcome: object
             try:
@@ -978,101 +870,128 @@ class ManagedCredentialRegistrationTests(unittest.TestCase):
                 )
             except Exception as exc:  # noqa: BLE001 - returned for assertions
                 outcome = exc
-        return outcome, events, fake_account, upsert_model, store, delete_created, resolve_names
+        return outcome, events, fake_account, upsert_model, delete_legacy, read_secret
 
-    def test_managed_registration_stores_secrets_after_alpaca_and_holdings_checks(self) -> None:
+    def test_managed_registration_stores_the_keys_after_alpaca_and_holdings_checks(self) -> None:
         client = StubTradingClient(_stub_account(), [], raw={"cash": "1000.50"})
-        result, events, _, upsert_model, store, delete_created, resolve_names = self._register(
-            client
-        )
+        result, events, _, upsert_model, delete_legacy, read_secret = self._register(client)
 
-        self.assertEqual(events, ["holdings", "secrets", "account"])
-        store.assert_called_once_with("010203ABCD__ALPACA_PAPER", SUBMITTED)
-        resolve_names.assert_not_called()
-        delete_created.assert_not_called()
+        self.assertEqual(events, ["holdings", "account", "detail"])
+        read_secret.assert_not_called()
+        delete_legacy.assert_not_called()
         values = upsert_model.call_args.kwargs["values"]
         self.assertEqual(values["credential_source"], CREDENTIAL_SOURCE_MANAGED)
-        self.assertEqual(values["api_key_secret_uid"], "managed-api-uid")
-        self.assertEqual(
-            values["api_key_secret_name"],
-            "ALPACA_CONNECTORS__010203ABCD__ALPACA_PAPER__API_KEY",
-        )
+        self.assertEqual(values["api_key"], "PKSUBMITTED")
+        self.assertEqual(values["secret_key"], "SKSUBMITTED")
         self.assertEqual(values["api_key_fingerprint"], api_key_fingerprint("PKSUBMITTED"))
         self.assertEqual(values["credentials_updated_by_user_uid"], "user-uid")
-        self.assertNotIn("PKSUBMITTED", str(values))
-        self.assertNotIn("SKSUBMITTED", str(values))
+        for column in LEGACY_SECRET_REFERENCE_COLUMNS:
+            self.assertIsNone(values[column])
         self.assertEqual(result.credential_source, CREDENTIAL_SOURCE_MANAGED)
+        self.assertNotIn("PKSUBMITTED", str(result))
 
-    def test_rejected_credentials_write_no_secret_or_account(self) -> None:
+    def test_rejected_credentials_write_nothing(self) -> None:
         client = _RejectingTradingClient(_stub_account(), [], raw={})
-        outcome, events, fake_account, upsert_model, store, _, _ = self._register(client)
+        outcome, events, fake_account, upsert_model, _, _ = self._register(client)
 
         self.assertIsInstance(outcome, AlpacaCredentialsRejectedError)
         self.assertEqual(events, [])
-        store.assert_not_called()
         fake_account.upsert.assert_not_called()
         upsert_model.assert_not_called()
 
-    def test_failure_after_secret_creation_removes_the_created_secrets(self) -> None:
+    def test_a_failed_account_write_stores_no_keys(self) -> None:
         def failing_upsert(**kwargs):
             raise RuntimeError("account write failed")
 
         client = StubTradingClient(_stub_account(), [], raw={})
-        outcome, _, _, upsert_model, _, delete_created, _ = self._register(
-            client,
-            account_upsert=failing_upsert,
-        )
+        outcome, _, _, upsert_model, _, _ = self._register(client, account_upsert=failing_upsert)
 
         self.assertIsInstance(outcome, RuntimeError)
         upsert_model.assert_not_called()
-        delete_created.assert_called_once_with(_managed_write().created)
 
-    def test_external_reregistration_deletes_previously_managed_secrets(self) -> None:
-        previous = _managed_write().references
+    def test_reregistering_a_legacy_identity_deletes_the_secrets_it_still_referenced(self) -> None:
+        previous = _legacy_managed_references()
+        client = StubTradingClient(_stub_account(), [], raw={})
+        result, _, _, upsert_model, delete_legacy, _ = self._register(
+            client,
+            previous_references=previous,
+            deleted=([], ["Managed Secret 'X' could not be deleted."]),
+        )
+
+        delete_legacy.assert_called_once_with(previous)
+        self.assertEqual(result.warnings, ["Managed Secret 'X' could not be deleted."])
+        # The new keys replace the references whatever happened to the old Secrets.
+        values = upsert_model.call_args.kwargs["values"]
+        self.assertIsNone(values["api_key_secret_uid"])
+
+
+class RegistrationSealingTests(unittest.TestCase):
+    """The upsert that stores a registration leaves the process with the keys sealed."""
+
+    def setUp(self) -> None:
+        from metatables.encryption import Keyring, set_keyring_source
+
+        self.ring = Keyring.new("test")
+        set_keyring_source(lambda name: self.ring.render())
+
+    def tearDown(self) -> None:
+        from metatables.encryption import set_keyring_source
+
+        set_keyring_source(None)
+
+    def test_the_registration_upsert_carries_envelopes_not_values(self) -> None:
+        from metatables.compiled_sql.v1 import compile_sqlalchemy_statement
+        from metatables.encryption import is_envelope
+
+        operations = []
+
+        def offline_compile(statement, *, context, operation, dialect=None):
+            return compile_sqlalchemy_statement(
+                statement, operation=operation, data_source_uid="ds", dialect="postgresql"
+            )
+
+        client = StubTradingClient(_stub_account(), [], raw={"cash": "1000.50"})
         fake_account = MagicMock()
         fake_account.upsert.return_value = SimpleNamespace(uid="acc-uid-1")
-        client = StubTradingClient(_stub_account(), [], raw={})
         with (
             patch(
                 "alpaca_connectors.runtime.start_markets_engine",
                 return_value=SimpleNamespace(context=SimpleNamespace()),
             ),
             patch("msm.api.accounts.Account", fake_account),
-            patch("msm.repositories.crud.upsert_model"),
+            patch("msm.repositories.crud.compile_markets_statement", offline_compile),
             patch(
-                "alpaca_connectors.account.services.resolve_alpaca_secret_references",
-                return_value=_external_references(),
+                "msm.repositories.crud.execute_markets_operation",
+                side_effect=lambda operation, context: operations.append(operation) or {},
             ),
-            patch(
-                "alpaca_connectors.account.services.resolve_alpaca_credentials",
-                return_value=ResolvedAlpacaCredentials(api_key="PKTEST", secret_key="SKTEST"),
-            ),
-            patch(
-                "alpaca_connectors.account.services._previous_managed_references",
-                return_value=previous,
-            ),
-            patch(
-                "alpaca_connectors.account.services.delete_managed_alpaca_secrets",
-                return_value=([], ["Managed Secret 'X' could not be deleted."]),
-            ) as delete_managed,
             patch(
                 "alpaca_connectors.holdings.services.resolve_complete_account_holdings_rows",
                 return_value=[],
             ),
             patch(
                 "alpaca_connectors.holdings.services.publish_resolved_account_holdings_snapshot",
-                return_value=SimpleNamespace(holdings_rows=1, unresolved_symbols=[]),
+                return_value=SimpleNamespace(holdings_rows=0, unresolved_symbols=[]),
+            ),
+            patch(
+                "alpaca_connectors.account.services._previous_legacy_references", return_value=None
             ),
         ):
-            result = register_alpaca_account(
-                credentials=EXTERNAL_NAMES,
+            register_alpaca_account(
+                credentials=SUBMITTED,
+                paper=True,
                 client=client,
                 asset_resolver=lambda position: None,
             )
 
-        delete_managed.assert_called_once_with(previous)
-        self.assertEqual(result.credential_source, CREDENTIAL_SOURCE_EXTERNAL)
-        self.assertEqual(result.warnings, ["Managed Secret 'X' could not be deleted."])
+        (operation,) = operations
+        serialized = str(operation.model_dump(mode="json"))
+        self.assertNotIn("PKSUBMITTED", serialized)
+        self.assertNotIn("SKSUBMITTED", serialized)
+        parameters = operation.statement.parameters
+        sealed = [parameters["api_key"], parameters["secret_key"]]
+        self.assertTrue(all(is_envelope(value) for value in sealed))
+        self.assertFalse(is_envelope(parameters["api_key_fingerprint"]))
+        self.assertIn("ON CONFLICT", operation.statement.sql.upper())
 
 
 class AccountCredentialUpdateTests(unittest.TestCase):
@@ -1086,55 +1005,55 @@ class AccountCredentialUpdateTests(unittest.TestCase):
             ),
             patch(
                 "alpaca_connectors.runtime.start_markets_engine",
-                return_value=SimpleNamespace(context=None),
+                return_value=SimpleNamespace(context="context"),
             ),
             patch("msm.api.accounts.Account"),
             patch(
                 "alpaca_connectors.account.services.build_alpaca_trading_client",
                 return_value=candidate_client,
             ) as build_client,
+            _imported(ResolvedAlpacaCredentials(api_key="PKNEW", secret_key="SKNEW")),
+            patch("alpaca_connectors.account.services.write_stored_credentials") as write,
             patch(
-                "alpaca_connectors.account.services.store_managed_alpaca_credentials",
-                return_value=_managed_write(),
-            ) as store,
-            patch(
-                "alpaca_connectors.account.services.resolve_alpaca_secret_references",
-                return_value=_external_references("NEW_API_KEY", "NEW_SECRET_KEY"),
-            ),
-            patch(
-                "alpaca_connectors.account.services.resolve_alpaca_credentials",
-                return_value=ResolvedAlpacaCredentials(api_key="PKNEW", secret_key="SKNEW"),
-            ),
-            patch(
-                "alpaca_connectors.account.services.delete_managed_alpaca_secrets"
-            ) as delete_managed,
-            patch("msm.repositories.crud.update_model") as update_model,
+                "alpaca_connectors.account.services.delete_legacy_managed_secrets",
+                return_value=([], []),
+            ) as delete_legacy,
         ):
             try:
                 outcome: object = update_account_registration("acc-uid-1", **kwargs)
             except Exception as exc:  # noqa: BLE001 - returned for assertions
                 outcome = exc
-        return outcome, build_client, store, delete_managed, update_model
+        return outcome, build_client, write, delete_legacy
 
-    def test_managed_rotation_validates_then_overwrites_and_keeps_external_secrets(self) -> None:
-        _, build_client, store, delete_managed, update_model = self._update(
+    def test_managed_rotation_validates_then_replaces_the_stored_keys(self) -> None:
+        _, build_client, write, delete_legacy = self._update(
             _stub_registration(),
             credential_values=SUBMITTED,
             actor_user_uid="user-uid",
         )
 
         build_client.assert_called_once_with(credentials=SUBMITTED, paper=True)
-        store.assert_called_once_with("010203ABCD__ALPACA_PAPER", SUBMITTED)
-        values = update_model.call_args.kwargs["values"]
+        values = write.call_args.kwargs["values"]
+        self.assertEqual(values["api_key"], "PKSUBMITTED")
         self.assertEqual(values["credential_source"], CREDENTIAL_SOURCE_MANAGED)
-        self.assertEqual(values["secret_key_secret_uid"], "managed-secret-uid")
+        self.assertEqual(values["api_key_fingerprint"], api_key_fingerprint("PKSUBMITTED"))
         self.assertEqual(values["credentials_updated_by_user_uid"], "user-uid")
-        self.assertNotIn("SKSUBMITTED", str(values))
-        # The external Secrets the account used before belong to whoever created them.
-        delete_managed.assert_not_called()
+        delete_legacy.assert_not_called()
+
+    def test_rotating_a_legacy_registration_deletes_its_managed_secrets(self) -> None:
+        _, _, write, delete_legacy = self._update(
+            _legacy_registration(),
+            credential_values=SUBMITTED,
+        )
+
+        values = write.call_args.kwargs["values"]
+        for column in LEGACY_SECRET_REFERENCE_COLUMNS:
+            self.assertIsNone(values[column])
+        delete_legacy.assert_called_once()
+        self.assertEqual(delete_legacy.call_args.args[0], _legacy_managed_references())
 
     def test_rotation_to_another_alpaca_account_writes_nothing(self) -> None:
-        outcome, _, store, _, update_model = self._update(
+        outcome, _, write, _ = self._update(
             _stub_registration(),
             alpaca_account_id="someone-else",
             credential_values=SUBMITTED,
@@ -1142,38 +1061,32 @@ class AccountCredentialUpdateTests(unittest.TestCase):
 
         self.assertIsInstance(outcome, ValueError)
         self.assertIn("different Alpaca account", str(outcome))
-        store.assert_not_called()
-        update_model.assert_not_called()
+        write.assert_not_called()
 
-    def test_switching_managed_account_to_external_secrets_deletes_managed_ones(self) -> None:
-        current = _managed_registration()
-        _, _, store, delete_managed, update_model = self._update(
-            current,
-            api_key_secret_name="NEW_API_KEY",
-            secret_key_secret_name="NEW_SECRET_KEY",
+    def test_importing_from_secrets_records_the_imported_source(self) -> None:
+        _, _, write, _ = self._update(
+            _stub_registration(),
+            credential_secret_names=AlpacaSecretNames("NEW_API_KEY", "NEW_SECRET_KEY"),
         )
 
-        store.assert_not_called()
-        self.assertEqual(
-            update_model.call_args.kwargs["values"]["credential_source"],
-            CREDENTIAL_SOURCE_EXTERNAL,
-        )
-        deleted_references = delete_managed.call_args.args[0]
-        self.assertEqual(deleted_references.api_key_secret_uid, "managed-api-uid")
+        values = write.call_args.kwargs["values"]
+        self.assertEqual(values["credential_source"], CREDENTIAL_SOURCE_IMPORTED)
+        self.assertEqual(values["api_key"], "PKNEW")
+        self.assertNotIn("NEW_API_KEY", str(values))
 
     def test_credential_values_and_secret_names_cannot_be_combined(self) -> None:
-        outcome, build_client, _, _, update_model = self._update(
+        outcome, build_client, write, _ = self._update(
             _stub_registration(),
             credential_values=SUBMITTED,
-            api_key_secret_name="NEW_API_KEY",
+            credential_secret_names=AlpacaSecretNames("NEW_API_KEY", "NEW_SECRET_KEY"),
         )
 
         self.assertIsInstance(outcome, ValueError)
         build_client.assert_not_called()
-        update_model.assert_not_called()
+        write.assert_not_called()
 
 
-class AccountRemovalAndBackfillTests(unittest.TestCase):
+class AccountRemovalTests(unittest.TestCase):
     def _remove(self, current):
         with (
             patch(
@@ -1189,80 +1102,30 @@ class AccountRemovalAndBackfillTests(unittest.TestCase):
             ),
             patch("msm.api.accounts.Account"),
             patch("msm.api.accounts.AccountHoldingsSet") as holdings_sets,
-            patch("msm.repositories.crud.delete_model"),
+            patch("msm.repositories.crud.delete_model") as delete_model,
             patch(
-                "alpaca_connectors.account.services.delete_managed_alpaca_secrets",
+                "alpaca_connectors.account.services.delete_legacy_managed_secrets",
                 return_value=(["A", "B"], []),
-            ) as delete_managed,
+            ) as delete_legacy,
         ):
             holdings_sets.filter.return_value = []
             result = remove_account_registration("acc-uid-1")
-        return result, delete_managed
+        return result, delete_model, delete_legacy
 
-    def test_removing_a_managed_account_deletes_its_secrets(self) -> None:
-        result, delete_managed = self._remove(_managed_registration())
+    def test_removing_a_registration_deletes_the_row_and_nothing_else(self) -> None:
+        result, delete_model, delete_legacy = self._remove(_stub_registration())
 
-        delete_managed.assert_called_once()
-        self.assertEqual(result["deleted_secrets"], ["A", "B"])
-
-    def test_removing_an_external_account_keeps_its_secrets(self) -> None:
-        result, delete_managed = self._remove(_stub_registration())
-
-        delete_managed.assert_not_called()
+        delete_model.assert_called_once()
+        self.assertEqual(delete_model.call_args.kwargs["uid"], "acc-uid-1")
+        delete_legacy.assert_not_called()
         self.assertEqual(result["deleted_secrets"], [])
+        self.assertTrue(result["registration_removed"])
 
-    def test_backfill_resolves_missing_uids_in_one_set_based_update(self) -> None:
-        from alpaca_connectors.platform_secrets import PlatformSecretNotFoundError
+    def test_removing_a_legacy_registration_deletes_its_managed_secrets(self) -> None:
+        result, _, delete_legacy = self._remove(_legacy_registration())
 
-        rows = [
-            {**_stub_registration(), "account_uid": str(uuid.uuid4())},
-            {
-                **_stub_registration(),
-                "account_uid": str(uuid.uuid4()),
-                "api_key_secret_uid": None,
-                "secret_key_secret_uid": None,
-            },
-            {
-                **_stub_registration(),
-                "account_uid": str(uuid.uuid4()),
-                "api_key_secret_name": "MISSING",
-                "api_key_secret_uid": None,
-                "secret_key_secret_uid": None,
-            },
-        ]
-
-        def resolve(names):
-            if names.api_key_secret_name == "MISSING":
-                raise PlatformSecretNotFoundError("Main Sequence Secret 'MISSING' does not exist.")
-            return _external_references(names.api_key_secret_name, names.secret_key_secret_name)
-
-        for execute in (False, True):
-            with (
-                self.subTest(execute=execute),
-                patch(
-                    "alpaca_connectors.account.services.list_account_registrations",
-                    return_value=(rows, len(rows)),
-                ),
-                patch(
-                    "alpaca_connectors.account.services.resolve_alpaca_secret_references",
-                    side_effect=resolve,
-                ),
-                patch(
-                    "alpaca_connectors.runtime.start_markets_engine",
-                    return_value=SimpleNamespace(context=None),
-                ),
-                patch("msm.repositories.base.compile_markets_statement") as compile_statement,
-                patch("msm.repositories.base.execute_markets_operation") as execute_operation,
-            ):
-                result = backfill_account_secret_uids(execute=execute)
-
-                self.assertEqual(
-                    (result["pending"], result["resolved"], result["blocked"]), (2, 1, 1)
-                )
-                self.assertEqual(result["written"], 1 if execute else 0)
-                self.assertEqual(execute_operation.call_count, 1 if execute else 0)
-                if execute:
-                    self.assertIn("UPDATE", str(compile_statement.call_args.args[0]).upper())
+        delete_legacy.assert_called_once_with(_legacy_managed_references())
+        self.assertEqual(result["deleted_secrets"], ["A", "B"])
 
 
 if __name__ == "__main__":

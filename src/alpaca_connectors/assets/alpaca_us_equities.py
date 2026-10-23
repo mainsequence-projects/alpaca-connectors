@@ -300,7 +300,7 @@ def build_default_classification_passes() -> tuple[AlpacaEquityClassificationPas
 
 
 def build_alpaca_us_equity_trading_client(*, account_uid: str) -> TradingClient:
-    """Build an Alpaca client from one registered account's Secret references."""
+    """Build an Alpaca client from one registered account's stored keys."""
     from alpaca_connectors.account.services import (
         build_registered_account_client,
         get_account_registration,
@@ -578,7 +578,7 @@ def build_alpaca_us_equity_registration_plan(
         progress,
         "resolve_account",
         "running",
-        "Resolving the registered Alpaca account and its credential Secret references.",
+        "Resolving the registered Alpaca account and opening its stored keys.",
     )
     active_trading_client = trading_client or build_alpaca_us_equity_trading_client(
         account_uid=account_uid

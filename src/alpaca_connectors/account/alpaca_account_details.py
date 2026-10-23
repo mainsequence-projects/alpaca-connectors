@@ -5,6 +5,9 @@ row (PK+FK on ``account_uid``) holding everything the generic ms-markets ``Accou
 
 - static metadata (status, margin multiplier, PDT flag, shorting/blocks, options levels, account
   configuration) + the api-key fingerprint;
+- the account's Alpaca API key and secret key, encrypted in the application process under the
+  ``ALPACA_CONNECTORS_DATA_KEY`` Secret (MetaTables ADR 0025, ADR 0017): the API, the Admin, raw
+  SQL and the database only ever see envelopes;
 - the **current** Alpaca account financials (cash, equity, buying-power family, margin, SMA, fees,
   daytrade count), refreshed on each register;
 - the full raw account JSON (`raw_account_payload`).
@@ -37,7 +40,8 @@ from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.types import Uuid
 
 from alpaca_connectors.metatables import AlpacaMarketsMetaTableMixin, ProjectStorageNameMixin
-from alpaca_connectors.settings import PROJECT_NAMESPACE_SLUG
+from alpaca_connectors.settings import CREDENTIAL_SECRET_NAME, PROJECT_NAMESPACE_SLUG
+from metatables import EncryptedString
 
 # Money precision. Alpaca returns money as strings to preserve precision; store as Numeric.
 _MONEY = Numeric(38, 12)
@@ -155,8 +159,9 @@ class AlpacaAccountDetails(ProjectStorageNameMixin, AlpacaMarketsMetaTableMixin,
         "One row per Alpaca brokerage account registered in Main Sequence. Current status, "
         "trading permissions, account configuration and balances (cash, equity, buying power, "
         "margin and fees) of Alpaca paper and live trading accounts, read from the Alpaca "
-        "trading API when the account is registered or refreshed; API key values are never "
-        "stored."
+        "trading API when the account is registered or refreshed. The account's API key and "
+        "secret key are stored encrypted by the application and cannot be read, filtered or "
+        "compared through the API or SQL."
     )
     __metatable_labels__ = ["brokerage", "accounts", "balances", "alpaca"]
     __metatable_extra_hash_components__: ClassVar[dict[str, str]] = {
@@ -207,38 +212,68 @@ class AlpacaAccountDetails(ProjectStorageNameMixin, AlpacaMarketsMetaTableMixin,
             ),
         },
     )
-    api_key_secret_name: Mapped[str] = mapped_column(
-        String(255),
-        nullable=False,
+    # The keys themselves, sealed in this process under the application's keyring (ADR 0017).
+    # Null only on a registration written before revision 0018 that the credential migration Job
+    # has not copied yet; such a registration cannot build an Alpaca client.
+    api_key: Mapped[str | None] = mapped_column(
+        EncryptedString(secret=CREDENTIAL_SECRET_NAME),
+        nullable=True,
         info={
-            "label": "API key secret name",
+            "label": "API key",
             "description": (
-                "Name of the Main Sequence Secret that holds the Alpaca API key ID; the key value "
-                "itself is never stored here."
+                "Alpaca API key ID, encrypted by the application under the "
+                f"{CREDENTIAL_SECRET_NAME} Secret; readable only by a process granted that "
+                "Secret, never through the API or SQL. Null until the credential migration has "
+                "copied a registration made before revision 0018."
             ),
         },
     )
-    secret_key_secret_name: Mapped[str] = mapped_column(
-        String(255),
-        nullable=False,
+    secret_key: Mapped[str | None] = mapped_column(
+        EncryptedString(secret=CREDENTIAL_SECRET_NAME),
+        nullable=True,
         info={
-            "label": "Secret key secret name",
+            "label": "Secret key",
             "description": (
-                "Name of the Main Sequence Secret that holds the Alpaca secret key; the key value "
-                "itself is never stored here."
+                "Alpaca secret key, encrypted by the application under the "
+                f"{CREDENTIAL_SECRET_NAME} Secret; readable only by a process granted that "
+                "Secret, never through the API or SQL. Null until the credential migration has "
+                "copied a registration made before revision 0018."
             ),
         },
     )
-    # Credentials resolve by Secret UID (ADR 0011). Nullable only until the reviewed one-time
-    # backfill of registrations that predate UID storage has run.
+    # Transition columns (ADR 0011, superseded by ADR 0017): the Main Sequence Secrets a
+    # registration resolved before its keys were stored here. Null once the credential migration
+    # Job has copied and, for managed Secrets, deleted them; a later revision drops the columns.
+    api_key_secret_name: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+        info={
+            "label": "Legacy API key secret name",
+            "description": (
+                "Name of the Main Sequence Secret that held the Alpaca API key ID before the keys "
+                "were stored encrypted on this row; null once migrated."
+            ),
+        },
+    )
+    secret_key_secret_name: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+        info={
+            "label": "Legacy secret key secret name",
+            "description": (
+                "Name of the Main Sequence Secret that held the Alpaca secret key before the keys "
+                "were stored encrypted on this row; null once migrated."
+            ),
+        },
+    )
     api_key_secret_uid: Mapped[str | None] = mapped_column(
         String(64),
         nullable=True,
         info={
-            "label": "API key secret UID",
+            "label": "Legacy API key secret UID",
             "description": (
-                "UID of the Main Sequence Secret that holds the Alpaca API key ID; null for a "
-                "registration made before Secret UIDs were stored and not yet backfilled."
+                "UID of the Main Sequence Secret that held the Alpaca API key ID before the keys "
+                "were stored encrypted on this row; null once migrated."
             ),
         },
     )
@@ -246,10 +281,10 @@ class AlpacaAccountDetails(ProjectStorageNameMixin, AlpacaMarketsMetaTableMixin,
         String(64),
         nullable=True,
         info={
-            "label": "Secret key secret UID",
+            "label": "Legacy secret key secret UID",
             "description": (
-                "UID of the Main Sequence Secret that holds the Alpaca secret key; null for a "
-                "registration made before Secret UIDs were stored and not yet backfilled."
+                "UID of the Main Sequence Secret that held the Alpaca secret key before the keys "
+                "were stored encrypted on this row; null once migrated."
             ),
         },
     )
@@ -261,8 +296,10 @@ class AlpacaAccountDetails(ProjectStorageNameMixin, AlpacaMarketsMetaTableMixin,
         info={
             "label": "Credential source",
             "description": (
-                "managed when this application created and owns both Secrets from keys a person "
-                "entered, or external when existing Secrets were selected by name."
+                "managed when a person entered the keys through the API or the site; imported "
+                "when they were copied once from Main Sequence Secrets selected by name; external "
+                "on a registration made before revision 0018 whose keys the credential migration "
+                "has not copied yet."
             ),
         },
     )
@@ -272,8 +309,7 @@ class AlpacaAccountDetails(ProjectStorageNameMixin, AlpacaMarketsMetaTableMixin,
         info={
             "label": "Credentials updated at",
             "description": (
-                "Time, in UTC, the Secret references or the managed key values last changed; "
-                "null when no change was recorded."
+                "Time, in UTC, the stored keys last changed; null when no change was recorded."
             ),
         },
     )

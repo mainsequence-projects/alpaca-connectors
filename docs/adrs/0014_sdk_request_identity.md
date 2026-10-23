@@ -2,6 +2,10 @@
 
 ## Status
 
+Amended by [ADR 0017](0017_encrypted_account_credentials.md) on 2026-10-24: the API no longer
+writes Secrets; the platform calls it makes as its runtime principal now include the encrypted
+key writes to MetaTables. Everything else below is unchanged.
+
 Accepted on 2026-10-05. Jose approved this request-identity round for every workbench API; the
 same change was made in mexicofundcompetition (`8567f17`), mainsequenceworkspacesapi, the CRM API,
 valmer-connectors and sentinel. It amends how

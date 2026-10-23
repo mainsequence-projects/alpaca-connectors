@@ -50,7 +50,7 @@ def _started(request: AccountKeyRequest) -> dict[str, Any]:
         "instructions": (
             f"Ask the person to open {where}, go to Accounts, and enter the Alpaca {environment} "
             f"API key and secret key for the pending request to {task}. The site sends the keys "
-            "only to the API, which stores them as Main Sequence Secrets. Never ask for or accept "
+            "only to the API, which stores them encrypted on the account. Never ask for or accept "
             "the keys in this conversation. Check progress with the status operation; the "
             f"request expires at {request.expires_at.isoformat()}."
         ),

@@ -3,10 +3,14 @@ name: alpaca-connectors-market-data
 resources:
 - key: alpaca-bars-update
   kind: job
+  # Opens the configuration account's stored keys to call Alpaca (ADR 0017).
   access:
     branches:
     - repository: MetaTables
       policy: reader
+    secrets:
+    - name: ALPACA_CONNECTORS_DATA_KEY
+      policy: value_reader
   spec:
     name: Alpaca Bars Update
     description: Execute one enabled stored Alpaca bar configuration selected by a per-run configuration_uid argument.

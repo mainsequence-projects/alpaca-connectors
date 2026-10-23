@@ -17,6 +17,9 @@ resources:
   # Hunch release: each declares `user` on this release from its own workflow
   # (`access.branches: [{repository: <this repository>, policy: user}]`); nothing is declared here
   # for a caller, and whose Account a caller may trade is that application's decision.
+  # Reading the ALPACA_CONNECTORS_DATA_KEY Secret lets the API seal and open the account keys it
+  # stores in the encrypted columns of the account table (ADR 0017); the Secret holds a keyring
+  # created with `metatables encryption new-keyring`, never a key value.
   access:
     branch: editor
     branches:
@@ -33,6 +36,9 @@ resources:
       policy: viewer
     - key: alpaca-etf-portfolio-dispatcher
       policy: viewer
+    secrets:
+    - name: ALPACA_CONNECTORS_DATA_KEY
+      policy: value_reader
   spec:
     source_path: api/app/main.py
     automatic_deployment: true
@@ -119,10 +125,15 @@ resources:
 # that gap.
 - key: alpaca-etf-signal
   kind: job
+  # Registers universe constituents through the configuration's account, so it opens that
+  # account's stored keys (ADR 0017).
   access:
     branches:
     - repository: MetaTables
       policy: reader
+    secrets:
+    - name: ALPACA_CONNECTORS_DATA_KEY
+      policy: value_reader
   spec:
     name: Alpaca ETF Signal
     description: Run one ETF signal configuration (--configuration-uid).
@@ -208,6 +219,31 @@ resources:
         expression: '0 2 * * *'
         timezone: UTC
     scheduled_command_args: ['--scheduled']
+    automatic_redeployment:
+      enabled: true
+      tag_regex: null
+# One-off: after revision 0018, copies every registration's keys from the Main Sequence Secrets it
+# referenced into the encrypted account columns and deletes the Secrets this application created
+# (ADR 0017). No step references it and it has no schedule; an operator runs it once per
+# Environment with `--execute` after a dry run. It is removed with the revision that drops the
+# legacy Secret columns.
+- key: alpaca-credential-migration
+  kind: job
+  access:
+    branches:
+    - repository: MetaTables
+      policy: reader
+    secrets:
+    - name: ALPACA_CONNECTORS_DATA_KEY
+      policy: value_reader
+  spec:
+    name: Alpaca Credential Migration
+    description: One-off copy of registered Alpaca account keys from Main Sequence Secrets into the encrypted account columns (--execute writes).
+    execution_path: src/jobs/migrate_account_credentials.py
+    cpu_request: '0.25'
+    memory_request: '0.5'
+    max_runtime_seconds: 1800
+    spot: false
     automatic_redeployment:
       enabled: true
       tag_regex: null

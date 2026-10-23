@@ -9,9 +9,14 @@ from msm.api.http import api_error
 from msm.api.http import api_http_error as markets_api_http_error
 from msm.api.http import not_found as not_found
 
-from alpaca_connectors.account.credentials import AlpacaCredentialsRejectedError
+from alpaca_connectors.account.credentials import (
+    AccountCredentialsMissingError,
+    AlpacaCredentialsRejectedError,
+    StoredCredentialError,
+)
 from alpaca_connectors.execution.orders import PreTradeCheckError
 from alpaca_connectors.platform_secrets import PlatformSecretAccessError
+from metatables import EncryptionError
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +32,20 @@ def api_http_error(exc: Exception) -> HTTPException:
             code="secret_resolution_failed",
             message=str(exc),
             retryable=True,
+        )
+    if isinstance(exc, EncryptionError):
+        # The message names the key Secret and the failure kind; never a value or key material.
+        return api_error(
+            status_code=503,
+            code="credential_key_unavailable",
+            message=str(exc),
+            retryable=True,
+        )
+    if isinstance(exc, (AccountCredentialsMissingError, StoredCredentialError)):
+        return api_error(
+            status_code=409,
+            code="account_credentials_missing",
+            message=str(exc),
         )
     if isinstance(exc, AlpacaCredentialsRejectedError):
         return api_error(
