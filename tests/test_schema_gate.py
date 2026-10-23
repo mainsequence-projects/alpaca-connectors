@@ -210,9 +210,9 @@ def test_api_deploys_only_after_the_migration_job_in_one_workflow() -> None:
     api = resources["alpaca"]
     job = resources["alpaca-connectors-migrate"]
 
-    # The API's key is the Agent's MCP tool prefix (ADR 0015); 2.3.0 kinds only.
+    # The API's key is the Agent's MCP tool prefix (ADR 0015); 3.0.0 kinds only.
     assert workflow["name"] == "alpaca-connectors-api"
-    assert workflow["api_version"] == "2.3.0"
+    assert workflow["api_version"] == "3.0.0"
     assert api["kind"] == "fastapi"
     assert api["spec"]["mcp_enabled"] is True
     assert (root / api["spec"]["source_path"]).is_file()
@@ -270,10 +270,10 @@ def test_every_resource_that_uses_metatables_declares_its_branch() -> None:
     declared: dict[str, bool] = {}
     for path in sorted((root / ".mainsequence/workflows").glob("*.yaml")):
         workflow = yaml.safe_load(path.read_text())
-        assert workflow["api_version"] == "2.3.0", path.name
+        assert workflow["api_version"] == "3.0.0", path.name
         for resource in workflow["resources"]:
             branches = (resource.get("access") or {}).get("branches") or []
-            declared[resource["key"]] = {"repository": "MetaTables", "level": "view"} in branches
+            declared[resource["key"]] = {"repository": "MetaTables", "policy": "reader"} in branches
 
     # The Agent's tools run in the API, so it reads no tables and needs no MetaTables access.
     assert declared.pop("alpaca-connectors-agent") is False

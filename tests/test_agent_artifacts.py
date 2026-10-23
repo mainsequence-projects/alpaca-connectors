@@ -95,7 +95,7 @@ class AgentArtifactsTests(unittest.TestCase):
     def test_agent_workflow_declares_a_harness_agent_that_acts_for_its_requester(self) -> None:
         workflow = yaml.safe_load(WORKFLOW_PATH.read_text(encoding="utf-8"))
 
-        self.assertEqual(workflow["api_version"], "2.3.0")
+        self.assertEqual(workflow["api_version"], "3.0.0")
         resources = {resource["key"]: resource for resource in workflow["resources"]}
         agents = [item for item in resources.values() if item["kind"] == "harness_agent"]
         self.assertEqual(len(agents), 1)
@@ -119,7 +119,15 @@ class AgentArtifactsTests(unittest.TestCase):
         self.assertEqual(
             specification["automatic_redeployment"], {"enabled": True, "tag_regex": None}
         )
-        for retired in ("command_center_icon", "cpu_limit", "memory_limit"):
+        icon = specification["command_center_icon"]
+        self.assertEqual(icon["rendering"], "color")
+        self.assertTrue((REPO_ROOT / icon["path"]).is_file())
+        animations = specification["command_center_animations"]
+        self.assertEqual(set(animations["poses"]), {"thinking", "working", "error"})
+        for pose in animations["poses"].values():
+            self.assertTrue((REPO_ROOT / pose["path"]).is_file())
+        self.assertEqual(animations["tools"], [{"application": "alpaca", "pose": "working"}])
+        for retired in ("cpu_limit", "memory_limit"):
             self.assertNotIn(retired, specification)
 
     def test_the_api_and_the_agent_declare_view_access_to_each_other(self) -> None:
@@ -131,14 +139,14 @@ class AgentArtifactsTests(unittest.TestCase):
         self.assertEqual(
             resources["alpaca"]["access"],
             {
-                "branch": "edit",
-                "branches": [{"repository": "MetaTables", "level": "view"}],
-                "resources": [{"key": "alpaca-connectors-agent", "level": "view"}],
+                "branch": "editor",
+                "branches": [{"repository": "MetaTables", "policy": "reader"}],
+                "resources": [{"key": "alpaca-connectors-agent", "policy": "viewer"}],
             },
         )
         self.assertEqual(
             resources["alpaca-connectors-agent"]["access"],
-            {"resources": [{"key": "alpaca", "level": "view"}]},
+            {"resources": [{"key": "alpaca", "policy": "viewer"}]},
         )
 
     def test_agent_workflow_disables_generic_tool_sources(self) -> None:

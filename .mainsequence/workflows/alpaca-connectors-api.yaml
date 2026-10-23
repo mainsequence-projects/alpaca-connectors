@@ -1,4 +1,4 @@
-api_version: 2.3.0
+api_version: 3.0.0
 name: alpaca-connectors-api
 resources:
 # The key is also the Agent's MCP tool prefix (`alpaca__list_tools`, `alpaca__call_tool`), so it
@@ -9,13 +9,13 @@ resources:
   # read through the MetaTables API on the MetaTables repository's branch. Viewing the Agent lets
   # the project configuration find it at request time and return it to the site.
   access:
-    branch: edit
+    branch: editor
     branches:
     - repository: MetaTables
-      level: view
+      policy: reader
     resources:
     - key: alpaca-connectors-agent
-      level: view
+      policy: viewer
   spec:
     source_path: api/app/main.py
     automatic_deployment: true
@@ -42,9 +42,21 @@ resources:
   access:
     resources:
     - key: alpaca
-      level: view
+      policy: viewer
   spec:
     source_path: api/agent/main.py
+    command_center_icon:
+      path: assets/agents/sequence/assets/alpaca/neutral/idle.png
+      rendering: color
+      image_rendering: auto
+    command_center_animations:
+      poses:
+        thinking: {path: assets/agents/sequence/assets/alpaca/neutral/thinking.png}
+        working: {path: assets/agents/sequence/assets/alpaca/neutral/working.png}
+        error: {path: assets/agents/sequence/assets/alpaca/neutral/error.png}
+      tools:
+        - application: alpaca
+          pose: working
     llm_provider: openai-codex
     llm_model: gpt-5.6-luna
     llm_thinking: medium
@@ -68,7 +80,7 @@ resources:
   access:
     branches:
     - repository: MetaTables
-      level: view
+      policy: reader
   spec:
     name: Alpaca Connectors Migrations
     description: Apply the alpaca_connectors MetaTable schema revisions before the API rolls out (ADR 0012).
@@ -90,7 +102,7 @@ resources:
   access:
     branches:
     - repository: MetaTables
-      level: view
+      policy: reader
   spec:
     name: Alpaca ETF Signal
     description: Run one ETF signal configuration (--configuration-uid) or start a run per scheduled one (--scheduled).
@@ -113,7 +125,7 @@ resources:
   access:
     branches:
     - repository: MetaTables
-      level: view
+      policy: reader
   spec:
     name: Alpaca ETF Portfolio
     description: Run one ETF portfolio configuration (--configuration-uid) or start a run per scheduled one (--scheduled).
