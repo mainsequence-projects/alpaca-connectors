@@ -333,7 +333,7 @@ the launcher's own CORS does in a deployment. Preflights therefore need no calle
 origin can read a 401.
 
 Call a local API with the session of `mainsequence login`, giving the API and the CLI the same
-development backend (for example `MAINSEQUENCE_ENDPOINT=http://127.0.0.1:8000`, the value the
+development backend (for example `MAINSEQUENCE_ENDPOINT=http://local-backend:8000`, the value the
 repository `.env` holds):
 
 ```bash
