@@ -255,8 +255,9 @@ the Agent then calls the platform with the ordinary permissions of the person wh
 serves, for at most 24 hours after that request. The retired `code_repository_coding_agent` kind
 and its `cpu_limit` and `memory_limit` fields are rejected by the platform. The `harness_agent`
 declares its Command Center icon and poses (`command_center_icon`, `command_center_animations`)
-from `assets/agents/packer/`; the platform refuses an icon file over 128 x 128 px or 64 KiB and
-then keeps its default robot without failing the deployment.
+from the animated loops in `assets/agents/sequence/assets/alpaca/neutral/`, whose source and
+rebuild steps are in `assets/agents/sequence/README.md`; the platform refuses an icon file over
+128 x 128 px or 64 KiB and then keeps its default robot without failing the deployment.
 
 The explicit execution chain builds the API's image, runs this project's migration Job from it,
 and then deploys the API. The Harness is part of the same chain: `agent_image` builds its image and
