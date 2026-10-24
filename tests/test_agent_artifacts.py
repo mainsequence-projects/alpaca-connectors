@@ -179,6 +179,14 @@ class AgentArtifactsTests(unittest.TestCase):
         self.assertEqual(
             specification["automatic_redeployment"], {"enabled": True, "tag_regex": None}
         )
+        icon = specification["command_center_icon"]
+        self.assertEqual(icon["rendering"], "color")
+        self.assertTrue((REPO_ROOT / icon["path"]).is_file())
+        animations = specification["command_center_animations"]
+        self.assertEqual(set(animations["poses"]), {"thinking", "working", "error"})
+        for pose in animations["poses"].values():
+            self.assertTrue((REPO_ROOT / pose["path"]).is_file())
+        self.assertEqual(animations["tools"], [{"application": "alpaca", "pose": "working"}])
         for retired in ("cpu_limit", "memory_limit"):
             self.assertNotIn(retired, specification)
 
@@ -192,8 +200,6 @@ class AgentArtifactsTests(unittest.TestCase):
         paths = [specification["command_center_icon"]["path"]] + [
             pose["path"] for pose in animations["poses"].values()
         ]
-        self.assertEqual(set(animations["poses"]), {"thinking", "working", "trading", "error"})
-        self.assertEqual(animations["tools"], [{"application": "alpaca", "pose": "trading"}])
         for path in paths:
             with self.subTest(icon=path):
                 payload = (REPO_ROOT / path).read_bytes()

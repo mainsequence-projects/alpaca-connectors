@@ -1,0 +1,16 @@
+[
+  {
+    "key": "alpaca",
+    "name": "Alpaca Agent",
+    "action": "Market data flowing",
+    "detail": "Holdings \u00b7 allocation \u00b7 market data",
+    "sha256": "085fccf605d867e487a618d4cf9ecdd16cd2674b74b693b66a59f1e60dad3113",
+    "short": "Alpaca",
+    "file": "source-assets/alpaca.svg",
+    "box": "0 0 310 310",
+    "source": {
+      "url": "https://alpaca.markets/newsroom",
+      "asset": "01-primary-alpaca-logo.svg"
+    }
+  }
+]
