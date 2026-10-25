@@ -1,8 +1,9 @@
 """The Alpaca Agent runs on its own `.tau/SYSTEM.md`, not on Tau's packaged general prompt.
 
-Tau replaces its packaged prompt with a project's `.tau/SYSTEM.md` and still adds the project's
-AGENTS.md as context, so the runtime role and guardrails live in that file and AGENTS.md stays a
-short developer file. This uses Tau's own resource discovery and prompt builder.
+Tau replaces its packaged prompt with a project's `.tau/SYSTEM.md`, so the runtime role and
+guardrails live in that file. The deployed Agent reads only `.tau/` (ms-tau-sdk ADR 0025) and gets
+no project context file; `test_agent_resource_scope.py` pins that on a session the SDK builds.
+This uses the SDK's resource paths with Tau's own resource discovery and prompt builder.
 """
 
 from __future__ import annotations
@@ -10,7 +11,6 @@ from __future__ import annotations
 from pathlib import Path
 
 from ms_tau_sdk.resources.loader import resource_root, tau_resource_paths
-from tau_coding.context import discover_project_context
 from tau_coding.resources import discover_system_prompt_resources
 from tau_coding.system_prompt import BuildSystemPromptOptions, build_system_prompt
 
@@ -26,20 +26,11 @@ def test_the_runtime_replaces_the_packaged_prompt_with_the_alpaca_prompt(tmp_pat
     )
     assert packaged.custom_prompt_path == resource_root() / "SYSTEM.md"
 
-    paths = tau_resource_paths(REPO_ROOT, state_home=tmp_path)
-    resources = discover_system_prompt_resources(paths)
+    resources = discover_system_prompt_resources(tau_resource_paths(REPO_ROOT, state_home=tmp_path))
     assert resources.custom_prompt_path == SYSTEM_PROMPT_PATH
-    # AGENTS.md is the only project context; no .tau/AGENTS.md or .agents/AGENTS.md adds more.
-    context_files = discover_project_context(paths)
-    assert [Path(item.path) for item in context_files] == [REPO_ROOT / "AGENTS.md"]
-
+    # No context file: the SDK keeps the root AGENTS.md out (test_agent_resource_scope.py).
     prompt = build_system_prompt(
-        BuildSystemPromptOptions(
-            cwd=REPO_ROOT,
-            tools=(),
-            custom_prompt=resources.custom_prompt,
-            context_files=context_files,
-        )
+        BuildSystemPromptOptions(cwd=REPO_ROOT, tools=(), custom_prompt=resources.custom_prompt)
     )
     flat = " ".join(prompt.split())
     assert "You are Alpaca Agent" in flat

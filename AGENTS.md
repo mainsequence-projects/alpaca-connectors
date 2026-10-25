@@ -50,12 +50,13 @@ FastAPI surface:
 
 Project-to-agent boundary:
 
-- One Harness Agent: `.agents/agent_card.json`, six skills under `.agents/skills/mcp_tools/`, and
-  the tools `alpaca_connectors.api.app.mcp_server` serves from `alpaca_connectors.agent_tools`.
-  Add no separate `agents/` runtime and no `.tau/extensions` tools.
-- The API publishes only `.agents/skills/mcp_tools/` through `skills_extension`: one copy per
-  skill, named after its frontmatter, with no custom loader or shim. Never publish the whole
-  `.agents/skills/` tree, copy skills into `.tau/skills`, or expose SDK or platform skills.
+- One Harness Agent: `.agents/agent_card.json`, six skills under `.tau/skills/`, and the tools
+  `alpaca_connectors.api.app.mcp_server` serves from `alpaca_connectors.agent_tools`. Add no
+  separate `agents/` runtime and no `.tau/extensions` tools.
+- The API publishes `.tau/skills/` itself through `skills_extension`, so the Agent's skills and
+  the published skills are one set: one copy per skill directly under it (no group folder, so the
+  URIs stay `skill://<name>/SKILL.md`), named after its frontmatter, with no custom loader or
+  shim. Keep only these six there; development, SDK and platform skills stay in `.agents/skills/`.
 - The `harness_agent` in `alpaca-connectors-api.yaml` serves `api/agent/main.py`
   (`ms_tau_sdk.create_app()`) with `acts_for_requester: true` and
   `mcp_applications: [{resource: alpaca}]`. It deploys after the API, the two hold `user` on
@@ -76,6 +77,5 @@ and [Agent](docs/agent.md). Main Sequence SDK guidance: `.agents/skills/mainsequ
 
 ## The Alpaca Agent
 
-This repository also deploys the Alpaca Agent. Its runtime instructions are `.tau/SYSTEM.md`; this
-file is for developers. Tau loads this file into the Agent's context too, so keep it short and
-never put runtime-only instructions here.
+This repository also deploys the Alpaca Agent. Its runtime instructions are `.tau/SYSTEM.md`; the
+deployed Agent reads only `.tau/` (ms-tau-sdk ADR 0025), and this file is for developers only.

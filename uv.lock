@@ -59,7 +59,7 @@ requires-dist = [
     { name = "mkdocs", specifier = ">=1.6.1" },
     { name = "mkdocs-material", specifier = ">=9.7.6" },
     { name = "ms-markets", specifier = ">=3.0.0,<4" },
-    { name = "ms-tau-sdk", specifier = ">=2.0.23,<3" },
+    { name = "ms-tau-sdk", specifier = ">=2.0.26,<3" },
     { name = "playwright" },
     { name = "uvicorn", specifier = ">=0.52.4,<0.53" },
 ]
@@ -1122,10 +1122,11 @@ wheels = [
 
 [[package]]
 name = "ms-tau-sdk"
-version = "2.0.23"
+version = "2.0.26"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
+    { name = "certifi" },
     { name = "concurrent-log-handler" },
     { name = "cryptography" },
     { name = "fastapi" },
@@ -1140,9 +1141,9 @@ dependencies = [
     { name = "tau-ai" },
     { name = "uvicorn", extra = ["standard"] },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/4f/00/2974af76f990906a74398bbbc6f326e6f48e73b6037e37266f4d9fe65778/ms_tau_sdk-2.0.23.tar.gz", hash = "sha256:20abb31299fb8755b6b5a35eb9b42ec18ffabcfec263810d0a0e142e4fb3ef0f", size = 331074, upload-time = "2026-10-21T13:11:03.084Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/a2/16/8bcc757ddeb45977ea4498d279b43869075173943686612243914a18f2e1/ms_tau_sdk-2.0.26.tar.gz", hash = "sha256:537039b2c41568753904ab6113c11ed58894ca9bc434fa3c7f96cd6fb072ae4c", size = 342731, upload-time = "2026-10-24T22:18:46.013Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/25/80/74dbc0ee28d1fe224b750b103c6b7929a0c69385bb2f9b9fa8f209fb80d5/ms_tau_sdk-2.0.23-py3-none-any.whl", hash = "sha256:0812686b11bac0d764f71ba0c92eb391f0b75bf227de950151995ac86bdd97cf", size = 352179, upload-time = "2026-10-21T13:11:01.736Z" },
+    { url = "https://files.pythonhosted.org/packages/a3/a2/cbf9adb2dcfa8f203a9abcfbc5d8d95bab64882582d96722fea50531e199/ms_tau_sdk-2.0.26-py3-none-any.whl", hash = "sha256:b59edc040d7a456357e1fbc94037aac6d7035ed768603b89670392a24e7476e3", size = 364769, upload-time = "2026-10-24T22:18:44.27Z" },
 ]
 
 [[package]]

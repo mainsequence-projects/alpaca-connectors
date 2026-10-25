@@ -24,7 +24,7 @@ dependencies = [
     "etfhextractor",
     "empyrical-reloaded>=0.5.12",
     # Runtime of the `harness_agent` (api/agent/main.py); the platform runs it from this image.
-    "ms-tau-sdk>=2.0.23,<3",
+    "ms-tau-sdk>=2.0.26,<3",
 ]
 
 [project.scripts]

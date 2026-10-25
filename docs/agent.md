@@ -39,12 +39,13 @@ The source card advertises completed A2A messages; a returned JobRun UID is not 
 
 - `.tau/SYSTEM.md` is the Agent's runtime prompt: its role, its Alpaca tools and skills, identity
   and key-entry rules, confirmations, uncertain writes and refusals.
-- `AGENTS.md` holds the short developer rules and the project boundary. TAU adds it to every
-  session too, so the CLI and operational rules live in the
+- `AGENTS.md` holds the short developer rules and the project boundary. It is for developers:
+  the deployed Agent reads only `.tau/`. The CLI and operational rules live in the
   [operator guide](operations/operator-guide.md).
 - `.agents/agent_card.json` contains stable source metadata and six repository-owned skills.
-- `.agents/skills/mcp_tools/` holds the six MCP-usage skills, with one authoritative copy each.
-  The sibling SDK/platform skill bundles remain private development guidance.
+- `.tau/skills/` holds the six MCP-usage skills directly under it, with one authoritative copy
+  each: the Agent's own skills and the skills the API publishes. The SDK/platform skill bundles
+  under `.agents/skills/` remain private development guidance that the Agent does not read.
 - `api/agent/main.py` is the Agent's entry point: the Tau runtime from `ms_tau_sdk.create_app()`.
 - `src/alpaca_connectors/api/app/mcp_server.py` serves the structured project tools from
   `alpaca_connectors.agent_tools` at the API's `/mcp`.
@@ -60,15 +61,18 @@ security declarations, and protocol versions are intentionally absent from the r
 card; it declares its supported response kind and business skills.
 
 `.tau/SYSTEM.md` replaces TAU's packaged general-purpose prompt with the Alpaca Agent's runtime
-instructions, and TAU still adds `AGENTS.md` to every session as project context. There is no
-in-process extension tool directory, and no `.tau/AGENTS.md` or `.agents/AGENTS.md`. The business skills now
-live under `.agents/skills/mcp_tools/<skill-name>/SKILL.md`, and the Agent Card points to those
-same files. TAU 2.0.14 discovers and reads them through the application's authenticated MCP:
-`alpaca__list_resources` lists the six skills, and `alpaca__read_resource` reads a listed file
-after verifying its size and SHA-256 digest. Published skills remain application-owned; they
-do not become local TAU skills. The local loader still scans immediate skill folders, but that is
-not the consumption path for this Harness. No custom loader, symlink, duplicate tree or generic-
-tool fallback is needed.
+instructions. Since TAU 2.0.26
+([ADR 0025](https://github.com/mainsequence-sdk/ms-tau-sdk/blob/v2.0.26/docs/adrs/0025-runtime-resources-only-from-tau.md))
+the deployed Agent reads its resources only from `.tau/`: the root `AGENTS.md` and
+`.agents/skills/` no longer reach it, and the workflow does not admit those development
+resources. There is no in-process extension tool directory and no `.tau/AGENTS.md`, so the Agent
+has no project context file. The business skills live under
+`.tau/skills/<skill-name>/SKILL.md`, and the Agent Card points to those same files. TAU 2.0.14
+discovers and reads them through the application's authenticated MCP: `alpaca__list_resources`
+lists the six skills, and `alpaca__read_resource` reads a listed file after verifying its size and
+SHA-256 digest. The same six are the Agent's local TAU skills, but the MCP is the consumption path
+`.tau/SYSTEM.md` names. No custom loader, symlink, duplicate tree or generic-tool fallback is
+needed.
 
 ## Tool Surface
 
@@ -155,10 +159,10 @@ The model-facing catalog retains:
 - `alpaca__list_resources` and `alpaca__read_resource`, reaching only the skills/resources that
   same application advertises and verifying listed skill-file digests before returning content;
 - a restricted `read` that can open discovered skill files and their supporting files, not
-  arbitrary repository files or paths outside those skills. Since TAU 2.0.21 the runtime discovers
-  every `SKILL.md` under `.agents/skills/` at any depth, so that index, which the prompt also
-  lists, covers the six business skills and the copied Main Sequence, platform, MetaTables,
-  ms-markets and TAU development bundles;
+  arbitrary repository files or paths outside those skills. Since TAU 2.0.26 the runtime discovers
+  skills only under `.tau/skills/`, so that index, which the prompt also lists, is the six
+  business skills; the copied Main Sequence, platform, MetaTables, ms-markets and TAU development
+  bundles under `.agents/skills/` are not skills of the Agent and the `read` refuses them;
 - SDK `task_request_input` and `task_request_authorization` controls for the Agent's own A2A
   Task context. These are runtime controls, not general platform operations.
 
@@ -193,9 +197,12 @@ actual tool schemas, query-operation guidance, bounded pagination and the shared
 fractional commission units. CLI examples are removed from these Agent-facing skills.
 
 Main Sequence 9.0.23 supports publishing a selected directory through
-`mainsequence.server.mcp_skills.skills_extension`. The API configures it with the user's chosen
-`.agents/skills/mcp_tools` directory. MCP clients use `skills/list`,
-`skills/get`, and `resources/read`; the SDK owns the manifests and `skill://` resources.
+`mainsequence.server.mcp_skills.skills_extension`. The API configures it with `.tau/skills`, the
+Agent's own skills folder, so the Agent's skills and the published skills are one set. Until
+2026-10-27 it was `.agents/skills/mcp_tools`; the six skills moved directly under `.tau/skills`,
+with no group folder, so their `skill://<name>/SKILL.md` URIs did not change. MCP clients use
+`skills/list`, `skills/get`, and `resources/read`; the SDK owns the manifests and `skill://`
+resources.
 The modern `server/discover` capability advertises `io.modelcontextprotocol/skills`; legacy
 initialization remains supported. Skill requests use the same request-identity protection as
 tools. Local contract tests check all six manifests and exact source bytes/digests, reject private
@@ -203,8 +210,9 @@ SDK/platform resource URIs, require authentication and verify working-directory-
 resolution. This local implementation does not establish that a deployed revision serves it.
 
 The original six folders are moved, not copied. Their new folder names match their lowercase,
-hyphenated frontmatter names. Neither the complete `.agents/skills` tree nor managed Main Sequence,
-MetaTables, ms-markets, TAU or platform development guidance is published.
+hyphenated frontmatter names. Neither the `.agents/skills` tree nor managed Main Sequence,
+MetaTables, ms-markets, TAU or platform development guidance is published: `.tau/skills` holds only
+the six skills, so publishing the whole folder publishes exactly them.
 
 Serving skills is distinct from consuming them. TAU 2.0.14 fixes application skill consumption
 through `alpaca__list_resources` and `alpaca__read_resource`
@@ -215,18 +223,19 @@ with the legacy protocol. These operations use the current call's application ac
 cross-person catalog. Only advertised resources or listed skill files are read.
 
 The earlier grouped-local-discovery issue [TAU #99](https://github.com/mainsequence-sdk/ms-tau-sdk/issues/99)
-is closed. The solution used here is MCP consumption of the single nested directory. Tests now
+is closed. The solution used here is MCP consumption of the single published directory. Tests now
 exercise the real SDK application connector and resource tools over local HTTP: all six files must
 be returned byte-for-byte with verified digests, private/traversal URIs must be refused, and
 altered content must never reach the model. This does not certify a deployed revision or a live
 model conversation.
 
-TAU 2.0.21 added recursive local loading: a folder without a `SKILL.md` groups skills, and the
-managed `.agents/skills/ms_tau_sdk/` skills are read too (its `tau_project_customization` skill).
-The Agent therefore also reads the six business skills and the copied development bundles
-locally, through its restricted `read`. A local-reader test pins that index to the repository's
-`SKILL.md` files and checks that every other file, such as `pyproject.toml`, `AGENTS.md` or
-`.tau/SYSTEM.md`, is still refused.
+TAU 2.0.21 added recursive local loading: a folder without a `SKILL.md` groups skills, and it read
+the managed `.agents/skills/ms_tau_sdk/` skills and the other copied development bundles as the
+Agent's own. TAU 2.0.26 reads skills only from `.tau/skills`, so the Agent's local skills are
+exactly the six business skills. `tests/test_agent_resource_scope.py` loads a session through the
+SDK's `tau_resource_paths` and pins that set, no context file and no root `AGENTS.md` text in the
+prompt. The local-reader test checks that a synced `.agents/skills/ms_tau_sdk/` file and every
+other file, such as `pyproject.toml`, `AGENTS.md` or `.tau/SYSTEM.md`, are refused.
 
 ### Application-tool timeouts
 
@@ -298,7 +307,7 @@ connection before relying on it.
 
 ## Current local compatibility review
 
-The installed and locked versions are Main Sequence **9.0.33**, TAU **2.0.23**, MetaTables
+The installed and locked versions are Main Sequence **9.0.33**, TAU **2.0.26**, MetaTables
 (`mainsequence-metatable`) **0.1.57**, ms-markets **3.0.0** and `etfhextractor` **0.5.0**
 (2026-10-27).
 
@@ -320,15 +329,17 @@ The installed and locked versions are Main Sequence **9.0.33**, TAU **2.0.23**, 
   moved to `>=9.0.31`.
 - `etfhextractor` 0.5.0 pins `ms-markets==3.0.0`, so the two move together. Its calendar helpers
   are imported from `etfhextractor.calendars`.
+- TAU 2.0.26 (ADR 0025) reads the deployed Agent's resources only from `.tau/`, so the six skills
+  moved from `.agents/skills/mcp_tools/` to `.tau/skills/` in the same change.
 
 `pyproject.toml` keeps non-exact compatibility ranges (`mainsequence[mcp]>=9.0.31,<10`,
-`mainsequence-metatable>=0.1.55,<0.2`, `ms-tau-sdk>=2.0.23,<3`, `ms-markets>=3.0.0,<4`), while
+`mainsequence-metatable>=0.1.55,<0.2`, `ms-tau-sdk>=2.0.26,<3`, `ms-markets>=3.0.0,<4`), while
 `uv.lock` and the exported `requirements.txt` record the resolution. On 2026-10-14 Main Sequence
 had moved from 9.0.23 to 9.0.24, which stopped scaffolding `AGENTS.md` and ships its guidance in
 the SDK skills, and MetaTables from 0.1.34 to 0.1.35. The earlier SDK upgrade moved the official
 MCP dependency from **1.30.0** to **2.3.0**, with its required transport dependencies.
 The `etfhextractor` Git source is pinned to release tag `v0.5.0` (commit `5f63fd5`), which requires
-compatible versions. With these versions the suite passes 559 tests plus 93 subtests with network
+compatible versions. With these versions the suite passes 562 tests plus 93 subtests with network
 access blocked (2026-10-27). No Alpaca workload reads or writes its only table, `DemoBarsTS`, so the
 migration Job does not apply its provider.
 
@@ -344,14 +355,15 @@ Verification with Main Sequence 9.0.30, MetaTables 0.1.51 and TAU 2.0.23 passes 
 the strict documentation build and installed dependency checks. The new real HTTP tests verify
 application-MCP skill discovery and digest-checked reads, private/traversal denial, altered-content
 rejection and caller isolation. The old local-index expectation is replaced with this released
-application-skill contract, not a copy or custom loader.
+application-skill contract, not a copy or custom loader. The resource-scope test came with TAU
+2.0.26; the 2026-10-27 count above includes it.
 The MCP catalog contains nine read-only tools and eight mutation/multi-operation tools. This
 local review alone does not certify a deployed Agent or hosted migration completion.
 The MetaTables SDK compatibility check and installed dependency consistency check also passed.
 
 Tool-restriction regressions exercise the installed TAU runtime's catalog assembly with mocked
 backend/model I/O: only the four Alpaca application tools, restricted local reader, and A2A Task
-controls remain. The local reader indexes only the repository's `SKILL.md` files. Local HTTP tests
+controls remain. The local reader indexes only the six `.tau/skills` files. Local HTTP tests
 additionally verify skill consumption through MCP, refusal of private files and digest
 mismatches, and separate caller identities on consecutive calls. Hosted caller tests sign
 identity-only assertions, and an assertion or requester statement that lists `team_uids` is
@@ -360,7 +372,8 @@ refused with 401.
 The requested development skill bundles were explicitly refreshed from the installed packages on
 2026-10-21: Main Sequence 9.0.30, TAU 2.0.23 and MetaTables 0.1.51, and the platform skills from
 the development backend's catalog, which no longer ships `code_repository_design`. The existing
-ms-markets 2.2.10 bundle was left unchanged. Each bundle's `PINNED_FROM.txt` records its matching version. The six
+ms-markets 2.2.10 bundle was left unchanged. The `ms_tau_sdk` bundle was synced again from TAU
+2.0.26 on 2026-10-25. Each bundle's `PINNED_FROM.txt` records its matching version. The six
 repository-owned business skills remain single-copy. On 2026-10-14 `AGENTS.md` lost the retired SDK
 block and was cut to its developer rules, the operator manual moved to the
 [operator guide](operations/operator-guide.md), and `.tau/SYSTEM.md` became the runtime prompt.

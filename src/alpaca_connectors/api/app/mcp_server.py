@@ -10,8 +10,9 @@ the same names and input schemas, validates arguments against them, and runs eac
 worker thread that keeps the call's identity. Results and errors are JSON text; errors never echo
 arguments, so no submitted value reaches a response, a log, or the model.
 
-The SDK's skills extension publishes only ``.agents/skills/mcp_tools``. It owns discovery,
-manifests and file resources; managed SDK/platform skills are not exposed by this application.
+The SDK's skills extension publishes ``.tau/skills``, the Agent's own six skills, so the Agent's
+skills and the published skills are one set (ms-tau-sdk ADR 0025). It owns discovery, manifests
+and file resources; the development skills under ``.agents/skills`` are never published.
 """
 
 from __future__ import annotations
@@ -39,7 +40,7 @@ from mainsequence.server.mcp_skills import skills_extension
 
 MCP_SERVER_NAME = "alpaca"
 MCP_PATH = "/mcp"
-MCP_SKILLS_DIRECTORY = ".agents/skills/mcp_tools"
+MCP_SKILLS_DIRECTORY = ".tau/skills"
 
 
 def json_value(value: Any) -> Any:

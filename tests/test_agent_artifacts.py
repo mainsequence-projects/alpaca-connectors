@@ -15,8 +15,8 @@ from alpaca_connectors.agent_tools import PROJECT_AGENT_TOOLS
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 AGENTS_PATH = REPO_ROOT / "AGENTS.md"
-SKILLS_ROOT = REPO_ROOT / ".agents" / "skills"
-MCP_SKILLS_ROOT = SKILLS_ROOT / "mcp_tools"
+# The Agent's skills, which the API also publishes: the only skills the runtime reads (ADR 0025).
+TAU_SKILLS_ROOT = REPO_ROOT / ".tau" / "skills"
 AGENT_CARD_PATH = REPO_ROOT / ".agents" / "agent_card.json"
 ICON_PATH = REPO_ROOT / ".agents" / "alpaca-command-center-icon.png"
 PYPROJECT_PATH = REPO_ROOT / "pyproject.toml"
@@ -27,21 +27,10 @@ AGENT_ENTRY_PATH = REPO_ROOT / "api" / "agent" / "main.py"
 
 
 def project_skill_paths() -> list[str]:
-    paths: list[str] = []
-    for skill_file in sorted(SKILLS_ROOT.rglob("SKILL.md")):
-        relative = skill_file.relative_to(REPO_ROOT).as_posix()
-        if relative.startswith(
-            (
-                ".agents/skills/mainsequence/",
-                ".agents/skills/mainsequence_platform/",
-                ".agents/skills/metatables/",
-                ".agents/skills/ms_markets/",
-                ".agents/skills/ms_tau_sdk/",
-            )
-        ):
-            continue
-        paths.append(relative)
-    return paths
+    return [
+        skill_file.relative_to(REPO_ROOT).as_posix()
+        for skill_file in sorted(TAU_SKILLS_ROOT.rglob("SKILL.md"))
+    ]
 
 
 class AgentArtifactsTests(unittest.TestCase):
@@ -52,9 +41,9 @@ class AgentArtifactsTests(unittest.TestCase):
         self.assertIn("Project-to-agent boundary:", content)
         self.assertIn("alpaca_connectors.api.app.mcp_server", content)
 
-    def test_agents_md_is_a_short_developer_file_the_agent_also_reads(self) -> None:
-        # TAU adds AGENTS.md to every Agent session, so it holds only developer rules; the runtime
-        # prompt is .tau/SYSTEM.md, and the operator manual lives in docs/.
+    def test_agents_md_is_a_short_developer_file(self) -> None:
+        # The deployed Agent reads only .tau/ (ms-tau-sdk ADR 0025): AGENTS.md holds only developer
+        # rules, the runtime prompt is .tau/SYSTEM.md, and the operator manual lives in docs/.
         content = AGENTS_PATH.read_text(encoding="utf-8")
         # 81: two lines carry the Markets API boundary rule (ms-markets ADR 0047).
         self.assertLess(len(content.splitlines()), 82)
@@ -66,6 +55,7 @@ class AgentArtifactsTests(unittest.TestCase):
         ):
             self.assertNotIn(retired, content)
         self.assertIn("Its runtime instructions are `.tau/SYSTEM.md`", content)
+        self.assertIn("deployed Agent reads only `.tau/` (ms-tau-sdk ADR 0025)", content)
         self.assertTrue((REPO_ROOT / ".tau" / "SYSTEM.md").is_file())
 
         guide = REPO_ROOT / "docs" / "operations" / "operator-guide.md"
@@ -119,18 +109,27 @@ class AgentArtifactsTests(unittest.TestCase):
             self.assertTrue(skill["examples"])
             self.assertTrue((REPO_ROOT / skill["path"]).is_file())
 
-    def test_business_skills_have_one_copy_in_the_selected_mcp_root(self) -> None:
+    def test_business_skills_have_one_copy_in_the_published_tau_skills(self) -> None:
+        from alpaca_connectors.api.app.mcp_server import MCP_SKILLS_DIRECTORY
+
+        # The API publishes the whole folder, so it holds exactly the six skills, each directly
+        # under it (no group folder), which keeps their `skill://<name>/SKILL.md` URIs.
+        self.assertEqual(REPO_ROOT / MCP_SKILLS_DIRECTORY, TAU_SKILLS_ROOT)
+        self.assertEqual(
+            sorted(entry.name for entry in TAU_SKILLS_ROOT.iterdir()),
+            sorted(Path(path).parent.name for path in project_skill_paths()),
+        )
+        self.assertFalse((REPO_ROOT / ".agents" / "skills" / "mcp_tools").exists())
         paths = project_skill_paths()
         self.assertEqual(len(paths), 6)
         for path in paths:
             skill = REPO_ROOT / path
-            self.assertEqual(skill.parent.parent, MCP_SKILLS_ROOT)
+            self.assertEqual(skill.parent.parent, TAU_SKILLS_ROOT)
             self.assertFalse(skill.is_symlink())
             self.assertFalse(skill.parent.is_symlink())
             frontmatter = yaml.safe_load(skill.read_text().split("---", 2)[1])
             self.assertEqual(frontmatter["name"], skill.parent.name)
             self.assertTrue(frontmatter["description"])
-        self.assertFalse((REPO_ROOT / ".tau" / "skills").exists())
 
     def test_skill_call_examples_match_the_actual_tool_schemas(self) -> None:
         catalog = {tool.name: tool.parameters for tool in PROJECT_AGENT_TOOLS}

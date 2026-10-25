@@ -46,6 +46,7 @@ certifi==2026.10.19
     #   mainsequence
     #   mainsequence-metatable
     #   ms-markets
+    #   ms-tau-sdk
     #   requests
 cffi==2.1.1 ; platform_python_implementation != 'PyPy'
     # via cryptography
@@ -230,7 +231,7 @@ ms-markets==3.0.0
     # via
     #   alpaca-connectors
     #   etfhextractor
-ms-tau-sdk==2.0.23
+ms-tau-sdk==2.0.26
     # via alpaca-connectors
 msgpack==1.2.0
     # via alpaca-py

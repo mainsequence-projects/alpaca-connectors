@@ -2,9 +2,10 @@
 
 Rules for people and coding agents who run the `alpaca-connectors` CLI, the API and the
 repository's Jobs against a Main Sequence environment. They moved here from `AGENTS.md` on
-2026-10-14, because TAU loads `AGENTS.md` into every Alpaca Agent session and the Agent cannot use
-a shell or the CLI. The Agent's own runtime instructions are `.tau/SYSTEM.md`; its tools and
-skills are described in [the Agent page](../agent.md).
+2026-10-14, because TAU then loaded `AGENTS.md` into every Alpaca Agent session and the Agent cannot
+use a shell or the CLI; since TAU 2.0.26 the Agent reads only `.tau/`. The Agent's own runtime
+instructions are `.tau/SYSTEM.md`; its tools and skills are described in
+[the Agent page](../agent.md).
 
 ## Supported Operator Surfaces
 

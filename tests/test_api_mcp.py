@@ -16,7 +16,7 @@ from alpaca_connectors.agent_tools import PROJECT_AGENT_TOOL_NAMES, PROJECT_AGEN
 PERSON_UID = "77777777-7777-4777-8777-777777777777"
 MCP_HEADERS = {"Accept": "application/json, text/event-stream", "Content-Type": "application/json"}
 SUBMITTED_SECRET = "SECRET-LOOKING-VALUE-9911"
-SKILLS_ROOT = Path(__file__).resolve().parents[1] / ".agents/skills/mcp_tools"
+SKILLS_ROOT = Path(__file__).resolve().parents[1] / ".tau/skills"
 SKILL_NAMES = {
     "alpaca-account-workflow",
     "alpaca-asset-registration",
@@ -161,7 +161,8 @@ def test_mcp_publishes_only_six_business_skills_with_exact_source_bytes(
         "skill://mainsequence_platform/agents/code_repository_to_agent/SKILL.md",
         "skill://ms_tau_sdk/tau_project_customization/SKILL.md",
         "skill://metatables/metatables-meta-tables/SKILL.md",
-        "skill://alpaca-account-workflow/../../mainsequence/PINNED_FROM.txt",
+        "skill://alpaca-account-workflow/../../../.agents/skills/mainsequence/PINNED_FROM.txt",
+        "skill://alpaca-account-workflow/../../SYSTEM.md",
     ],
 )
 @pytest.mark.parametrize("method", ["skills/get", "resources/read"])

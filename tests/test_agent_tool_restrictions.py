@@ -102,19 +102,19 @@ def test_hosted_catalog_preserves_alpaca_but_excludes_generic_tools(tmp_path: Pa
         mcp.assert_not_awaited()
 
 
-def test_local_reader_serves_only_the_repository_skill_files(tmp_path: Path):
+def test_local_reader_serves_only_the_agents_tau_skill_files(tmp_path: Path):
     skills, diagnostics = load_skills_with_diagnostics(
         tau_resource_paths(REPO_ROOT, state_home=tmp_path)
     )
     assert not diagnostics
-    # Since TAU 2.0.21 the runtime reads `.agents/skills/` at any depth: a folder without a
-    # SKILL.md groups skills (its tau_project_customization skill). The six business skills under
-    # mcp_tools/ and the copied development bundles are therefore local skills too, besides the
-    # application skills the API publishes through its MCP (test_agent_mcp_skills.py covers
-    # their real HTTP discovery and verified reads).
-    skill_files = {path.resolve() for path in (REPO_ROOT / ".agents/skills").rglob("SKILL.md")}
+    # Since ms-tau-sdk 2.0.26 (ADR 0025) the runtime reads skills only from `.tau/skills`: the six
+    # business skills, which the API also publishes through its MCP (test_agent_mcp_skills.py
+    # covers their real HTTP discovery and verified reads). The copied development bundles under
+    # `.agents/skills/` are not the Agent's skills, so the restricted reader refuses them.
+    skill_files = {path.resolve() for path in (REPO_ROOT / ".tau/skills").glob("*/SKILL.md")}
+    assert len(skill_files) == 6
     assert {Path(skill.path).resolve() for skill in skills} == skill_files
-    business = REPO_ROOT / ".agents/skills/mcp_tools/alpaca-account-workflow/SKILL.md"
+    business = REPO_ROOT / ".tau/skills/alpaca-account-workflow/SKILL.md"
     assert business.resolve() in skill_files
     reader = create_skill_read_tool(cwd=REPO_ROOT, skills=lambda: skills)
 
@@ -126,6 +126,7 @@ def test_local_reader_serves_only_the_repository_skill_files(tmp_path: Path):
             REPO_ROOT / ".tau/SYSTEM.md",
             REPO_ROOT / ".agents/agent_card.json",
             REPO_ROOT / ".agents/skills/ms_tau_sdk/PINNED_FROM.txt",
+            REPO_ROOT / ".agents/skills/ms_tau_sdk/tau_project_customization/SKILL.md",
             REPO_ROOT / "src/alpaca_connectors/settings.py",
         ):
             with pytest.raises(ToolInputError, match="outside the available skills"):

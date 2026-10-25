@@ -26,7 +26,7 @@ from ms_tau_sdk.tools.mcp_applications import application_connector, create_mcp_
 from alpaca_connectors.agent_tools import PROJECT_AGENT_TOOL_NAMES
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-SKILLS_ROOT = REPO_ROOT / ".agents/skills/mcp_tools"
+SKILLS_ROOT = REPO_ROOT / ".tau/skills"
 SKILL_URIS = {f"skill://{path.parent.name}/SKILL.md" for path in SKILLS_ROOT.glob("*/SKILL.md")}
 
 
