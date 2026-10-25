@@ -84,7 +84,18 @@ Portfolios owns analytical construction based on registered assets and market da
 - runs on the shared portfolio Job declared in the API workflow, with a per-configuration
   scheduled flag
 
-The repository does not provide order placement or trade execution.
+## Execution
+
+Execution places batches of market orders on a registered account for authorised applications
+([ADR 0016](../adrs/0016_order_execution_for_authorised_applications.md)):
+
+- batches keyed by the caller's `batch_id`, orders by the caller's `client_order_id`
+- market day orders, whole shares or fractions where Alpaca allows them
+- pre-trade checks reported as structured `409` errors
+- the ms-markets execution ledger: `OrderManager`, `OrdersTS`, `TradesTS`
+- a holdings snapshot after fills
+
+It is an API capability. The Alpaca Agent has no tool over it and places no orders.
 
 ## Operations
 
@@ -107,5 +118,6 @@ Use these capability-oriented imports:
 - `alpaca_connectors.market_data`
 - `alpaca_connectors.account`
 - `alpaca_connectors.holdings`
+- `alpaca_connectors.execution`
 - `alpaca_connectors.portfolios`
 - `alpaca_connectors.api.app.capabilities` for the API-only descriptive catalog

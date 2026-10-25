@@ -114,6 +114,23 @@ CAPABILITIES: tuple[Capability, ...] = (
         surfaces=("cli", "api", "python"),
     ),
     Capability(
+        key="execution",
+        name="Execution",
+        purpose=(
+            "Place and track batches of market orders on a registered account for authorised "
+            "applications."
+        ),
+        contents=(
+            "order batches keyed by the caller's batch identifier",
+            "market day orders with client order identifiers",
+            "pre-trade checks",
+            "ms-markets execution ledger (OrderManager, OrdersTS, TradesTS)",
+            "holdings snapshot after fills",
+        ),
+        actions=("preflight", "submit", "sync", "cancel", "list orders"),
+        surfaces=("api",),
+    ),
+    Capability(
         key="portfolios",
         name="Portfolios",
         purpose="Construct analytical portfolios from resolved weights and market data.",
@@ -157,3 +174,14 @@ CAPABILITIES: tuple[Capability, ...] = (
 def capability_summaries() -> list[dict[str, object]]:
     """Return JSON-safe summaries in control-surface navigation order."""
     return [capability.summary() for capability in CAPABILITIES]
+
+
+def capability_features() -> list[dict[str, str]]:
+    """The catalog as feature flags, ``{"id": key, "status": availability}`` per capability.
+
+    A consumer that depends on one capability (the Hunch backend on ``execution``) probes this
+    list instead of parsing the descriptive summaries.
+    """
+    return [
+        {"id": capability.key, "status": capability.availability} for capability in CAPABILITIES
+    ]

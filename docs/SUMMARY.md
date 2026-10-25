@@ -37,6 +37,7 @@
   - [0013 Workflow-Declared Configuration Jobs](adrs/0013_workflow_declared_configuration_jobs.md)
   - [0014 SDK Request Identity](adrs/0014_sdk_request_identity.md)
   - [0015 Agent Tools On The API's MCP, And Alpaca Keys Entered On The Site](adrs/0015_agent_tools_on_the_api_mcp_and_site_key_entry.md)
+  - [0016 Order Execution For Authorised Applications](adrs/0016_order_execution_for_authorised_applications.md)
 - Implementation Records
   - [SDK 8 And ms-markets Migration](implementation_tasks/0001_ms_markets_storage_first_migration.md)
   - [Alpaca Account Storage](implementation_tasks/0002_alpaca_account_module.md)

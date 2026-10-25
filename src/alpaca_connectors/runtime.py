@@ -67,7 +67,8 @@ def account_runtime_models() -> list[type[Any]]:
 
     The base asset/bars graph (registration resolves/registers held assets) plus the ms-markets
     account graph (`AccountGroupTable`, `AccountTable`, `AccountHoldingsSetTable`,
-    `AccountHoldingsStorage`) and the project-owned Alpaca account tables. ``msm.start_engine``
+    `AccountHoldingsStorage`), the project-owned Alpaca account tables and the ms-markets
+    execution ledger (`OrderManagerTable`, `OrdersStorage`, `TradesStorage`). ``msm.start_engine``
     re-orders by FK dependency, so the leaves are enough but the full set is listed for clarity.
 
     Use this only in the ``account`` entrypoint; ``start_engine`` rejects a second *differing*
@@ -78,6 +79,7 @@ def account_runtime_models() -> list[type[Any]]:
     from msm.models.accounts.groups import AccountGroupTable
 
     from alpaca_connectors.account.alpaca_account_details import project_account_models
+    from alpaca_connectors.execution import execution_runtime_models
 
     return [
         *project_runtime_models(),
@@ -86,6 +88,8 @@ def account_runtime_models() -> list[type[Any]]:
         AccountHoldingsSetTable,
         AccountHoldingsStorage,
         *project_account_models(),
+        # Order execution (ADR 0016) writes the ms-markets execution ledger of these accounts.
+        *execution_runtime_models(),
     ]
 
 

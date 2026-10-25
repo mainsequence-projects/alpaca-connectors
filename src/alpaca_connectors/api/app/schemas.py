@@ -37,8 +37,19 @@ class CapabilitySummary(BaseModel):
     availability: Literal["available", "partial"]
 
 
+class CapabilityFeature(BaseModel):
+    """One capability as a feature flag: ``id`` is the capability key."""
+
+    id: str
+    status: Literal["available", "partial"]
+
+
 class CapabilityCatalogResponse(BaseModel):
     capabilities: list[CapabilitySummary]
+    features: list[CapabilityFeature] = Field(
+        default_factory=list,
+        description="The same catalog as feature flags, for callers that probe one capability.",
+    )
 
 
 class ProjectConfigurationResponse(BaseModel):
@@ -355,6 +366,94 @@ class HoldingsCaptureResponse(BaseModel):
     time_index: Any
     holdings_rows: int
     unresolved_symbols: list[str]
+
+
+OrderStatus = Literal[
+    "submitted", "partially_filled", "filled", "cancelled", "rejected", "expired", "failed"
+]
+
+
+class OrderLegRequest(BaseModel):
+    """One market order of a batch (ADR 0016)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    client_order_id: str = Field(
+        min_length=1,
+        max_length=128,
+        description="The caller's idempotency key for this order; unique within the account.",
+    )
+    asset_identifier: str = Field(
+        min_length=1,
+        max_length=255,
+        description="The registered asset's unique identifier, ALPACA::<alpaca asset uuid>.",
+    )
+    symbol: str = Field(min_length=1, max_length=64)
+    side: Literal["buy", "sell"]
+    quantity: float = Field(gt=0, description="Shares; fractional only where Alpaca allows it.")
+    order_type: Literal["market"] = "market"
+    time_in_force: Literal["day"] = "day"
+
+
+class OrderBatchSubmitRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    batch_id: str = Field(
+        min_length=1,
+        max_length=255,
+        description="The caller's batch identifier; the ms-markets OrderManager unique identifier.",
+    )
+    orders: list[OrderLegRequest] = Field(min_length=1, max_length=200)
+    queue_when_closed: bool = Field(
+        default=False,
+        description=(
+            "Place the day orders while the market is closed, queued by Alpaca for the next "
+            "session. Off, a closed market refuses the batch with market_closed."
+        ),
+    )
+
+
+class OrderBatchActionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    batch_id: str = Field(min_length=1, max_length=255)
+
+
+class OrderStateResponse(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    client_order_id: str
+    broker_order_id: str | None = None
+    status: OrderStatus
+    venue_status: str | None = None
+    asset_identifier: str
+    symbol: str
+    side: Literal["buy", "sell"]
+    quantity: float
+    order_type: str = "market"
+    time_in_force: str = "day"
+    filled_quantity: float = 0.0
+    average_fill_price: float | None = None
+    submitted_at: dt.datetime | None = None
+    updated_at: dt.datetime | None = None
+    message: str | None = None
+
+
+class OrderBatchResponse(BaseModel):
+    """The outcome of a submit, sync or cancel of one batch."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    batch_id: str
+    account_uid: str
+    status: str
+    accepted: bool = True
+    message: str | None = None
+    warnings: list[str] = Field(default_factory=list)
+    holdings_set_uid: str | None = Field(
+        default=None, description="The holdings snapshot published after the latest fills."
+    )
+    orders: list[OrderStateResponse]
 
 
 class UniverseSourceCreateRequest(BaseModel):

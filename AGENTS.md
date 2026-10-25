@@ -3,17 +3,19 @@
 ## CodeRepository-Specific Instructions
 
 This repository is the Alpaca connector project for Main Sequence: Alpaca US equity Assets,
-brokerage Accounts and holdings, ETF Universes, stock bars, Universe-backed ETF weight signals and
-analytical ETF portfolios. The installable `alpaca_connectors` package (`src/`) backs the
-`alpaca-connectors` CLI, the FastAPI application with its MCP server, and the workflow Jobs.
+brokerage Accounts, holdings and order execution, ETF Universes, stock bars, Universe-backed ETF
+weight signals and analytical ETF portfolios. The installable `alpaca_connectors` package (`src/`)
+backs the `alpaca-connectors` CLI, the FastAPI application with its MCP server, and the Jobs.
 
 Repository rules:
 
-- Capability boundaries are Assets, Universes, Market Data, Accounts, Holdings, Portfolios and
-  Operations; providers are dependencies, not a `Connection` domain. API-only capability
-  descriptions live in `alpaca_connectors.api.app`; the rest of the package is reusable behavior.
-- Import capabilities from `alpaca_connectors.{universes,market_data,account,holdings,portfolios}`;
-  never reintroduce a generic top-level `src`, `api` or `migrations` package.
+- Capability boundaries are Assets, Universes, Market Data, Accounts, Holdings, Execution,
+  Portfolios and Operations; providers are dependencies, not a `Connection` domain. API-only
+  capability descriptions live in `alpaca_connectors.api.app`; the rest is reusable behavior.
+- Import capabilities from `alpaca_connectors.{universes,market_data,account,holdings,execution,
+  portfolios}`; never reintroduce a generic top-level `src`, `api` or `migrations` package.
+- Execution (ADR 0016) is an API capability for applications, never an Agent tool; only
+  `alpaca_connectors.execution.services` places market day orders and writes the execution ledger.
 - Frozen identities: the provider `alpaca_connectors.migrations:migration` keeps catalog key
   `package="src"`, and `SIGNAL_IDENTITY_CLASS_IMPORT_PATH` (`src.portfolios.alpaca_etf_signal`)
   keeps existing signal UIDs stable. Never change either.
@@ -62,8 +64,7 @@ Project-to-agent boundary:
     Agent's key entry is `alpaca_account_key_request` and the site (ADR 0015).
   - Results and errors never quote arguments. Deletes need exact `DELETE <uid>`. Bars, signal and
     portfolio updates submit Jobs. Reads run in parallel and mutations in sequence.
-  - There is no Environment selector and no trading, ordering, arbitrary SQL, shell or platform
-    release.
+  - No Environment selector, no tool over the order routes (ADR 0016), no SQL, shell or release.
 
 Validate with `.venv/bin/python -m pytest -q`, `.venv/bin/ruff check api src tests`,
 `.venv/bin/ruff format --check api src tests` and `.venv/bin/mkdocs build --strict`. Developer

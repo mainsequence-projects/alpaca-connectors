@@ -20,3 +20,18 @@ def test_portfolio_runtime_includes_project_foreign_key_dependencies() -> None:
     assert application_tables.issubset(table_names)
     assert table_names.index(signal_configuration) < table_names.index(portfolio_configuration)
     assert table_names.index(bars_configuration) < table_names.index(portfolio_configuration)
+
+
+def test_application_runtime_attaches_the_ms_markets_execution_ledger() -> None:
+    table_names = {
+        model.__table__.name
+        for model in resolve_markets_meta_table_models(application_runtime_models())
+    }
+    from msm.data_nodes.execution.storage import OrdersStorage, TradesStorage
+    from msm.models import OrderManagerTable
+
+    assert {
+        OrderManagerTable.__table__.name,
+        OrdersStorage.__table__.name,
+        TradesStorage.__table__.name,
+    } <= table_names

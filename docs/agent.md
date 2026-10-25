@@ -134,8 +134,9 @@ namespace's owner; the Harness needs no table role to use these tools. See
 - Bars, ETF signal, and ETF portfolio updates submit their existing Main Sequence Jobs and return a
   JobRun UID. Large updates do not execute inline in the agent session.
 - Destructive tool operations require exact `DELETE <uid>` confirmation.
-- The 17 Alpaca tools expose no trading, order submission, arbitrary SQL, shell execution, or
-  unrelated platform-release operations. Those are outside this application's supported scope.
+- The 17 Alpaca tools expose no order submission, arbitrary SQL, shell execution, or unrelated
+  platform-release operations. Order execution exists on the API for authorised applications
+  ([ADR 0016](adrs/0016_order_execution_for_authorised_applications.md)); no Agent tool reaches it.
 
 ### Restricted runtime tool scope
 

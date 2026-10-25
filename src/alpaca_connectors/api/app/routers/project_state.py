@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from ..capabilities import capability_summaries
+from ..capabilities import capability_features, capability_summaries
 from ..identity import acting_user_uid
 from ..schemas import CapabilityCatalogResponse, HealthResponse, ProjectConfigurationResponse
 from ..services import get_project_configuration
@@ -29,7 +29,9 @@ def health() -> HealthResponse:
     description="Return the repository capabilities and their currently available surfaces.",
 )
 def capabilities() -> CapabilityCatalogResponse:
-    return CapabilityCatalogResponse(capabilities=capability_summaries())
+    return CapabilityCatalogResponse(
+        capabilities=capability_summaries(), features=capability_features()
+    )
 
 
 @router.get(
