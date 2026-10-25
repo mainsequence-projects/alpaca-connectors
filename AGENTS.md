@@ -59,9 +59,9 @@ Project-to-agent boundary:
   `mcp_applications: [{resource: alpaca}]`. It deploys after the API, the two hold `user` on
   each other, and `TAU_EXCLUDE_BASE_TOOLS` and `TAU_EXCLUDE_MAINSEQUENCE_MCP` stay `true`.
 - Tool invariants:
-  - No tool or CLI command takes Alpaca key values. Only the HTTP account create and rotate routes
-    do, to store managed Secrets (ADR 0011), and nothing echoes, logs or persists them. The
-    Agent's key entry is `alpaca_account_key_request` and the site (ADR 0015).
+  - No tool or CLI command takes Alpaca key values; only the HTTP account create and rotate routes
+    do. Keys live in the account table's encrypted columns under `ALPACA_CONNECTORS_DATA_KEY`
+    (ADR 0017); nothing echoes, logs or returns them. Agent key entry: `alpaca_account_key_request` and the site (ADR 0015).
   - Results and errors never quote arguments. Deletes need exact `DELETE <uid>`. Bars, signal and
     portfolio updates submit Jobs. Reads run in parallel and mutations in sequence.
   - No Environment selector, no tool over the order routes (ADR 0016), no SQL, shell or release.

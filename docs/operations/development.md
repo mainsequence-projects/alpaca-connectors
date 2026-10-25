@@ -56,7 +56,9 @@ uv run uvicorn alpaca_connectors.api.app.main:app --reload
 ```
 
 Mutating account and market-data operations use a registered Account UID. CLI account registration
-accepts Main Sequence Secret names only; the API also accepts values to store as managed Secrets. Universe sync uses a UniverseSource UID and does not infer
+accepts Main Sequence Secret names only, imported once; the API also accepts values. Both store the
+keys encrypted on the account row, which needs the `ALPACA_CONNECTORS_DATA_KEY` Secret
+([operator guide](operator-guide.md#account-key-secret)). Universe sync uses a UniverseSource UID and does not infer
 extraction targets from source-code constants.
 
 ### Call the local API

@@ -15,6 +15,12 @@ PROJECT_NAMESPACE_SLUG = "alpaca_connectors"
 # Market venue suffix for Alpaca account/asset identities (``<token>__ALPACA`` convention).
 ALPACA_VENUE = "ALPACA"
 
+# The one Environment Secret holding this application's keyring for its application-encrypted
+# columns (MetaTables ADR 0025, ADR 0017). Every workload that writes or reads an Alpaca account's
+# keys is granted ``value_reader`` on it in the workflow files; the value is created once with
+# ``metatables encryption new-keyring``.
+CREDENTIAL_SECRET_NAME = "ALPACA_CONNECTORS_DATA_KEY"
+
 
 def get_openfigi_api_key() -> str | None:
     return os.getenv("OPENFIGI_API_KEY") or os.getenv("FIGI_API_KEY")

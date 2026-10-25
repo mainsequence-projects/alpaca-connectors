@@ -151,8 +151,8 @@ class AssetRegistrationOperationTests(unittest.TestCase):
                 "code": "credential_service_dns_failure",
                 "message": (
                     "DNS could not resolve the configured Main Sequence backend while "
-                    "retrieving the selected account's credential Secret. OpenFIGI was not "
-                    "called."
+                    "reading the key Secret that opens the selected account's stored "
+                    "credentials. OpenFIGI was not called."
                 ),
                 "retryable": True,
             },

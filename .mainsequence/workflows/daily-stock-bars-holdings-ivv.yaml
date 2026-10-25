@@ -3,10 +3,14 @@ name: alpaca-connectors-workflows
 resources:
 - key: daily-stock-bars-holdings-ivv
   kind: job
+  # Opens the configuration account's stored keys to call Alpaca (ADR 0017).
   access:
     branches:
     - repository: MetaTables
       policy: reader
+    secrets:
+    - name: ALPACA_CONNECTORS_DATA_KEY
+      policy: value_reader
   spec:
     name: Alpaca Stored Bar Configuration
     description: Execute the enabled bar configuration selected by ALPACA_BARS_CONFIGURATION_UID.

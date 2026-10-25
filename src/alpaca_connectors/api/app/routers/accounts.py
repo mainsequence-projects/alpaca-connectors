@@ -16,14 +16,12 @@ from ..schemas import (
     BulkActionRequest,
     ResourceCollection,
     ResourceDiscoveryResponse,
-    SecretReferenceCollectionResponse,
 )
 from ..services.accounts import (
     account_delete_blockers,
     create_account_registration,
     get_account,
     list_accounts,
-    list_secret_references,
     preflight_account_registration,
     refresh_account,
     remove_account,
@@ -54,26 +52,6 @@ def accounts_list(
             active=active,
             is_paper=is_paper,
             ordering=ordering,
-        )
-    except Exception as exc:
-        raise api_http_error(exc) from exc
-
-
-@router.get("/secret-references", response_model=SecretReferenceCollectionResponse)
-def account_secret_references_list(
-    limit: int = Query(default=100, ge=1, le=100),
-    offset: int = Query(default=0, ge=0),
-    search: str | None = None,
-) -> SecretReferenceCollectionResponse:
-    """List Secret names available to this runtime without exposing values."""
-    validate_page_window(limit=limit, offset=offset)
-    try:
-        return SecretReferenceCollectionResponse.model_validate(
-            list_secret_references(
-                limit=limit,
-                offset=offset,
-                search=search,
-            ).model_dump(mode="json")
         )
     except Exception as exc:
         raise api_http_error(exc) from exc
@@ -167,8 +145,8 @@ def accounts_remove_preflight(request: BulkActionRequest = Body(...)) -> dict[st
         "contract": "command-center.bulk_action_preflight@v1",
         "allowed": not blockers,
         "detail": (
-            "Registrations will be removed, accounts deactivated, application-managed "
-            "credential Secrets deleted, and holdings retained."
+            "Registrations will be removed with their stored keys, accounts deactivated, and "
+            "holdings retained."
             if not blockers
             else "One or more account registrations have blocking dependencies."
         ),

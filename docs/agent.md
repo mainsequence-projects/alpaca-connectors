@@ -123,7 +123,9 @@ namespace's owner; the Harness needs no table role to use these tools. See
 
 - The Organization Environment is derived from the deployed CodeRepositoryBranch and is never a
   user or tool argument.
-- No tool accepts Alpaca credential values. To register an account or replace its keys from keys
+- No tool accepts Alpaca credential values, and no tool result carries one: the keys are stored
+  encrypted on the account row and opened only when the API calls Alpaca
+  ([ADR 0017](adrs/0017_encrypted_account_credentials.md)). To register an account or replace its keys from keys
   the person holds, `alpaca_account_key_request` creates a pending request for that person and
   returns the Alpaca site link; the person types the keys on the site, which sends them to the API
   with the request UID, and the Agent reads the result with operation `status`. Registration from
@@ -296,7 +298,7 @@ connection before relying on it.
 ## Current local compatibility review
 
 The installed and locked versions are Main Sequence **9.0.30**, TAU **2.0.23**, MetaTables
-(`mainsequence-metatable`) **0.1.51**, and ms-markets **2.2.10** (2026-10-21).
+(`mainsequence-metatable`) **0.1.56**, and ms-markets **2.2.10** (2026-10-25).
 
 - Since 2026-10-15 the platform's caller assertions carry only the caller's identity (`sub` and
   `is_organization_admin`, no `team_uids`). The hosted API on Main Sequence 9.0.22 answered every
@@ -306,9 +308,13 @@ The installed and locked versions are Main Sequence **9.0.30**, TAU **2.0.23**, 
   together.
 - TAU 2.0.22 makes a Task act for the person who asked for it and return its answer, and 2.0.23
   keeps the last batch of a Task's answer.
+- MetaTables 0.1.55 ships application-encrypted columns (MetaTables ADR 0025); on 2026-10-25
+  the range moved to `>=0.1.55` and resolved to 0.1.56 for
+  [ADR 0017](adrs/0017_encrypted_account_credentials.md), which stores Alpaca account keys in
+  such columns.
 
 `pyproject.toml` keeps non-exact compatibility ranges (`mainsequence[mcp]>=9.0.30,<10`,
-`mainsequence-metatable>=0.1.51,<0.2`, `ms-tau-sdk>=2.0.23,<3`), while `uv.lock` and the exported
+`mainsequence-metatable>=0.1.55,<0.2`, `ms-tau-sdk>=2.0.23,<3`), while `uv.lock` and the exported
 `requirements.txt` record the resolution. ms-markets was not upgraded. On 2026-10-14 Main Sequence
 had moved from 9.0.23 to 9.0.24, which stopped scaffolding `AGENTS.md` and ships its guidance in
 the SDK skills, and MetaTables from 0.1.34 to 0.1.35. The earlier SDK upgrade moved the official

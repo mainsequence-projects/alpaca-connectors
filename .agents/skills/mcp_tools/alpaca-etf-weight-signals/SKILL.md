@@ -13,7 +13,7 @@ updater or platform Job-provisioning fallback exists.
 ## Identity And Observations
 
 `universe_uid` defines stable business identity and final `signal_uid`. `account_uid` is
-serialized runtime configuration to resolve Secret references and register constituents. It is
+serialized runtime configuration to open the account's stored keys and register constituents. It is
 excluded from signal identity and never becomes a storage column/index dimension. Weights retain
 their standard `(time_index, signal_uid, asset_identifier)` grain.
 

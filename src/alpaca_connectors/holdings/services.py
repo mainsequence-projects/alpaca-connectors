@@ -243,7 +243,7 @@ def plan_alpaca_account_holdings(
     snapshot = read_alpaca_account(active_client)
     if str(getattr(snapshot.account, "id", "")) != str(registration["alpaca_account_id"]):
         raise ValueError(
-            "The configured Secrets resolve to a different Alpaca account than the registered row."
+            "The stored keys resolve to a different Alpaca account than the registered row."
         )
     cash_identifier = DEFAULT_CASH_ASSET_IDENTIFIER
     cash_asset_identifiers_to_ensure = (
@@ -376,7 +376,7 @@ def capture_alpaca_account_holdings(
     snapshot = read_alpaca_account(active_client)
     if str(getattr(snapshot.account, "id", "")) != str(registration["alpaca_account_id"]):
         raise ValueError(
-            "The configured Secrets resolve to a different Alpaca account than the registered row."
+            "The stored keys resolve to a different Alpaca account than the registered row."
         )
     when = snapshot_time or dt.datetime.now(dt.timezone.utc).replace(microsecond=0)
     identifiers_by_position_id, _ = prepare_alpaca_position_assets(

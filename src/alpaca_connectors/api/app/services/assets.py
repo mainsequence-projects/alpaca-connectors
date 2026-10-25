@@ -263,14 +263,14 @@ def _asset_registration_public_error(
                 ),
                 "retryable": False,
             }
-        if "Secret" in message:
+        if "Secret" in message or "EncryptionError" in exception_names:
             if "NameResolutionError" in exception_names or "gaierror" in exception_names:
                 return {
                     "code": "credential_service_dns_failure",
                     "message": (
                         "DNS could not resolve the configured Main Sequence backend while "
-                        "retrieving the selected account's credential Secret. OpenFIGI was not "
-                        "called."
+                        "reading the key Secret that opens the selected account's stored "
+                        "credentials. OpenFIGI was not called."
                     ),
                     "retryable": True,
                 }
@@ -278,18 +278,17 @@ def _asset_registration_public_error(
                 return {
                     "code": "account_credentials_missing",
                     "message": (
-                        "The selected Alpaca account references a credential Secret that does not "
-                        "exist or has no value. Update the account registration before retrying. "
-                        "OpenFIGI was not called."
+                        "The selected Alpaca account has no stored keys yet. Run the credential "
+                        "migration or rotate its keys before retrying. OpenFIGI was not called."
                     ),
                     "retryable": False,
                 }
             return {
                 "code": "credential_lookup_failed",
                 "message": (
-                    "Main Sequence could not retrieve a credential Secret referenced by the "
-                    "selected Alpaca account. OpenFIGI was not called. Check backend connectivity "
-                    "and Secret access."
+                    "The selected Alpaca account's stored credentials could not be opened: the "
+                    "key Secret could not be read by this runtime. OpenFIGI was not called. Check "
+                    "backend connectivity and the Secret grant."
                 ),
                 "retryable": True,
             }

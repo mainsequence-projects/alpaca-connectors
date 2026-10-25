@@ -23,10 +23,7 @@ def configure_register_parser(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--account-uid",
         required=True,
-        help=(
-            "Registered Alpaca Account UID whose stored Main Sequence Secret references are used "
-            "for provider access."
-        ),
+        help=("Registered Alpaca Account UID whose stored keys are used for provider access."),
     )
     parser.add_argument(
         "--execute",

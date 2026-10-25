@@ -80,8 +80,7 @@ class AssetRegistrationRequest(BaseModel):
     account_uid: str = Field(
         min_length=1,
         description=(
-            "Registered Alpaca Account UID whose stored Main Sequence Secret references are used "
-            "for provider access."
+            "Registered Alpaca Account UID whose stored keys are used for provider access."
         ),
     )
     symbols: list[str] = Field(
@@ -168,7 +167,7 @@ class ResourceDiscoveryResponse(ResourceDiscovery):
 
 
 class ManagedAlpacaCredentials(BaseModel):
-    """Credential values the API stores in application-managed Secrets (ADR 0011).
+    """Credential values the API stores encrypted on the account row (ADR 0017).
 
     Both values are write-only: they are never returned, logged, or echoed in validation errors.
     """
@@ -191,7 +190,7 @@ class ManagedAlpacaCredentials(BaseModel):
 
 
 class ExternalAlpacaCredentials(BaseModel):
-    """Existing Main Sequence Secrets selected by name; the API only ever reads them."""
+    """Existing Main Sequence Secrets to import the keys from, once; the names are not kept."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -256,7 +255,7 @@ class AccountUpdateRequest(BaseModel):
 
 
 class AccountSecretNameRegistrationRequest(BaseModel):
-    """Agent-facing registration by Secret names only; agent sessions never receive values."""
+    """Agent-facing registration importing keys from Secrets by name; never values."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -267,7 +266,7 @@ class AccountSecretNameRegistrationRequest(BaseModel):
 
 
 class AccountSecretNameUpdateRequest(BaseModel):
-    """Agent-facing account update; credentials change only by selecting Secret names."""
+    """Agent-facing account update; keys change only by importing both Secrets by name."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -280,6 +279,8 @@ class AccountSecretNameUpdateRequest(BaseModel):
     def require_change(self) -> "AccountSecretNameUpdateRequest":
         if all(getattr(self, field_name) is None for field_name in self.__class__.model_fields):
             raise ValueError("At least one mutable account field must be provided.")
+        if (self.api_key_secret_name is None) != (self.secret_key_secret_name is None):
+            raise ValueError("Importing keys needs both Secret names.")
         return self
 
 
@@ -292,11 +293,10 @@ class AccountResponse(BaseModel):
     account_name: str
     is_paper: bool
     account_is_active: bool
-    credential_source: Literal["managed", "external"] = "external"
-    api_key_secret_name: str
-    secret_key_secret_name: str
-    api_key_secret_uid: str | None = None
-    secret_key_secret_uid: str | None = None
+    credential_source: Literal["managed", "imported", "external"] = "external"
+    # False only for a registration made before revision 0018 that the credential migration
+    # has not copied yet; the keys themselves are never part of a response.
+    credentials_stored: bool = True
     credentials_updated_at: Any | None = None
     credentials_updated_by_user_uid: str | None = None
     status: str | None = None
@@ -327,20 +327,6 @@ class AccountKeyRequestCollectionResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     items: list[AccountKeyRequestResponse]
-
-
-class SecretReferenceResponse(BaseModel):
-    """Safe Secret metadata exposed to credential-reference pickers."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    name: str
-
-
-class SecretReferenceCollectionResponse(MarketsResourceCollection[SecretReferenceResponse]):
-    """Typed Secret-name collection over the shared pagination contract."""
-
-    page_info: PageInfo = Field(alias="pageInfo")
 
 
 class BulkSelection(BulkActionExplicitSelection):

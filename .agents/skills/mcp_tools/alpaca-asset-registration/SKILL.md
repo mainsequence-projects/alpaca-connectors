@@ -1,6 +1,6 @@
 ---
 name: alpaca-asset-registration
-description: Register exact Alpaca US equity symbols as canonical Main Sequence Assets, using a registered Account's Secret names and optional OpenFIGI enrichment.
+description: Register exact Alpaca US equity symbols as canonical Main Sequence Assets, using a registered Account's stored keys and optional OpenFIGI enrichment.
 ---
 
 # Alpaca Asset Registration
@@ -26,7 +26,7 @@ Examples below are arguments to `alpaca__call_tool`; replace UID placeholders wi
 
 ## Identity And Inputs
 
-- Require a registered `account_uid`; its stored Main Sequence Secret references resolve provider
+- Require a registered `account_uid`; its stored keys, opened only by the API, give provider
   credentials at runtime. Never request or accept API-key values.
 - Require explicit symbols. Asset registration never expands ETF seeds or extracts components.
 - Treat Alpaca's immutable asset UUID as authoritative:
@@ -64,7 +64,7 @@ Authorized execution uses the same request:
 {"tool":"alpaca_register_assets","arguments":{"operation":"execute","request":{"account_uid":"ACCOUNT_UID","symbols":["AAPL","NVDA"],"timeout":30}}}
 ```
 
-Stop if the account does not exist, its Secret references cannot resolve, Alpaca supplies no
+Stop if the account does not exist, its stored keys cannot be opened, Alpaca supplies no
 immutable asset UUID, or a symbol has neither one current-catalog identity nor one unique stored
 Alpaca identity. A timeout or ambiguous transport result is not proof that a write failed; inspect
 the requested Assets before repeating execution. This workflow registers Assets, not orders.

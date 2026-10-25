@@ -586,7 +586,11 @@ or expect a separate phase. `pending` means a declared future step has not
 started; waiting for image/provider work leaves the build step `running`; after
 a failure, later prevented steps are `skipped` with
 `outcome=run_terminated`. Inspect the failed step's `error` before the root
-error when explaining where execution stopped.
+error when explaining where execution stopped. A repository image may first
+wait for a dependency build, a run with
+`target.kind=code_repository_dependency_image` that several commits share;
+the build step stays `running` meanwhile, and a failed dependency build fails
+the image with `dependency_image_build_failed`.
 
 Read image-lifecycle cost from the run's `billing` object. Its scope is exactly
 `image_lifecycle`: it may include an attributed image build, registry storage,

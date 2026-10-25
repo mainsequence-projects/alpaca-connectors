@@ -14,8 +14,8 @@ user-maintained universes, and analytical portfolios to Main Sequence and ms-mar
   ms-markets `AssetCategory` materialization target through real foreign keys.
 - **Market Data:** maintain reusable bar configurations and query or publish Alpaca OHLCV
   observations in migrated asset-indexed tables.
-- **Accounts:** register and maintain Alpaca accounts from submitted keys stored as
-  application-managed Main Sequence Secrets, or from existing Secrets selected by name.
+- **Accounts:** register and maintain Alpaca accounts from submitted keys, or from existing
+  Main Sequence Secrets imported once by name; the keys are stored encrypted on the account row.
 - **Holdings:** capture Alpaca positions and cash as immutable ms-markets account snapshots.
 - **Execution:** place, sync and cancel batches of market orders on a registered account for
   authorised applications, keeping the ms-markets execution ledger
@@ -34,7 +34,7 @@ project's top-level ontology.
 - `src/alpaca_connectors/assets/`: instrument discovery, FIGI resolution, and strict registration.
 - `src/alpaca_connectors/universes/`: source configurations, registered Asset Universes, and category materialization.
 - `src/alpaca_connectors/market_data/`: migrated price storage, updater, queries, and account-backed execution.
-- `src/alpaca_connectors/account/`: account identity, credential Secret references, registration, and refresh.
+- `src/alpaca_connectors/account/`: account identity, encrypted credential storage, registration, and refresh.
 - `src/alpaca_connectors/holdings/`: Alpaca-position translation and canonical snapshot publication.
 - `src/alpaca_connectors/execution/`: order batches on registered accounts and the ms-markets execution ledger.
 - `src/alpaca_connectors/portfolios/`: analytical portfolio construction.
@@ -83,7 +83,8 @@ idempotently. Application startup never creates schema and never seeds rows.
 
 ## Core CLI
 
-Account registration accepts names of existing Main Sequence Secrets, never key values:
+Account registration imports the keys once from existing Main Sequence Secrets, never accepting
+key values:
 
 ```bash
 alpaca-connectors account register \

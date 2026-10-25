@@ -2,6 +2,11 @@
 
 ## Status
 
+Amended by [ADR 0017](0017_encrypted_account_credentials.md) on 2026-10-24: the keys a person
+enters on the site are stored encrypted on the account row, not as managed Secrets, and the
+Agent's `secret_references` operation is gone; registration from Secret names imports the keys
+once. The key-request flow and the identity rules below are unchanged.
+
 Accepted on 2026-10-08. Amends the "Tau tools and agent sessions" surface of
 [ADR 0011](0011_api_managed_alpaca_credential_secrets.md).
 

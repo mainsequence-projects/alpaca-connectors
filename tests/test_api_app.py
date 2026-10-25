@@ -416,10 +416,7 @@ class ApiAppTests(unittest.TestCase):
             "is_paper": True,
             "account_is_active": True,
             "credential_source": "managed",
-            "api_key_secret_name": "ALPACA_CONNECTORS__123__ALPACA_PAPER__API_KEY",
-            "secret_key_secret_name": "ALPACA_CONNECTORS__123__ALPACA_PAPER__SECRET_KEY",
-            "api_key_secret_uid": "api-uid",
-            "secret_key_secret_uid": "secret-uid",
+            "credentials_stored": True,
             "api_key_fingerprint": "fingerprint",
         }
         with (
@@ -451,9 +448,11 @@ class ApiAppTests(unittest.TestCase):
         self.assertEqual(credentials.api_key, "PKVALUE5566")
         self.assertEqual(register.call_args.kwargs["actor_user_uid"], self.caller.uid)
         self.assertEqual(response.json()["credential_source"], "managed")
+        self.assertTrue(response.json()["credentials_stored"])
         self.assertNotIn("PKVALUE5566", response.text)
         self.assertNotIn("SKVALUE7788", response.text)
         self.assertNotIn("fingerprint", response.text)
+        self.assertNotIn("api_key", response.json())
 
     def test_rejected_alpaca_credentials_return_a_fixed_client_error(self) -> None:
         from alpaca_connectors.account.credentials import AlpacaCredentialsRejectedError
@@ -485,7 +484,10 @@ class ApiAppTests(unittest.TestCase):
         )
 
     def test_account_patch_routes_credentials_only_when_supplied(self) -> None:
-        from alpaca_connectors.account.credentials import ResolvedAlpacaCredentials
+        from alpaca_connectors.account.credentials import (
+            AlpacaSecretNames,
+            ResolvedAlpacaCredentials,
+        )
 
         registration = {
             "uid": "account-uid",
@@ -494,8 +496,6 @@ class ApiAppTests(unittest.TestCase):
             "account_name": "Renamed",
             "is_paper": True,
             "account_is_active": False,
-            "api_key_secret_name": "A",
-            "secret_key_secret_name": "B",
         }
         cases = (
             ({"account_name": "Renamed", "account_is_active": False}, set()),
@@ -517,7 +517,7 @@ class ApiAppTests(unittest.TestCase):
                         "secret_key_secret_name": "NEW_B",
                     }
                 },
-                {"api_key_secret_name", "secret_key_secret_name"},
+                {"credential_secret_names"},
             ),
         )
         for body, credential_kwargs in cases:
@@ -533,12 +533,15 @@ class ApiAppTests(unittest.TestCase):
                 self.assertEqual(response.status_code, 200)
                 kwargs = update.call_args.kwargs
                 self.assertEqual(
-                    {"api_key_secret_name", "secret_key_secret_name", "credential_values"}
-                    & set(kwargs),
+                    {"credential_secret_names", "credential_values"} & set(kwargs),
                     credential_kwargs,
                 )
                 if "credential_values" in kwargs:
                     self.assertIsInstance(kwargs["credential_values"], ResolvedAlpacaCredentials)
+                if "credential_secret_names" in kwargs:
+                    self.assertEqual(
+                        kwargs["credential_secret_names"], AlpacaSecretNames("NEW_A", "NEW_B")
+                    )
                 self.assertNotIn("PKVALUE5566", response.text)
 
         response = self.client.patch(
@@ -547,29 +550,22 @@ class ApiAppTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 422)
 
-    def test_account_secret_references_expose_names_only(self) -> None:
-        visible_secrets = [
-            SimpleNamespace(name="ALPACA_PAPER_SECRET_KEY", value="private-value"),
-            SimpleNamespace(name="ALPACA_PAPER_API_KEY", value="another-private-value"),
-        ]
+    def test_the_secret_reference_picker_route_is_gone(self) -> None:
+        # Keys are stored encrypted on the account (ADR 0017); nothing lists Secrets any more,
+        # so the path only reaches the account lookup, which does not know it.
         with patch(
-            "alpaca_connectors.api.app.services.accounts.msc.Secret.filter",
-            return_value=visible_secrets,
-        ):
+            "alpaca_connectors.api.app.routers.accounts.get_account", return_value=None
+        ) as get_account:
             response = self.client.get("/v1/accounts/secret-references")
 
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(
-            response.json()["items"],
-            [
-                {"name": "ALPACA_PAPER_API_KEY"},
-                {"name": "ALPACA_PAPER_SECRET_KEY"},
-            ],
+        self.assertEqual(response.status_code, 404)
+        get_account.assert_called_once_with("secret-references")
+        self.assertNotIn(
+            "/v1/accounts/secret-references",
+            [route.path for route in app.routes if isinstance(route, APIRoute)],
         )
-        self.assertNotIn("private-value", response.text)
-        self.assertNotIn("another-private-value", response.text)
 
-    def test_account_response_drops_internal_payload_and_fingerprint(self) -> None:
+    def test_account_response_drops_internal_payload_fingerprint_and_keys(self) -> None:
         response = AccountResponse.model_validate(
             {
                 "uid": "account-uid",
@@ -578,8 +574,11 @@ class ApiAppTests(unittest.TestCase):
                 "account_name": "Paper",
                 "is_paper": True,
                 "account_is_active": True,
-                "api_key_secret_name": "ALPACA_PAPER_API_KEY",
-                "secret_key_secret_name": "ALPACA_PAPER_SECRET_KEY",
+                "credential_source": "imported",
+                "credentials_stored": True,
+                "api_key": "mt1.test.envelope",
+                "secret_key": "PLAINTEXT-MUST-NOT-PASS",
+                "api_key_secret_name": "LEGACY_NAME",
                 "api_key_fingerprint": "fingerprint",
                 "raw_account_payload": {"account_number": "123"},
             }
@@ -587,6 +586,41 @@ class ApiAppTests(unittest.TestCase):
 
         self.assertNotIn("raw_account_payload", response)
         self.assertNotIn("api_key_fingerprint", response)
+        self.assertNotIn("api_key", response)
+        self.assertNotIn("secret_key", response)
+        self.assertNotIn("api_key_secret_name", response)
+        self.assertEqual(response["credential_source"], "imported")
+        self.assertTrue(response["credentials_stored"])
+
+    def test_an_unavailable_key_secret_and_missing_keys_map_to_fixed_errors(self) -> None:
+        from alpaca_connectors.account.credentials import AccountCredentialsMissingError
+        from metatables import EncryptionError
+
+        cases = (
+            (
+                EncryptionError(
+                    "The Secret ALPACA_CONNECTORS_DATA_KEY cannot be read by this identity.",
+                    code="secret_unavailable",
+                    secret="ALPACA_CONNECTORS_DATA_KEY",
+                ),
+                503,
+                "credential_key_unavailable",
+            ),
+            (AccountCredentialsMissingError("account-uid"), 409, "account_credentials_missing"),
+        )
+        for error, status, code in cases:
+            with (
+                self.subTest(code=code),
+                patch(
+                    "alpaca_connectors.api.app.routers.accounts.refresh_account",
+                    side_effect=error,
+                ),
+            ):
+                response = self.client.post("/v1/accounts/account-uid/actions/refresh")
+
+                self.assertEqual(response.status_code, status)
+                self.assertEqual(response.json()["detail"]["code"], code)
+                self.assertEqual(response.json()["detail"]["message"], str(error))
 
     def test_collection_pagination_requires_aligned_offset(self) -> None:
         response = self.client.get("/v1/assets?limit=25&offset=1")
@@ -613,8 +647,12 @@ class ApiAppTests(unittest.TestCase):
             self.assertTrue(managed[field_name]["writeOnly"])
         response_properties = schemas["AccountResponse"]["properties"]
         self.assertNotIn("api_key", response_properties)
+        self.assertNotIn("secret_key", response_properties)
         self.assertNotIn("api_key_fingerprint", response_properties)
+        self.assertNotIn("api_key_secret_name", response_properties)
         self.assertIn("credential_source", response_properties)
+        self.assertIn("credentials_stored", response_properties)
+        self.assertFalse({name for name in schemas if name.startswith("SecretReference")})
 
     def test_universe_source_preview_route_returns_conflict_on_blocker(self) -> None:
         with patch(

@@ -43,6 +43,7 @@ certifi==2026.10.19
     #   etfhextractor
     #   httpcore
     #   httpx
+    #   mainsequence-metatable
     #   requests
 cffi==2.1.1 ; platform_python_implementation != 'PyPy'
     # via cryptography
@@ -171,7 +172,7 @@ mainsequence==9.0.30
     #   etfhextractor
     #   mainsequence-metatable
     #   ms-markets
-mainsequence-metatable==0.1.51
+mainsequence-metatable==0.1.56
     # via
     #   alpaca-connectors
     #   etfhextractor

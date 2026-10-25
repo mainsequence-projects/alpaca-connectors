@@ -229,6 +229,7 @@ class AgentArtifactsTests(unittest.TestCase):
                     {"key": "alpaca-etf-signal-dispatcher", "policy": "viewer"},
                     {"key": "alpaca-etf-portfolio-dispatcher", "policy": "viewer"},
                 ],
+                "secrets": [{"name": "ALPACA_CONNECTORS_DATA_KEY", "policy": "value_reader"}],
             },
         )
         self.assertEqual(

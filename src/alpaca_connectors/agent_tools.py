@@ -248,27 +248,16 @@ def register_assets(arguments: Mapping[str, Any]) -> Any:
 
 
 def query_accounts(arguments: Mapping[str, Any]) -> Any:
-    from alpaca_connectors.api.app.services.accounts import (
-        get_account,
-        list_accounts,
-        list_secret_references,
-    )
+    from alpaca_connectors.api.app.services.accounts import get_account, list_accounts
     from alpaca_connectors.api.app.services.holdings import get_holdings_snapshot, list_holdings
 
     operation = _operation(
         arguments,
-        {"get", "holdings", "holdings_snapshot", "list", "secret_references"},
+        {"get", "holdings", "holdings_snapshot", "list"},
     )
     if operation == "get":
         account_uid = _required_text(arguments, "account_uid")
         return _require_found(get_account(account_uid), label="Account", uid=account_uid)
-    if operation == "secret_references":
-        limit, offset = _page(arguments)
-        return list_secret_references(
-            limit=limit,
-            offset=offset,
-            search=_optional_text(arguments, "search"),
-        )
     if operation == "holdings_snapshot":
         account_uid = _required_text(arguments, "account_uid")
         holdings_set_uid = _required_text(arguments, "holdings_set_uid")
@@ -854,8 +843,8 @@ PROJECT_AGENT_TOOLS: tuple[ProjectAgentTool, ...] = (
         name="alpaca_query_accounts",
         label="Query Alpaca Accounts",
         description=(
-            "List or retrieve registered Alpaca accounts, safe Secret names, and account "
-            "holdings. Holdings are queried only for the selected account."
+            "List or retrieve registered Alpaca accounts and account holdings. Holdings are "
+            "queried only for the selected account. Responses never carry key values."
         ),
         parameters=_operations(
             _operation_case(
@@ -866,10 +855,6 @@ PROJECT_AGENT_TOOLS: tuple[ProjectAgentTool, ...] = (
                 "get",
                 properties={"account_uid": _uid("Account")},
                 required=("account_uid",),
-            ),
-            _operation_case(
-                "secret_references",
-                properties={**PAGE, **SEARCH},
             ),
             _operation_case(
                 "holdings",
@@ -900,12 +885,12 @@ PROJECT_AGENT_TOOLS: tuple[ProjectAgentTool, ...] = (
         label="Manage Alpaca Account",
         description=(
             "Plan, create, update, refresh, or delete an Alpaca Account registration, or capture "
-            "its holdings. Creation accepts Main Sequence Secret names only and always performs "
-            "the connector's mandatory initial asset registration and holdings capture. Never "
-            "ask a user for Alpaca key values; to register an account or replace keys from "
-            "values the person holds, use alpaca_account_key_request so the person enters them "
-            "on the Alpaca site. Deleting an account also deletes its application-managed "
-            "credential Secrets."
+            "its holdings. Creation accepts Main Sequence Secret names only: the keys are "
+            "imported once from those Secrets and stored encrypted on the account, and creation "
+            "always performs the connector's mandatory initial asset registration and holdings "
+            "capture. Never ask a user for Alpaca key values; to register an account or replace "
+            "keys from values the person holds, use alpaca_account_key_request so the person "
+            "enters them on the Alpaca site. Deleting an account deletes its stored keys."
         ),
         parameters=_operations(
             *[
@@ -914,7 +899,8 @@ PROJECT_AGENT_TOOLS: tuple[ProjectAgentTool, ...] = (
                     properties={
                         "request": _request(
                             AccountSecretNameRegistrationRequest,
-                            "Account registration containing Secret names, never credential values.",
+                            "Account registration naming the Secrets to import the keys from, "
+                            "never credential values.",
                         )
                     },
                     required=("request",),
@@ -927,7 +913,8 @@ PROJECT_AGENT_TOOLS: tuple[ProjectAgentTool, ...] = (
                     "account_uid": _uid("Account"),
                     "request": _request(
                         AccountSecretNameUpdateRequest,
-                        "Mutable Account fields; credentials change only by Secret name.",
+                        "Mutable Account fields; keys change only by importing both Secrets by "
+                        "name.",
                     ),
                 },
                 required=("account_uid", "request"),
@@ -959,7 +946,7 @@ PROJECT_AGENT_TOOLS: tuple[ProjectAgentTool, ...] = (
             "the person holds, without the keys entering this conversation. start_registration "
             "or start_rotation creates a pending request for the person this call works for and "
             "returns the Alpaca site link and instructions to give them; the person enters the "
-            "keys on the site, which stores them as Main Sequence Secrets. status reports "
+            "keys on the site, which sends them to the API to store encrypted. status reports "
             "pending, completed (with the account UID), cancelled, or expired; cancel withdraws "
             "a pending request. This tool never accepts key values."
         ),

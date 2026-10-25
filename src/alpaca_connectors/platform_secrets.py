@@ -1,10 +1,13 @@
-"""Main Sequence Secret resolution and application-managed Secret writes.
+"""Main Sequence Secret reads and deletes.
+
+Account keys are stored on the account row since ADR 0017, so this module only serves two
+transitional needs: importing keys once from Secrets a person selected by name, and the credential
+migration that copies keys out of the Secrets registrations referenced before revision 0018 and
+deletes the ones this application created. It is removed with the revision that drops the legacy
+Secret reference columns.
 
 Secret collection responses intentionally contain metadata only.  Resolving a value therefore
 requires an exact-name metadata lookup (or a stored UID) followed by a UID-addressed detail request.
-
-Write failures are re-raised ``from None``: an SDK exception for a create or patch request may
-describe the request, and the request body carries the Secret value.
 """
 
 from __future__ import annotations
@@ -93,35 +96,6 @@ def read_platform_secret_value(secret_name: str) -> str:
     )
 
 
-def upsert_platform_secret(secret_name: str, value: str) -> tuple[str, bool]:
-    """Create or overwrite one Secret by exact name; return ``(uid, created)``."""
-    import mainsequence.client as msc
-
-    try:
-        existing_uid: str | None = resolve_platform_secret_uid(secret_name)
-    except PlatformSecretNotFoundError:
-        existing_uid = None
-
-    if existing_uid is not None:
-        try:
-            msc.Secret.patch_by_uid(existing_uid, value=value)
-        except Exception:
-            raise PlatformSecretAccessError(
-                f"Main Sequence Secret {secret_name!r} could not be updated by this runtime."
-            ) from None
-        return existing_uid, False
-
-    try:
-        msc.Secret.create(name=secret_name, value=value)
-    except Exception:
-        raise PlatformSecretAccessError(
-            f"Main Sequence Secret {secret_name!r} could not be created by this runtime. A "
-            "Secret with this name may already exist without being visible to this runtime."
-        ) from None
-    # The create response may omit the UID, so read the new Secret back by its exact name.
-    return resolve_platform_secret_uid(secret_name), True
-
-
 def delete_platform_secret(secret_uid: str, *, secret_name: str) -> None:
     """Delete one Secret by UID."""
     import mainsequence.client as msc
@@ -142,5 +116,4 @@ __all__ = [
     "read_platform_secret_value",
     "read_platform_secret_value_by_uid",
     "resolve_platform_secret_uid",
-    "upsert_platform_secret",
 ]

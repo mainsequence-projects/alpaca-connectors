@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import mainsequence.client as msc
 from alpaca_connectors.account.services import (
     get_account_registration,
     list_account_registrations,
@@ -69,24 +68,6 @@ def list_accounts(
     return collection_response(items=safe_items, total=total, limit=limit, offset=offset)
 
 
-def list_secret_references(*, limit: int, offset: int, search: str | None):
-    """Return visible Secret names without ever serializing their values."""
-    search_term = (search or "").strip().casefold()
-    names = sorted(
-        {
-            secret.name.strip()
-            for secret in msc.Secret.filter()
-            if secret.name.strip() and (not search_term or search_term in secret.name.casefold())
-        }
-    )
-    return collection_response(
-        items=[{"name": name} for name in names[offset : offset + limit]],
-        total=len(names),
-        limit=limit,
-        offset=offset,
-    )
-
-
 def preflight_account_registration(request: RegistrationRequest) -> dict:
     return plan_alpaca_account(
         credentials=_credential_input(request),
@@ -148,7 +129,10 @@ def update_account(
     *,
     actor_user_uid: str | None = None,
 ) -> AccountResponse:
-    from alpaca_connectors.account.credentials import submitted_alpaca_credentials
+    from alpaca_connectors.account.credentials import (
+        AlpacaSecretNames,
+        submitted_alpaca_credentials,
+    )
     from alpaca_connectors.account.key_requests import (
         complete_account_key_request,
         require_pending_account_key_request,
@@ -167,17 +151,18 @@ def update_account(
         "account_is_active": request.account_is_active,
     }
     if isinstance(request, AccountSecretNameUpdateRequest):
-        changes.update(
-            api_key_secret_name=request.api_key_secret_name,
-            secret_key_secret_name=request.secret_key_secret_name,
-        )
+        if request.api_key_secret_name is not None:
+            changes["credential_secret_names"] = AlpacaSecretNames(
+                api_key_secret_name=request.api_key_secret_name,
+                secret_key_secret_name=request.secret_key_secret_name,
+            )
     elif isinstance(request.credentials, ManagedAlpacaCredentials):
         changes["credential_values"] = submitted_alpaca_credentials(
             api_key=request.credentials.api_key.get_secret_value(),
             secret_key=request.credentials.secret_key.get_secret_value(),
         )
     elif request.credentials is not None:
-        changes.update(
+        changes["credential_secret_names"] = AlpacaSecretNames(
             api_key_secret_name=request.credentials.api_key_secret_name,
             secret_key_secret_name=request.credentials.secret_key_secret_name,
         )
@@ -216,7 +201,6 @@ __all__ = [
     "account_delete_blockers",
     "get_account",
     "list_accounts",
-    "list_secret_references",
     "preflight_account_registration",
     "refresh_account",
     "remove_account",

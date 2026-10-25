@@ -2,6 +2,12 @@
 
 ## Status
 
+Superseded in part by [ADR 0017](0017_encrypted_account_credentials.md) on 2026-10-24: account
+keys are stored in application-encrypted columns of `AlpacaAccountDetails`, not in managed or
+external Main Sequence Secrets, so the Secret naming, the UID resolution, the backfill, the
+Secret-reference listing and the managed-Secret lifecycle below no longer apply. The value
+boundary, the registration order and the fixed Alpaca rejection error remain in force.
+
 Amended by [ADR 0015](0015_agent_tools_on_the_api_mcp_and_site_key_entry.md): Agent sessions
 register accounts from keys the person enters on the Alpaca site, not by Secret name only.
 

@@ -275,6 +275,29 @@ error and does no work. Do not weaken a launcher or move a configuration into an
 variable to work around a missing argument; repeat the smoke test with a real configuration
 instead.
 
+## Credential Migration Job
+
+The API workflow also declares the one-off `alpaca-credential-migration` Job
+(`src/jobs/migrate_account_credentials.py`, [ADR 0017](../adrs/0017_encrypted_account_credentials.md)).
+No step references it and it has no schedule. After revision `0018` has been applied and the
+`ALPACA_CONNECTORS_DATA_KEY` Secret exists, an operator runs it once per Environment: first as a
+dry run, then with `--execute`, which copies every registration's keys from its Main Sequence
+Secrets into the encrypted account columns and deletes the Secrets this application created.
+The launcher starts with the schema gate, prints counts, Secret names and reasons (never a key
+value), and exits non-zero when a registration is blocked:
+
+```bash
+mainsequence code-repository jobs run <JOB_UID>
+```
+
+```bash
+mainsequence code-repository jobs run <JOB_UID> -- --execute
+```
+
+Like the API, the bars Jobs and the signal Job, it declares `value_reader` on the Secret in its
+`access.secrets`; the schema migration Job and the portfolio Job do not read keys and have no
+such grant.
+
 ## API Invocation And Observation
 
 The FastAPI update action performs a read-only resolution preflight and submits the canonical Job:
