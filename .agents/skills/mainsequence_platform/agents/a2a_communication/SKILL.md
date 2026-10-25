@@ -17,8 +17,7 @@ returns a validated Message or durable Task without exposing transport
 credentials to the model. A trusted harness may project canonical names into
 its local tool namespace; host-specific projection and debugging belong to the
 installed harness SDK rather than this platform protocol skill.
-Agent discovery also advertises the fixed `agent.update_runtime` operation
-when persisted evidence proves that the selected Agent needs replacement.
+Agent deployments follow the repository workflow; discovery offers no manual update.
 
 Streaming remains a direct-runtime concern. Durable Task state and dispatch are
 Django-owned while the selected trusted runtime executes under canonical
@@ -122,21 +121,10 @@ permissions; the internal sender keeps its connection token out of message resul
 `caller_session_proof_required` means the trusted runtime host failed to attach that private
 provenance. The protected operation has not reached its target authorization or deployment logic.
 
-When the selected discovery result has `runtime_update.state` equal to
-`update_required` or `update_failed`, confirm the destructive operation and
-call `agent.update_runtime` with exactly:
-
-```json
-{
-  "agent_uid": "<selected-Agent.uid>"
-}
-```
-
-The tool has no AgentSession UID, action, interaction revision, idempotency
-key, service, branch, image, Environment, or deployment-strategy input. Django
-reloads the Agent, revalidates current state and permission, and prepares or
-reuses the canonical fenced operation. Private caller-session proof
-authenticates a deployed Agent caller but never selects the deployment target.
+Agent image builds and deployments are owned by the normal repository workflow.
+Do not request a manual runtime update. Follow the current session's runtime
+admission; a branch commit waiting for promotion or prerequisites does not
+itself invalidate the already deployed Agent.
 
 ## Canonical Flow
 
@@ -147,25 +135,21 @@ authenticates a deployed Agent caller but never selects the deployment target.
 2. Discover a bounded set of candidates with `agent.search`, passing the
    selected environment UID when it is model-visible.
 3. Inspect the selected Agent with `agent.get` when more detail is needed.
-4. Inspect `runtime_update`. When it is `update_required` or `update_failed`,
-   call `agent.update_runtime` with only the selected `agent_uid`, then poll
-   `agent.get` while it is `updating`. Continue only when it is `current`.
-   Treat `unknown` as unknown and do not infer permission or currency.
-5. Create or reuse its session with `agent.get_or_create_session`.
-6. Resolve the session's current runtime endpoint and short-lived credential
+4. Create or reuse its session with `agent.get_or_create_session`.
+5. Resolve the session's current runtime endpoint and short-lived credential
    with `agent_session.resolve_runtime_access`.
-7. Inspect `runtime_interaction.can_submit`. When the state is `waking`, call
+6. Inspect `runtime_interaction.can_submit`. When the state is `waking`, call
    `agent_session.resolve_runtime_access` again after the bounded
    `retry_after_ms` interval until it becomes ready, terminal, or the host's
    wait deadline expires. Send only with the atomic URL, paths, and credential
    from the response where `can_submit=true`. Surface the backend-owned notice
    for a terminal or timed-out wait.
-8. Read the selected Agent's `a2a_profile`, choose an advertised response kind,
+7. Read the selected Agent's `a2a_profile`, choose an advertised response kind,
    and send the versioned response-kind extension header.
-9. Consume the returned `message` directly or follow the returned `task` using
+8. Consume the returned `message` directly or follow the returned `task` using
    its documented lifecycle operations.
 
-For the canonical MCP sender or a constrained host sender, steps 5 through 9
+For the canonical MCP sender or a constrained host sender, steps 4 through 8
 are one `a2a.send_message` operation after candidate selection. Durable Task
 state is then read, waited on, or canceled through the corresponding Task tool.
 The detailed steps remain the fallback implementation contract.
@@ -229,11 +213,9 @@ Every `agent.search` and `agent.get` result includes an `a2a_profile` with:
 Missing legacy profile data means Message-only support. Never infer Task support
 from runtime routes, an empty answer, or prior knowledge of another Agent.
 
-Every Agent discovery result also includes `runtime_update` with `state`,
-tri-state `needs_redeploy`, and nullable `remediation`. `needs_redeploy=null`
-is not false. Discovery is read-only and never updates, wakes, or creates a
-session. When remediation names `agent.update_runtime`, use the Agent UID from
-that same result; never invent another identifier.
+Discovery is read-only and never builds, deploys, wakes or creates a session.
+Inspect deployment progress through the existing branch workflow-run and
+deployment-run reads when needed.
 
 ## Session Reuse
 
@@ -294,11 +276,8 @@ neither may override the interaction decision. When the interaction is
 `waking`, resolve again after the bounded `retry_after_ms` interval until
 ready, terminal, or the host wait deadline expires. When the structured block
 is terminal, surface its returned notice.
-When the structured block also returns `runtime_update` with the fixed
-`agent.update_runtime` remediation, the caller may explicitly invoke that
-Agent-scoped tool after confirmation. Never turn a session UI action into an
-arbitrary deployment call, never update automatically inside A2A, and never
-resend the blocked message automatically after an update.
+A deployment failure is handled through the repository workflow. Never start
+an independent deployment or automatically resend a blocked message.
 
 The canonical MCP sender keeps the credential private. In the direct-runtime
 fallback, the credential is visible only to the trusted host that makes the

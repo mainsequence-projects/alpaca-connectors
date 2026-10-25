@@ -13,7 +13,7 @@ dependencies = [
     # Keep compatible ranges here and let uv.lock capture the reproducible environment.
     "ms-markets>=2.2.10,<3",
     "mainsequence[mcp]>=9.0.30,<10",
-    "mainsequence-metatable>=0.1.51,<0.2",
+    "mainsequence-metatable>=0.1.55,<0.2",
     "alpaca-py",
     "playwright",
     "mkdocs>=1.6.1",
