@@ -10,6 +10,8 @@ Current scope:
 - publish Alpaca stock bars through an ms-markets `AssetIndexedDataNode` (storage-first)
 - register Alpaca brokerage accounts with application-managed or external credential Secrets and
   capture holdings snapshots independently
+- place, sync and cancel batches of market orders on a registered account for authorised
+  applications, writing the ms-markets execution ledger (ADR 0016)
 - build durable scheduled analytical portfolios from existing ETF Weight Signals, persistent
   interpolated Alpaca bars, and reusable persisted-calendar rebalance configurations
 - expose plans, executions, validation outcomes, and existing invocation paths
@@ -26,6 +28,7 @@ record at `docs/implementation_tasks/0001_ms_markets_storage_first_migration.md`
 - `src/alpaca_connectors/market_data/`: Alpaca bar storage, update logic, and supporting functions
 - `src/alpaca_connectors/account/`: Alpaca account registration and project-owned account details
 - `src/alpaca_connectors/holdings/`: public account-holdings capability boundary
+- `src/alpaca_connectors/execution/`: order batches, pre-trade checks and the execution ledger
 - `src/alpaca_connectors/cli/`: thin capability command adapters
 - `src/jobs/`: repository-local launchers for platform-managed execution
 - `src/alpaca_connectors/operations/`: durable workflow state and runs on the workflow-declared signal and portfolio Jobs

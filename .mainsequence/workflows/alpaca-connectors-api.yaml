@@ -13,6 +13,10 @@ resources:
   # schedule the configuration responses report (operations/configuration_jobs.py), and `user` on
   # the Agent, which the project configuration finds and returns to the site (site_agent.py).
   # Every MetaTable is read through the MetaTables API on the MetaTables repository's branch.
+  # The order-execution routes (ADR 0016) are for applications in other repositories, such as the
+  # Hunch release: each declares `user` on this release from its own workflow
+  # (`access.branches: [{repository: <this repository>, policy: user}]`); nothing is declared here
+  # for a caller, and whose Account a caller may trade is that application's decision.
   access:
     branch: editor
     branches:

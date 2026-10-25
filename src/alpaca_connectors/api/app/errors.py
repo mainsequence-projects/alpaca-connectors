@@ -10,6 +10,7 @@ from msm.api.http import api_http_error as markets_api_http_error
 from msm.api.http import not_found as not_found
 
 from alpaca_connectors.account.credentials import AlpacaCredentialsRejectedError
+from alpaca_connectors.execution.orders import PreTradeCheckError
 from alpaca_connectors.platform_secrets import PlatformSecretAccessError
 
 logger = logging.getLogger(__name__)
@@ -32,6 +33,17 @@ def api_http_error(exc: Exception) -> HTTPException:
             status_code=400,
             code="alpaca_credentials_rejected",
             message=str(exc),
+        )
+    if isinstance(exc, PreTradeCheckError):
+        # Structured 409: the checks that refused the batch, for the caller's own decision.
+        return HTTPException(
+            status_code=409,
+            detail={
+                "code": exc.code,
+                "message": str(exc),
+                "retryable": False,
+                "checks": [check.as_payload() for check in exc.checks],
+            },
         )
     if isinstance(exc, ValueError):
         return api_error(status_code=409, code="action_conflict", message=str(exc))

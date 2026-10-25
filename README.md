@@ -17,6 +17,10 @@ user-maintained universes, and analytical portfolios to Main Sequence and ms-mar
 - **Accounts:** register and maintain Alpaca accounts from submitted keys stored as
   application-managed Main Sequence Secrets, or from existing Secrets selected by name.
 - **Holdings:** capture Alpaca positions and cash as immutable ms-markets account snapshots.
+- **Execution:** place, sync and cancel batches of market orders on a registered account for
+  authorised applications, keeping the ms-markets execution ledger
+  ([ADR 0016](docs/adrs/0016_order_execution_for_authorised_applications.md)). The Alpaca Agent has
+  no tool over it.
 - **Portfolios:** publish scheduled Universe-backed ETF signals and create durable scheduled
   analytical ETF-tracking portfolios from existing signals, persistent interpolated Alpaca bars,
   and reusable persisted-calendar rebalance configurations. Two Jobs declared in the API workflow,
@@ -32,6 +36,7 @@ project's top-level ontology.
 - `src/alpaca_connectors/market_data/`: migrated price storage, updater, queries, and account-backed execution.
 - `src/alpaca_connectors/account/`: account identity, credential Secret references, registration, and refresh.
 - `src/alpaca_connectors/holdings/`: Alpaca-position translation and canonical snapshot publication.
+- `src/alpaca_connectors/execution/`: order batches on registered accounts and the ms-markets execution ledger.
 - `src/alpaca_connectors/portfolios/`: analytical portfolio construction.
 - `src/alpaca_connectors/cli/`: thin command adapters over reusable services.
 - `src/jobs/`: reviewed launchers for platform-managed execution.

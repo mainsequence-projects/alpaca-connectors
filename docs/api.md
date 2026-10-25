@@ -45,6 +45,7 @@ process restarts; the shared in-memory operation repository is intentionally not
 | Assets | `GET /v1/assets`, `GET /v1/assets/{asset_uid}`, synchronous registration plan/execute, and observable registration operations |
 | Accounts | `GET/POST /v1/accounts`, `GET /v1/accounts/secret-references`, `POST /v1/accounts/registration/preflight`, `GET/PATCH/DELETE /v1/accounts/{account_uid}`, refresh and bulk actions; the signed-in person's key requests under `/v1/accounts/key-requests` |
 | Holdings | list/get and capture under `/v1/accounts/{account_uid}/holdings`; `/latest` lists only the newest immutable snapshot |
+| Execution | submit (with preflight), sync and cancel order batches, and list recorded orders, under `/v1/accounts/{account_uid}/orders` |
 | Universe Sources | Explicit extraction-configuration CRUD and read-only source preview under `/v1/universe-sources` |
 | Universes | Create/list/get/update registered `AssetUniverse` rows; list linked category Assets at `GET /v1/universes/{universe_uid}/assets`; run, activate, deactivate, and confirmed delete actions under `/v1/universes` |
 | Market Data | configuration CRUD and resolve/update actions under `/v1/market-data/bar-configurations`; dataset list/get and bounded observations under `/v1/market-data/datasets` |
@@ -80,6 +81,73 @@ paginated Asset response and discovery contract, scoped to that linked category.
 collection and detail endpoints do not perform one backend request per Asset. Universe execution
 publishes the extracted weights through the canonical `SignalWeightsStorage`. The linked category
 records membership only; weights do not become category-membership columns.
+
+## Order Execution
+
+Execution is for applications ([ADR 0016](adrs/0016_order_execution_for_authorised_applications.md));
+the Alpaca Agent has no tool over it. An application in another repository declares `user` on this
+release in its own workflow (`access.branches: [{repository: <this repository>, policy: user}]`).
+Whose account it may trade is that application's decision, as it is for the holdings capture.
+
+```text
+POST /v1/accounts/{account_uid}/orders/actions/submit/preflight
+POST /v1/accounts/{account_uid}/orders/actions/submit
+POST /v1/accounts/{account_uid}/orders/actions/sync      {"batch_id": "..."}
+POST /v1/accounts/{account_uid}/orders/actions/cancel    {"batch_id": "..."}
+GET  /v1/accounts/{account_uid}/orders?batch_id=...
+```
+
+A submission names the batch and its orders:
+
+```json
+{
+  "batch_id": "HUNCH_BATCH__5d1c",
+  "queue_when_closed": false,
+  "orders": [
+    {
+      "client_order_id": "5d1c:0",
+      "asset_identifier": "ALPACA::b0b6dd9d-8b9b-48a9-ba46-b9d54906e415",
+      "symbol": "AAPL",
+      "side": "buy",
+      "quantity": 1.5,
+      "order_type": "market",
+      "time_in_force": "day"
+    }
+  ]
+}
+```
+
+`asset_identifier` is the registered asset's canonical identifier; the order is placed on the live
+Alpaca asset behind it, under Alpaca's current symbol. Only market day orders are accepted (`422`
+otherwise). Every answer has the same shape: `batch_id`, `account_uid`, the batch `status`,
+`accepted`, an optional `message`, `warnings`, the `holdings_set_uid` published after the latest
+fills, and `orders`, one per request leg, with `client_order_id`, `broker_order_id`, `status`
+(`submitted`, `partially_filled`, `filled`, `cancelled`, `rejected`, `expired`, `failed`),
+`venue_status` (Alpaca's own), `filled_quantity`, `average_fill_price`, `submitted_at`,
+`updated_at` and `message`.
+
+- **Preflight and submit** run the pre-trade checks: the registration and the Alpaca account are
+  active and tradable, every asset is a registered Alpaca asset that is tradable (and fractionable
+  when the quantity is a fraction), the market is open (or `queue_when_closed` is set, and Alpaca
+  queues the day orders for the next session), and the buys' latest-trade notional net of the
+  sells fits Alpaca's buying power. A failed check is `409` with
+  `{"code", "message", "retryable": false, "checks": [{"code", "message", "client_order_id"}]}`,
+  `code` being the failed check's code or `pre_trade_checks_failed` when several failed. The
+  preflight answer is the bulk-action preflight contract with the same `checks`.
+- **Submit** is idempotent on `client_order_id`: an order Alpaca already holds is read back, not
+  placed again. Sells go first; with both sells and buys in one batch, the buys wait up to ten
+  seconds for the sells to settle. An order Alpaca refuses at submission comes back `rejected`
+  with Alpaca's reason while the rest of the batch proceeds; `accepted` stays true because the
+  batch was processed.
+- **Sync** re-reads every order of the batch from Alpaca, updates the ledger and publishes a
+  holdings snapshot when it records new fills. **Cancel** asks Alpaca to cancel the open orders
+  and re-reads them; Alpaca cancels asynchronously, so an order can still read `submitted` until
+  the next sync.
+- **The ledger** is ms-markets': one `OrderManager` row per batch (`unique_identifier` is the
+  `batch_id`), one `OrdersTS` row per order and one `TradesTS` row per terminal order with a fill.
+  `GET .../orders` reads the batch rows only and never calls Alpaca.
+- `GET /v1/project-state/capabilities` lists every capability as a feature too:
+  `{"id": "execution", "status": "available"}` says this release executes.
 
 ## Project State And The Site's Agent
 
