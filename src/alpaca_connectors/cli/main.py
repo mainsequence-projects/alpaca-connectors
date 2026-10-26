@@ -6,6 +6,9 @@ import sys
 from collections.abc import Sequence
 
 from .account import (
+    configure_backfill_listing_fields_parser as configure_account_backfill_listing_fields_parser,
+)
+from .account import (
     configure_get_parser as configure_account_get_parser,
 )
 from .account import (
@@ -193,6 +196,12 @@ def build_parser() -> argparse.ArgumentParser:
         account_commands.add_parser(
             "migrate-credentials",
             help="One-time: copy account keys from Main Sequence Secrets into the account row.",
+        )
+    )
+    configure_account_backfill_listing_fields_parser(
+        account_commands.add_parser(
+            "backfill-listing-fields",
+            help="One-time: copy account names and active flags onto the account details rows.",
         )
     )
 

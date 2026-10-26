@@ -86,6 +86,22 @@ def configure_migrate_credentials_parser(parser: argparse.ArgumentParser) -> Non
     parser.set_defaults(handler=run_account_migrate_credentials_command)
 
 
+def configure_backfill_listing_fields_parser(parser: argparse.ArgumentParser) -> None:
+    parser.description = (
+        "Copy each registration's account name and active flag from Markets onto its account "
+        "details row (revision 0019, ms-markets ADR 0047). Dry run by default."
+    )
+    parser.add_argument("--execute", action="store_true")
+    parser.set_defaults(handler=run_account_backfill_listing_fields_command)
+
+
+def run_account_backfill_listing_fields_command(args: argparse.Namespace) -> int:
+    from alpaca_connectors.account.services import backfill_account_listing_fields
+
+    _print(backfill_account_listing_fields(execute=args.execute))
+    return 0
+
+
 def run_account_register_command(args: argparse.Namespace) -> int:
     from alpaca_connectors.account.credentials import AlpacaSecretNames
     from alpaca_connectors.account.services import plan_alpaca_account, register_alpaca_account
@@ -212,6 +228,7 @@ def run_account_migrate_credentials_command(args: argparse.Namespace) -> int:
 
 
 __all__ = [
+    "configure_backfill_listing_fields_parser",
     "configure_get_parser",
     "configure_list_parser",
     "configure_migrate_credentials_parser",

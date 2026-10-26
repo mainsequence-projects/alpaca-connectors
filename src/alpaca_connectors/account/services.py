@@ -11,6 +11,7 @@ remain an independent lifecycle operation.
 from __future__ import annotations
 
 import datetime as dt
+import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
@@ -542,6 +543,7 @@ def register_alpaca_account(
         snapshot_time=when,
         raw_account=snapshot.raw_account,
     )
+    detail_values.update(_listing_values(account))
     detail_values.update(
         stored_credential_values(
             resolved_credentials,
@@ -690,11 +692,32 @@ def get_account_registration(account_uid: str) -> dict[str, Any] | None:
     detail_rows = operation_result_rows(detail_result)
     if account is None or not detail_rows:
         return None
+    return _registration_row(account.model_dump(mode="json"), detail_rows[0])
+
+
+def _listing_values(account: Any) -> dict[str, Any]:
+    """The Markets Account fields copied onto the details row for the listing (revision 0019)."""
     return {
-        **account.model_dump(mode="json"),
-        **detail_rows[0],
-        "uid": str(account.uid),
-        "account_uid": str(account.uid),
+        "account_name": getattr(account, "account_name", None),
+        "account_is_active": getattr(account, "account_is_active", None),
+    }
+
+
+def _registration_row(account: dict[str, Any] | None, detail: dict[str, Any]) -> dict[str, Any]:
+    """A registration: the Markets Account merged with its Alpaca details row.
+
+    Detail columns win except the listing copies, where the Account's own values are current.
+    Without the Account (never expected: the details row cascades with it) the copies stand in.
+    """
+    account_uid = str(detail.get("account_uid"))
+    core = dict(account or {})
+    return {
+        "unique_identifier": detail.get("account_unique_identifier"),
+        **core,
+        **detail,
+        **{key: core[key] for key in ("account_name", "account_is_active") if key in core},
+        "uid": account_uid,
+        "account_uid": account_uid,
     }
 
 
@@ -707,57 +730,47 @@ def list_account_registrations(
     is_paper: bool | None = None,
     ordering: str = "account_name",
 ) -> tuple[list[dict[str, Any]], int]:
-    """Return paginated Alpaca registrations, excluding unrelated ms-markets Accounts."""
+    """Return paginated Alpaca registrations, excluding unrelated ms-markets Accounts.
+
+    Pages, filters, searches and orders on this project's details table, which carries the
+    account identifier, paper flag and copies of the Account's name and active flag; the page's
+    Accounts are then read from Markets in one batch (ms-markets ADR 0047, decision 4).
+    """
     from msm.api.accounts import Account
     from msm.api.base import operation_result_rows
     from msm.repositories.base import compile_markets_statement, execute_markets_operation
     from sqlalchemy import func, or_, select
 
+    from alpaca_connectors.markets_api import read_in_batches
     from alpaca_connectors.runtime import account_runtime_models, start_markets_engine
 
     runtime = start_markets_engine(models=account_runtime_models())
-    account_model = Account.__table__
-    detail_columns = [column for column in registration_columns() if column.key != "account_uid"]
-    statement = (
-        select(
-            account_model.uid.label("uid"),
-            account_model.uid.label("account_uid"),
-            account_model.unique_identifier,
-            account_model.account_name,
-            account_model.is_paper,
-            account_model.account_is_active,
-            account_model.account_group_uid,
-            account_model.holdings_storage_table_uid,
-            account_model.metadata_json,
-            *detail_columns,
-        )
-        .select_from(AlpacaAccountDetails)
-        .join(account_model, AlpacaAccountDetails.account_uid == account_model.uid)
-    )
+    details = AlpacaAccountDetails.__table__
+    statement = select(*registration_columns())
     if active is not None:
-        statement = statement.where(account_model.account_is_active == active)
+        statement = statement.where(details.c.account_is_active == active)
     if is_paper is not None:
-        statement = statement.where(account_model.is_paper == is_paper)
+        statement = statement.where(details.c.is_paper == is_paper)
     if search:
         pattern = f"%{search.strip()}%"
         statement = statement.where(
             or_(
-                account_model.account_name.ilike(pattern),
-                account_model.unique_identifier.ilike(pattern),
+                details.c.account_name.ilike(pattern),
+                details.c.account_unique_identifier.ilike(pattern),
             )
         )
     count_statement = select(func.count().label("count")).select_from(statement.subquery())
     descending = ordering.startswith("-")
     ordering_key = ordering.removeprefix("-")
     ordering_columns = {
-        "account_name": account_model.account_name,
-        "unique_identifier": account_model.unique_identifier,
+        "account_name": details.c.account_name,
+        "unique_identifier": details.c.account_unique_identifier,
     }
     if ordering_key not in ordering_columns:
         raise ValueError(f"Unsupported account ordering {ordering!r}.")
     ordering_column = ordering_columns[ordering_key]
     ordering_expression = ordering_column.desc() if descending else ordering_column.asc()
-    page_statement = statement.order_by(ordering_expression, account_model.uid.asc())
+    page_statement = statement.order_by(ordering_expression, details.c.account_uid.asc())
     page_statement = page_statement.limit(limit).offset(offset)
     page_operation = compile_markets_statement(
         page_statement,
@@ -769,14 +782,97 @@ def list_account_registrations(
         context=runtime.context,
         operation="select",
     )
-    registrations = operation_result_rows(
+    detail_rows = operation_result_rows(
         execute_markets_operation(page_operation, context=runtime.context)
     )
     count_rows = operation_result_rows(
         execute_markets_operation(count_operation, context=runtime.context)
     )
     total = int(count_rows[0].get("count", 0)) if count_rows else 0
+    accounts = {
+        str(account.uid): account.model_dump(mode="json")
+        for account in read_in_batches(
+            lambda batch: Account.filter(uid__in=batch, limit=len(batch)),
+            [str(row["account_uid"]) for row in detail_rows],
+        )
+    }
+    registrations = [
+        _registration_row(accounts.get(str(row["account_uid"])), row) for row in detail_rows
+    ]
     return registrations, total
+
+
+def backfill_account_listing_fields(*, execute: bool = False) -> dict[str, Any]:
+    """Copy each registration's Account name and active flag onto its details row.
+
+    One-off after revision 0019 (docs/operations/markets-api-boundary.md): rows registered
+    before it have null copies, which the listing's active filter, search and ordering read.
+    Reads every registration, its Accounts in batches through Markets, and updates only rows
+    whose copies differ. Dry run unless ``execute``.
+    """
+    from msm.api.accounts import Account
+    from msm.api.base import operation_result_rows
+    from msm.repositories.base import compile_markets_statement, execute_markets_operation
+    from sqlalchemy import case, select, update
+
+    from alpaca_connectors.markets_api import read_in_batches
+    from alpaca_connectors.runtime import account_runtime_models, start_markets_engine
+
+    runtime = start_markets_engine(models=account_runtime_models())
+    details = AlpacaAccountDetails.__table__
+    rows = operation_result_rows(
+        execute_markets_operation(
+            compile_markets_statement(
+                select(details.c.account_uid, details.c.account_name, details.c.account_is_active),
+                context=runtime.context,
+                operation="select",
+            ),
+            context=runtime.context,
+        )
+    )
+    accounts = {
+        str(account.uid): account
+        for account in read_in_batches(
+            lambda batch: Account.filter(uid__in=batch, limit=len(batch)),
+            [str(row["account_uid"]) for row in rows],
+        )
+    }
+    changes = [
+        (str(row["account_uid"]), _listing_values(accounts[str(row["account_uid"])]))
+        for row in rows
+        if str(row["account_uid"]) in accounts
+        and (row.get("account_name"), row.get("account_is_active"))
+        != tuple(_listing_values(accounts[str(row["account_uid"])]).values())
+    ]
+    missing = sorted(
+        str(row["account_uid"]) for row in rows if str(row["account_uid"]) not in accounts
+    )
+    if execute and changes:
+        # One statement for every changed row: each column takes its value by account uid.
+        by_uid = {uuid.UUID(account_uid): values for account_uid, values in changes}
+        statement = (
+            update(details)
+            .where(details.c.account_uid.in_(list(by_uid)))
+            .values(
+                {
+                    column: case(
+                        {uid: values[column] for uid, values in by_uid.items()},
+                        value=details.c.account_uid,
+                    )
+                    for column in ("account_name", "account_is_active")
+                }
+            )
+        )
+        execute_markets_operation(
+            compile_markets_statement(statement, context=runtime.context, operation="update"),
+            context=runtime.context,
+        )
+    return {
+        "executed": execute,
+        "registrations": len(rows),
+        "updated" if execute else "would_update": [account_uid for account_uid, _ in changes],
+        "accounts_missing_in_markets": missing,
+    }
 
 
 def _require_registered_alpaca_account(
@@ -814,6 +910,7 @@ def update_account_registration(
     references from before revision 0018 included.
     """
     from msm.api.accounts import Account
+    from msm.repositories.crud import update_model
 
     from alpaca_connectors.runtime import account_runtime_models, start_markets_engine
 
@@ -832,7 +929,13 @@ def update_account_registration(
         if value is not None
     }
     if account_values:
-        Account.update(account_uid, account_values)
+        account = Account.update(account_uid, account_values)
+        update_model(
+            runtime.context,
+            model=AlpacaAccountDetails,
+            uid=account_uid,
+            values=_listing_values(account),
+        )
 
     credential_input: AlpacaCredentialInput | None = credential_values or credential_secret_names
     if credential_input is not None:
@@ -887,7 +990,7 @@ def remove_account_registration(account_uid: str) -> dict[str, Any]:
             f"configuration(s): {dependencies}. Delete or change those configurations first."
         )
     runtime = start_markets_engine(models=account_runtime_models())
-    holdings_sets = AccountHoldingsSet.filter(account_uid=account_uid, limit=500)
+    retained_holdings_sets = AccountHoldingsSet.count(account_uid=str(account_uid))
     delete_model(runtime.context, model=AlpacaAccountDetails, uid=account_uid)
     Account.update(account_uid, account_is_active=False)
     deleted_secrets: list[str] = []
@@ -899,7 +1002,7 @@ def remove_account_registration(account_uid: str) -> dict[str, Any]:
         "account_uid": str(account_uid),
         "registration_removed": True,
         "account_deactivated": True,
-        "retained_holdings_sets": len(holdings_sets),
+        "retained_holdings_sets": retained_holdings_sets,
         "deleted_secrets": deleted_secrets,
         "warnings": warnings,
     }
@@ -935,7 +1038,7 @@ def refresh_alpaca_account(
         )
     runtime = start_markets_engine(models=account_runtime_models())
     status = (_enum_str(getattr(snapshot.account, "status", None)) or "").upper()
-    Account.update(account_uid, account_is_active=(status == "ACTIVE"))
+    account = Account.update(account_uid, account_is_active=(status == "ACTIVE"))
     values = build_account_detail_values(
         account=snapshot.account,
         configuration=snapshot.configuration,
@@ -945,6 +1048,7 @@ def refresh_alpaca_account(
         snapshot_time=dt.datetime.now(dt.timezone.utc).replace(microsecond=0),
         raw_account=snapshot.raw_account,
     )
+    values.update(_listing_values(account))
     update_model(
         runtime.context,
         model=AlpacaAccountDetails,
@@ -960,6 +1064,7 @@ def refresh_alpaca_account(
 __all__ = [
     "AlpacaAccountRegistrationResult",
     "AlpacaAccountSnapshot",
+    "backfill_account_listing_fields",
     "build_account_balance_values",
     "build_account_detail_values",
     "build_alpaca_trading_client",

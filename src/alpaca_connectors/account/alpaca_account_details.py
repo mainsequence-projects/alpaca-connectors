@@ -188,6 +188,32 @@ class AlpacaAccountDetails(ProjectStorageNameMixin, AlpacaMarketsMetaTableMixin,
             ),
         },
     )
+    # Copies of the Markets Account's name and active flag, so the registration listing pages,
+    # filters and orders on this table alone (ms-markets ADR 0047, decision 4). Every write path
+    # here sets them with the Account; `alpaca-connectors account backfill-listing-fields` fills
+    # rows registered before revision 0019. Reads still return the Account's own values.
+    account_name: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+        info={
+            "label": "Account name",
+            "description": (
+                "Display name of the Main Sequence account, copied from the account when this "
+                "application registers, renames or refreshes it; null until it is copied."
+            ),
+        },
+    )
+    account_is_active: Mapped[bool | None] = mapped_column(
+        Boolean,
+        nullable=True,
+        info={
+            "label": "Account active",
+            "description": (
+                "Whether the Main Sequence account is active, copied from the account when this "
+                "application registers, updates or refreshes it; null until it is copied."
+            ),
+        },
+    )
     alpaca_account_id: Mapped[str] = mapped_column(
         String(64),
         nullable=False,

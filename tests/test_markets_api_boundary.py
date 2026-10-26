@@ -155,3 +155,117 @@ def test_recent_holdings_scope_reads_one_set_and_its_snapshot(monkeypatch, no_en
     assert scope.holdings_set_uid == "s2"
     assert scope.asset_identifiers == ["ALPACA::A"]
     assert scope.asset_uids == ["uid-ALPACA::A"]
+
+
+def _compiled_sql(statement: Any) -> str:
+    return str(statement.compile(compile_kwargs={"literal_binds": True}))
+
+
+def test_account_listing_pages_the_details_table_and_hydrates_accounts(monkeypatch) -> None:
+    from msm.api.accounts import Account
+
+    from alpaca_connectors.account.services import list_account_registrations
+
+    account_uid = uuid.uuid4()
+    detail = {
+        "account_uid": account_uid,
+        "account_unique_identifier": "PA1__ALPACA_PAPER",
+        "account_name": "stale copy",
+        "account_is_active": True,
+        "is_paper": True,
+        "status": "ACTIVE",
+    }
+    statements: list[Any] = []
+    monkeypatch.setattr(
+        "alpaca_connectors.runtime.start_markets_engine",
+        lambda **kwargs: SimpleNamespace(context=object()),
+    )
+    monkeypatch.setattr(
+        "msm.repositories.base.compile_markets_statement",
+        lambda statement, **kwargs: statements.append(statement) or statement,
+    )
+    results = iter([{"rows": [detail]}, {"rows": [{"count": 1}]}])
+    monkeypatch.setattr(
+        "msm.repositories.base.execute_markets_operation", lambda operation, **kwargs: next(results)
+    )
+    filters: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        Account,
+        "filter",
+        classmethod(
+            lambda cls, **kw: (
+                filters.append(kw)
+                or [
+                    SimpleNamespace(
+                        uid=account_uid,
+                        model_dump=lambda mode="json": {
+                            "uid": str(account_uid),
+                            "unique_identifier": "PA1__ALPACA_PAPER",
+                            "account_name": "Paper One",
+                            "account_is_active": True,
+                        },
+                    )
+                ]
+            )
+        ),
+    )
+
+    rows, total = list_account_registrations(search="paper", active=True)
+
+    assert total == 1
+    assert rows[0]["account_name"] == "Paper One"
+    assert rows[0]["unique_identifier"] == "PA1__ALPACA_PAPER"
+    assert rows[0]["uid"] == rows[0]["account_uid"] == str(account_uid)
+    assert filters == [{"uid__in": [str(account_uid)], "limit": 1}]
+    for statement in statements:
+        sql = _compiled_sql(statement)
+        assert "ms_markets__" not in sql
+        assert "alpaca_connectors__acct_alpaca" in sql
+    # The encrypted key columns are never selected, only the credentials_stored flag.
+    assert "api_key AS api_key" not in _compiled_sql(statements[0])
+
+
+def test_listing_field_backfill_updates_changed_rows_in_one_statement(monkeypatch) -> None:
+    from msm.api.accounts import Account
+
+    from alpaca_connectors.account.services import backfill_account_listing_fields
+
+    current, stale = uuid.uuid4(), uuid.uuid4()
+    rows = [
+        {"account_uid": current, "account_name": "A", "account_is_active": True},
+        {"account_uid": stale, "account_name": None, "account_is_active": None},
+    ]
+    executed: list[Any] = []
+    monkeypatch.setattr(
+        "alpaca_connectors.runtime.start_markets_engine",
+        lambda **kwargs: SimpleNamespace(context=object()),
+    )
+    monkeypatch.setattr(
+        "msm.repositories.base.compile_markets_statement", lambda statement, **kwargs: statement
+    )
+    monkeypatch.setattr(
+        "msm.repositories.base.execute_markets_operation",
+        lambda statement, **kwargs: executed.append(statement) or {"rows": rows},
+    )
+    monkeypatch.setattr(
+        Account,
+        "filter",
+        classmethod(
+            lambda cls, **kw: [
+                SimpleNamespace(uid=current, account_name="A", account_is_active=True),
+                SimpleNamespace(uid=stale, account_name="B", account_is_active=False),
+            ]
+        ),
+    )
+
+    dry_run = backfill_account_listing_fields()
+    assert dry_run["would_update"] == [str(stale)] and len(executed) == 1
+
+    executed.clear()
+    result = backfill_account_listing_fields(execute=True)
+
+    assert result["updated"] == [str(stale)]
+    select_statement, update_statement = executed
+    sql = _compiled_sql(update_statement)
+    assert sql.startswith("UPDATE alpaca_connectors__acct_alpaca")
+    assert "CASE" in sql and stale.hex in sql and current.hex not in sql

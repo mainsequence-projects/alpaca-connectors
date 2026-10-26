@@ -740,7 +740,11 @@ class RegisterAlpacaAccountTests(unittest.TestCase):
             patch("alpaca_connectors.account.services.resolve_credential_input") as resolve,
             patch("alpaca_connectors.account.services.build_alpaca_trading_client") as build_client,
             patch("alpaca_connectors.account.services.write_stored_credentials") as write,
+            patch("msm.repositories.crud.update_model") as update_details,
         ):
+            fake_account.update.return_value = SimpleNamespace(
+                account_name="Renamed", account_is_active=False
+            )
             result = update_account_registration(
                 "acc-uid-1",
                 account_name="Renamed",
@@ -749,6 +753,11 @@ class RegisterAlpacaAccountTests(unittest.TestCase):
 
         fake_account.update.assert_called_once_with(
             "acc-uid-1", {"account_name": "Renamed", "account_is_active": False}
+        )
+        # The listing copies on the details row follow the Account (revision 0019).
+        self.assertEqual(
+            update_details.call_args.kwargs["values"],
+            {"account_name": "Renamed", "account_is_active": False},
         )
         resolve.assert_not_called()
         build_client.assert_not_called()
