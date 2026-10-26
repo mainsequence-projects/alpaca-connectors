@@ -47,9 +47,12 @@ namespace, and Markets finds provider time series through its dataset catalog.
    changes. Each portfolio run registers and reconciles its dataset catalog row and each signal run
    binds its signal (`PortfolioDatasets`). The Markets workload reads the three catalogued
    instances with `data_viewer`.
-6. **History.** `alpaca-connectors instances backfill` copies this application's rows of the
-   shared time series into the instances once. Signal observations are live ETF extractions and
-   are copied, never recomputed. It is the only module that reads Markets tables, run by a person.
+6. **History.** `alpaca-connectors instances backfill` moves this application's rows of the
+   shared time series into the instances once with ms-markets' shared series moves
+   (`SignalSeriesMove`, `PortfolioSeriesMove`, `TableSeriesMove`), which verify every key before
+   the catalog is written; `instances rollback` undoes it until the Markets roles are revoked.
+   Signal observations are live ETF extractions and are copied, never recomputed. A person runs
+   both; the selection comes from this application's tables.
 7. **Schema gate.** Jobs no longer read the ms-markets Alembic version table; they wait until the
    Markets API's `/health` reports at least the ms-markets release of the image.
 

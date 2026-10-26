@@ -28,12 +28,10 @@ INSTANCE_NAMESPACE = markets_configured_namespace(PROJECT_NAMESPACE)
 def _instance_kwargs() -> dict[str, Any]:
     """Factory arguments of every instance: this namespace and app segment, the Markets base.
 
-    No provider ``base``: ms-markets 3.0.0 attaches only ``MarketsBase`` models
-    (``msm.start_engine`` rejects an instance built on another declarative base), and its table
-    copy raises ``TypeError`` when a provider base already holds a referenced Markets table
-    (``metadata.tables.get(...) or ...`` tests a Table's truth value), which TradesStorage's three
-    Asset foreign keys always hit. In the Markets declarative metadata the references resolve;
-    this provider's migration copies the instance tables into its own metadata like any model.
+    The instances are built on the Markets declarative base (no ``base=``), where their
+    references to Markets registries resolve; this provider's migration copies the instance tables
+    into its own metadata like any model (revisions 0020 and 0021 were written from it). A
+    provider ``base`` would change that migration metadata, so it stays out.
     """
     return {
         "instance_key": INSTANCE_KEY,
@@ -91,7 +89,7 @@ def portfolio_output_tables() -> dict[str, type[Any]]:
 def interpolated_prices_storage_kwargs() -> dict[str, Any]:
     """``InterpolatedPrices`` keyword arguments placing its table in this namespace.
 
-    No ``storage_base``, for the reasons ``_instance_kwargs`` gives.
+    No ``storage_base``, like the other instances (see ``_instance_kwargs``).
     """
     return {"storage_namespace": INSTANCE_NAMESPACE, "storage_app": PROJECT_NAMESPACE_SLUG}
 

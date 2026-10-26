@@ -25,8 +25,8 @@ def upgrade() -> None:
     and trades move from the shared ``ms_markets__*`` tables to contract-identical
     ``alpaca_connectors__<contract>__main`` tables in the ``alpaca-connectors`` namespace
     (``alpaca_connectors.instances``). Their foreign keys reference the Markets registries by
-    physical name. The shared tables keep their rows; ``alpaca-connectors portfolio
-    backfill-instances`` copies this application's rows (docs/operations/markets-api-boundary.md).
+    physical name. The shared tables keep their rows; ``alpaca-connectors instances backfill``
+    moves this application's rows (docs/operations/markets-api-boundary.md).
     """
     op.create_table(
         "alpaca_connectors__signalweightsts__main",

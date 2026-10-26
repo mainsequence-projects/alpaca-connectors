@@ -108,27 +108,48 @@ The owner of `alpaca-connectors` grants the Markets workload `data_viewer` on ex
 `alpaca_connectors__acct_alpaca`: that table holds the application-encrypted account keys and is
 not `include`d by Markets.
 
-## 7. Copy The History
+## 7. Move The History
 
 As a person who holds `data_viewer` on the source tables in `mainsequence.markets` and
-`data_writer` on `alpaca-connectors`:
+`data_writer` on `alpaca-connectors`, with the scheduled runs held (step 3):
 
 ```bash
 alpaca-connectors account backfill-listing-fields             # dry run
 alpaca-connectors account backfill-listing-fields --execute
-alpaca-connectors instances backfill                          # dry run: rows per table
+alpaca-connectors instances backfill                          # dry run: rows per key
 alpaca-connectors instances backfill --execute --register-catalog
-alpaca-connectors instances backfill                          # destination_rows_before == source_rows
+alpaca-connectors instances backfill                          # every key: missing_rows == 0
 ```
 
 `backfill-listing-fields` copies each registration's account name and active flag (read through
-the Markets API) onto its details row. `instances backfill` copies, in grain order and with
-`ON CONFLICT DO NOTHING`, this application's rows of the shared Markets time series into its
-instances: signal weights of its signals (copied, never recomputed: they are live ETF
-extractions), values, weights and rebalance state of its `ALPACA_ETF_PORTFOLIO__*` portfolios,
-calendar events of its rebalance calendars, the revision-0011 interpolated prices, and orders and
-trades of its accounts. `--register-catalog` then registers every portfolio's catalog row and binds
-every signal, which needs step 6. The command is idempotent; rerun it after a failure.
+the Markets API) onto its details row.
+
+`instances backfill` runs ms-markets' shared series moves (`msm.storage_copies`,
+`msm_portfolios.services.series_moves`) over this application's history:
+
+| Move | Rows | Key |
+|---|---|---|
+| `SignalSeriesMove` | signal weights of the signal configurations no portfolio points to | `signal_uid` |
+| `PortfolioSeriesMove`, one per `ALPACA_ETF_PORTFOLIO__*` portfolio | its current signal's weights, rebalance state, weights and values | `signal_uid`, `portfolio_identifier` |
+| `TableSeriesMove` | calendar events of the rebalance calendars | `calendar_identifier` |
+| `TableSeriesMove` | orders and trades of the registered accounts | `account_identifier` |
+| `TableSeriesMove`, one per bars profile | the revision-0011 interpolated prices | `asset_identifier` |
+
+Signal observations are live ETF extractions, so they are copied, never recomputed. Each copy
+writes only the rows the instance lacks (by the full index) through the ms-markets
+`TimeIndexRowsCopy` updater, then counts both sides per key. A move whose keys are all complete is
+`moved`; with `--register-catalog` it then binds its signals (`register_signal`) and writes its
+portfolio's catalog row last (`register`), which needs step 6. A key still missing rows leaves the
+move `incomplete` and changes nothing in Markets; rerunning copies only the gaps. Calendar events
+are copied although the engine could rebuild them from the persisted calendar. The selection of
+what moves comes from this application's own tables; the command reads no Markets table itself.
+
+The same moves run from the ms-markets CLI, which registers the catalog:
+
+```bash
+msm series move alpaca_connectors.operations.instance_backfill:series_moves            # dry run
+msm series move alpaca_connectors.operations.instance_backfill:series_moves --execute
+```
 
 ## 8. Move The Project Tables To `alpaca-connectors`
 
@@ -228,8 +249,21 @@ Put the configurations held in step 3 back on the schedule, then check:
 - the next scheduled signal and portfolio JobRuns succeed and append to the instances;
 - `alpaca-connectors account list` pages, searches and filters as before.
 
-To roll a portfolio back to the shared tables, `PortfolioDatasets.unregister(portfolio_uid=...)`
-removes its catalog row; the instance keeps its rows.
+## Rolling Back
+
+Until step 10 revokes the roles on `mainsequence.markets`, the move can be undone. With the
+scheduled runs held, as a person with write access on the shared Markets tables:
+
+```bash
+alpaca-connectors instances rollback                  # dry run
+alpaca-connectors instances rollback --execute        # or: msm series rollback <same callable> --execute
+```
+
+The rollback runs the same moves backwards (portfolios first): it copies the rows the instances
+gained since the move into the shared tables, verifies every key, then removes each portfolio's
+catalog row (`unregister`) and the signal bindings (`unregister_signal`); `--keep-catalog`
+leaves them. The instances keep their rows. This release always writes the instances and
+registers the catalog after every run, so deploy the previous release before resuming the runs.
 
 ## 10. Revoke The Markets Roles
 

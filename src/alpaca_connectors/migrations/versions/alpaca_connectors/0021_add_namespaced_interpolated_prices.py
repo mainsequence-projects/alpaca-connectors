@@ -26,7 +26,7 @@ def upgrade() -> None:
     ``configured_alpaca_interpolated_prices_storage`` now places them in ``alpaca-connectors``
     with the ``alpaca_connectors`` app segment; the storage identity, and so the suffix, is
     unchanged. The 0011 tables keep their rows until a later revision drops them;
-    ``alpaca-connectors portfolio backfill-instances`` copies them here.
+    ``alpaca-connectors instances backfill`` copies their rows here.
     """
     op.create_table(
         "alpaca_connectors__interpolated_prices__t_0e9255594b348d8c",
