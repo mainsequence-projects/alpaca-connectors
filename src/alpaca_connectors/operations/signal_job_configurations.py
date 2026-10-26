@@ -329,9 +329,9 @@ class AlpacaETFSignalJobConfiguration(MarketsMetaTableRow):
     __table__: ClassVar[type[AlpacaETFSignalJobConfigurationTable]] = (
         AlpacaETFSignalJobConfigurationTable
     )
+    # Own tables only; the Account foreign key is a reference (ms-markets ADR 0047).
     __required_tables__: ClassVar[list[type[MarketsBase]]] = [
         AssetUniverseTable,
-        AccountTable,
         AlpacaETFSignalJobConfigurationTable,
     ]
 

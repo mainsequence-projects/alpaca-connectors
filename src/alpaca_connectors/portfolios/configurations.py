@@ -472,10 +472,10 @@ class AlpacaETFPortfolioConfiguration(MarketsMetaTableRow):
     __table__: ClassVar[type[AlpacaETFPortfolioConfigurationTable]] = (
         AlpacaETFPortfolioConfigurationTable
     )
+    # Own tables only; the Portfolio foreign key is a reference (ms-markets ADR 0047).
     __required_tables__: ClassVar[list[type[MarketsBase]]] = [
         AlpacaBarsConfigurationTable,
         PortfolioRebalanceConfigurationTable,
-        PortfolioTable,
         AlpacaETFPortfolioConfigurationTable,
     ]
 

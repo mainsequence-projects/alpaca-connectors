@@ -41,78 +41,116 @@ def require_asset_universe_links(universe_uid: uuid.UUID | str) -> tuple[Any, An
     return universe, source, category
 
 
-def get_asset_universe_view(universe_uid: uuid.UUID | str) -> dict[str, Any] | None:
-    """Return one Universe and its linked category without loading every member Asset."""
+def _universe_rows(universe_uid: uuid.UUID | str | None = None) -> list[dict[str, Any]]:
+    """Registered universes joined with their sources: one query of this project's tables."""
     from msm.api.base import operation_result_rows
-    from msm.models import AssetCategoryMembershipTable, AssetCategoryTable
     from msm.repositories.base import compile_markets_statement, execute_markets_operation
-    from sqlalchemy import func, select
+    from sqlalchemy import select
 
     from alpaca_connectors.runtime import start_markets_engine
     from alpaca_connectors.universes.sources import UniverseSourceTable
 
     runtime = start_markets_engine()
-    statement = (
-        select(
-            AssetUniverseTable.uid.label("uid"),
-            AssetUniverseTable.source_uid.label("source_uid"),
-            AssetUniverseTable.asset_category_uid.label("asset_category_uid"),
-            AssetUniverseTable.is_active.label("is_active"),
-            AssetUniverseTable.created_at.label("created_at"),
-            AssetUniverseTable.updated_at.label("updated_at"),
-            UniverseSourceTable.symbol.label("symbol"),
-            UniverseSourceTable.source_url.label("source_url"),
-            AssetCategoryTable.unique_identifier.label("category_unique_identifier"),
-            AssetCategoryTable.display_name.label("display_name"),
-            AssetCategoryTable.description.label("description"),
-            func.count(AssetCategoryMembershipTable.asset_uid).label("asset_count"),
+    statement = select(
+        AssetUniverseTable.uid.label("uid"),
+        AssetUniverseTable.source_uid.label("source_uid"),
+        AssetUniverseTable.asset_category_uid.label("asset_category_uid"),
+        AssetUniverseTable.is_active.label("is_active"),
+        AssetUniverseTable.created_at.label("created_at"),
+        AssetUniverseTable.updated_at.label("updated_at"),
+        UniverseSourceTable.name.label("source_name"),
+        UniverseSourceTable.symbol.label("symbol"),
+        UniverseSourceTable.source_url.label("source_url"),
+    ).join(UniverseSourceTable, AssetUniverseTable.source_uid == UniverseSourceTable.uid)
+    if universe_uid is not None:
+        statement = statement.where(AssetUniverseTable.uid == uuid.UUID(str(universe_uid)))
+    operation = compile_markets_statement(statement, context=runtime.context, operation="select")
+    return operation_result_rows(execute_markets_operation(operation, context=runtime.context))
+
+
+def _categories_by_uid(category_uids: list[str]) -> dict[str, Any]:
+    from msm.api.assets import AssetCategory
+
+    from alpaca_connectors.markets_api import read_in_batches
+
+    return {
+        str(category.uid): category
+        for category in read_in_batches(
+            lambda batch: AssetCategory.filter(uid__in=batch, limit=len(batch)), category_uids
         )
-        .select_from(AssetUniverseTable)
-        .join(UniverseSourceTable, AssetUniverseTable.source_uid == UniverseSourceTable.uid)
-        .join(
-            AssetCategoryTable,
-            AssetUniverseTable.asset_category_uid == AssetCategoryTable.uid,
-        )
-        .outerjoin(
-            AssetCategoryMembershipTable,
-            AssetCategoryMembershipTable.category_uid == AssetCategoryTable.uid,
-        )
-        .where(AssetUniverseTable.uid == uuid.UUID(str(universe_uid)))
-        .group_by(
-            AssetUniverseTable.uid,
-            UniverseSourceTable.symbol,
-            UniverseSourceTable.source_url,
-            AssetCategoryTable.uid,
-        )
+    }
+
+
+def _member_counts(category_uids: list[str]) -> dict[str, int]:
+    """Membership count per category, from the categories' memberships read in pages.
+
+    Markets has no grouped membership count, so this reads the memberships of these categories
+    (one ``count`` and one ``filter`` per 500 memberships) and counts them here.
+    """
+    from msm.api.assets import AssetCategoryMembership
+
+    from alpaca_connectors.markets_api import read_all_pages
+
+    if not category_uids:
+        return {}
+    total = AssetCategoryMembership.count(category_uid__in=category_uids)
+    rows = read_all_pages(
+        lambda limit, offset: AssetCategoryMembership.filter(
+            category_uid__in=category_uids,
+            order_by=["category_uid", "asset_uid"],
+            limit=limit,
+            offset=offset,
+        ),
+        total,
     )
-    operation = compile_markets_statement(
-        statement,
-        context=runtime.context,
-        operation="select",
-    )
-    rows = operation_result_rows(execute_markets_operation(operation, context=runtime.context))
-    if not rows:
-        return None
-    row = rows[0]
+    counts = dict.fromkeys(category_uids, 0)
+    for row in rows:
+        counts[str(row.category_uid)] = counts.get(str(row.category_uid), 0) + 1
+    return counts
+
+
+def _universe_view(row: dict[str, Any], category: Any | None, asset_count: int) -> dict[str, Any]:
+    category_uid = str(row["asset_category_uid"])
+    display_name = getattr(category, "display_name", None)
+    description = getattr(category, "description", None)
     return {
         "uid": str(row["uid"]),
         "source_uid": str(row["source_uid"]),
-        "asset_category_uid": str(row["asset_category_uid"]),
-        "display_name": row["display_name"],
+        "asset_category_uid": category_uid,
+        "display_name": display_name,
         "symbol": row["symbol"],
         "source_url": row["source_url"],
-        "description": row.get("description"),
+        "description": description,
         "is_active": bool(row["is_active"]),
-        "asset_count": int(row.get("asset_count", 0)),
+        "asset_count": int(asset_count),
         "asset_category": {
-            "uid": str(row["asset_category_uid"]),
-            "unique_identifier": row["category_unique_identifier"],
-            "display_name": row["display_name"],
-            "description": row.get("description"),
+            "uid": category_uid,
+            "unique_identifier": getattr(category, "unique_identifier", None),
+            "display_name": display_name,
+            "description": description,
         },
         "created_at": row.get("created_at"),
         "updated_at": row.get("updated_at"),
     }
+
+
+def get_asset_universe_view(universe_uid: uuid.UUID | str) -> dict[str, Any] | None:
+    """Return one Universe and its linked category without loading every member Asset.
+
+    The universe and its source come from this project's tables; the category and its member
+    count from Markets (ms-markets ADR 0047).
+    """
+    from msm.api.assets import AssetCategory, AssetCategoryMembership
+
+    rows = _universe_rows(universe_uid)
+    if not rows:
+        return None
+    row = rows[0]
+    category = AssetCategory.get_by_uid(row["asset_category_uid"])
+    if category is None:
+        return None
+    count = AssetCategoryMembership.count(category_uid=str(row["asset_category_uid"]))
+    return _universe_view(row, category, count)
 
 
 def list_asset_universes(
@@ -122,106 +160,51 @@ def list_asset_universes(
     search: str | None = None,
     ordering: str = "display_name",
 ) -> tuple[list[dict[str, Any]], int]:
-    """List registered universes by their own UID, enriched from source/category rows."""
-    from msm.api.base import operation_result_rows
-    from msm.bootstrap import resolve_runtime
-    from msm.models.assets.categories import (
-        AssetCategoryMembershipTable,
-        AssetCategoryTable,
-    )
-    from msm.repositories.base import compile_markets_statement, execute_markets_operation
-    from sqlalchemy import func, or_, select
+    """List registered universes by their own UID, enriched from source/category rows.
 
-    from alpaca_connectors.runtime import start_markets_engine
-    from alpaca_connectors.universes.sources import UniverseSourceTable
-
-    start_markets_engine()
-    runtime = resolve_runtime(
-        models=[
-            UniverseSourceTable,
-            AssetCategoryTable,
-            AssetCategoryMembershipTable,
-            AssetUniverseTable,
-        ],
-        row_model_name="AssetUniverse",
-    )
-    statement = (
-        select(
-            AssetUniverseTable.uid.label("uid"),
-            AssetUniverseTable.source_uid.label("source_uid"),
-            AssetUniverseTable.asset_category_uid.label("asset_category_uid"),
-            AssetUniverseTable.is_active.label("is_active"),
-            AssetUniverseTable.created_at.label("created_at"),
-            AssetUniverseTable.updated_at.label("updated_at"),
-            UniverseSourceTable.symbol.label("symbol"),
-            UniverseSourceTable.source_url.label("source_url"),
-            AssetCategoryTable.display_name.label("display_name"),
-            AssetCategoryTable.description.label("description"),
-            func.count(AssetCategoryMembershipTable.asset_uid).label("asset_count"),
-        )
-        .join(UniverseSourceTable, AssetUniverseTable.source_uid == UniverseSourceTable.uid)
-        .join(
-            AssetCategoryTable,
-            AssetUniverseTable.asset_category_uid == AssetCategoryTable.uid,
-        )
-        .outerjoin(
-            AssetCategoryMembershipTable,
-            AssetCategoryMembershipTable.category_uid == AssetCategoryTable.uid,
-        )
-    )
-    if search:
-        pattern = f"%{search.strip()}%"
-        statement = statement.where(
-            or_(
-                UniverseSourceTable.name.ilike(pattern),
-                UniverseSourceTable.symbol.ilike(pattern),
-                AssetCategoryTable.display_name.ilike(pattern),
-            )
-        )
-    statement = statement.group_by(
-        AssetUniverseTable.uid,
-        UniverseSourceTable.symbol,
-        UniverseSourceTable.source_url,
-        AssetCategoryTable.uid,
-    )
-    count_statement = select(func.count().label("count")).select_from(statement.subquery())
+    The universes and sources are this project's tables (one universe per ETF source, so the
+    set is small); their categories are read from Markets in one batch, so search and ordering
+    on the category's display name happen here. Member counts are read for the page only.
+    """
     descending = ordering.startswith("-")
     ordering_key = ordering.removeprefix("-")
-    ordering_columns = {
-        "display_name": AssetCategoryTable.display_name,
-        "symbol": UniverseSourceTable.symbol,
-        "updated_at": AssetUniverseTable.updated_at,
-    }
-    if ordering_key not in ordering_columns:
+    if ordering_key not in {"display_name", "symbol", "updated_at"}:
         raise ValueError(f"Unsupported universe ordering {ordering!r}.")
-    ordering_column = ordering_columns[ordering_key]
-    ordering_expression = ordering_column.desc() if descending else ordering_column.asc()
-    statement = statement.order_by(ordering_expression, AssetUniverseTable.uid.asc())
-    page_operation = compile_markets_statement(
-        statement.limit(limit).offset(offset),
-        context=runtime.context,
-        operation="select",
-    )
-    count_operation = compile_markets_statement(
-        count_statement,
-        context=runtime.context,
-        operation="select",
-    )
-    rows = operation_result_rows(execute_markets_operation(page_operation, context=runtime.context))
-    count_rows = operation_result_rows(
-        execute_markets_operation(count_operation, context=runtime.context)
-    )
-    items = [
-        {
-            **row,
-            "uid": str(row["uid"]),
-            "source_uid": str(row["source_uid"]),
-            "asset_category_uid": str(row["asset_category_uid"]),
-            "asset_count": int(row.get("asset_count", 0)),
-        }
-        for row in rows
-    ]
-    total = int(count_rows[0].get("count", 0)) if count_rows else 0
+    rows = _universe_rows()
+    categories = _categories_by_uid([str(row["asset_category_uid"]) for row in rows])
+    # A universe whose category no longer exists is not listed, as the inner join did.
+    rows = [row for row in rows if str(row["asset_category_uid"]) in categories]
+    if search:
+        needle = search.strip().casefold()
+        rows = [
+            row
+            for row in rows
+            if any(
+                needle in str(value or "").casefold()
+                for value in (
+                    row.get("source_name"),
+                    row.get("symbol"),
+                    categories[str(row["asset_category_uid"])].display_name,
+                )
+            )
+        ]
+
+    def sort_value(row: dict[str, Any]) -> Any:
+        if ordering_key == "display_name":
+            return str(categories[str(row["asset_category_uid"])].display_name or "")
+        return row.get(ordering_key) or ""
+
+    rows.sort(key=lambda row: str(row["uid"]))
+    rows.sort(key=sort_value, reverse=descending)
+    total = len(rows)
+    page = rows[offset : offset + limit]
+    counts = _member_counts([str(row["asset_category_uid"]) for row in page])
+    items = []
+    for row in page:
+        category_uid = str(row["asset_category_uid"])
+        view = _universe_view(row, categories[category_uid], counts.get(category_uid, 0))
+        view.pop("asset_category")
+        items.append(view)
     return items, total
 
 
@@ -332,17 +315,11 @@ def update_asset_universe(
 def delete_asset_universe(universe_uid: uuid.UUID | str) -> dict[str, Any]:
     """Delete one registered universe and its materialization, retaining its source."""
     from msm.api.assets import AssetCategory
-    from msm.models import AssetCategoryMembershipTable
-    from msm.repositories.asset_categories import (
-        build_delete_asset_category_memberships_for_category_operation,
-    )
-    from msm.repositories.base import execute_markets_operation
 
     from alpaca_connectors.market_data.configurations import bar_configurations_for_universe
     from alpaca_connectors.operations.signal_job_configurations import (
         signal_job_configurations_for_universe,
     )
-    from alpaca_connectors.runtime import start_markets_engine
 
     universe = get_asset_universe_view(universe_uid)
     if universe is None:
@@ -369,12 +346,9 @@ def delete_asset_universe(universe_uid: uuid.UUID | str) -> dict[str, Any]:
         )
 
     category_uid = universe["asset_category_uid"]
-    runtime = start_markets_engine()
-    delete_memberships = build_delete_asset_category_memberships_for_category_operation(
-        runtime.context,
-        category_uid=category_uid,
-    )
-    execute_markets_operation(delete_memberships, context=runtime.context)
+    # Empty the category's memberships through Markets, then delete the registration and the
+    # category it owns (write-policy resource ``asset-category``).
+    AssetCategory.replace_memberships(category_uid=category_uid, asset_uids=[])
     AssetUniverse.delete(universe_uid)
     AssetCategory.delete(category_uid)
     return {

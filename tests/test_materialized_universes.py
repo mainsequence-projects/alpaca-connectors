@@ -118,48 +118,90 @@ def test_creation_persists_distinct_universe_source_and_category_uids_without_me
     )
 
 
-def test_list_query_compiles_governed_page_and_count_operations() -> None:
-    page_row = {
-        "uid": "universe-uid",
-        "source_uid": "source-uid",
-        "asset_category_uid": "category-uid",
-        "is_active": True,
-        "created_at": None,
-        "updated_at": None,
-        "symbol": "IVV",
-        "source_url": "https://example.com/ivv",
-        "display_name": "IVV holdings",
-        "description": None,
-        "asset_count": 1,
-    }
+def _category(uid, name: str, identifier: str = "HOLDINGS__X"):
+    return SimpleNamespace(
+        uid=uid, unique_identifier=identifier, display_name=name, description=None
+    )
+
+
+def test_list_reads_own_tables_once_and_categories_and_counts_in_batches() -> None:
+    from msm.api.assets import AssetCategory, AssetCategoryMembership
+
+    def own_row(uid: str, symbol: str, category: str) -> dict:
+        return {
+            "uid": uid,
+            "source_uid": f"source-{symbol}",
+            "asset_category_uid": category,
+            "is_active": True,
+            "created_at": None,
+            "updated_at": None,
+            "source_name": f"{symbol} source",
+            "symbol": symbol,
+            "source_url": f"https://example.com/{symbol}",
+        }
+
+    rows = [own_row("u1", "SPY", "c1"), own_row("u2", "IVV", "c2"), own_row("u3", "QQQ", "c3")]
+    categories = [_category("c1", "SPY holdings"), _category("c2", "IVV holdings")]
+    calls: list[tuple[str, dict]] = []
     with (
-        patch("alpaca_connectors.runtime.start_markets_engine"),
         patch(
-            "msm.bootstrap.resolve_runtime",
+            "alpaca_connectors.runtime.start_markets_engine",
             return_value=SimpleNamespace(context=object()),
         ),
         patch(
-            "msm.repositories.base.compile_markets_statement",
-            side_effect=["page-operation", "count-operation"],
+            "msm.repositories.base.compile_markets_statement", return_value="universes-operation"
         ) as compile_statement,
-        patch("msm.repositories.base.execute_markets_operation", return_value={}),
-        patch(
-            "msm.api.base.operation_result_rows",
-            side_effect=[[page_row], [{"count": 1}]],
+        patch("msm.repositories.base.execute_markets_operation", return_value={"rows": rows}),
+        patch.object(
+            AssetCategory,
+            "filter",
+            classmethod(lambda cls, **kw: calls.append(("categories", kw)) or categories),
+        ),
+        patch.object(
+            AssetCategoryMembership,
+            "count",
+            classmethod(lambda cls, **kw: calls.append(("count", kw)) or 3),
+        ),
+        patch.object(
+            AssetCategoryMembership,
+            "filter",
+            classmethod(
+                lambda cls, **kw: (
+                    calls.append(("members", kw))
+                    or [SimpleNamespace(category_uid=value) for value in ("c2", "c2", "c1")]
+                )
+            ),
         ),
     ):
-        items, total = list_asset_universes()
+        items, total = list_asset_universes(search="holdings", limit=1, offset=0)
 
-    assert items == [page_row]
-    assert total == 1
-    assert compile_statement.call_count == 2
-    assert all(call.kwargs["operation"] == "select" for call in compile_statement.call_args_list)
+    # The universe whose category is gone is not listed; the page is ordered by display name.
+    assert total == 2
+    assert [(item["uid"], item["display_name"], item["asset_count"]) for item in items] == [
+        ("u2", "IVV holdings", 2)
+    ]
+    compile_statement.assert_called_once()
+    assert calls == [
+        ("categories", {"uid__in": ["c1", "c2", "c3"], "limit": 3}),
+        ("count", {"category_uid__in": ["c2"]}),
+        (
+            "members",
+            {
+                "category_uid__in": ["c2"],
+                "order_by": ["category_uid", "asset_uid"],
+                "limit": 500,
+                "offset": 0,
+            },
+        ),
+    ]
 
 
 def test_universe_detail_returns_linked_category_without_loading_member_assets() -> None:
     universe_uid = uuid.UUID("33333333-3333-4333-8333-333333333333")
     source_uid = uuid.UUID("11111111-1111-4111-8111-111111111111")
     category_uid = uuid.UUID("22222222-2222-4222-8222-222222222222")
+    from msm.api.assets import AssetCategory, AssetCategoryMembership
+
     row = {
         "uid": universe_uid,
         "source_uid": source_uid,
@@ -167,18 +209,23 @@ def test_universe_detail_returns_linked_category_without_loading_member_assets()
         "is_active": True,
         "created_at": None,
         "updated_at": None,
+        "source_name": "IVV",
         "symbol": "IVV",
         "source_url": "https://example.com/ivv",
-        "category_unique_identifier": "HOLDINGS__IVV",
-        "display_name": "IVV holdings",
-        "description": "Configured holdings universe for ETF IVV.",
-        "asset_count": 503,
     }
+    category = SimpleNamespace(
+        uid=category_uid,
+        unique_identifier="HOLDINGS__IVV",
+        display_name="IVV holdings",
+        description="Configured holdings universe for ETF IVV.",
+    )
     with (
         patch(
             "alpaca_connectors.runtime.start_markets_engine",
             return_value=SimpleNamespace(context=object()),
         ),
+        patch.object(AssetCategory, "get_by_uid", classmethod(lambda cls, uid: category)),
+        patch.object(AssetCategoryMembership, "count", classmethod(lambda cls, **kw: 503)),
         patch(
             "msm.repositories.base.compile_markets_statement",
             return_value="detail-operation",

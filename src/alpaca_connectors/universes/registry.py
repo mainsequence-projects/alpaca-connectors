@@ -112,9 +112,9 @@ class AssetUniverse(MarketsMetaTableRow):
     model_config = ConfigDict(extra="ignore", frozen=True)
 
     __table__: ClassVar[type[AssetUniverseTable]] = AssetUniverseTable
+    # Own tables only; the AssetCategory foreign key is a reference (ms-markets ADR 0047).
     __required_tables__: ClassVar[list[type[Any]]] = [
         UniverseSourceTable,
-        AssetCategoryTable,
         AssetUniverseTable,
     ]
 
@@ -149,7 +149,7 @@ def create_asset_universe(
     }
     start_markets_engine()
     runtime = resolve_runtime(
-        models=[UniverseSourceTable, AssetCategoryTable, AssetUniverseTable],
+        models=[UniverseSourceTable, AssetUniverseTable],
         row_model_name="AssetUniverse",
     )
     result = create_model(runtime.context, model=AssetUniverseTable, values=values)
