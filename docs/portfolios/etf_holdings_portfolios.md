@@ -94,7 +94,7 @@ beyond the configured commission fee.
 at a real portfolio timestamp, while `valuation_maximum_staleness_seconds` bounds how old that
 selected price may be. The missing-price flag controls whether an incomplete valuation fails the
 run. Neither option invents daily timestamps, extends the calculation to the current time, or
-changes signal validity. `PortfoliosDataNode` writes only at valuation-source observations and
+changes signal validity. `PortfoliosUpdater` writes only at valuation-source observations and
 `PortfolioWeights` writes only at rebalance execution events. The connector passes every asset to
 `InterpolatedPrices` with the Rebalance Configuration's calendar identifier, so daily valuation
 observations follow the configured exchange session instead of the ms-markets `24/7` default used

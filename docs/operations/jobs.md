@@ -212,7 +212,7 @@ alpaca-connectors portfolio update <PORTFOLIO_CONFIGURATION_UID> --no-scheduled
 ```
 
 Execution reads an existing Signal observation, updates the configuration-derived persistent
-`InterpolatedPrices`, and calculates `PortfoliosDataNode` with dependency traversal disabled. It
+`InterpolatedPrices`, and calculates `PortfoliosUpdater` with dependency traversal disabled. It
 does not rerun Universe extraction, the Signal producer, or the raw Bars updater. Revision `0010`
 and the configuration-derived interpolation storage must be migrated before the first live run.
 See [ADR 0008](../adrs/0008_portfolio_configuration_and_job_ownership.md).

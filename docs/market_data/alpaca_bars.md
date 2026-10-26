@@ -10,7 +10,7 @@ Main modules:
 
 - `src/alpaca_connectors/market_data/storage.py`: migrated table contracts
 - `src/alpaca_connectors/market_data/configurations.py`: stored configuration and explicit-asset membership tables
-- `src/alpaca_connectors/market_data/alpaca_bars.py`: `AssetIndexedDataNode` producer
+- `src/alpaca_connectors/market_data/alpaca_bars.py`: `AssetIndexedUpdater` producer
 - `src/alpaca_connectors/market_data/services.py`: configuration resolution, dataset catalog, reads, and execution
 - `src/alpaca_connectors/cli/bars.py`: thin CLI adapter
 
