@@ -18,33 +18,27 @@ from __future__ import annotations
 from typing import Any
 
 from msm.settings import markets_configured_namespace
-from sqlalchemy import MetaData
-from sqlalchemy.orm import DeclarativeBase
 
 from alpaca_connectors.settings import PROJECT_NAMESPACE, PROJECT_NAMESPACE_SLUG
-from metatables import sqlalchemy_naming_convention
 
 INSTANCE_KEY = "main"
 INSTANCE_NAMESPACE = markets_configured_namespace(PROJECT_NAMESPACE)
 
 
-class AlpacaInstanceBase(DeclarativeBase):
-    """Declarative base of the instance tables, kept out of the Markets model registry.
-
-    The factories copy the Markets tables an instance references (Asset, Account, Portfolio,
-    SignalMetadata, Calendar, OrderManager) into this metadata, so the foreign keys resolve
-    without importing the Markets classes into the migration scope.
-    """
-
-    metadata = MetaData(naming_convention=sqlalchemy_naming_convention())
-
-
 def _instance_kwargs() -> dict[str, Any]:
+    """Factory arguments of every instance: this namespace and app segment, the Markets base.
+
+    No provider ``base``: ms-markets 3.0.0 attaches only ``MarketsBase`` models
+    (``msm.start_engine`` rejects an instance built on another declarative base), and its table
+    copy raises ``TypeError`` when a provider base already holds a referenced Markets table
+    (``metadata.tables.get(...) or ...`` tests a Table's truth value), which TradesStorage's three
+    Asset foreign keys always hit. In the Markets declarative metadata the references resolve;
+    this provider's migration copies the instance tables into its own metadata like any model.
+    """
     return {
         "instance_key": INSTANCE_KEY,
         "namespace": INSTANCE_NAMESPACE,
         "storage_app": PROJECT_NAMESPACE_SLUG,
-        "base": AlpacaInstanceBase,
     }
 
 
@@ -69,18 +63,9 @@ def _build() -> dict[str, type[Any]]:
         "portfolio_calendar_events": configured_portfolio_calendar_events_storage(
             **_instance_kwargs()
         ),
-        # ms-markets 3.0.0 `configured_time_index_instance` raises TypeError when `base` already
-        # holds a referenced Markets table (its `_copy_table` tests a Table's truth value), which
-        # every provider base hits for TradesStorage's three Asset foreign keys. Without `base`
-        # the instance table is built in the Markets declarative metadata, where the references
-        # resolve; this provider's migration copies it into its own metadata like any model.
-        "orders": configured_time_index_instance(OrdersStorage, **_execution_instance_kwargs()),
-        "trades": configured_time_index_instance(TradesStorage, **_execution_instance_kwargs()),
+        "orders": configured_time_index_instance(OrdersStorage, **_instance_kwargs()),
+        "trades": configured_time_index_instance(TradesStorage, **_instance_kwargs()),
     }
-
-
-def _execution_instance_kwargs() -> dict[str, Any]:
-    return {key: value for key, value in _instance_kwargs().items() if key != "base"}
 
 
 _INSTANCES = _build()
@@ -106,9 +91,7 @@ def portfolio_output_tables() -> dict[str, type[Any]]:
 def interpolated_prices_storage_kwargs() -> dict[str, Any]:
     """``InterpolatedPrices`` keyword arguments placing its table in this namespace.
 
-    No ``storage_base``: ms-markets 3.0.0 cannot copy the Asset reference into a provider base
-    that already holds it (see ``_execution_instance_kwargs``), and a process builds one
-    interpolated storage per bars profile.
+    No ``storage_base``, for the reasons ``_instance_kwargs`` gives.
     """
     return {"storage_namespace": INSTANCE_NAMESPACE, "storage_app": PROJECT_NAMESPACE_SLUG}
 
@@ -137,7 +120,6 @@ def execution_instance_models() -> list[type[Any]]:
 __all__ = [
     "INSTANCE_KEY",
     "INSTANCE_NAMESPACE",
-    "AlpacaInstanceBase",
     "AlpacaOrdersStorage",
     "AlpacaPortfolioCalendarEventsStorage",
     "AlpacaPortfolioRebalanceStateStorage",

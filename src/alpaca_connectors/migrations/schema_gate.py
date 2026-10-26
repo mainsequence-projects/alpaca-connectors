@@ -7,8 +7,13 @@ bootstraps a runtime or touches any table: when the database is behind the code 
 whose tables this image reads, the run ends cleanly without side effects and the next scheduled run
 does the work.
 
-Applied revisions are read from each provider's Alembic version MetaTable with an ordinary
-governed SELECT, so the gate needs read access only and never takes the migration lock.
+Applied revisions are read from this application's Alembic version MetaTable with an ordinary
+governed SELECT, so the gate needs read access only and never takes the migration lock. The
+ms-markets schema belongs to the Markets deployment, whose version table this application cannot
+read (it holds no role on ``mainsequence.markets``, ms-markets ADR 0047): the gate instead waits
+until the Markets API reports, on its ``/health`` route, at least the ms-markets release this image
+runs. The Markets deployment rolls its API out only after its ``migrate-markets`` Job applied that
+release's revisions.
 """
 
 from __future__ import annotations
@@ -21,9 +26,11 @@ from typing import Any
 # deployment's `migrate-markets` Job migrates the ms-markets schema.
 MIGRATION_PROVIDERS = ("alpaca_connectors.migrations:migration",)
 
-# Providers whose schema this image's code reads, in dependency order. The gate also waits for the
-# ms-markets deployment to reach the version this image pins.
-GATED_PROVIDERS = ("msm_migrations:migration", *MIGRATION_PROVIDERS)
+# Providers whose version table the gate reads: this application's own.
+GATED_PROVIDERS = MIGRATION_PROVIDERS
+
+# The gate's name for the Markets deployment, whose release it reads from the Markets API.
+MARKETS_API_GATE = "markets-api"
 
 
 @dataclass(frozen=True, slots=True)
@@ -123,13 +130,54 @@ def _is_behind(script: Any, applied: tuple[str, ...], code_head: str) -> bool:
     return True
 
 
+def markets_api_version() -> str:
+    """The ms-markets release the Environment's Markets API reports on ``GET /health``."""
+    from msm.client import MarketsClient
+
+    health = MarketsClient.from_environment().request("GET", "/health")
+    version = str((health or {}).get("version") or "").strip()
+    if not version:
+        raise RuntimeError("The Markets API health response carries no version.")
+    return version
+
+
+def required_markets_version() -> str:
+    """The ms-markets release this image runs."""
+    from importlib.metadata import version
+
+    return version("ms-markets")
+
+
+def markets_api_state(
+    *,
+    read_version: Callable[[], str] = markets_api_version,
+    required: Callable[[], str] = required_markets_version,
+) -> ProviderSchemaState:
+    """Whether the Markets deployment runs at least the ms-markets release of this image."""
+    from packaging.version import Version
+
+    deployed = read_version()
+    needed = required()
+    return ProviderSchemaState(
+        provider=MARKETS_API_GATE,
+        applied=(deployed,),
+        code_head=needed,
+        behind=Version(deployed).release < Version(needed).release,
+    )
+
+
 def schema_state(
     providers: Iterable[str] = GATED_PROVIDERS,
     *,
     read_applied: Callable[[Any], tuple[str, ...]] = applied_revisions,
+    read_markets: Callable[[], ProviderSchemaState] | None = markets_api_state,
 ) -> SchemaState:
-    """Compare each provider's applied revisions with the head revision this image ships."""
-    states = []
+    """Compare each provider's applied revisions with the head revision this image ships.
+
+    The Markets deployment comes first: ``read_markets`` (``None`` skips it) compares the
+    release the Markets API reports with the one this image runs.
+    """
+    states = [] if read_markets is None else [read_markets()]
     for reference in providers:
         migration = load_provider(reference)
         script = script_directory(migration)
@@ -171,12 +219,16 @@ def skip_if_schema_behind(
 
 __all__ = [
     "GATED_PROVIDERS",
+    "MARKETS_API_GATE",
     "MIGRATION_PROVIDERS",
     "ProviderSchemaState",
     "SchemaState",
     "applied_revisions",
     "code_head_revision",
     "load_provider",
+    "markets_api_state",
+    "markets_api_version",
+    "required_markets_version",
     "schema_state",
     "script_directory",
     "skip_if_schema_behind",

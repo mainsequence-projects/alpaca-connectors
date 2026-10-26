@@ -31,15 +31,16 @@ from .services import (
 
 
 def execution_runtime_models() -> list[type]:
-    """The ms-markets execution tables this capability reads and writes at runtime.
+    """The execution tables this capability writes at runtime: its orders and trades instances.
 
-    They belong to the ms-markets provider (``msm_migrations:migration``), like ``AccountTable``;
-    this project never migrates them, it attaches them to its runtime.
+    Orders and trades live in this application's ``OrdersTS`` / ``TradesTS`` instances
+    (``alpaca_connectors.instances``, ms-markets ADR 0047), migrated by its own provider. Order
+    managers are Markets registry rows reached through the Markets API, so no Markets table is
+    attached.
     """
-    from msm.models import OrderManagerTable
-    from msm.time_index.execution.storage import OrdersStorage, TradesStorage
+    from alpaca_connectors.instances import execution_instance_models
 
-    return [OrderManagerTable, OrdersStorage, TradesStorage]
+    return execution_instance_models()
 
 
 __all__ = [

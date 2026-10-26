@@ -11,12 +11,14 @@ import pytest
 
 from alpaca_connectors.migrations.schema_gate import (
     GATED_PROVIDERS,
+    MARKETS_API_GATE,
     MIGRATION_PROVIDERS,
     ProviderSchemaState,
     SchemaState,
     applied_revisions,
     code_head_revision,
     load_provider,
+    markets_api_state,
     schema_state,
     script_directory,
     skip_if_schema_behind,
@@ -32,9 +34,10 @@ def _heads() -> dict[str, str]:
 
 
 def test_job_migrates_only_this_application_but_the_gate_also_waits_for_ms_markets() -> None:
-    # ms-markets 2.1.1: only the ms-markets deployment migrates the ms-markets schema.
+    # ms-markets 2.1.1: only the ms-markets deployment migrates the ms-markets schema. This
+    # application reads no Markets table (ADR 0047), so it waits on the Markets API's release.
     assert MIGRATION_PROVIDERS == (APP,)
-    assert GATED_PROVIDERS == (MSM, APP)
+    assert GATED_PROVIDERS == (APP,)
 
 
 def test_each_provider_ships_one_head() -> None:
@@ -53,7 +56,7 @@ def test_each_provider_ships_one_head() -> None:
     ],
 )
 def test_provider_state_compares_database_with_code(applied, behind) -> None:
-    state = schema_state([APP], read_applied=lambda migration: applied)
+    state = schema_state([APP], read_applied=lambda migration: applied, read_markets=None)
 
     assert state.providers == (
         ProviderSchemaState(provider=APP, applied=applied, code_head="0021", behind=behind),
@@ -61,16 +64,36 @@ def test_provider_state_compares_database_with_code(applied, behind) -> None:
     assert state.behind is behind
 
 
-def test_a_behind_ms_markets_schema_blocks_the_run_even_when_ours_is_current() -> None:
+@pytest.mark.parametrize(
+    ("deployed", "behind"),
+    [("2.2.13", True), ("3.0.0", False), ("3.0.0.dev4", False), ("3.1.0", False)],
+)
+def test_a_behind_markets_deployment_blocks_the_run_even_when_ours_is_current(
+    deployed, behind
+) -> None:
     heads = _heads()
 
-    def read_applied(migration):
-        return () if migration.migration_provider_key.startswith("msm") else (heads[APP],)
+    state = schema_state(
+        read_applied=lambda migration: (heads[APP],),
+        read_markets=lambda: markets_api_state(
+            read_version=lambda: deployed, required=lambda: "3.0.0"
+        ),
+    )
 
-    state = schema_state(read_applied=read_applied)
+    assert [provider.provider for provider in state.providers] == [MARKETS_API_GATE, APP]
+    assert [provider.behind for provider in state.providers] == [behind, False]
+    assert state.behind is behind
 
-    assert [provider.behind for provider in state.providers] == [True, False]
-    assert state.behind
+
+def test_the_markets_release_is_read_from_the_markets_api_health_route() -> None:
+    from alpaca_connectors.migrations.schema_gate import markets_api_version
+
+    client = MagicMock()
+    client.request.return_value = {"status": "ok", "service": "markets", "version": "3.0.0"}
+    with patch("msm.client.MarketsClient.from_environment", return_value=client):
+        assert markets_api_version() == "3.0.0"
+
+    client.request.assert_called_once_with("GET", "/health")
 
 
 def test_behind_schema_skips_and_names_the_provider() -> None:
@@ -113,10 +136,7 @@ def test_unfinalized_version_table_means_no_applied_revision(registrations) -> N
     execute.assert_not_called()
 
 
-@pytest.mark.parametrize(
-    ("reference", "table"),
-    [(APP, "alpaca_connectors__alembic_version"), (MSM, "ms_markets__alembic_version")],
-)
+@pytest.mark.parametrize(("reference", "table"), [(APP, "alpaca_connectors__alembic_version")])
 def test_active_version_table_is_read_with_a_governed_select(reference, table) -> None:
     import metatables
 

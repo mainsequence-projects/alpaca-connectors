@@ -241,3 +241,12 @@ def keyring():
         yield ring
     finally:
         set_keyring_source(None)
+
+
+@pytest.fixture(autouse=True)
+def _restore_runtime_row_backend():
+    """Entry points select the remote Markets row backend process-wide; keep tests isolated."""
+    yield
+    from msm.api.remote import use_runtime_backend
+
+    use_runtime_backend()

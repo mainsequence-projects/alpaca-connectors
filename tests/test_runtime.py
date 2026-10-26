@@ -1,15 +1,33 @@
+from __future__ import annotations
+
+import pytest
 from msm.models.registration import resolve_markets_meta_table_models
 
-from alpaca_connectors.runtime import application_runtime_models, portfolio_runtime_models
+from alpaca_connectors.runtime import (
+    account_runtime_models,
+    application_runtime_models,
+    portfolio_runtime_models,
+)
 
 
-def test_portfolio_runtime_includes_project_foreign_key_dependencies() -> None:
-    models = resolve_markets_meta_table_models(portfolio_runtime_models())
-    table_names = [model.__table__.name for model in models]
-    application_tables = {
-        model.__table__.name
-        for model in resolve_markets_meta_table_models(application_runtime_models())
-    }
+@pytest.fixture
+def remote_backend():
+    """Select the remote row backend as every entrypoint does, then restore the runtime."""
+    from msm.api.remote import use_remote_backend, use_runtime_backend
+    from msm.client import LazyRemoteBackend
+
+    use_remote_backend(LazyRemoteBackend())
+    yield
+    use_runtime_backend()
+
+
+def _table_names(models) -> list[str]:
+    return [model.__table__.name for model in resolve_markets_meta_table_models(models)]
+
+
+def test_portfolio_runtime_includes_project_foreign_key_dependencies(remote_backend) -> None:
+    table_names = _table_names(portfolio_runtime_models())
+    application_tables = set(_table_names(application_runtime_models()))
 
     signal_configuration = "alpaca_connectors__etf_signal_job_configuration"
     bars_configuration = "alpaca_connectors__bars_configuration"
@@ -22,16 +40,22 @@ def test_portfolio_runtime_includes_project_foreign_key_dependencies() -> None:
     assert table_names.index(bars_configuration) < table_names.index(portfolio_configuration)
 
 
-def test_application_runtime_attaches_the_ms_markets_execution_ledger() -> None:
-    table_names = {
-        model.__table__.name
-        for model in resolve_markets_meta_table_models(application_runtime_models())
-    }
-    from msm.models import OrderManagerTable
-    from msm.time_index.execution.storage import OrdersStorage, TradesStorage
+def test_runtimes_attach_only_this_applications_tables(remote_backend) -> None:
+    """Markets tables are foreign-key targets by name only (ms-markets ADR 0047)."""
+    for models in (account_runtime_models(), portfolio_runtime_models()):
+        names = _table_names(models)
+        assert names, "the runtime attaches this application's tables"
+        assert all(name.startswith("alpaca_connectors__") for name in names), names
+
+
+def test_application_runtime_attaches_the_own_execution_ledger_and_portfolio_instances(
+    remote_backend,
+) -> None:
+    table_names = set(_table_names(application_runtime_models()))
 
     assert {
-        OrderManagerTable.__table__.name,
-        OrdersStorage.__table__.name,
-        TradesStorage.__table__.name,
+        "alpaca_connectors__ordersts__main",
+        "alpaca_connectors__tradests__main",
+        "alpaca_connectors__signalweightsts__main",
+        "alpaca_connectors__portfoliosts__main",
     } <= table_names
