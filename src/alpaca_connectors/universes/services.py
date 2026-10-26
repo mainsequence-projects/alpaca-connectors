@@ -322,6 +322,11 @@ def run_asset_universe(
         raise RuntimeError(
             f"Asset Universe {universe_uid!s} signal update returned no materialization result."
         )
+    # The observations live in this application's signal-weights instance; bind the signal to
+    # it in the Markets catalog (ms-markets ADR 0047).
+    from alpaca_connectors.portfolios.datasets import register_signal_dataset
+
+    register_signal_dataset(signal.signal_uid)
     return replace(
         result,
         signal_uid=signal.signal_uid,

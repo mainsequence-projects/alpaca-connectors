@@ -39,7 +39,7 @@ def test_job_migrates_only_this_application_but_the_gate_also_waits_for_ms_marke
 
 def test_each_provider_ships_one_head() -> None:
     heads = _heads()
-    assert heads[APP] == "0019"
+    assert heads[APP] == "0021"
     assert heads[MSM]
 
 
@@ -48,7 +48,7 @@ def test_each_provider_ships_one_head() -> None:
     [
         ((), True),  # never migrated
         (("0016",), True),  # this image's revision not applied yet
-        (("0019",), False),  # current
+        (("0021",), False),  # current
         (("0099_from_a_newer_release",), False),  # database ahead: older image still runs
     ],
 )
@@ -56,7 +56,7 @@ def test_provider_state_compares_database_with_code(applied, behind) -> None:
     state = schema_state([APP], read_applied=lambda migration: applied)
 
     assert state.providers == (
-        ProviderSchemaState(provider=APP, applied=applied, code_head="0019", behind=behind),
+        ProviderSchemaState(provider=APP, applied=applied, code_head="0021", behind=behind),
     )
     assert state.behind is behind
 

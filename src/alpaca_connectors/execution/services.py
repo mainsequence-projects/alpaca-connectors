@@ -112,12 +112,16 @@ class ExecutionLedger(Protocol):
     def write_trades(self, rows: list[dict[str, Any]]) -> None: ...
 
 
-def _run_execution_node(node_class: Any, rows: list[dict[str, Any]], label: str) -> None:
+def _run_execution_node(
+    node_class: Any, output_table: Any, rows: list[dict[str, Any]], label: str
+) -> None:
     if not rows:
         return
     import pandas as pd
 
-    node = node_class(config=node_class.default_config())
+    # The ledger rows land in this application's OrdersTS / TradesTS instances (ms-markets
+    # ADR 0047); the output table does not enter the update hash.
+    node = node_class(config=node_class.default_config(), output_table=output_table)
     node.set_frame(pd.DataFrame(rows))
     error, _ = node.run()
     if error:
@@ -125,7 +129,12 @@ def _run_execution_node(node_class: Any, rows: list[dict[str, Any]], label: str)
 
 
 class MarketsExecutionLedger:
-    """The real ledger: ``OrderManager`` rows and the ``OrdersTS`` / ``TradesTS`` DataNodes."""
+    """The real ledger: Markets ``OrderManager`` rows and this application's orders and trades.
+
+    Order managers are Markets registry rows written through the Markets API (write-policy
+    resource ``order-manager``); orders and trades are written by the ms-markets ``Orders`` and
+    ``Trades`` updaters into ``alpaca_connectors.instances`` tables.
+    """
 
     def get_batch(self, batch_id: str) -> Any | None:
         from msm.api.execution import OrderManager
@@ -175,12 +184,16 @@ class MarketsExecutionLedger:
     def write_orders(self, rows: list[dict[str, Any]]) -> None:
         from msm.time_index.execution import Orders
 
-        _run_execution_node(Orders, rows, "orders")
+        from alpaca_connectors.instances import AlpacaOrdersStorage
+
+        _run_execution_node(Orders, AlpacaOrdersStorage, rows, "orders")
 
     def write_trades(self, rows: list[dict[str, Any]]) -> None:
         from msm.time_index.execution import Trades
 
-        _run_execution_node(Trades, rows, "trades")
+        from alpaca_connectors.instances import AlpacaTradesStorage
+
+        _run_execution_node(Trades, AlpacaTradesStorage, rows, "trades")
 
 
 PriceReader = Callable[[Sequence[str]], Mapping[str, float]]

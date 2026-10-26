@@ -232,13 +232,16 @@ def build_alpaca_interpolated_prices(
         }
         for asset_identifier in sorted(set(asset_identifiers))
     ]
+    from alpaca_connectors.instances import interpolated_prices_storage_kwargs
+
     return InterpolatedPrices(
         interpolation_config=InterpolatedPricesConfig(
             source_time_index_meta_table_uid=source_time_index_meta_table_uid,
             asset_list=asset_scope,
             upsample_frequency_id=upsample_frequency_id,
             intraday_bar_interpolation_rule=intraday_bar_interpolation_rule,
-        )
+        ),
+        **interpolated_prices_storage_kwargs(),
     )
 
 
@@ -350,6 +353,11 @@ def build_alpaca_etf_tracking_portfolio(
         PortfoliosUpdater,
     )
 
+    from alpaca_connectors.instances import (
+        AlpacaPortfolioCalendarEventsStorage,
+        portfolio_output_tables,
+    )
+
     plan = plan_alpaca_etf_tracking_portfolio(config, start_engine=False)
     signal = build_alpaca_etf_holdings_signal(
         universe_uid=config.universe_uid,
@@ -369,7 +377,8 @@ def build_alpaca_etf_tracking_portfolio(
             calendar_identifier=str(calendar_row.unique_identifier),
             session_label="regular",
             event_types=("market_close",),
-        )
+        ),
+        output_table=AlpacaPortfolioCalendarEventsStorage,
     )
     portfolio_name = config.portfolio_name or f"Alpaca ETF Tracker {plan.universe.etf_ticker}"
     description = config.description or (
@@ -408,7 +417,9 @@ def build_alpaca_etf_tracking_portfolio(
         unique_identifier=plan.portfolio_unique_identifier,
         calendar_uid=calendar_row.uid,
     )
-    portfolio_node = PortfoliosUpdater(portfolio_configuration=portfolio_configuration)
+    portfolio_node = PortfoliosUpdater(
+        portfolio_configuration=portfolio_configuration, **portfolio_output_tables()
+    )
     portfolio_node.set_portfolio_configuration(
         portfolio_configuration,
         portfolio_description=description,

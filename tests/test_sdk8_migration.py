@@ -53,6 +53,7 @@ def test_migration_metadata_includes_fk_dependencies_but_manages_only_project_ta
         "ms_markets__index",
         "ms_markets__portfolio",
         "ms_markets__signalmetadata",
+        "ms_markets__ordermanager",
         *PROJECT_TABLE_NAMES,
     } == set(METADATA.tables)
     assert {model.__table__.name for model in migration.metatable_models} == PROJECT_TABLE_NAMES
@@ -78,6 +79,14 @@ def test_migration_metadata_includes_fk_dependencies_but_manages_only_project_ta
         "alpaca_connectors__etf_signal_job_configuration",
         "alpaca_connectors__portfolio_rebalance_configuration",
         "alpaca_connectors__universe_source",
+        # Contract instances of the Markets time series (ms-markets ADR 0047).
+        "alpaca_connectors__signalweightsts__main",
+        "alpaca_connectors__portfoliosts__main",
+        "alpaca_connectors__portfolioweightsts__main",
+        "alpaca_connectors__portfoliorebalancestatets__main",
+        "alpaca_connectors__portfoliocalendareventsts__main",
+        "alpaca_connectors__ordersts__main",
+        "alpaca_connectors__tradests__main",
     }
 
 

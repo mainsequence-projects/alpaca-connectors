@@ -37,15 +37,26 @@ def configured_alpaca_interpolated_prices_storage(
     upsample_frequency_id: str = UPSAMPLE_FREQUENCY_ID,
     intraday_bar_interpolation_rule: str = INTERPOLATION_RULE,
 ) -> type[Any]:
+    """The interpolated-price storage of one bars source, in this application's namespace.
+
+    ``alpaca_connectors__interpolated_prices__t_<suffix>`` in ``alpaca-connectors`` (ms-markets
+    ADR 0047); the suffix and identifier are the storage identity ms-markets derives from the
+    source and interpolation settings, as before.
+    """
     from msm_portfolios.time_index.prices.storage import (
         configured_interpolated_prices_storage,
     )
 
+    from alpaca_connectors.instances import interpolated_prices_storage_kwargs
+
+    placement = interpolated_prices_storage_kwargs()
     return configured_interpolated_prices_storage(
         source_time_index_meta_table_uid=str(source_time_index_meta_table_uid),
         source_cadence=str(source_cadence),
         upsample_frequency_id=str(upsample_frequency_id),
         intraday_bar_interpolation_rule=str(intraday_bar_interpolation_rule),
+        namespace=placement["storage_namespace"],
+        storage_app=placement["storage_app"],
     )
 
 

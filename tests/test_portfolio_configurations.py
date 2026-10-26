@@ -306,6 +306,9 @@ def test_execution_updates_each_released_stage_without_tree_walk() -> None:
         patch(
             "alpaca_connectors.portfolios.execution.update_portfolio_configuration_row"
         ) as update_row,
+        patch(
+            "alpaca_connectors.portfolios.datasets.register_portfolio_datasets"
+        ) as register_datasets,
     ):
         result = execute_portfolio_configuration(CONFIGURATION_UID)
 
@@ -333,4 +336,6 @@ def test_execution_updates_each_released_stage_without_tree_walk() -> None:
         CONFIGURATION_UID,
         values={"portfolio_uid": PORTFOLIO_UID},
     )
+    # The run registers and reconciles the portfolio's Markets catalog row.
+    register_datasets.assert_called_once_with(str(PORTFOLIO_UID))
     assert result.portfolio_uid == str(PORTFOLIO_UID)

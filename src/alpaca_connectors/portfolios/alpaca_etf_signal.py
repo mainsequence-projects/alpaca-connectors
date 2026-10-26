@@ -1,9 +1,10 @@
 """Universe-backed Alpaca ETF holdings signal.
 
 The signal producer is connector-owned because executing it needs both the durable
-``AssetUniverse`` configuration and a registered Alpaca account.  Its output uses the
-canonical ms-markets ``SignalWeightsStorage`` table; this module does not define another
-storage model.
+``AssetUniverse`` configuration and a registered Alpaca account.  Its output is this
+application's instance of the ms-markets ``SignalWeightsTS`` contract
+(``alpaca_connectors.instances.AlpacaSignalWeightsStorage``, ms-markets ADR 0047); the output
+table does not enter the update hash or the signal UID.
 """
 
 from __future__ import annotations
@@ -213,11 +214,14 @@ def build_alpaca_etf_holdings_signal(
     prepared_plan: Any | None = None,
 ) -> AlpacaETFHoldingsSignal:
     """Construct the serializable signal and optionally attach one prepared execution plan."""
+    from alpaca_connectors.instances import AlpacaSignalWeightsStorage
+
     signal = AlpacaETFHoldingsSignal.from_signal_configuration(
         AlpacaETFHoldingsSignalConfig(
             universe_uid=universe_uid,
             account_uid=account_uid,
-        )
+        ),
+        output_table=AlpacaSignalWeightsStorage,
     )
     if prepared_plan is not None:
         signal.set_prepared_universe_plan(prepared_plan)

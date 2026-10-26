@@ -558,6 +558,7 @@ def test_run_publishes_the_prepared_universe_through_the_signal() -> None:
             "alpaca_connectors.portfolios.alpaca_etf_signal.build_alpaca_etf_holdings_signal",
             return_value=signal,
         ) as build_signal,
+        patch("alpaca_connectors.portfolios.datasets.register_signal_dataset") as register_signal,
     ):
         result = run_asset_universe(
             "universe-uid",
@@ -576,6 +577,8 @@ def test_run_publishes_the_prepared_universe_through_the_signal() -> None:
         prepared_plan=plan,
     )
     signal.run.assert_called_once_with()
+    # The signal is bound to this application's signal-weights instance in the Markets catalog.
+    register_signal.assert_called_once_with("signal-uid")
     assert result.signal_uid == "signal-uid"
     assert result.signal_weight_row_count == 1
 

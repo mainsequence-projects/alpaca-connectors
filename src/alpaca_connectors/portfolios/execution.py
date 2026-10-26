@@ -184,6 +184,11 @@ def build_portfolio_graph(resolved: ResolvedPortfolioConfiguration) -> Portfolio
         PortfoliosUpdater,
     )
 
+    from alpaca_connectors.instances import (
+        AlpacaPortfolioCalendarEventsStorage,
+        portfolio_output_tables,
+    )
+
     configuration = resolved.configuration
     rebalance = resolved.rebalance_configuration
     if rebalance.strategy != "calendar_event_signal":
@@ -216,7 +221,8 @@ def build_portfolio_graph(resolved: ResolvedPortfolioConfiguration) -> Portfolio
             calendar_identifier=rebalance.calendar_identifier,
             session_label=rebalance.session_label,
             event_types=(rebalance.rebalance_event,),
-        )
+        ),
+        output_table=AlpacaPortfolioCalendarEventsStorage,
     )
     description = configuration.description or (
         "Analytical ETF portfolio using already-published observed holdings weights and "
@@ -271,9 +277,12 @@ def build_portfolio_graph(resolved: ResolvedPortfolioConfiguration) -> Portfolio
         unique_identifier=unique_identifier,
         calendar_uid=calendar_row.uid,
     )
+    # Values, weights and rebalance state land in this application's contract instances
+    # (ms-markets ADR 0047); output tables do not enter any update hash.
     portfolio_node = PortfoliosUpdater(
         portfolio_configuration=portfolio_configuration,
         portfolio_description=description,
+        **portfolio_output_tables(),
     )
     portfolio_node.target_portfolio = portfolio_row
     portfolio_node._explicit_portfolio_identifier = unique_identifier
@@ -330,6 +339,10 @@ def execute_portfolio_configuration(configuration_uid: Any) -> PortfolioExecutio
             resolved.configuration.uid,
             values={"portfolio_uid": uuid.UUID(portfolio_uid)},
         )
+    # Point the Markets dataset catalog at this application's instances and refresh its state.
+    from alpaca_connectors.portfolios.datasets import register_portfolio_datasets
+
+    register_portfolio_datasets(portfolio_uid)
     return PortfolioExecutionResult(
         resolved=resolved,
         portfolio_uid=portfolio_uid,

@@ -1,12 +1,20 @@
 from __future__ import annotations
 
-from msm.models import AccountGroupTable, AccountTable, CalendarTable, IndexTable, PortfolioTable
+from msm.models import (
+    AccountGroupTable,
+    AccountTable,
+    CalendarTable,
+    IndexTable,
+    OrderManagerTable,
+    PortfolioTable,
+)
 from msm.models.assets.categories import AssetCategoryTable
 from msm.models.assets.core import AssetTable
 from msm_portfolios.models import SignalMetadataTable
 
 from alpaca_connectors.account.alpaca_account_details import project_account_models
 from alpaca_connectors.assets.alpaca_asset_details import project_asset_models
+from alpaca_connectors.instances import project_instance_models
 from alpaca_connectors.market_data import project_configuration_models, project_storage_models
 from alpaca_connectors.operations import project_operation_models
 from alpaca_connectors.portfolios import project_portfolio_configuration_models
@@ -29,6 +37,8 @@ def all_project_metatable_models() -> list[type]:
         *project_configuration_models(),
         *project_operation_models(),
         *project_portfolio_configuration_models(),
+        # Contract instances of the Markets time series this application produces (ADR 0047).
+        *project_instance_models(),
     ]
 
 
@@ -46,9 +56,10 @@ def _include_project_tables(
 
 
 # SQLAlchemy must see the full foreign-key metadata closure to sort the project tables.
-# AssetTable, AccountTable, and AccountGroupTable are metadata-only dependencies: the
-# include-name hook excludes them from this provider's DDL and the provider model list excludes
-# them from catalog registration. Their schemas remain owned by the ms-markets provider.
+# The ms-markets tables below are metadata-only dependencies: the include-name hook excludes them
+# from this provider's DDL and the provider model list excludes them from catalog registration.
+# Their schemas remain owned by the ms-markets provider; the project tables reference them by
+# physical name and key column only.
 METADATA = metadata_for_models(
     [
         AssetTable,
@@ -59,6 +70,7 @@ METADATA = metadata_for_models(
         IndexTable,
         SignalMetadataTable,
         PortfolioTable,
+        OrderManagerTable,
         *all_project_metatable_models(),
     ]
 )
