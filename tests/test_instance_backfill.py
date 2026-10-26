@@ -23,14 +23,22 @@ OTHER_SIGNAL = "signal-other"
 class Markets:
     """Records the copies and catalog calls of one run."""
 
-    def __init__(self, *, missing: dict[tuple[str, str], int] | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        missing: dict[tuple[str, str], int] | None = None,
+        signals_without_metadata: tuple[str, ...] = (),
+    ) -> None:
         self.missing = missing or {}
+        self.signals_without_metadata = set(signals_without_metadata)
         self.calls: list[tuple[str, Any]] = []
+        self.reads: list[tuple[int, float]] = []
 
-    def copy(self, source, target, *, key_column, keys, dry_run=False, **kwargs):
+    def copy(self, source, target, *, key_column, keys, dry_run, keys_per_read, deadline_seconds):
         from msm.storage_copies import KeyCopy, TimeIndexCopyReport
 
         target_name = target.__table__.name
+        self.reads.append((keys_per_read, deadline_seconds))
         self.calls.append(("copy", (source.__table__.name, target_name, key_column, list(keys))))
         return TimeIndexCopyReport(
             source_table=source.__table__.name,
@@ -51,6 +59,14 @@ class Markets:
 
     def catalog(self, name):
         return classmethod(lambda cls, *args, **kwargs: self.calls.append((name, args or kwargs)))
+
+    def signal_metadata(self, cls=None, *, signal_uid__in, limit):
+        """The moves refuse a signal without a SignalMetadata row before any catalog call."""
+        return [
+            SimpleNamespace(signal_uid=uid)
+            for uid in signal_uid__in
+            if uid not in self.signals_without_metadata
+        ][:limit]
 
 
 @pytest.fixture
@@ -73,6 +89,11 @@ def markets(monkeypatch):
         )
         for name in ("register", "register_signal", "unregister", "unregister_signal"):
             monkeypatch.setattr(PortfolioDatasets, name, fake.catalog(name))
+        from msm_portfolios.api.market_metadata import SignalMetadata
+
+        monkeypatch.setattr(
+            SignalMetadata, "filter", classmethod(lambda cls, **kw: fake.signal_metadata(**kw))
+        )
         monkeypatch.setattr(
             instance_backfill,
             "_scope",
@@ -87,7 +108,7 @@ def markets(monkeypatch):
                 "account_identifiers": ["PA1__ALPACA_PAPER"],
             },
         )
-        monkeypatch.setattr(instance_backfill, "_interpolated_moves", lambda: [])
+        monkeypatch.setattr(instance_backfill, "_interpolated_moves", lambda **reads: [])
         return fake
 
     return install
@@ -221,13 +242,46 @@ def test_rollback_copies_the_instances_back_and_unregisters_portfolios_first(mar
         [CURRENT_SIGNAL],
     )
     assert all(target.startswith("ms_markets__") for _, target, _, _ in copies)
-    assert _catalog(fake) == ["unregister", "unregister_signal", "unregister_signal"]
+    # The portfolio's catalog row goes without touching signal bindings; each move then unbinds
+    # only the signals it moved: the portfolio its current signal, the signal move the other.
+    catalog = [(kind, call) for kind, call in fake.calls if kind != "copy"]
+    assert catalog == [
+        ("unregister", {"portfolio_uid": PORTFOLIO_UID, "unbind_signal": False}),
+        ("unregister_signal", {"signal_uid": CURRENT_SIGNAL}),
+        ("unregister_signal", {"signal_uid": OTHER_SIGNAL}),
+    ]
+
+
+def test_a_signal_without_metadata_refuses_the_move_before_any_catalog_call(markets) -> None:
+    fake = markets(signals_without_metadata=(OTHER_SIGNAL,))
+
+    report = instance_backfill.backfill_instances(execute=True, register_catalog=True)
+
+    statuses = {result["kind"]: result["status"] for result in report["results"]}
+    assert statuses["signal"] == "failed"
+    assert "SignalMetadata" in next(
+        result["detail"] for result in report["results"] if result["kind"] == "signal"
+    )
+    # The portfolio, whose current signal has metadata, still registers.
+    assert _catalog(fake) == ["register"]
+
+
+def test_batch_size_sets_the_keys_read_per_request(markets) -> None:
+    fake = markets()
+
+    instance_backfill.backfill_instances(batch_size=7)
+
+    assert {keys_per_read for keys_per_read, _ in fake.reads} == {7}
 
 
 def test_msm_series_callable_returns_the_registering_moves(markets) -> None:
     markets()
 
     moves = instance_backfill.series_moves()
+    # `msm series rollback` passes rollback=; the moves are the same in both directions.
+    assert [type(move) for move in instance_backfill.series_moves(rollback=True)] == [
+        type(move) for move in moves
+    ]
 
     assert [type(move).__name__ for move in moves] == [
         "SignalSeriesMove",

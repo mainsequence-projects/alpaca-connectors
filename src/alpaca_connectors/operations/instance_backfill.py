@@ -93,7 +93,7 @@ def _scope() -> dict[str, Any]:
     }
 
 
-def _interpolated_moves() -> list[Any]:
+def _interpolated_moves(**reads: Any) -> list[Any]:
     """Revision 0011's Markets-namespace interpolated tables into their namespaced successors.
 
     The keys are the assets of the bars table each storage interpolates: an interpolated row
@@ -131,17 +131,20 @@ def _interpolated_moves() -> list[Any]:
                 "asset_identifier",
                 assets,
                 label=f"interpolated_prices[{spec.frequency_id}/{spec.feed}/{spec.adjustment}]",
+                **reads,
             )
         )
     return moves
 
 
-def build_series_moves(*, register_catalog: bool) -> list[Any]:
+def build_series_moves(*, register_catalog: bool, keys_per_read: int | None = None) -> list[Any]:
     """Every move of this application's history, with its scope resolved.
 
     ``register_catalog`` writes the Markets catalog rows and signal bindings after a complete
     move (and removes them on a rollback); it needs the Markets workload's ``data_viewer`` on the
-    portfolio and signal instances.
+    portfolio and signal instances, and every moved signal needs a ``SignalMetadata`` row (the
+    moves refuse before any catalog call otherwise). ``keys_per_read`` bounds the keys one copy
+    request reads (ms-markets' default when ``None``).
     """
     from msm.storage_copies import TableSeriesMove
     from msm.time_index.execution.storage import OrdersStorage, TradesStorage
@@ -154,6 +157,7 @@ def build_series_moves(*, register_catalog: bool) -> list[Any]:
 
     from alpaca_connectors import instances
 
+    reads: dict[str, Any] = {} if keys_per_read is None else {"keys_per_read": keys_per_read}
     scope = _scope()
     portfolio_tables = PortfolioSeriesTables(
         values=instances.AlpacaPortfoliosStorage,
@@ -169,6 +173,7 @@ def build_series_moves(*, register_catalog: bool) -> list[Any]:
                 instances.AlpacaSignalWeightsStorage,
                 label="signal configurations",
                 register=register_catalog,
+                **reads,
             )
         )
     moves.extend(
@@ -178,6 +183,7 @@ def build_series_moves(*, register_catalog: bool) -> list[Any]:
             portfolio_uid=portfolio.uid,
             with_current_signal=True,
             register=register_catalog,
+            **reads,
         )
         for portfolio in scope["portfolios"]
     )
@@ -189,6 +195,7 @@ def build_series_moves(*, register_catalog: bool) -> list[Any]:
                 "calendar_identifier",
                 scope["calendar_identifiers"],
                 label="calendar_events",
+                **reads,
             )
         )
     if scope["account_identifiers"]:
@@ -199,6 +206,7 @@ def build_series_moves(*, register_catalog: bool) -> list[Any]:
                 "account_identifier",
                 scope["account_identifiers"],
                 label="orders",
+                **reads,
             )
         )
         moves.append(
@@ -208,39 +216,57 @@ def build_series_moves(*, register_catalog: bool) -> list[Any]:
                 "account_identifier",
                 scope["account_identifiers"],
                 label="trades",
+                **reads,
             )
         )
-    moves.extend(_interpolated_moves())
+    moves.extend(_interpolated_moves(**reads))
     return moves
 
 
-def series_moves() -> list[Any]:
+def series_moves(rollback: bool = False) -> list[Any]:
     """``msm series move|rollback alpaca_connectors.operations.instance_backfill:series_moves``.
 
-    The same moves as ``alpaca-connectors instances backfill --register-catalog``.
+    The same moves as ``alpaca-connectors instances backfill --register-catalog``; ``msm series``
+    passes ``rollback``, and the moves are the same in both directions (``run_series_moves``
+    reverses them).
     """
+    del rollback
     return build_series_moves(register_catalog=True)
 
 
-def backfill_instances(*, execute: bool = False, register_catalog: bool = False) -> dict[str, Any]:
-    """Move this application's history into its instances; a dry run only counts."""
+def backfill_instances(
+    *,
+    execute: bool = False,
+    register_catalog: bool = False,
+    batch_size: int | None = None,
+) -> dict[str, Any]:
+    """Move this application's history into its instances; a dry run only counts.
+
+    ``batch_size`` is the number of keys one copy request reads (``keys_per_read``).
+    """
     from msm.storage_copies import run_series_moves
 
-    moves = build_series_moves(register_catalog=register_catalog)
+    moves = build_series_moves(register_catalog=register_catalog, keys_per_read=batch_size)
     return run_series_moves(moves, dry_run=not execute).summary()
 
 
-def rollback_instances(*, execute: bool = False, register_catalog: bool = True) -> dict[str, Any]:
+def rollback_instances(
+    *,
+    execute: bool = False,
+    register_catalog: bool = True,
+    batch_size: int | None = None,
+) -> dict[str, Any]:
     """Copy the rows the instances gained back into the shared tables and unregister them.
 
     Runs before the Markets roles are revoked (it writes the shared tables). The catalog rows
-    and signal bindings are removed unless ``register_catalog`` is false. This release's updaters
+    are removed (``unregister`` with ``unbind_signal=False``) and each move unbinds only the
+    signals it moved, unless ``register_catalog`` is false. This release's updaters
     keep writing the instances, and each run registers its catalog row again, so a rollback is
     followed by deploying the previous release before the next run.
     """
     from msm.storage_copies import run_series_moves
 
-    moves = build_series_moves(register_catalog=register_catalog)
+    moves = build_series_moves(register_catalog=register_catalog, keys_per_read=batch_size)
     return run_series_moves(moves, rollback=True, dry_run=not execute).summary()
 
 

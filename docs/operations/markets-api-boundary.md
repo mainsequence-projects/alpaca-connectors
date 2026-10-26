@@ -140,8 +140,10 @@ Signal observations are live ETF extractions, so they are copied, never recomput
 writes only the rows the instance lacks (by the full index) through the ms-markets
 `TimeIndexRowsCopy` updater, then counts both sides per key. A move whose keys are all complete is
 `moved`; with `--register-catalog` it then binds its signals (`register_signal`) and writes its
-portfolio's catalog row last (`register`), which needs step 6. A key still missing rows leaves the
-move `incomplete` and changes nothing in Markets; rerunning copies only the gaps. Calendar events
+portfolio's catalog row last (`register`), which needs step 6; before any catalog call it
+refuses a move whose signals have no `SignalMetadata` row. A key still missing rows leaves the move
+`incomplete` and changes nothing in Markets; rerunning copies only the gaps. `--batch-size N` sets
+how many keys one copy request reads (ms-markets `keys_per_read`). Calendar events
 are copied although the engine could rebuild them from the persisted calendar. The selection of
 what moves comes from this application's own tables; the command reads no Markets table itself.
 
@@ -262,8 +264,10 @@ alpaca-connectors instances rollback --execute        # or: msm series rollback 
 
 The rollback runs the same moves backwards (portfolios first): it copies the rows the instances
 gained since the move into the shared tables, verifies every key, then removes each portfolio's
-catalog row (`unregister`) and the signal bindings (`unregister_signal`); `--keep-catalog`
-leaves them. The instances keep their rows. This release always writes the instances and
+catalog row (`unregister`, keeping signal bindings) and unbinds only the signals each move moved
+(`unregister_signal`: a portfolio its current signal, the signal move the others);
+`--keep-catalog` leaves them. `msm series rollback` passes `rollback=True` to the callable, which
+returns the same moves. The instances keep their rows. This release always writes the instances and
 registers the catalog after every run, so deploy the previous release before resuming the runs.
 
 ## 10. Revoke The Markets Roles
