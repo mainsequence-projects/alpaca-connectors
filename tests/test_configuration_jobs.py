@@ -923,7 +923,11 @@ def test_workflow_declares_one_job_and_one_dispatcher_per_kind_outside_the_steps
         for key, value in step.items()
         if key in {"prepare_image", "run_job", "deploy"}
     }
-    metatables = [{"repository": "MetaTables", "policy": "reader"}]
+    # Every Job reads MetaTables and reaches Markets through the Markets API (ms-markets ADR 0047).
+    metatables = [
+        {"repository": "MetaTables", "policy": "reader"},
+        {"repository": "MainSequenceMarkets", "policy": "reader"},
+    ]
     api_entries = resources["alpaca"]["access"]["resources"]
 
     for kind, expression in (("signal", "30 0 * * *"), ("portfolio", "0 2 * * *")):

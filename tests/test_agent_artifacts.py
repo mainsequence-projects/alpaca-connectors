@@ -221,7 +221,11 @@ class AgentArtifactsTests(unittest.TestCase):
             resources["alpaca"]["access"],
             {
                 "branch": "editor",
-                "branches": [{"repository": "MetaTables", "policy": "reader"}],
+                "branches": [
+                    {"repository": "MetaTables", "policy": "reader"},
+                    # Markets registries go through the Markets API (ms-markets ADR 0047).
+                    {"repository": "MainSequenceMarkets", "policy": "reader"},
+                ],
                 "resources": [
                     {"key": "alpaca-connectors-agent", "policy": "user"},
                     {"key": "alpaca-etf-signal", "policy": "runner"},

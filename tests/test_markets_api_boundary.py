@@ -516,3 +516,21 @@ def test_markets_registries_are_reached_only_through_row_calls() -> None:
                 if names:
                     violations.append(f"{path.name}: {module} {sorted(names)}")
     assert violations == [], violations
+
+
+def test_every_workload_that_calls_markets_can_find_the_markets_api() -> None:
+    from pathlib import Path
+
+    import yaml
+
+    workflows = Path(__file__).resolve().parents[1] / ".mainsequence" / "workflows"
+    markets = {"repository": "MainSequenceMarkets", "policy": "reader"}
+    declared = {}
+    for path in sorted(workflows.glob("*.yaml")):
+        for resource in yaml.safe_load(path.read_text())["resources"]:
+            declared[resource["key"]] = (resource.get("access") or {}).get("branches", [])
+
+    # The migration Job applies only this application's provider; the Agent uses the API's MCP.
+    assert markets not in declared.pop("alpaca-connectors-migrate")
+    assert declared.pop("alpaca-connectors-agent") == []
+    assert all(markets in branches for branches in declared.values()), declared

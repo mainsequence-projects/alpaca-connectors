@@ -8,6 +8,8 @@ resources:
     branches:
     - repository: MetaTables
       policy: reader
+    - repository: MainSequenceMarkets
+      policy: reader
     secrets:
     - name: ALPACA_CONNECTORS_DATA_KEY
       policy: value_reader
