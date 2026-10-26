@@ -116,8 +116,6 @@ def test_portfolio_price_source_resolves_the_migration_catalog_identity() -> Non
 
     assert table_uid == output_table.uid
     filter_by_body.assert_called_once_with(
-        identifier__in=[AlpacaStockBars1dSipAllStorage.__table__.name],
-        namespace__in=[AlpacaStockBars1dSipAllStorage.__metatable_namespace__],
         physical_table_name__in=[AlpacaStockBars1dSipAllStorage.__table__.name],
         limit=2,
     )

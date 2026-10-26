@@ -40,7 +40,11 @@ table:
 | `alpaca_connectors__portfolio_rebalance_configuration` | `PortfolioRebalanceConfiguration` | `alpaca-connectors.PortfolioRebalanceConfiguration` |
 | `alpaca_connectors__etf_portfolio_configuration` | `AlpacaETFPortfolioConfiguration` | `alpaca-connectors.AlpacaETFPortfolioConfiguration` |
 
-The "before" column is what the code registered; check it against the catalog before the move.
+The "before" column is what the code declared; check it against the catalog before the move.
+The portfolio code of earlier releases looked the two bars tables up with their physical name as
+identifier, so their registered identifier may be `alpaca_connectors__bars_1d_sip_all` and
+`alpaca_connectors__bars_1d_iex_raw` instead (not verified against a live catalog). The code of
+this release finds the bars and interpolated-price tables by physical name only.
 The only places the identifier is shown are the market-data dataset reads (`identifier`), which
 read it from the catalog. The dataset `key` (`1d/sip/all`) and every uid are unchanged.
 

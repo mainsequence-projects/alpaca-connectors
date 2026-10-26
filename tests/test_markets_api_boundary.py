@@ -8,6 +8,7 @@ the answers. No test needs the network.
 from __future__ import annotations
 
 import datetime as dt
+import re
 import uuid
 from types import SimpleNamespace
 from typing import Any
@@ -269,3 +270,249 @@ def test_listing_field_backfill_updates_changed_rows_in_one_statement(monkeypatc
     sql = _compiled_sql(update_statement)
     assert sql.startswith("UPDATE alpaca_connectors__acct_alpaca")
     assert "CASE" in sql and stale.hex in sql and current.hex not in sql
+
+
+def test_start_markets_engine_selects_the_api_and_attaches_only_own_tables(monkeypatch) -> None:
+    import msm
+    import msm.bootstrap
+    from msm.api import remote
+
+    from alpaca_connectors import runtime
+
+    attached: dict[str, Any] = {}
+    monkeypatch.setattr(remote, "active_remote_backend", lambda: None)
+    monkeypatch.setattr(
+        remote, "use_remote_backend", lambda backend: attached.setdefault("backend", backend)
+    )
+    monkeypatch.setattr(
+        "msm.client.MarketsClient.from_environment",
+        classmethod(lambda cls: pytest.fail("the Markets API is found on the first row call")),
+    )
+
+    def resolve_runtime(**kwargs):
+        raise RuntimeError("requires an initialized markets runtime")
+
+    monkeypatch.setattr(msm.bootstrap, "resolve_runtime", resolve_runtime)
+    monkeypatch.setattr(
+        msm, "start_engine", lambda **kwargs: attached.setdefault("models", kwargs["models"])
+    )
+
+    runtime.start_markets_engine()
+
+    from msm.client import LazyRemoteBackend
+
+    assert isinstance(attached["backend"], LazyRemoteBackend)
+    names = {model.__table__.name for model in attached["models"]}
+    assert all(name.startswith("alpaca_connectors__") for name in names), names
+    assert {"alpaca_connectors__acct_alpaca", "alpaca_connectors__asset_alpaca"} <= names
+
+
+def test_producers_write_to_own_namespace_instances() -> None:
+    from alpaca_connectors import instances
+    from alpaca_connectors.portfolios.interpolated_prices_schema import (
+        configured_alpaca_interpolated_prices_storage,
+    )
+
+    for model in instances.project_instance_models():
+        assert model.__table__.info["namespace"] == "alpaca-connectors"
+        assert model.__table__.name.startswith("alpaca_connectors__")
+        assert model.__table__.name.endswith("__main")
+    assert instances.portfolio_output_tables() == {
+        "output_table": instances.AlpacaPortfoliosStorage,
+        "weights_output_table": instances.AlpacaPortfolioWeightsStorage,
+        "rebalance_output_table": instances.AlpacaPortfolioRebalanceStateStorage,
+    }
+    interpolated = configured_alpaca_interpolated_prices_storage(
+        source_time_index_meta_table_uid="11111111-1111-4111-8111-111111111111",
+        source_cadence="1d",
+    )
+    assert interpolated.__table__.name.startswith("alpaca_connectors__interpolated_prices__t_")
+    assert interpolated.__table__.info["namespace"] == "alpaca-connectors"
+
+
+def test_signal_and_ledger_updaters_are_bound_to_own_instances(monkeypatch) -> None:
+    from alpaca_connectors.execution.services import MarketsExecutionLedger
+    from alpaca_connectors.instances import (
+        AlpacaOrdersStorage,
+        AlpacaSignalWeightsStorage,
+        AlpacaTradesStorage,
+    )
+    from alpaca_connectors.portfolios.alpaca_etf_signal import (
+        AlpacaETFHoldingsSignal,
+        build_alpaca_etf_holdings_signal,
+    )
+
+    built: dict[str, Any] = {}
+    monkeypatch.setattr(
+        AlpacaETFHoldingsSignal,
+        "from_signal_configuration",
+        classmethod(lambda cls, config, **kwargs: built.setdefault("signal", kwargs)),
+    )
+    build_alpaca_etf_holdings_signal(universe_uid="universe", account_uid="account")
+    assert built["signal"] == {"output_table": AlpacaSignalWeightsStorage}
+
+    class Node:
+        tables: list[Any] = []
+
+        def __init__(self, config=None, output_table=None):
+            Node.tables.append(output_table)
+
+        @classmethod
+        def default_config(cls):
+            return None
+
+        def set_frame(self, frame):
+            return self
+
+        def run(self):
+            return False, None
+
+    monkeypatch.setattr("msm.time_index.execution.Orders", Node)
+    monkeypatch.setattr("msm.time_index.execution.Trades", Node)
+    ledger = MarketsExecutionLedger()
+    ledger.write_orders([{"order_identifier": "o"}])
+    ledger.write_trades([{"trade_identifier": "t"}])
+    assert Node.tables == [AlpacaOrdersStorage, AlpacaTradesStorage]
+
+
+def test_portfolio_catalog_registration_names_the_own_instances(monkeypatch) -> None:
+    from msm_portfolios.api.datasets import PortfolioDatasets
+
+    from alpaca_connectors import instances
+    from alpaca_connectors.portfolios import datasets
+
+    for index, model in enumerate(
+        (
+            instances.AlpacaPortfoliosStorage,
+            instances.AlpacaPortfolioWeightsStorage,
+            instances.AlpacaSignalWeightsStorage,
+        )
+    ):
+        monkeypatch.setattr(
+            model, "get_meta_table_uid", classmethod(lambda cls, index=index: f"table-{index}")
+        )
+    calls: list[tuple[str, Any]] = []
+    monkeypatch.setattr(
+        PortfolioDatasets,
+        "register",
+        classmethod(lambda cls, registration, **kw: calls.append(("register", registration, kw))),
+    )
+    monkeypatch.setattr(
+        PortfolioDatasets,
+        "register_signal",
+        classmethod(lambda cls, registration: calls.append(("register_signal", registration))),
+    )
+
+    datasets.register_portfolio_datasets("portfolio-uid")
+    datasets.register_signal_dataset("signal-uid")
+
+    assert calls == [
+        (
+            "register",
+            {
+                "portfolio_uid": "portfolio-uid",
+                "values_meta_table_uid": "table-0",
+                "weights_meta_table_uid": "table-1",
+                "signal_meta_table_uid": "table-2",
+            },
+            {"reconcile": True},
+        ),
+        ("register_signal", {"signal_uid": "signal-uid", "signal_meta_table_uid": "table-2"}),
+    ]
+
+
+# Markets table classes may appear only where this application declares a foreign key to a
+# Markets registry (`X.__table__.fullname` inside ForeignKey(...)), in migration metadata, as a
+# contract handed to an ms-markets instance factory, or in the documented one-off backfill.
+_MARKETS_TABLE_MODULES = re.compile(
+    r"^(msm\.models(\..*)?|msm\.time_index\..*storage|msm_portfolios\.models(\..*)?"
+    r"|msm_portfolios\.time_index\..*storage)$"
+)
+_FOREIGN_KEY_ONLY = {
+    "account/alpaca_account_details.py",
+    "assets/alpaca_asset_details.py",
+    "market_data/configurations.py",
+    "market_data/storage.py",
+    "operations/signal_job_configurations.py",
+    "portfolios/configurations.py",
+    "universes/registry.py",
+}
+_EXEMPT = {
+    # Metadata closure for this provider's foreign keys; never queried.
+    "migrations/__init__.py",
+    "portfolios/interpolated_prices_migration.py",
+    # Contracts handed to ms-markets instance factories.
+    "instances.py",
+    "portfolios/interpolated_prices_schema.py",
+    # The one-off copy out of the shared Markets time series, run as a person.
+    "operations/instance_backfill.py",
+}
+
+
+def test_no_module_builds_a_statement_on_a_markets_table() -> None:
+    import ast
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1] / "src" / "alpaca_connectors"
+    violations: list[str] = []
+    for path in sorted(root.rglob("*.py")):
+        relative = path.relative_to(root).as_posix()
+        if relative.startswith("migrations/versions/"):
+            continue
+        tree = ast.parse(path.read_text())
+        imported = {
+            alias.asname or alias.name
+            for node in ast.walk(tree)
+            if isinstance(node, ast.ImportFrom) and _MARKETS_TABLE_MODULES.match(node.module or "")
+            for alias in node.names
+        }
+        if not imported or relative in _EXEMPT:
+            continue
+        if relative not in _FOREIGN_KEY_ONLY:
+            violations.append(f"{relative} imports {sorted(imported)}")
+            continue
+        parents = {child: node for node in ast.walk(tree) for child in ast.iter_child_nodes(node)}
+        for node in ast.walk(tree):
+            if not (isinstance(node, ast.Name) and node.id in imported):
+                continue
+            parent = parents.get(node)
+            grandparent = parents.get(parent)
+            if not (
+                isinstance(parent, ast.Attribute)
+                and parent.attr == "__table__"
+                and isinstance(grandparent, ast.Attribute)
+                and grandparent.attr == "fullname"
+            ):
+                violations.append(f"{relative}:{node.lineno} uses {node.id}")
+    assert violations == [], violations
+
+
+def test_markets_registries_are_reached_only_through_row_calls() -> None:
+    """No module calls the ms-markets repositories or services on Markets tables directly."""
+    import ast
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1] / "src" / "alpaca_connectors"
+    allowed_repository_names = {
+        # Compile and execute statements on this application's own tables.
+        "compile_markets_statement",
+        "execute_markets_operation",
+        # Generic CRUD on this application's own row tables.
+        "bulk_upsert_model",
+        "create_model",
+        "delete_model",
+        "update_model",
+        "upsert_model",
+    }
+    violations = []
+    for path in sorted(root.rglob("*.py")):
+        tree = ast.parse(path.read_text())
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.ImportFrom):
+                continue
+            module = node.module or ""
+            if module.startswith(("msm.repositories", "msm.services", "msm_portfolios.services")):
+                names = {alias.name for alias in node.names} - allowed_repository_names
+                if names:
+                    violations.append(f"{path.name}: {module} {sorted(names)}")
+    assert violations == [], violations

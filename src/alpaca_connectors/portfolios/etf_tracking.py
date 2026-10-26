@@ -163,19 +163,14 @@ def resolve_alpaca_bars_time_index_meta_table_uid(
     from metatables import TimeIndexMetaTable
 
     storage = storage_for(frequency_id, feed, adjustment)
-    catalog_identifier = storage.__table__.name
+    # The physical name identifies a bars table; its namespace and identifier change when the
+    # project tables move to `alpaca-connectors` (docs/operations/markets-api-boundary.md).
     matches = TimeIndexMetaTable.filter_by_body(
-        identifier__in=[catalog_identifier],
-        namespace__in=[storage.__metatable_namespace__],
         physical_table_name__in=[storage.__table__.name],
         limit=2,
     )
     exact_matches = [
-        table
-        for table in matches
-        if table.identifier == catalog_identifier
-        and table.namespace == storage.__metatable_namespace__
-        and table.physical_table_name == storage.__table__.name
+        table for table in matches if table.physical_table_name == storage.__table__.name
     ]
     if len(exact_matches) != 1:
         raise RuntimeError(
