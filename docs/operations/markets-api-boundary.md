@@ -77,7 +77,8 @@ then start from that observation. Either push right after the 02:00 UTC portfoli
 finish step 7 before the 00:30 UTC signal dispatch, or take every configuration off the schedule
 first (`alpaca-connectors signal update <uid> --no-scheduled`,
 `alpaca-connectors portfolio update <uid> --no-scheduled`) and put it back in step 9. Until the
-backfill, portfolio preflight blocks a run whose signal instance has no observation.
+backfill, portfolio preflight blocks a run whose signal instance has no observation. Keep the runs
+held while a move or a rollback runs.
 
 ## 4. Push This Release
 
