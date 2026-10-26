@@ -127,13 +127,15 @@ skills are described in [the Agent page](../agent.md).
   the ms-markets schema is migrated only by the ms-markets deployment's `migrate-markets` Job; never
   run `metatables migrations upgrade` or `downgrade` against a hosted environment from a developer
   or agent session
-- the project uses two MetaTables catalog namespaces: `alpaca-connectors` for this provider's
-  Alembic registry, and `mainsequence.markets` for the project's tables and the ms-markets tables
-  it writes; a person owns each namespace, and the owner grants each workload its MetaTables role
-  (`data_viewer`, `data_writer` or `editor`, never `owner`), directly or through the Environment's
-  Team (for example `alpaca-connectors-production`) for the roles its members share
-  ([Table Access And MetaTables Roles](jobs.md#table-access-and-metatables-roles)). Every
-  workflow resource that uses MetaTables declares
+- every table this project owns, including its instances of the Markets time series, is in its
+  own `alpaca-connectors` namespace (ms-markets ADR 0047); a person owns it and grants each
+  workload its MetaTables role (`data_viewer`, `data_writer` or `editor`, never `owner`), directly
+  or through the Environment's Team (for example `alpaca-connectors-production`) for the roles
+  its members share ([Table Access And MetaTables Roles](jobs.md#table-access-and-metatables-roles));
+  no workload holds a role on `mainsequence.markets`: Markets registries go through the Markets
+  API under the `MARKETS_REGISTRY_WRITERS` allow-list ([Markets API
+  Access](jobs.md#markets-api-access); moving an existing Environment:
+  [runbook](markets-api-boundary.md)). Every workflow resource that uses MetaTables declares
   `access.branches: [{repository: MetaTables, policy: reader}]`; the `harness_agent` uses only the
   API's MCP and declares no MetaTables access
 - during development apply revisions to the local runtime, which has no ms-markets deployment, with

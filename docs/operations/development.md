@@ -19,6 +19,12 @@ session, use only the read-only `metatables migrations current --provider
 alpaca_connectors.migrations:migration` against a hosted environment. Every Job launcher checks the
 applied schema first and skips the run while the database is behind its code.
 
+Every entrypoint reaches Markets registries through the Markets API (ms-markets ADR 0047), so a
+local process needs one: run the Markets API from an ms-markets checkout against the same local
+runtime and point this project at it with `MARKETS_API_URL` (plus `MARKETS_API_TOKEN` when it
+checks one). This project's own tables, including its time-series instances, stay on the local
+MetaTables runtime.
+
 `mainsequence refresh-token` renews the saved session; the SDK keeps credentials in the operating
 system credential store, not in the CodeRepository `.env`. MetaTables schema commands come from the
 `metatables` CLI installed by `mainsequence-metatable`.

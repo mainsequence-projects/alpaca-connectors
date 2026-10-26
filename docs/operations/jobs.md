@@ -339,42 +339,53 @@ its DeploymentRun separately.
 
 ## Table Access And MetaTables Roles
 
-The provider uses two MetaTables catalog namespaces: `alpaca-connectors` for its
-`alpaca_connectors.alembic_version` registry, and `mainsequence.markets` for the project tables
-and the ms-markets tables it writes (Assets, Accounts, holdings, signal weights, portfolios). The
-project tables stay in `mainsequence.markets`: moving them would change the catalog identities
-that AGENTS.md freezes. The migration namespace and the table's catalog namespace are separate
-concepts; inspect the registered table rather than inferring its grant scope from the provider
-name.
+Every table this project owns is registered in its own `alpaca-connectors` namespace (ms-markets
+ADR 0047, decision 4): the project tables, its Alembic version registry, and its instances of the
+Markets time-series contracts (signal weights, portfolio values, weights, rebalance state,
+calendar events, orders, trades and interpolated prices; `alpaca_connectors.instances`).
+Environments that ran earlier releases move the thirteen older project tables there once; see
+the [Markets API Boundary Runbook](markets-api-boundary.md). No workload holds a role on
+`mainsequence.markets`: Markets registries (assets, asset types, OpenFIGI details, accounts,
+holdings, asset snapshots, categories and memberships, calendars, portfolios, signal metadata,
+order managers and the portfolio dataset catalog) are read and written through the Markets API
+(see Markets API Access below). The migration namespace and the table's catalog namespace are
+separate concepts; inspect the registered table rather than inferring its grant scope from the
+provider name.
 
 Since MetaTables 0.1.46 (its ADR 0024) access is a role on a namespace or a table. `data_viewer`
-reads rows, `data_writer` also writes rows, `editor` also registers and changes tables, and `owner`
-also decides who has access. A namespace role covers the namespace's tables. A person, or a Team of
-people, owns each namespace; a workload never owns one, never grants, and never creates a table
-outside a namespace. Both namespaces predate roles: an Organization admin granted their first
-owner, and that owner grants every role below. The Writer grant Team `alpaca-connectors-production`
-held on both namespaces became `editor`, which every member of the Team inherits.
+reads rows, `data_writer` also writes rows, `editor` also registers and changes tables and runs
+updaters, and `owner` also decides who has access. A namespace role covers the namespace's tables.
+A person, or a Team of people, owns each namespace; a workload never owns one, never grants, and
+never creates a table outside a namespace.
 
 In each Environment where the project runs:
 
 1. ms-markets must already be deployed and migrated there by its own deployment, which owns the
-   `mainsequence.markets` schema. The project's revisions reference its tables.
-2. Each workload holds these roles. A workload User exists once its declaration is applied, and a
-   recreated resource, such as a renamed key, has a new workload User that needs its roles again.
+   `mainsequence.markets` schema, and its Markets API must serve the release this image runs
+   (the Jobs' schema gate checks its `/health`). The project's revisions reference its tables by
+   physical name.
+2. Each workload holds these roles on `alpaca-connectors`. A workload User exists once its
+   declaration is applied, and a recreated resource, such as a renamed key, has a new workload
+   User that needs its roles again.
 
-   | Workload | `alpaca-connectors` | `mainsequence.markets` |
-   |---|---|---|
-   | `alpaca-connectors-migrate` | `editor` | `editor`: it registers the project tables there |
-   | `alpaca` API | none | `data_writer`, plus table `editor` on the AssetSnapshot, AccountHoldings and SignalWeights storages, whose ms-markets updaters it runs in-process |
-   | `alpaca-etf-signal` | `data_viewer` (schema gate) | `data_writer`, plus table `editor` on the AssetSnapshot and SignalWeights storages |
-   | `alpaca-etf-portfolio` | `data_viewer` | `data_writer`, plus table `editor` on InterpolatedPrices, PortfolioCalendarEvents and the PortfolioRebalance, PortfolioWeights and Portfolios storages |
-   | `alpaca-bars-update`, `daily-stock-bars-holdings-ivv` | `data_viewer` | `data_viewer`, plus table `editor` on `alpaca_stock_bars_1d_sip_all` and `alpaca_stock_bars_1d_iex_raw` |
-   | `alpaca-etf-signal-dispatcher`, `alpaca-etf-portfolio-dispatcher` | `data_viewer` | `data_viewer` |
-   | `alpaca-connectors-agent` | none | none: its tools run in the API |
+   | Workload | `alpaca-connectors` |
+   |---|---|
+   | `alpaca-connectors-migrate` | `editor`: it registers the project tables |
+   | `alpaca` API | `editor`: it writes project rows and runs the signal (Universe run) and the orders and trades updaters in-process |
+   | `alpaca-etf-signal` | `editor` |
+   | `alpaca-etf-portfolio` | `editor` |
+   | `alpaca-bars-update`, `daily-stock-bars-holdings-ivv` | `data_viewer`, plus table `editor` on `alpaca_connectors__bars_1d_sip_all` and `alpaca_connectors__bars_1d_iex_raw` |
+   | `alpaca-etf-signal-dispatcher`, `alpaca-etf-portfolio-dispatcher` | `data_viewer` |
+   | `alpaca-credential-migration` (one-off) | `data_writer` |
+   | `alpaca-connectors-agent` | none: its tools run in the API |
+
+   The Markets workload holds `data_viewer` on `alpaca_connectors__portfoliosts__main`,
+   `alpaca_connectors__portfolioweightsts__main` and `alpaca_connectors__signalweightsts__main`,
+   which the Markets portfolio dataset catalog verifies and reads, and nothing else here: never a
+   role on `alpaca_connectors__acct_alpaca`, whose columns hold the application-encrypted keys.
 
    Shared roles can stay on the Team, with its person owner as a member, so a recreated workload
-   needs only membership. Grant the `editor` roles directly. Keep the Team's converted `editor`
-   until the direct roles exist, then lower it.
+   needs only membership. Grant the `editor` roles directly.
 3. Every one of those resources except the Agent declares
    `access.branches: [{repository: MetaTables, policy: reader}]` in its workflow file. A migration
    that fails with `namespace_access_required`, `namespace_not_writable` or `table_not_editable`
@@ -384,6 +395,31 @@ In each Environment where the project runs:
 
 An Organization admin's ability to administer the platform does not by itself give a workload
 table access. The Harness Agent receives no table role.
+
+## Markets API Access
+
+The connector reaches Markets through the Markets API (ms-markets ADR 0047): every entrypoint
+selects ms-markets' remote row backend (`alpaca_connectors.runtime.use_markets_api`), attaches only
+its own `alpaca-connectors` tables, and reads and writes Markets registries with `msm.api` row
+calls, `AccountHoldingsSnapshots`, `AssetSnapshots` and `PortfolioDatasets`. Two things make the
+calls work in each Environment:
+
+- the workflows grant every resource that calls Markets (the API, the signal and portfolio Jobs
+  and their dispatchers, both bars Jobs and the credential migration) `reader` on the
+  `MainSequenceMarkets` branch, which lets them find the Markets API; the migration Job and the
+  Agent do not call it;
+- an Environment admin adds the workload User uids to the Markets `MARKETS_REGISTRY_WRITERS`
+  constant under the resources they write; the Markets API refuses an application's write to any
+  other resource with 403:
+
+  | Workload | Markets resources it writes |
+  |---|---|
+  | `alpaca` (API) | `asset-type`, `asset`, `open-figi-details`, `asset-snapshots`, `account`, `account-holdings`, `asset-category`, `signal-metadata`, `portfolio-datasets`, `order-manager` |
+  | `alpaca-etf-signal` | `asset-type`, `asset`, `asset-snapshots`, `asset-category`, `signal-metadata`, `portfolio-datasets` |
+  | `alpaca-etf-portfolio` | `calendar`, `portfolio`, `signal-metadata`, `portfolio-datasets` |
+
+The other workloads only read Markets. `MARKETS_API_URL` (with `MARKETS_API_TOKEN`) points a local
+process at a local Markets API.
 
 ## Operational Checks
 
