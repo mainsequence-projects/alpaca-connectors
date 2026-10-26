@@ -22,7 +22,7 @@ from alpaca_connectors.api.app.services.bar_configurations import (
     update_configuration as update_api_configuration,
 )
 from alpaca_connectors.holdings import held_asset_identifiers_from_snapshot_rows
-from alpaca_connectors.holdings.services import _recent_holdings_set_statement
+from alpaca_connectors.holdings.services import _holdings_sets
 from alpaca_connectors.market_data.alpaca_bars import AlpacaStockBarsConfig
 from alpaca_connectors.market_data.configurations import (
     AlpacaBarsConfiguration,
@@ -241,20 +241,27 @@ def test_account_holdings_asset_scope_excludes_cash_zeroes_and_duplicates() -> N
 
 
 def test_account_holdings_window_is_inclusive_and_selects_the_newest_set() -> None:
+    from msm.api.accounts import AccountHoldingsSet
+
     boundary = datetime(2026, 9, 3, 12, tzinfo=UTC)
-    statement = _recent_holdings_set_statement(
-        uuid.uuid4(),
-        boundary=boundary,
-        max_age=timedelta(days=30),
-    )
-    compiled = statement.compile()
-    assert boundary in compiled.params.values()
-    assert boundary - timedelta(days=30) in compiled.params.values()
-    sql = str(compiled)
-    assert "time_index >=" in sql
-    assert "time_index <=" in sql
-    assert "time_index DESC" in sql
-    assert "LIMIT" in sql
+    account_uid = uuid.uuid4()
+    calls: list[dict] = []
+    with patch.object(
+        AccountHoldingsSet,
+        "filter",
+        classmethod(lambda cls, **kw: calls.append(kw) or []),
+    ):
+        _holdings_sets(account_uid, as_of=boundary, since=boundary - timedelta(days=30), limit=1)
+
+    assert calls == [
+        {
+            "account_uid": str(account_uid),
+            "time_index__lte": boundary,
+            "time_index__gte": boundary - timedelta(days=30),
+            "order_by": ["-time_index", "-uid"],
+            "limit": 1,
+        }
+    ]
 
 
 def test_api_configuration_never_accepts_dataset_uid() -> None:

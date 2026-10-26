@@ -158,16 +158,13 @@ class AlpacaStockBarsNode(AssetIndexedUpdater):
         return self.config.adjustment
 
     def dependencies(self) -> dict:
-        if self.config.asset_source == "account_holdings":
-            from msm.time_index.accounts.storage import AccountHoldingsStorage
+        """No upstream updaters.
 
-            from metatables import TimeIndexTableRef
-
-            return {
-                "account_holdings": TimeIndexTableRef.from_meta_table(
-                    AccountHoldingsStorage.get_time_index_meta_table()
-                )
-            }
+        An ``account_holdings`` source reads the account's newest holdings snapshot through the
+        Markets API when the update runs (``resolve_recent_account_holdings_assets``); the
+        Markets holdings table is not attached in this process (ms-markets ADR 0047), so it is
+        not declared as an upstream table.
+        """
         return {}
 
     def get_asset_list(self) -> list[str]:

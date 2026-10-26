@@ -1,4 +1,11 @@
-"""Canonical Alpaca account-holdings capture and query services."""
+"""Canonical Alpaca account-holdings capture and query services.
+
+Holdings are Markets data this application publishes into and reads back through the Markets API
+(ms-markets ADR 0047): ``AccountHoldingsSnapshots.publish`` writes a snapshot (its holdings set and
+rows in one Markets operation), ``AccountHoldingsSnapshots.get``/``get_many`` read snapshots, and
+``AccountHoldingsSet.filter``/``count`` select holdings sets. No statement reads the Markets
+holdings tables.
+"""
 
 from __future__ import annotations
 
@@ -6,8 +13,6 @@ import datetime as dt
 import uuid
 from dataclasses import dataclass, field
 from typing import Any
-
-from msm.api.base import operation_result_rows
 
 from alpaca_connectors.holdings.account import (
     DEFAULT_CASH_ASSET_IDENTIFIER,
@@ -93,46 +98,98 @@ def held_asset_identifiers_from_snapshot_rows(rows: list[dict[str, Any]]) -> lis
     return sorted(identifiers)
 
 
-def _recent_holdings_set_statement(
-    account_uid: uuid.UUID | str,
-    *,
-    boundary: dt.datetime,
-    max_age: dt.timedelta,
-):
-    from msm.models.accounts.core import AccountHoldingsSetTable
-    from sqlalchemy import select
-
-    cutoff = boundary - max_age
-    return (
-        select(AccountHoldingsSetTable)
-        .where(
-            AccountHoldingsSetTable.account_uid == account_uid,
-            AccountHoldingsSetTable.time_index >= cutoff,
-            AccountHoldingsSetTable.time_index <= boundary,
-        )
-        .order_by(AccountHoldingsSetTable.time_index.desc(), AccountHoldingsSetTable.uid.desc())
-        .limit(1)
-    )
+# Snapshots one ``AccountHoldingsSnapshots.get_many`` call reads when a listing spans many sets.
+HOLDINGS_SNAPSHOTS_PER_READ = 50
 
 
-def _latest_holdings_set_uid_statement(
+def _utc(value: Any) -> dt.datetime | None:
+    if value in (None, ""):
+        return None
+    if isinstance(value, str):
+        value = dt.datetime.fromisoformat(value.replace("Z", "+00:00"))
+    return value if value.tzinfo else value.replace(tzinfo=dt.timezone.utc)
+
+
+def _holdings_row(
+    row: dict[str, Any], *, account_uid: str, holdings_set_uid: str
+) -> dict[str, Any]:
+    """An ``AccountHoldingsStorage``-shaped row from a Markets holdings snapshot row."""
+    quantity = row.get("quantity")
+    return {
+        "time_index": _utc(row.get("time_index")),
+        "account_uid": account_uid,
+        "asset_identifier": str(row.get("asset_identifier") or ""),
+        "holdings_set_uid": holdings_set_uid,
+        "is_trade_snapshot": False,
+        "quantity": None if quantity in (None, "") else float(quantity),
+        "direction": int(row.get("direction") or 1),
+        "target_trade_time": _utc(row.get("target_trade_time")),
+        "extra_details": dict(row.get("extra_details") or {}),
+    }
+
+
+def _snapshot_rows(account_uid: str, snapshot: dict[str, Any] | None) -> list[dict[str, Any]]:
+    if not snapshot or not snapshot.get("holdings_set_uid"):
+        return []
+    holdings_set_uid = str(snapshot["holdings_set_uid"])
+    return [
+        _holdings_row(row, account_uid=account_uid, holdings_set_uid=holdings_set_uid)
+        for row in snapshot.get("holdings") or []
+    ]
+
+
+def _holdings_sets(
     account_uid: uuid.UUID | str,
     *,
     as_of: dt.datetime | None = None,
-):
-    """Select the newest immutable holdings-set UID for one account."""
-    from msm.models.accounts.core import AccountHoldingsSetTable
-    from sqlalchemy import select
+    since: dt.datetime | None = None,
+    limit: int | None = None,
+) -> list[Any]:
+    """Holdings sets of one account, newest first, bounded by ``since <= time_index <= as_of``."""
+    from msm.api.accounts import AccountHoldingsSet
 
-    statement = select(AccountHoldingsSetTable.uid).where(
-        AccountHoldingsSetTable.account_uid == account_uid
-    )
+    from alpaca_connectors.markets_api import read_all_pages
+
+    filters: dict[str, Any] = {"account_uid": str(account_uid)}
     if as_of is not None:
-        statement = statement.where(AccountHoldingsSetTable.time_index <= as_of)
-    return statement.order_by(
-        AccountHoldingsSetTable.time_index.desc(),
-        AccountHoldingsSetTable.uid.desc(),
-    ).limit(1)
+        filters["time_index__lte"] = as_of
+    if since is not None:
+        filters["time_index__gte"] = since
+    order_by = ["-time_index", "-uid"]
+    if limit is not None:
+        return AccountHoldingsSet.filter(**filters, order_by=order_by, limit=limit)
+    total = AccountHoldingsSet.count(**filters)
+    return read_all_pages(
+        lambda page_limit, offset: AccountHoldingsSet.filter(
+            **filters, order_by=order_by, limit=page_limit, offset=offset
+        ),
+        total,
+    )
+
+
+def _rows_of_sets(account_uid: uuid.UUID | str, holdings_sets: list[Any]) -> list[dict[str, Any]]:
+    """Every holdings row of ``holdings_sets``, read in ``get_many`` calls of 50 snapshots."""
+    from msm.api.accounts import AccountHoldingsSnapshots
+
+    from alpaca_connectors.markets_api import batches
+
+    account = str(account_uid)
+    wanted = {str(holdings_set.uid) for holdings_set in holdings_sets}
+    dates = [holdings_set.time_index for holdings_set in holdings_sets]
+    snapshots = [
+        snapshot
+        for batch in batches(dates, HOLDINGS_SNAPSHOTS_PER_READ)
+        for snapshot in AccountHoldingsSnapshots.get_many(
+            account_uid=account, holdings_dates=batch, limit=len(batch)
+        )
+        or []
+    ]
+    return [
+        row
+        for snapshot in snapshots
+        if str(snapshot.get("holdings_set_uid")) in wanted
+        for row in _snapshot_rows(account, snapshot)
+    ]
 
 
 def resolve_recent_account_holdings_assets(
@@ -144,13 +201,9 @@ def resolve_recent_account_holdings_assets(
     """Resolve the newest stored account snapshot in the inclusive trailing window.
 
     This is intentionally read-only. It never contacts Alpaca and never captures a new holdings
-    snapshot. The exact ``AccountHoldingsSet`` selected here is then used to query holdings rows,
-    so simultaneous newer captures cannot mix positions into this resolution.
+    snapshot. The exact ``AccountHoldingsSet`` selected here is then used to read its holdings
+    rows, so simultaneous newer captures cannot mix positions into this resolution.
     """
-    from msm.repositories.base import compile_markets_statement, execute_markets_operation
-    from msm.time_index.accounts.storage import AccountHoldingsStorage
-    from sqlalchemy import select
-
     from alpaca_connectors.runtime import account_runtime_models, start_markets_engine
 
     if max_age <= dt.timedelta(0):
@@ -159,43 +212,15 @@ def resolve_recent_account_holdings_assets(
     if boundary.tzinfo is None:
         raise ValueError("as_of must be timezone-aware.")
     boundary = boundary.astimezone(dt.timezone.utc)
-    runtime = start_markets_engine(models=account_runtime_models())
-    set_statement = _recent_holdings_set_statement(
-        account_uid,
-        boundary=boundary,
-        max_age=max_age,
-    )
-    set_operation = compile_markets_statement(
-        set_statement,
-        context=runtime.context,
-        operation="select",
-    )
-    set_rows = operation_result_rows(
-        execute_markets_operation(set_operation, context=runtime.context)
-    )
-    if not set_rows:
+    start_markets_engine(models=account_runtime_models())
+    holdings_sets = _holdings_sets(account_uid, as_of=boundary, since=boundary - max_age, limit=1)
+    if not holdings_sets:
         raise LookupError(
             f"Account {account_uid!s} has no stored holdings snapshot in the trailing "
             f"{max_age.days}-day window. Capture holdings first."
         )
-    holdings_set = set_rows[0]
-    holdings_set_uid = holdings_set["uid"]
-    holdings_statement = (
-        select(AccountHoldingsStorage)
-        .where(
-            AccountHoldingsStorage.account_uid == account_uid,
-            AccountHoldingsStorage.holdings_set_uid == holdings_set_uid,
-        )
-        .order_by(AccountHoldingsStorage.asset_identifier.asc())
-    )
-    holdings_operation = compile_markets_statement(
-        holdings_statement,
-        context=runtime.context,
-        operation="select",
-    )
-    holdings_rows = operation_result_rows(
-        execute_markets_operation(holdings_operation, context=runtime.context)
-    )
+    holdings_set = holdings_sets[0]
+    holdings_rows = _rows_of_sets(account_uid, [holdings_set])
     identifiers = held_asset_identifiers_from_snapshot_rows(holdings_rows)
     if not identifiers:
         raise ValueError(
@@ -213,8 +238,8 @@ def resolve_recent_account_holdings_assets(
     asset_uids = [str(assets_by_identifier[identifier].uid) for identifier in identifiers]
     return AccountHoldingsAssetScope(
         account_uid=str(account_uid),
-        holdings_set_uid=str(holdings_set_uid),
-        snapshot_time=holdings_set["time_index"],
+        holdings_set_uid=str(holdings_set.uid),
+        snapshot_time=_utc(holdings_set.time_index),
         asset_uids=asset_uids,
         asset_identifiers=identifiers,
     )
@@ -317,10 +342,12 @@ def publish_resolved_account_holdings_snapshot(
     rows: list[dict[str, Any]],
     snapshot_time: dt.datetime,
 ) -> AccountHoldingsCaptureResult:
-    """Publish rows that have already passed complete registered-asset resolution."""
-    from msm.api.accounts import AccountHoldingsSet
-    from msm.services import build_account_holdings_frame
-    from msm.time_index.accounts import AccountHoldings
+    """Publish rows that have already passed complete registered-asset resolution.
+
+    One ``AccountHoldingsSnapshots.publish`` call writes the holdings set and its rows in Markets
+    (write-policy resource ``account-holdings``), replacing a snapshot at the same time.
+    """
+    from msm.api.accounts import AccountHoldingsSnapshots
 
     if not rows:
         return AccountHoldingsCaptureResult(
@@ -330,24 +357,17 @@ def publish_resolved_account_holdings_snapshot(
             holdings_rows=0,
         )
 
-    holdings_set = AccountHoldingsSet.upsert(
-        account_uid=account_uid,
-        time_index=snapshot_time,
-    )
-    holdings_frame = build_account_holdings_frame(
+    snapshot = AccountHoldingsSnapshots.publish(
+        account_uid=str(account_uid),
         holdings_date=snapshot_time,
-        account_uid=account_uid,
-        holdings_set_uid=holdings_set.uid,
-        positions=rows,
+        positions=[dict(row) for row in rows],
+        overwrite=True,
     )
-    holdings_node = AccountHoldings(config=AccountHoldings.default_config())
-    holdings_node.set_frame(holdings_frame)
-    holdings_error, _ = holdings_node.run()
-    if holdings_error:
+    if not snapshot or not snapshot.get("holdings_set_uid"):
         raise RuntimeError(f"Account holdings capture failed for account {account_uid!s}.")
     return AccountHoldingsCaptureResult(
         account_uid=str(account_uid),
-        holdings_set_uid=str(holdings_set.uid),
+        holdings_set_uid=str(snapshot["holdings_set_uid"]),
         time_index=snapshot_time,
         holdings_rows=len(rows),
     )
@@ -404,69 +424,51 @@ def list_account_holdings(
     asset_identifiers: list[str] | None = None,
     ordering: str = "-time_index",
 ) -> tuple[list[dict[str, Any]], int]:
-    """Return bounded canonical holdings observations for one account."""
-    from msm.repositories.base import compile_markets_statement, execute_markets_operation
-    from msm.time_index.accounts.storage import AccountHoldingsStorage
-    from sqlalchemy import func, select
+    """Return bounded canonical holdings observations for one account.
+
+    The holdings sets in scope come from ``AccountHoldingsSet`` and their rows from
+    ``AccountHoldingsSnapshots`` (one call per 50 snapshots). Markets offers no paged, filtered
+    read of holdings rows across sets, so a listing over every set reads all of the account's
+    snapshots up to ``as_of`` and pages them here.
+    """
+    from msm.api.accounts import AccountHoldingsSet
 
     from alpaca_connectors.runtime import account_runtime_models, start_markets_engine
 
-    runtime = start_markets_engine(models=account_runtime_models())
-    statement = select(AccountHoldingsStorage).where(
-        AccountHoldingsStorage.account_uid == account_uid
-    )
-    if as_of is not None:
-        statement = statement.where(AccountHoldingsStorage.time_index <= as_of)
-    if holdings_set_uid is not None:
-        statement = statement.where(AccountHoldingsStorage.holdings_set_uid == holdings_set_uid)
-    elif latest_only:
-        latest_set_uid = _latest_holdings_set_uid_statement(
-            account_uid,
-            as_of=as_of,
-        ).scalar_subquery()
-        statement = statement.where(AccountHoldingsStorage.holdings_set_uid == latest_set_uid)
-    if asset_identifiers:
-        statement = statement.where(AccountHoldingsStorage.asset_identifier.in_(asset_identifiers))
     descending = ordering.startswith("-")
     ordering_key = ordering.removeprefix("-")
-    ordering_columns = {
-        "time_index": AccountHoldingsStorage.time_index,
-        "asset_identifier": AccountHoldingsStorage.asset_identifier,
-    }
-    if ordering_key not in ordering_columns:
+    if ordering_key not in {"time_index", "asset_identifier"}:
         raise ValueError(f"Unsupported holdings ordering {ordering!r}.")
-    ordering_column = ordering_columns[ordering_key]
-    ordering_expression = ordering_column.desc() if descending else ordering_column.asc()
-    statement = statement.order_by(
-        ordering_expression,
-        AccountHoldingsStorage.time_index.desc(),
-        AccountHoldingsStorage.asset_identifier.asc(),
-    )
-    count_statement = select(func.count().label("count")).select_from(statement.subquery())
-    page_operation = compile_markets_statement(
-        statement.limit(limit).offset(offset),
-        context=runtime.context,
-        operation="select",
-    )
-    count_operation = compile_markets_statement(
-        count_statement,
-        context=runtime.context,
-        operation="select",
-    )
-    rows = operation_result_rows(execute_markets_operation(page_operation, context=runtime.context))
-    count_rows = operation_result_rows(
-        execute_markets_operation(count_operation, context=runtime.context)
-    )
-    total = int(count_rows[0].get("count", 0)) if count_rows else 0
+    start_markets_engine(models=account_runtime_models())
+    if holdings_set_uid is not None:
+        holdings_sets = AccountHoldingsSet.filter(
+            account_uid=str(account_uid), uid=str(holdings_set_uid), limit=1
+        )
+        if as_of is not None:
+            holdings_sets = [item for item in holdings_sets if _utc(item.time_index) <= _utc(as_of)]
+    elif latest_only:
+        holdings_sets = _holdings_sets(account_uid, as_of=as_of, limit=1)
+    else:
+        holdings_sets = _holdings_sets(account_uid, as_of=as_of)
+    rows = _rows_of_sets(account_uid, holdings_sets)
+    if asset_identifiers:
+        wanted = set(asset_identifiers)
+        rows = [row for row in rows if row["asset_identifier"] in wanted]
+    # Secondary order as the compiled query had it: newest time first, then identifier.
+    rows.sort(key=lambda row: row["asset_identifier"])
+    rows.sort(key=lambda row: row["time_index"], reverse=True)
+    rows.sort(key=lambda row: row[ordering_key], reverse=descending)
+    total = len(rows)
+    page = rows[offset : offset + limit]
     from alpaca_connectors.assets.resolution import assets_by_unique_identifiers
 
-    identifiers = list(dict.fromkeys(str(row["asset_identifier"]) for row in rows))
+    identifiers = list(dict.fromkeys(str(row["asset_identifier"]) for row in page))
     assets_by_identifier = assets_by_unique_identifiers(identifiers)
-    for row in rows:
+    for row in page:
         identifier = str(row["asset_identifier"])
         asset = assets_by_identifier.get(identifier)
         row["asset_uid"] = str(asset.uid) if asset else None
-    return rows, total
+    return page, total
 
 
 def get_account_holdings_snapshot(

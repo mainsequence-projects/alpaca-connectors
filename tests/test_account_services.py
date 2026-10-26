@@ -30,7 +30,7 @@ from alpaca_connectors.account.services import (
 from alpaca_connectors.holdings import build_account_holdings_rows
 from alpaca_connectors.holdings.services import (
     AccountHoldingsRegistryError,
-    _latest_holdings_set_uid_statement,
+    _holdings_sets,
     publish_account_holdings_snapshot,
     resolve_complete_account_holdings_rows,
 )
@@ -131,16 +131,20 @@ def _imported(credentials=IMPORTED):
 
 
 def test_latest_holdings_set_query_is_account_scoped_and_deterministic() -> None:
-    account_uid = uuid.uuid4()
-    statement = _latest_holdings_set_uid_statement(account_uid)
-    compiled = statement.compile()
+    from msm.api.accounts import AccountHoldingsSet
 
-    assert account_uid in compiled.params.values()
-    sql = str(compiled)
-    assert "account_uid" in sql
-    assert "time_index DESC" in sql
-    assert "uid DESC" in sql
-    assert "LIMIT" in sql
+    account_uid = uuid.uuid4()
+    calls: list[dict] = []
+    with patch.object(
+        AccountHoldingsSet,
+        "filter",
+        classmethod(lambda cls, **kw: calls.append(kw) or []),
+    ):
+        _holdings_sets(account_uid, limit=1)
+
+    assert calls == [
+        {"account_uid": str(account_uid), "order_by": ["-time_index", "-uid"], "limit": 1}
+    ]
 
 
 class StubTradingClient:
