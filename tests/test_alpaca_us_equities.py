@@ -89,7 +89,7 @@ class AlpacaAssetRegistrationTests(unittest.TestCase):
                 "msm.repositories.crud.bulk_upsert_model",
                 side_effect=bulk_upsert,
             ) as bulk_upsert_model,
-            patch("msm.data_nodes.assets.AssetSnapshot", return_value=snapshot),
+            patch("msm.time_index.assets.AssetSnapshot", return_value=snapshot),
         ):
             result = _register_alpaca_assets_batch(assets, {})
 
@@ -342,7 +342,7 @@ class AlpacaAssetRegistrationTests(unittest.TestCase):
                 "alpaca_connectors.assets.alpaca_asset_details.upsert_alpaca_asset_details"
             ) as alpaca_details_upsert,
             patch("msm.api.assets.OpenFigiDetails.upsert") as figi_details_upsert,
-            patch("msm.data_nodes.assets.AssetSnapshot", return_value=snapshot),
+            patch("msm.time_index.assets.AssetSnapshot", return_value=snapshot),
         ):
             asset_uid = _register_alpaca_asset(asset_record, match)
 

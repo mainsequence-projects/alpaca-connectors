@@ -966,7 +966,7 @@ def _register_alpaca_asset(
 ) -> str:
     """Upsert one Alpaca asset; universe-sized callers use the batch implementation."""
     from msm.api.assets import Asset, AssetType, OpenFigiDetails
-    from msm.data_nodes.assets import AssetSnapshot
+    from msm.time_index.assets import AssetSnapshot
 
     from alpaca_connectors.assets.alpaca_asset_details import (
         build_alpaca_unique_identifier,
@@ -1011,9 +1011,9 @@ def _register_alpaca_assets_batch(
 
     from msm.api.base import operation_result_rows
     from msm.bootstrap import resolve_runtime
-    from msm.data_nodes.assets import AssetSnapshot
     from msm.models import AssetTable, AssetTypeTable, OpenFigiAssetDetailsTable
     from msm.repositories.crud import bulk_upsert_model
+    from msm.time_index.assets import AssetSnapshot
 
     from alpaca_connectors.assets.alpaca_asset_details import (
         AlpacaAssetDetailsTable,

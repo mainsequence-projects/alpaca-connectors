@@ -6,9 +6,9 @@ from unittest.mock import patch
 
 import pandas as pd
 import pytest
-from msm_portfolios.data_nodes.constants import ASSET_IDENTIFIER
-from msm_portfolios.data_nodes.signals.storage import SignalWeightsStorage
-from msm_portfolios.data_nodes.signals.weights import SignalWeights
+from msm_portfolios.time_index.constants import ASSET_IDENTIFIER
+from msm_portfolios.time_index.signals.storage import SignalWeightsStorage
+from msm_portfolios.time_index.signals.weights import SignalWeights
 
 from alpaca_connectors.portfolios.alpaca_etf_signal import (
     AlpacaETFHoldingsSignal,

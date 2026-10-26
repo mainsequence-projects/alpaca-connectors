@@ -173,12 +173,12 @@ class MarketsExecutionLedger:
         return ensure_cash_currency_asset(DEFAULT_CASH_ASSET_IDENTIFIER)
 
     def write_orders(self, rows: list[dict[str, Any]]) -> None:
-        from msm.data_nodes.execution import Orders
+        from msm.time_index.execution import Orders
 
         _run_execution_node(Orders, rows, "orders")
 
     def write_trades(self, rows: list[dict[str, Any]]) -> None:
-        from msm.data_nodes.execution import Trades
+        from msm.time_index.execution import Trades
 
         _run_execution_node(Trades, rows, "trades")
 

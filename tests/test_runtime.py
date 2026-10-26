@@ -27,8 +27,8 @@ def test_application_runtime_attaches_the_ms_markets_execution_ledger() -> None:
         model.__table__.name
         for model in resolve_markets_meta_table_models(application_runtime_models())
     }
-    from msm.data_nodes.execution.storage import OrdersStorage, TradesStorage
     from msm.models import OrderManagerTable
+    from msm.time_index.execution.storage import OrdersStorage, TradesStorage
 
     assert {
         OrderManagerTable.__table__.name,

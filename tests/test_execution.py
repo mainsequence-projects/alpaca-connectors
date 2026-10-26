@@ -17,7 +17,7 @@ from unittest.mock import patch
 import pandas as pd
 import pytest
 from alpaca.common.exceptions import APIError
-from msm.data_nodes.execution import Orders, Trades
+from msm.time_index.execution import Orders, Trades
 
 from alpaca_connectors.account.credentials import AlpacaCredentialsRejectedError
 from alpaca_connectors.execution import (

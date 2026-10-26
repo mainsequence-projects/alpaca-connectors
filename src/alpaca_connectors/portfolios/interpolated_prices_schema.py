@@ -37,7 +37,7 @@ def configured_alpaca_interpolated_prices_storage(
     upsample_frequency_id: str = UPSAMPLE_FREQUENCY_ID,
     intraday_bar_interpolation_rule: str = INTERPOLATION_RULE,
 ) -> type[Any]:
-    from msm_portfolios.data_nodes.prices.storage import (
+    from msm_portfolios.time_index.prices.storage import (
         configured_interpolated_prices_storage,
     )
 

@@ -324,8 +324,8 @@ def read_portfolio_history(
     from msm.api.base import operation_result_rows
     from msm.models import CalendarTable, PortfolioTable
     from msm.repositories.base import compile_markets_statement, execute_markets_operation
-    from msm_portfolios.data_nodes.portfolios.storage import PortfoliosStorage
     from msm_portfolios.models import PortfolioMetadataTable
+    from msm_portfolios.time_index.portfolios.storage import PortfoliosStorage
     from sqlalchemy import func, select
 
     from alpaca_connectors.portfolios.execution import portfolio_unique_identifier

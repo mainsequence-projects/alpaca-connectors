@@ -727,7 +727,7 @@ def list_account_registrations(
             account_model.is_paper,
             account_model.account_is_active,
             account_model.account_group_uid,
-            account_model.holdings_data_node_uid,
+            account_model.holdings_storage_table_uid,
             account_model.metadata_json,
             *detail_columns,
         )

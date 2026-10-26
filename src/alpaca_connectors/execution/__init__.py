@@ -36,8 +36,8 @@ def execution_runtime_models() -> list[type]:
     They belong to the ms-markets provider (``msm_migrations:migration``), like ``AccountTable``;
     this project never migrates them, it attaches them to its runtime.
     """
-    from msm.data_nodes.execution.storage import OrdersStorage, TradesStorage
     from msm.models import OrderManagerTable
+    from msm.time_index.execution.storage import OrdersStorage, TradesStorage
 
     return [OrderManagerTable, OrdersStorage, TradesStorage]
 

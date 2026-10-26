@@ -24,7 +24,6 @@ def project_runtime_models() -> list[type[Any]]:
     foreign-key dependencies and
     auto-includes referenced built-in tables (e.g. ``AssetTable``).
     """
-    from msm.data_nodes.assets.storage import AssetSnapshotsStorage
     from msm.models import (
         AssetCategoryMembershipTable,
         AssetCategoryTable,
@@ -32,9 +31,10 @@ def project_runtime_models() -> list[type[Any]]:
         AssetTypeTable,
         OpenFigiAssetDetailsTable,
     )
-    from msm_portfolios.data_nodes.portfolios.storage import PortfoliosStorage
-    from msm_portfolios.data_nodes.signals.storage import SignalWeightsStorage
+    from msm.time_index.assets.storage import AssetSnapshotsStorage
     from msm_portfolios.models import PortfolioMetadataTable, SignalMetadataTable
+    from msm_portfolios.time_index.portfolios.storage import PortfoliosStorage
+    from msm_portfolios.time_index.signals.storage import SignalWeightsStorage
 
     from alpaca_connectors.assets.alpaca_asset_details import project_asset_models
     from alpaca_connectors.market_data import project_configuration_models, project_storage_models
@@ -74,9 +74,9 @@ def account_runtime_models() -> list[type[Any]]:
     Use this only in the ``account`` entrypoint; ``start_engine`` rejects a second *differing*
     model set in one process, but each CLI command is its own process.
     """
-    from msm.data_nodes.accounts.storage import AccountHoldingsStorage
     from msm.models.accounts.core import AccountHoldingsSetTable, AccountTable
     from msm.models.accounts.groups import AccountGroupTable
+    from msm.time_index.accounts.storage import AccountHoldingsStorage
 
     from alpaca_connectors.account.alpaca_account_details import project_account_models
     from alpaca_connectors.execution import execution_runtime_models

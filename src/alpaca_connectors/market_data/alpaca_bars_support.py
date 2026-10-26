@@ -400,7 +400,7 @@ def group_bindings_by_last_update(
 
     Each bucket is fetched with a single Alpaca ``request_start``, preserving the legacy
     batching. The ``last_update_by_asset_identifier`` map is now derived from
-    ``AssetIndexedDataNode.get_asset_update_range_map_great_or_equal()`` instead of the removed
+    ``AssetIndexedUpdater.get_asset_update_range_map_great_or_equal()`` instead of the removed
     ``UpdateStatistics.get_last_update_index_2d``.
     """
     grouped_bindings: dict[dt.datetime, list[AlpacaBarAssetBinding]] = defaultdict(list)

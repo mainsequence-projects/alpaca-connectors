@@ -13,8 +13,8 @@ from typing import Any
 
 import pandas as pd
 from msm_portfolios.configuration import PortfolioConfigBaseModel
-from msm_portfolios.data_nodes import SignalWeights
-from msm_portfolios.data_nodes.constants import ASSET_IDENTIFIER
+from msm_portfolios.time_index import SignalWeights
+from msm_portfolios.time_index.constants import ASSET_IDENTIFIER
 from pydantic import field_validator
 
 # Import path under which every existing signal UID was computed (before the package moved from

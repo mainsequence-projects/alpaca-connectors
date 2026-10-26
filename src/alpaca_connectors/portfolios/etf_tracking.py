@@ -217,7 +217,7 @@ def build_alpaca_interpolated_prices(
     intraday_bar_interpolation_rule: str = "ffill",
 ) -> Any:
     """Build calendar-aware InterpolatedPrices sourced from registered Alpaca bars."""
-    from msm_portfolios.contrib.prices.data_nodes import (
+    from msm_portfolios.contrib.prices.updaters import (
         InterpolatedPrices,
         InterpolatedPricesConfig,
     )
@@ -343,12 +343,12 @@ def build_alpaca_etf_tracking_portfolio(
         PortfolioExecutionConfiguration,
         PortfolioMarketsConfig,
     )
-    from msm_portfolios.data_nodes import (
+    from msm_portfolios.rebalance_strategy import CalendarEventSignal
+    from msm_portfolios.time_index import (
         PortfolioCalendarEvents,
         PortfolioCalendarEventsConfiguration,
-        PortfoliosDataNode,
+        PortfoliosUpdater,
     )
-    from msm_portfolios.rebalance_strategy import CalendarEventSignal
 
     plan = plan_alpaca_etf_tracking_portfolio(config, start_engine=False)
     signal = build_alpaca_etf_holdings_signal(
@@ -408,7 +408,7 @@ def build_alpaca_etf_tracking_portfolio(
         unique_identifier=plan.portfolio_unique_identifier,
         calendar_uid=calendar_row.uid,
     )
-    portfolio_node = PortfoliosDataNode(portfolio_configuration=portfolio_configuration)
+    portfolio_node = PortfoliosUpdater(portfolio_configuration=portfolio_configuration)
     portfolio_node.set_portfolio_configuration(
         portfolio_configuration,
         portfolio_description=description,

@@ -177,12 +177,12 @@ def build_portfolio_graph(resolved: ResolvedPortfolioConfiguration) -> Portfolio
         PortfolioMarketsConfig,
         ValuationAlignmentPolicy,
     )
-    from msm_portfolios.data_nodes import (
+    from msm_portfolios.rebalance_strategy import CalendarEventSignal
+    from msm_portfolios.time_index import (
         PortfolioCalendarEvents,
         PortfolioCalendarEventsConfiguration,
-        PortfoliosDataNode,
+        PortfoliosUpdater,
     )
-    from msm_portfolios.rebalance_strategy import CalendarEventSignal
 
     configuration = resolved.configuration
     rebalance = resolved.rebalance_configuration
@@ -271,7 +271,7 @@ def build_portfolio_graph(resolved: ResolvedPortfolioConfiguration) -> Portfolio
         unique_identifier=unique_identifier,
         calendar_uid=calendar_row.uid,
     )
-    portfolio_node = PortfoliosDataNode(
+    portfolio_node = PortfoliosUpdater(
         portfolio_configuration=portfolio_configuration,
         portfolio_description=description,
     )

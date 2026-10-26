@@ -147,8 +147,8 @@ def resolve_recent_account_holdings_assets(
     snapshot. The exact ``AccountHoldingsSet`` selected here is then used to query holdings rows,
     so simultaneous newer captures cannot mix positions into this resolution.
     """
-    from msm.data_nodes.accounts.storage import AccountHoldingsStorage
     from msm.repositories.base import compile_markets_statement, execute_markets_operation
+    from msm.time_index.accounts.storage import AccountHoldingsStorage
     from sqlalchemy import select
 
     from alpaca_connectors.runtime import account_runtime_models, start_markets_engine
@@ -319,8 +319,8 @@ def publish_resolved_account_holdings_snapshot(
 ) -> AccountHoldingsCaptureResult:
     """Publish rows that have already passed complete registered-asset resolution."""
     from msm.api.accounts import AccountHoldingsSet
-    from msm.data_nodes.accounts import AccountHoldings
     from msm.services import build_account_holdings_frame
+    from msm.time_index.accounts import AccountHoldings
 
     if not rows:
         return AccountHoldingsCaptureResult(
@@ -405,8 +405,8 @@ def list_account_holdings(
     ordering: str = "-time_index",
 ) -> tuple[list[dict[str, Any]], int]:
     """Return bounded canonical holdings observations for one account."""
-    from msm.data_nodes.accounts.storage import AccountHoldingsStorage
     from msm.repositories.base import compile_markets_statement, execute_markets_operation
+    from msm.time_index.accounts.storage import AccountHoldingsStorage
     from sqlalchemy import func, select
 
     from alpaca_connectors.runtime import account_runtime_models, start_markets_engine

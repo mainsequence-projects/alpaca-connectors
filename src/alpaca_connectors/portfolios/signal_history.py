@@ -160,7 +160,7 @@ def read_signal_observation_matrix(
     from msm.api.base import operation_result_rows
     from msm.models import AssetTable
     from msm.repositories.base import compile_markets_statement, execute_markets_operation
-    from msm_portfolios.data_nodes.signals.storage import SignalWeightsStorage
+    from msm_portfolios.time_index.signals.storage import SignalWeightsStorage
     from sqlalchemy import select
 
     from alpaca_connectors.assets.alpaca_asset_details import AlpacaAssetDetailsTable
@@ -232,7 +232,7 @@ def read_signal_observation_bounds(*, signal_uid: str) -> SignalObservationBound
     """Return the exact first and last stored observation timestamps for one signal."""
     from msm.api.base import operation_result_rows
     from msm.repositories.base import compile_markets_statement, execute_markets_operation
-    from msm_portfolios.data_nodes.signals.storage import SignalWeightsStorage
+    from msm_portfolios.time_index.signals.storage import SignalWeightsStorage
     from sqlalchemy import func, select
 
     from alpaca_connectors.runtime import start_markets_engine

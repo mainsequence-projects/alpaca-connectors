@@ -7,7 +7,7 @@ from unittest.mock import Mock, patch
 
 from etfhextractor.portfolio_publish import required_calendar_window
 from etfhextractor.portfolio_signal import ETFHoldingsSignal, ETFHoldingsSignalConfig
-from msm_portfolios.data_nodes.signals.storage import SignalWeightsStorage
+from msm_portfolios.time_index.signals.storage import SignalWeightsStorage
 from packaging.specifiers import SpecifierSet
 
 from alpaca_connectors.market_data.alpaca_bars import AlpacaStockBarsNode
@@ -26,7 +26,7 @@ from alpaca_connectors.portfolios.etf_tracking import (
 def test_runtime_dependency_versions_match_the_sdk9_metatables_stack() -> None:
     assert version("mainsequence") in SpecifierSet(">=9.0.2,<10")
     assert version("mainsequence-metatable") in SpecifierSet(">=0.1.6,<0.2")
-    assert version("ms-markets") in SpecifierSet(">=2,<3")
+    assert version("ms-markets") in SpecifierSet(">=3,<4")
 
 
 def test_alpaca_bars_node_declares_sdk8_output_table() -> None:
@@ -118,7 +118,7 @@ def test_interpolated_prices_receive_explicit_asset_calendar_scope() -> None:
     node = object()
 
     with patch(
-        "msm_portfolios.contrib.prices.data_nodes.InterpolatedPrices",
+        "msm_portfolios.contrib.prices.updaters.InterpolatedPrices",
         return_value=node,
     ) as interpolated_prices:
         result = build_alpaca_interpolated_prices(
@@ -202,11 +202,11 @@ def test_alpaca_portfolio_uses_connector_owned_universe_signal() -> None:
         patch("msm_portfolios.configuration.FrontEndDetails"),
         patch("msm_portfolios.rebalance_strategy.CalendarEventSignal"),
         patch(
-            "msm_portfolios.data_nodes.PortfolioCalendarEvents",
+            "msm_portfolios.time_index.PortfolioCalendarEvents",
             return_value=calendar_events,
         ),
-        patch("msm_portfolios.data_nodes.PortfolioCalendarEventsConfiguration"),
-        patch("msm_portfolios.data_nodes.PortfoliosDataNode", return_value=portfolio_node),
+        patch("msm_portfolios.time_index.PortfolioCalendarEventsConfiguration"),
+        patch("msm_portfolios.time_index.PortfoliosUpdater", return_value=portfolio_node),
     ):
         result = build_alpaca_etf_tracking_portfolio(config, run=False)
 

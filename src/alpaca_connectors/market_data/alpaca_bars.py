@@ -5,10 +5,10 @@ import uuid
 from typing import Literal
 
 import pandas as pd
-from msm.data_nodes.assets import (
+from msm.time_index.assets import (
     ASSET_IDENTIFIER_DIMENSION,
-    AssetIndexedDataNode,
-    AssetIndexedDataNodeConfiguration,
+    AssetIndexedUpdater,
+    AssetIndexedUpdaterConfiguration,
 )
 from pydantic import Field, field_validator, model_validator
 
@@ -34,7 +34,7 @@ from .storage import AlpacaStockBars1dSipAllStorage, storage_for
 UTC = dt.timezone.utc
 
 
-class AlpacaStockBarsConfig(AssetIndexedDataNodeConfiguration):
+class AlpacaStockBarsConfig(AssetIndexedUpdaterConfiguration):
     """Updater-scope configuration for Alpaca OHLCV stock bars.
 
     Storage-first: the published column schema, table identifier, and ``asset_identifier``
@@ -109,10 +109,10 @@ class AlpacaStockBarsConfig(AssetIndexedDataNodeConfiguration):
         return self
 
 
-class AlpacaStockBarsNode(AssetIndexedDataNode):
+class AlpacaStockBarsNode(AssetIndexedUpdater):
     """Asset-indexed Alpaca OHLCV bars producer.
 
-    Subclasses ``AssetIndexedDataNode`` (not ``AssetTimestampedDataNode``) because it *fetches*
+    Subclasses ``AssetIndexedUpdater`` (not ``AssetTimestampedUpdater``) because it *fetches*
     from Alpaca during ``update()`` rather than receiving pre-built frames. The base supplies the
     universe scoping and per-asset incremental ``update_statistics`` that the old node hand-rolled.
     """
@@ -159,7 +159,7 @@ class AlpacaStockBarsNode(AssetIndexedDataNode):
 
     def dependencies(self) -> dict:
         if self.config.asset_source == "account_holdings":
-            from msm.data_nodes.accounts.storage import AccountHoldingsStorage
+            from msm.time_index.accounts.storage import AccountHoldingsStorage
 
             from metatables import TimeIndexTableRef
 
