@@ -14,42 +14,64 @@ from alpaca_connectors.portfolios.portfolio_history import (
 )
 
 
-def test_portfolio_history_reads_metadata_and_latest_values_in_one_query() -> None:
+def _markets_rows(*, portfolio_exists: bool = True):
+    """Patches for the Markets Portfolio, Calendar and PortfolioMetadata row reads."""
+    from msm.api.calendars import Calendar
+    from msm.api.portfolios import Portfolio
+    from msm_portfolios.api import PortfolioMetadata
+
+    portfolio = SimpleNamespace(
+        unique_identifier="ALPACA_ETF_PORTFOLIO__ABC",
+        calendar_uid="calendar-uid",
+        backtest_table_price_column_name="close",
+    )
+    calendar = SimpleNamespace(
+        display_name="US equities",
+        calendar_type="exchange",
+        timezone="America/New_York",
+        valid_from=dt.date(2018, 1, 1),
+        valid_to=dt.date(2027, 1, 1),
+    )
+    return (
+        patch.object(
+            Portfolio,
+            "get_by_unique_identifier",
+            classmethod(lambda cls, value: portfolio if portfolio_exists else None),
+        ),
+        patch.object(Calendar, "get_by_uid", classmethod(lambda cls, uid: calendar)),
+        patch.object(
+            PortfolioMetadata,
+            "filter",
+            classmethod(
+                lambda cls, **kw: [SimpleNamespace(description="Daily analytical ETF portfolio.")]
+            ),
+        ),
+    )
+
+
+def test_portfolio_history_reads_markets_metadata_and_own_values_in_one_query() -> None:
     older = dt.datetime(2026, 9, 3, 20, tzinfo=dt.UTC)
     newer = dt.datetime(2026, 9, 4, 20, tzinfo=dt.UTC)
     rows = [
         {
-            "portfolio_identifier": "ALPACA_ETF_PORTFOLIO__ABC",
-            "backtest_price_column": "close",
-            "portfolio_description": "Daily analytical ETF portfolio.",
-            "calendar_name": "US equities",
-            "calendar_type": "exchange",
-            "calendar_timezone": "America/New_York",
-            "calendar_valid_from": dt.date(2018, 1, 1),
-            "calendar_valid_to": dt.date(2027, 1, 1),
             "time_index": newer,
             "close": 102.5,
             "period_return": 0.025,
             "calculated_close": 102.5,
             "close_time": newer,
+            "total_observation_count": 2,
         },
         {
-            "portfolio_identifier": "ALPACA_ETF_PORTFOLIO__ABC",
-            "backtest_price_column": "close",
-            "portfolio_description": "Daily analytical ETF portfolio.",
-            "calendar_name": "US equities",
-            "calendar_type": "exchange",
-            "calendar_timezone": "America/New_York",
-            "calendar_valid_from": dt.date(2018, 1, 1),
-            "calendar_valid_to": dt.date(2027, 1, 1),
             "time_index": older,
             "close": 100.0,
             "period_return": 0.0,
             "calculated_close": 100.0,
             "close_time": older,
+            "total_observation_count": 2,
         },
     ]
     context = MarketsRepositoryContext()
+    portfolio_patch, calendar_patch, metadata_patch = _markets_rows()
 
     with (
         patch(
@@ -60,6 +82,9 @@ def test_portfolio_history_reads_metadata_and_latest_values_in_one_query() -> No
             "alpaca_connectors.portfolios.execution.portfolio_unique_identifier",
             return_value="ALPACA_ETF_PORTFOLIO__ABC",
         ),
+        portfolio_patch,
+        calendar_patch,
+        metadata_patch,
         patch(
             "msm.repositories.base.compile_markets_statement",
             return_value="portfolio-history-query",
@@ -72,8 +97,10 @@ def test_portfolio_history_reads_metadata_and_latest_values_in_one_query() -> No
         history = read_portfolio_history(configuration_uid="config-uid", observation_limit=100)
 
     assert history.materialized is True
+    assert history.description == "Daily analytical ETF portfolio."
     assert history.calendar_name == "US equities"
     assert history.calendar_timezone == "America/New_York"
+    assert history.backtest_price_column == "close"
     assert [item.time_index for item in history.observations] == [older, newer]
     assert [item.close for item in history.observations] == [100.0, 102.5]
     assert history.total_observation_count == 2
@@ -83,9 +110,9 @@ def test_portfolio_history_reads_metadata_and_latest_values_in_one_query() -> No
     assert history.performance.methodology == "empyrical-reloaded"
     assert history.performance.total_return == pytest.approx(0.025)
     compile_statement.assert_called_once()
-    statement = compile_statement.call_args.args[0]
-    compiled_sql = str(statement)
-    assert "portfoliosts" in compiled_sql
+    compiled_sql = str(compile_statement.call_args.args[0])
+    assert "alpaca_connectors__portfoliosts__main" in compiled_sql
+    assert "ms_markets__" not in compiled_sql
     assert "ORDER BY" in compiled_sql
     assert "LIMIT" in compiled_sql
     execute_operation.assert_called_once_with("portfolio-history-query", context=context)
@@ -93,6 +120,7 @@ def test_portfolio_history_reads_metadata_and_latest_values_in_one_query() -> No
 
 def test_portfolio_history_reports_an_unmaterialized_portfolio() -> None:
     context = MarketsRepositoryContext()
+    portfolio_patch, calendar_patch, metadata_patch = _markets_rows(portfolio_exists=False)
     with (
         patch(
             "alpaca_connectors.runtime.start_markets_engine",
@@ -102,19 +130,16 @@ def test_portfolio_history_reports_an_unmaterialized_portfolio() -> None:
             "alpaca_connectors.portfolios.execution.portfolio_unique_identifier",
             return_value="ALPACA_ETF_PORTFOLIO__ABC",
         ),
-        patch(
-            "msm.repositories.base.compile_markets_statement",
-            return_value="portfolio-history-query",
-        ),
-        patch(
-            "msm.repositories.base.execute_markets_operation",
-            return_value={"rows": [], "truncated": False},
-        ),
+        portfolio_patch,
+        calendar_patch,
+        metadata_patch,
+        patch("msm.repositories.base.compile_markets_statement") as compile_statement,
     ):
         history = read_portfolio_history(configuration_uid="config-uid")
 
     assert history.materialized is False
     assert history.observations == ()
+    compile_statement.assert_not_called()
 
 
 @pytest.mark.parametrize("limit", [0, 5_001, True])

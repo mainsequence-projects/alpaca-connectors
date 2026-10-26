@@ -317,52 +317,41 @@ def read_portfolio_history(
 ) -> PortfolioHistory:
     """Read one portfolio's canonical metadata and latest value observations.
 
-    The stable configuration-derived portfolio identifier scopes the shared
-    ``PortfoliosStorage`` table. The bounded query loads portfolio metadata and the latest
-    observations together, without requiring a DataNode execution or scanning other portfolios.
+    The Portfolio, its metadata and its Calendar are Markets rows read through the Markets API;
+    the values are this application's ``PortfoliosTS`` instance (ms-markets ADR 0047), read with
+    one bounded query scoped by the stable configuration-derived portfolio identifier.
     """
     from msm.api.base import operation_result_rows
-    from msm.models import CalendarTable, PortfolioTable
+    from msm.api.calendars import Calendar
+    from msm.api.portfolios import Portfolio
     from msm.repositories.base import compile_markets_statement, execute_markets_operation
-    from msm_portfolios.models import PortfolioMetadataTable
-    from msm_portfolios.time_index.portfolios.storage import PortfoliosStorage
+    from msm_portfolios.api import PortfolioMetadata
     from sqlalchemy import func, select
 
+    from alpaca_connectors.instances import AlpacaPortfoliosStorage
     from alpaca_connectors.portfolios.execution import portfolio_unique_identifier
     from alpaca_connectors.runtime import start_markets_engine
 
     normalized_limit = _normalize_limit(observation_limit)
     portfolio_identifier = portfolio_unique_identifier(configuration_uid)
     runtime = start_markets_engine()
+    portfolio = Portfolio.get_by_unique_identifier(portfolio_identifier)
+    if portfolio is None:
+        return _history_from_rows(portfolio_identifier=portfolio_identifier, rows=[])
+    calendar = Calendar.get_by_uid(portfolio.calendar_uid)
+    metadata = PortfolioMetadata.filter(unique_identifier=portfolio_identifier, limit=1)
+    values = AlpacaPortfoliosStorage.__table__.c
     statement = (
         select(
-            PortfolioTable.unique_identifier.label("portfolio_identifier"),
-            PortfolioTable.backtest_table_price_column_name.label("backtest_price_column"),
-            PortfolioMetadataTable.description.label("portfolio_description"),
-            CalendarTable.display_name.label("calendar_name"),
-            CalendarTable.calendar_type.label("calendar_type"),
-            CalendarTable.timezone.label("calendar_timezone"),
-            CalendarTable.valid_from.label("calendar_valid_from"),
-            CalendarTable.valid_to.label("calendar_valid_to"),
-            PortfoliosStorage.time_index.label("time_index"),
-            PortfoliosStorage.close.label("close"),
-            PortfoliosStorage.return_.label("period_return"),
-            PortfoliosStorage.calculated_close.label("calculated_close"),
-            PortfoliosStorage.close_time.label("close_time"),
-            func.count(PortfoliosStorage.time_index).over().label("total_observation_count"),
+            values.time_index.label("time_index"),
+            values.close.label("close"),
+            values["return"].label("period_return"),
+            values.calculated_close.label("calculated_close"),
+            values.close_time.label("close_time"),
+            func.count(values.time_index).over().label("total_observation_count"),
         )
-        .select_from(PortfolioTable)
-        .join(CalendarTable, CalendarTable.uid == PortfolioTable.calendar_uid)
-        .outerjoin(
-            PortfolioMetadataTable,
-            PortfolioMetadataTable.unique_identifier == PortfolioTable.unique_identifier,
-        )
-        .outerjoin(
-            PortfoliosStorage,
-            PortfoliosStorage.portfolio_identifier == PortfolioTable.unique_identifier,
-        )
-        .where(PortfolioTable.unique_identifier == portfolio_identifier)
-        .order_by(PortfoliosStorage.time_index.desc())
+        .where(values.portfolio_identifier == portfolio_identifier)
+        .order_by(values.time_index.desc())
         .limit(normalized_limit)
     )
     operation = compile_markets_statement(
@@ -370,11 +359,22 @@ def read_portfolio_history(
         context=runtime.context,
         operation="select",
     )
-    result = execute_markets_operation(operation, context=runtime.context)
-    return _history_from_rows(
-        portfolio_identifier=portfolio_identifier,
-        rows=operation_result_rows(result),
+    observations = operation_result_rows(
+        execute_markets_operation(operation, context=runtime.context)
     )
+    header = {
+        "portfolio_identifier": portfolio.unique_identifier,
+        "backtest_price_column": portfolio.backtest_table_price_column_name,
+        "portfolio_description": metadata[0].description if metadata else None,
+        "calendar_name": getattr(calendar, "display_name", None),
+        "calendar_type": getattr(calendar, "calendar_type", None),
+        "calendar_timezone": getattr(calendar, "timezone", None),
+        "calendar_valid_from": getattr(calendar, "valid_from", None),
+        "calendar_valid_to": getattr(calendar, "valid_to", None),
+    }
+    # A portfolio without observations keeps its metadata, as the outer join did.
+    rows = [{**header, **row} for row in observations] or [header]
+    return _history_from_rows(portfolio_identifier=portfolio_identifier, rows=rows)
 
 
 __all__ = [

@@ -78,6 +78,10 @@ def test_signal_history_reads_all_assets_for_the_latest_distinct_observations_on
     statement = compile_statement.call_args.args[0]
     compiled_sql = str(statement)
     assert "WITH latest_signal_observations AS" in compiled_sql
+    # This application's signal instance and asset details only (ms-markets ADR 0047).
+    assert "alpaca_connectors__signalweightsts__main" in compiled_sql
+    assert "alpaca_connectors__asset_alpaca" in compiled_sql
+    assert "ms_markets__" not in compiled_sql
     assert "GROUP BY" in compiled_sql
     assert "LIMIT" in compiled_sql
     assert set(statement.compile().params.values()) >= {"signal-123", 2}

@@ -1,4 +1,10 @@
-"""Read transposed signal-weight observations from canonical ms-markets storage."""
+"""Read transposed signal-weight observations from this application's signal instance.
+
+The observations live in ``alpaca_connectors.instances.AlpacaSignalWeightsStorage``, this
+application's instance of the ms-markets ``SignalWeightsTS`` contract (ms-markets ADR 0047), and
+are joined to this application's Alpaca asset details for symbols and names; no statement reads a
+Markets table.
+"""
 
 from __future__ import annotations
 
@@ -158,12 +164,14 @@ def read_signal_observation_matrix(
     merely because it contains many assets.
     """
     from msm.api.base import operation_result_rows
-    from msm.models import AssetTable
     from msm.repositories.base import compile_markets_statement, execute_markets_operation
-    from msm_portfolios.time_index.signals.storage import SignalWeightsStorage
-    from sqlalchemy import select
+    from sqlalchemy import String, cast, func, literal, select
 
-    from alpaca_connectors.assets.alpaca_asset_details import AlpacaAssetDetailsTable
+    from alpaca_connectors.assets.alpaca_asset_details import (
+        ALPACA_IDENTIFIER_PREFIX,
+        AlpacaAssetDetailsTable,
+    )
+    from alpaca_connectors.instances import AlpacaSignalWeightsStorage as SignalWeightsStorage
     from alpaca_connectors.runtime import start_markets_engine
 
     normalized_signal_uid = _normalize_signal_uid(signal_uid)
@@ -184,6 +192,10 @@ def read_signal_observation_matrix(
         .limit(normalized_limit)
         .cte("latest_signal_observations")
     )
+    # ALPACA::<alpaca_asset_id> is the canonical identifier by construction (ADR 0004).
+    detail_identifier = func.concat(
+        literal(ALPACA_IDENTIFIER_PREFIX), cast(AlpacaAssetDetailsTable.alpaca_asset_id, String)
+    )
     statement = (
         select(
             SignalWeightsStorage.time_index,
@@ -197,13 +209,9 @@ def read_signal_observation_matrix(
             latest_observations,
             latest_observations.c.time_index == SignalWeightsStorage.time_index,
         )
-        .join(
-            AssetTable,
-            AssetTable.unique_identifier == SignalWeightsStorage.asset_identifier,
-        )
         .outerjoin(
             AlpacaAssetDetailsTable,
-            AlpacaAssetDetailsTable.asset_uid == AssetTable.uid,
+            detail_identifier == SignalWeightsStorage.asset_identifier,
         )
         .where(SignalWeightsStorage.signal_uid == normalized_signal_uid)
         .order_by(
@@ -232,9 +240,9 @@ def read_signal_observation_bounds(*, signal_uid: str) -> SignalObservationBound
     """Return the exact first and last stored observation timestamps for one signal."""
     from msm.api.base import operation_result_rows
     from msm.repositories.base import compile_markets_statement, execute_markets_operation
-    from msm_portfolios.time_index.signals.storage import SignalWeightsStorage
     from sqlalchemy import func, select
 
+    from alpaca_connectors.instances import AlpacaSignalWeightsStorage as SignalWeightsStorage
     from alpaca_connectors.runtime import start_markets_engine
 
     normalized_signal_uid = _normalize_signal_uid(signal_uid)
