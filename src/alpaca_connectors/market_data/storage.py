@@ -24,6 +24,7 @@ from msm.settings import ASSET_IDENTIFIER_DIMENSION
 from sqlalchemy import DateTime, Float, ForeignKey, MetaData, String
 from sqlalchemy.orm import Mapped, mapped_column
 
+from alpaca_connectors.metatables import AlpacaMarketsTimeIndexMetaTableMixin
 from metatables import schema_table_name
 from metatables.migrations import metadata_for_models
 
@@ -107,7 +108,7 @@ _IEX_RAW_COLUMN_INFO = _daily_bar_column_info(
 )
 
 
-class AlpacaStockBars1dSipAllStorage(MarketsTimeIndexMetaTableMixin, MarketsBase):
+class AlpacaStockBars1dSipAllStorage(AlpacaMarketsTimeIndexMetaTableMixin, MarketsBase):
     """Daily (1d) SIP-feed, all-adjustment Alpaca US equity OHLCV bars."""
 
     __markets_storage_app__ = ALPACA_CONNECTORS_STORAGE_APP
@@ -164,7 +165,7 @@ class AlpacaStockBars1dSipAllStorage(MarketsTimeIndexMetaTableMixin, MarketsBase
     )
 
 
-class AlpacaStockBars1dIexRawStorage(MarketsTimeIndexMetaTableMixin, MarketsBase):
+class AlpacaStockBars1dIexRawStorage(AlpacaMarketsTimeIndexMetaTableMixin, MarketsBase):
     """Daily (1d) IEX-feed, raw-adjustment Alpaca US equity OHLCV bars."""
 
     __markets_storage_app__ = ALPACA_CONNECTORS_STORAGE_APP

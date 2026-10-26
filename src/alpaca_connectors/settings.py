@@ -12,6 +12,11 @@ OPENFIGI_DEFAULT_EXCHANGE_CODE = "US"
 # MetaTables (e.g. ``alpaca_connectors__<table>``). Matches alpaca_connectors.market_data's storage app.
 PROJECT_NAMESPACE_SLUG = "alpaca_connectors"
 
+# MetaTables catalog namespace of every table this project owns (ms-markets ADR 0047, decision 4).
+# The project mixins declare it; ``MSM_AUTO_REGISTER_NAMESPACE``, when set, overrides it silently
+# (ms-markets ``markets_configured_namespace``), so hosted resources never set that variable.
+PROJECT_NAMESPACE = "alpaca-connectors"
+
 # Market venue suffix for Alpaca account/asset identities (``<token>__ALPACA`` convention).
 ALPACA_VENUE = "ALPACA"
 

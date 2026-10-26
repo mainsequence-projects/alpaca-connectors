@@ -60,26 +60,18 @@ def resolve_interpolated_prices_storage_specs() -> list[InterpolatedPricesStorag
             {
                 "triple": triple,
                 "storage": storage,
-                "identifier": storage.__table__.name,
-                "namespace": storage.__metatable_namespace__,
                 "physical_table_name": storage.__table__.name,
             }
         )
+    # The physical name identifies a bars table; its namespace and identifier change when the
+    # project tables move to `alpaca-connectors` (docs/operations/markets-api-boundary.md).
     rows = TimeIndexMetaTable.filter_by_body(
-        identifier__in=sorted({item["identifier"] for item in sources}),
-        namespace__in=sorted({item["namespace"] for item in sources}),
         physical_table_name__in=sorted({item["physical_table_name"] for item in sources}),
         limit=max(len(sources) * 2, 1),
     )
     specs: list[InterpolatedPricesStorageSpec] = []
     for item in sources:
-        exact = [
-            row
-            for row in rows
-            if row.identifier == item["identifier"]
-            and row.namespace == item["namespace"]
-            and row.physical_table_name == item["physical_table_name"]
-        ]
+        exact = [row for row in rows if row.physical_table_name == item["physical_table_name"]]
         if len(exact) != 1:
             frequency_id, feed, adjustment = item["triple"]
             raise RuntimeError(

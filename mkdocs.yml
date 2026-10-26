@@ -41,6 +41,7 @@ nav:
       - Jobs And Scheduling: operations/jobs.md
       - Development Workflow: operations/development.md
       - Operator Guide: operations/operator-guide.md
+      - Markets API Boundary Runbook: operations/markets-api-boundary.md
   - ADRs:
       - "0001 ETF Holdings AssetCategory Ownership": adrs/0001_etf_holdings_asset_category_ownership.md
       - "0002 ETF Holdings Alpaca Portfolio Construction": adrs/0002_etf_holdings_alpaca_portfolio_construction.md

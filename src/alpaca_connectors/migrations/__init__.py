@@ -10,6 +10,7 @@ from alpaca_connectors.assets.alpaca_asset_details import project_asset_models
 from alpaca_connectors.market_data import project_configuration_models, project_storage_models
 from alpaca_connectors.operations import project_operation_models
 from alpaca_connectors.portfolios import project_portfolio_configuration_models
+from alpaca_connectors.settings import PROJECT_NAMESPACE
 from alpaca_connectors.universes import project_universe_models
 from metatables.migrations import (
     build_alembic_version_metatable,
@@ -64,7 +65,7 @@ METADATA = metadata_for_models(
 
 ProjectAlembicVersion = build_alembic_version_metatable(
     class_name="ProjectAlembicVersion",
-    namespace="alpaca-connectors",
+    namespace=PROJECT_NAMESPACE,
     identifier="alpaca_connectors.alembic_version",
     schema=None,
     table_name="alpaca_connectors__alembic_version",
@@ -75,7 +76,7 @@ SHARED_PROVIDER_KWARGS = {
     # to `package:namespace` and rejects a reservation under another key, so it stays "src" after
     # the provider module moved to `alpaca_connectors.migrations`.
     "package": "src",
-    "migration_namespace": "alpaca-connectors",
+    "migration_namespace": PROJECT_NAMESPACE,
     "script_location": "alpaca_connectors.migrations:",
     "version_location_prefix": "alpaca_connectors.migrations:versions",
     "alembic_registry": ProjectAlembicVersion,

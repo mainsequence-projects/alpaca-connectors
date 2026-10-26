@@ -21,9 +21,15 @@ OHLCV_COLUMNS = ("open", "high", "low", "close", "volume", "trade_count", "vwap"
 
 
 def test_metatable_identifier_preserves_published_node_identifier():
-    # These stable identifiers remain part of the public DataNode configuration contract.
-    assert AlpacaStockBars1dSipAllStorage.__metatable_identifier__ == "alpaca_stock_bars_1d_sip_all"
-    assert AlpacaStockBars1dIexRawStorage.__metatable_identifier__ == "alpaca_stock_bars_1d_iex_raw"
+    # The authored identifiers stay; the catalog identifier gains the project namespace prefix
+    # every table outside the Markets namespace carries (ms-markets ADR 0047, decision 4).
+    for storage, authored in (
+        (AlpacaStockBars1dSipAllStorage, "alpaca_stock_bars_1d_sip_all"),
+        (AlpacaStockBars1dIexRawStorage, "alpaca_stock_bars_1d_iex_raw"),
+    ):
+        assert storage.__markets_authored_identifier__ == authored
+        assert storage.__metatable_identifier__ == f"alpaca-connectors.{authored}"
+        assert storage.__table__.info["namespace"] == "alpaca-connectors"
 
 
 def test_index_names_are_time_then_asset_identifier():
