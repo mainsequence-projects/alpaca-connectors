@@ -59,3 +59,8 @@ def test_application_runtime_attaches_the_own_execution_ledger_and_portfolio_ins
         "alpaca_connectors__signalweightsts__main",
         "alpaca_connectors__portfoliosts__main",
     } <= table_names
+
+
+def test_account_and_application_runtimes_are_the_same_model_set() -> None:
+    # start_engine rejects a second differing model set in one process.
+    assert account_runtime_models() == application_runtime_models()

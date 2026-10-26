@@ -58,28 +58,29 @@ def project_runtime_models() -> list[type[Any]]:
 
 
 def account_runtime_models() -> list[type[Any]]:
-    """The project tables plus the account details, key requests and execution ledger instances.
+    """Every table of this project: the project tables, account details, key requests, and the
+    execution, signal and portfolio contract instances.
 
-    Use this only in the ``account`` entrypoint; ``start_engine`` rejects a second *differing*
-    model set in one process, but each CLI command is its own process.
+    It equals ``application_runtime_models()``: ``start_engine`` rejects a second *differing*
+    model set in one process, and services started with either set call each other.
     """
     from alpaca_connectors.account.alpaca_account_details import project_account_models
     from alpaca_connectors.execution import execution_runtime_models
+    from alpaca_connectors.instances import portfolio_instance_models
 
     return [
         *project_runtime_models(),
         *project_account_models(),
         # Order execution (ADR 0016) writes this application's orders and trades instances.
         *execution_runtime_models(),
+        # Signal and portfolio history are read from this application's instances.
+        *portfolio_instance_models(),
     ]
 
 
 def application_runtime_models() -> list[type[Any]]:
     """Complete model set used by long-lived API processes and shared services."""
-    from alpaca_connectors.instances import portfolio_instance_models
-
-    # The API reads signal and portfolio history from this application's instances.
-    return [*account_runtime_models(), *portfolio_instance_models()]
+    return account_runtime_models()
 
 
 def portfolio_runtime_models(extra_models: list[type[Any]] | None = None) -> list[type[Any]]:
