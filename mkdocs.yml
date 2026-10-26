@@ -60,6 +60,7 @@ nav:
       - "0015 Agent Tools On The API's MCP And Site Key Entry": adrs/0015_agent_tools_on_the_api_mcp_and_site_key_entry.md
       - "0016 Order Execution For Authorised Applications": adrs/0016_order_execution_for_authorised_applications.md
       - "0017 Account Keys As Application-Encrypted Columns": adrs/0017_encrypted_account_credentials.md
+      - "0018 Markets Through The Markets API": adrs/0018_markets_api_boundary.md
   - Implementation Records:
       - SDK 8 And ms-markets Migration: implementation_tasks/0001_ms_markets_storage_first_migration.md
       - Alpaca Account Storage: implementation_tasks/0002_alpaca_account_module.md

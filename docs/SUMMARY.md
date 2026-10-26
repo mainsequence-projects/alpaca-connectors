@@ -21,6 +21,7 @@
   - [Jobs And Scheduling](operations/jobs.md)
   - [Development Workflow](operations/development.md)
   - [Operator Guide](operations/operator-guide.md)
+  - [Markets API Boundary Runbook](operations/markets-api-boundary.md)
 - ADRs
   - [0001 ETF Holdings AssetCategory Ownership](adrs/0001_etf_holdings_asset_category_ownership.md)
   - [0002 ETF Holdings Alpaca Portfolio Construction](adrs/0002_etf_holdings_alpaca_portfolio_construction.md)
@@ -39,6 +40,7 @@
   - [0015 Agent Tools On The API's MCP, And Alpaca Keys Entered On The Site](adrs/0015_agent_tools_on_the_api_mcp_and_site_key_entry.md)
   - [0016 Order Execution For Authorised Applications](adrs/0016_order_execution_for_authorised_applications.md)
   - [0017 Account Keys As Application-Encrypted Columns](adrs/0017_encrypted_account_credentials.md)
+  - [0018 Markets Through The Markets API](adrs/0018_markets_api_boundary.md)
 - Implementation Records
   - [SDK 8 And ms-markets Migration](implementation_tasks/0001_ms_markets_storage_first_migration.md)
   - [Alpaca Account Storage](implementation_tasks/0002_alpaca_account_module.md)
