@@ -57,8 +57,17 @@ Rebalance Configuration ────────────> PortfolioCalendarE
 ETF Weight Signal + CalendarEventSignal ─> PortfolioRebalance
                                          └> PortfolioWeights
 
-PortfolioWeights + InterpolatedPrices ──> PortfoliosDataNode ─> PortfoliosStorage
+PortfolioWeights + InterpolatedPrices ──> PortfoliosUpdater ─> PortfoliosTS instance
 ```
+
+Every output of this graph lives in this application's `alpaca-connectors` namespace (ms-markets
+ADR 0047): the signal weights, calendar events, rebalance state, portfolio weights and values are
+written to its contract instances (`alpaca_connectors__<contract>__main`, see
+`alpaca_connectors.instances`) and the interpolated prices to
+`alpaca_connectors__interpolated_prices__t_<suffix>`. After each run the portfolio's Markets
+dataset catalog row is registered and reconciled (`PortfolioDatasets.register`), so Markets reads
+the values, weights and signal from those tables. The Portfolio row, its Calendar and the signal
+metadata are Markets registries written through the Markets API.
 
 The portfolio Job does not re-extract the ETF Universe and does not run the bars updater as a
 dependency. It requires an existing Signal observation, then explicitly updates persistent
@@ -168,9 +177,9 @@ Responses report the shared Job as `job_uid` and `job`, both null until a push c
 The configuration detail `GET` resolves the linked Signal, Universe, Alpaca accounts, Bars source,
 Rebalance policy, the shared Job's live settings, and canonical Portfolio metadata. With the optional
 `observation_limit` query parameter (default 2,500, maximum 5,000), it also returns the most recent
-portfolio values from shared `PortfoliosStorage`, ordered chronologically for presentation. The
-storage query is constrained by the canonical `PortfolioTable.unique_identifier`; it does not scan
-or combine values from other portfolios.
+portfolio values from this application's `PortfoliosTS` instance, ordered chronologically for
+presentation. The query is constrained by the canonical Portfolio unique identifier; it does not
+scan or combine values from other portfolios.
 
 The API calculates a quick historical-performance summary with `empyrical-reloaded` from the
 returned daily value window. It reports compounded and annualized return, annualized volatility,
@@ -200,11 +209,13 @@ Before the first live execution:
 
 - project revision `0014` must be applied for calendar-event Rebalance Configuration fields and
   bounded valuation alignment
-- the installed `ms-markets` release must be 2.x, with its provider migrated through revision
-  `0017`; the portfolio runtime attaches the event-ledger, state, and cash-flow tables that
-  revision creates
-- built-in ms-markets Signal, Calendar, calendar-event, rebalance-state, PortfolioWeights, and
-  Portfolios tables must be migrated and registered
+- the installed `ms-markets` release must be 3.x, and the Environment's Markets API must run at
+  least that release (the Job's schema gate checks it); this application holds no role on
+  `mainsequence.markets` and reaches the Portfolio, Calendar and signal metadata through the API
+- this project's revisions `0020` and `0021` must be applied (its signal, calendar-event,
+  rebalance-state, portfolio-weights, portfolio-values and interpolated-price instances), and
+  the rows earlier releases wrote to the shared Markets tables copied with
+  `alpaca-connectors instances backfill` ([runbook](../operations/markets-api-boundary.md))
 - the selected Signal Configuration must already have at least one published observation
 - the selected Bars Configuration must be enabled and its migrated raw bars table must contain the
   required assets
@@ -219,10 +230,11 @@ After a successful live JobRun, verify:
 
 - the JobRun's `command_args` are `--configuration-uid <uid>` for the intended configuration
 - the persistent `InterpolatedPrices` table contains the selected assets
-- `PortfolioCalendarEvents` contains the configured actual session events
-- `PortfolioRebalanceStateStorage` and `PortfolioWeightsStorage` use those event timestamps rather
-  than midnight-normalized dates
+- the `PortfolioCalendarEventsTS` instance contains the configured actual session events
+- the `PortfolioRebalanceStateTS` and `PortfolioWeightsTS` instances use those event timestamps
+  rather than midnight-normalized dates
 - the Portfolio Configuration stores the resulting canonical `Portfolio.uid`
-- `PortfolioWeightsStorage` and `PortfoliosStorage` contain output for that Portfolio
+- the `PortfolioWeightsTS` and `PortfoliosTS` instances contain output for that Portfolio, and its
+  Markets dataset catalog row is `populated`
 - the workflow declaration remains the only source for schedule, compute, image, and
   automatic-deployment state

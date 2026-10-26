@@ -24,10 +24,11 @@ Assets are written through the typed ms-markets API (`msm.api.assets`), not the 
   Alpaca UUID, symbol, exchange, status, capabilities, raw payload, and refresh time
 - `OpenFigiDetails` is an optional one-to-one enrichment row; it is never used as the canonical
   identity or as a registration gate
-- registration bulk-upserts the `AssetType`, `Asset`, and `AlpacaAssetDetails` rows, then
-  bulk-upserts `OpenFigiDetails` only when enrichment succeeds
-- all display snapshots for one registration request are published through one batched
-  `AssetSnapshot` update rather than one TimeIndexTableUpdater run per asset
+- registration bulk-upserts the `AssetType` and `Asset` rows through the Markets API
+  (`upsert_many`), the `AlpacaAssetDetails` rows on this project's table, then `OpenFigiDetails`
+  through the Markets API only when enrichment succeeds
+- all display snapshots for one registration request are published through one
+  `AssetSnapshots.publish` call rather than one TimeIndexTableUpdater run per asset
 - the runtime must be attached first via `alpaca_connectors.runtime.start_markets_engine()` (the CLI does this)
 
 ## Registration Contract

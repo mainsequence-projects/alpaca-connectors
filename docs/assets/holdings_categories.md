@@ -31,7 +31,8 @@ and stores neither Source UID nor active state.
    governed operation and removes stale memberships in one delete operation. It never executes one
    membership insert per constituent.
 7. Return the same extraction as one complete `AlpacaETFHoldingsSignal` DataFrame batch and publish
-   it to the canonical ms-markets `SignalWeightsStorage` table.
+   it to this application's `SignalWeightsTS` instance (`alpaca_connectors__signalweightsts__main`),
+   then bind the signal to it in the Markets dataset catalog (`PortfolioDatasets.register_signal`).
 
 The browser/API creation route is `POST /v1/universes`. Its response distinguishes `uid`,
 `source_uid` and `asset_category_uid`. Run is a separate API action with its own preflight and
@@ -46,7 +47,7 @@ requested while rendering the Universe collection.
 Universe execution persists two distinct outputs from the same extraction:
 
 - `AssetCategoryMembership` stores the current category/Asset relationship without weights.
-- `SignalWeightsStorage` stores the observed normalized weights under the stable
+- the `SignalWeightsTS` instance stores the observed normalized weights under the stable
   Universe-derived `signal_uid`.
 
 The selected Account UID is serialized in the signal updater configuration so automatic execution

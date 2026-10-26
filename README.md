@@ -113,8 +113,9 @@ alpaca-connectors universe run <UNIVERSE_UID> --execute
 ```
 
 An executed Universe run extracts once, bulk-registers missing Alpaca assets, bulk-replaces the
-linked category membership, and publishes the complete observed weights as one canonical
-`SignalWeightsStorage` batch. `universe_uid` defines signal identity; the required `account_uid`
+linked category membership, and publishes the complete observed weights as one batch into this
+application's `SignalWeightsTS` instance (`alpaca_connectors__signalweightsts__main`, ms-markets
+ADR 0047). `universe_uid` defines signal identity; the required `account_uid`
 is execution configuration only.
 
 Create a reusable update configuration and run it:

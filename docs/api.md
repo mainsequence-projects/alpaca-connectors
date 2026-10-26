@@ -79,7 +79,8 @@ inferred or persisted on the Universe.
 count without embedding all members. `GET /v1/universes/{universe_uid}/assets` reuses the standard
 paginated Asset response and discovery contract, scoped to that linked category. The Universe
 collection and detail endpoints do not perform one backend request per Asset. Universe execution
-publishes the extracted weights through the canonical `SignalWeightsStorage`. The linked category
+publishes the extracted weights into this application's `SignalWeightsTS` instance
+(`alpaca_connectors__signalweightsts__main`). The linked category
 records membership only; weights do not become category-membership columns.
 
 ## Order Execution
@@ -198,8 +199,8 @@ Signal and portfolio configurations run on the two Jobs declared in
 
 `POST /v1/signal-jobs` creates one durable signal configuration from one Universe and one registered
 Alpaca account; it does not touch the platform. `universe_uid` defines signal identity.
-`account_uid` is runtime configuration and never becomes part of the final signal UID or
-`SignalWeightsStorage`. A run performs one Universe extraction, materialization and signal update.
+`account_uid` is runtime configuration and never becomes part of the final signal UID or the
+signal weights. A run performs one Universe extraction, materialization and signal update.
 
 Lifecycle routes are:
 
@@ -217,7 +218,7 @@ The list filters on `scheduled` and orders by `name` or `updated_at`. Deleting a
 removes only its row; prior signal observations and the shared Job's runs remain.
 
 The observations endpoint resolves the signal UID from the stored configuration, selects the
-latest distinct observation timestamps from canonical ms-markets `SignalWeightsStorage`, and
+latest distinct observation timestamps from this application's `SignalWeightsTS` instance, and
 returns all constituent rows for those timestamps as a compact aligned payload. It never accepts an
 arbitrary signal UID and performs one set-based backend query rather than one request per Asset.
 The limit is between 1 and 100 and defaults to 100. Timestamps are returned chronologically and each
@@ -256,7 +257,8 @@ is still an analytical reconstruction rather than guaranteed point-in-time ETF r
 
 The configuration detail `GET` accepts `observation_limit` from 1 through 5,000 (default 2,500). It
 returns resolved Signal, Universe, Alpaca account, Bars, Rebalance, Job, and canonical
-portfolio/calendar summaries plus the requested latest values from `PortfoliosStorage`. The history
+portfolio/calendar summaries (read through the Markets API) plus the requested latest values from
+this application's `PortfoliosTS` instance (`alpaca_connectors__portfoliosts__main`). The history
 query is scoped by the canonical Portfolio unique identifier and runs only when a consumer opens
 that configuration; API consumers do not need to interpret or display related resource UIDs.
 
