@@ -680,23 +680,28 @@ def _query_existing_assets_by_alpaca_id(
     *,
     timeout: float | None = None,
 ) -> dict[str, Any]:
-    """Return assets already registered under their canonical Alpaca UUID identifier."""
+    """Return assets already registered under their canonical Alpaca UUID identifier.
+
+    Two set-based reads: this project's details table for the requested Alpaca ids, and one
+    batched Markets read for the Assets by canonical identifier plus the Assets those details
+    point to (ms-markets ADR 0047); no statement joins ``AssetTable``.
+    """
     if not alpaca_asset_ids:
         return {}
 
-    from msm.api.assets import Asset
     from msm.api.base import operation_result_rows
-    from msm.models import AssetTable
     from msm.repositories.base import compile_markets_statement, execute_markets_operation
-    from sqlalchemy import or_, select
+    from sqlalchemy import select
 
     from alpaca_connectors.assets.alpaca_asset_details import (
         AlpacaAssetDetailsTable,
         build_alpaca_unique_identifier,
         normalize_alpaca_asset_id,
     )
+    from alpaca_connectors.markets_api import assets_by_identifier, assets_by_uid
     from alpaca_connectors.runtime import start_markets_engine
 
+    _ = timeout
     normalized_ids = sorted(
         {normalize_alpaca_asset_id(value) for value in alpaca_asset_ids},
         key=str,
@@ -712,37 +717,31 @@ def _query_existing_assets_by_alpaca_id(
     # processes attach that model graph once at startup, and SDK 8 correctly
     # rejects a later ``start_engine`` call with a narrower model selection.
     runtime = start_markets_engine()
-    statement = (
-        select(
-            AssetTable.uid,
-            AssetTable.unique_identifier,
-            AssetTable.asset_type,
-            AlpacaAssetDetailsTable.alpaca_asset_id,
-        )
-        .select_from(AssetTable)
-        .outerjoin(
-            AlpacaAssetDetailsTable,
-            AlpacaAssetDetailsTable.asset_uid == AssetTable.uid,
-        )
-        .where(
-            or_(
-                AssetTable.unique_identifier.in_(list(ids_by_identifier)),
-                AlpacaAssetDetailsTable.alpaca_asset_id.in_(normalized_ids),
-            )
-        )
-    )
+    statement = select(
+        AlpacaAssetDetailsTable.asset_uid,
+        AlpacaAssetDetailsTable.alpaca_asset_id,
+    ).where(AlpacaAssetDetailsTable.alpaca_asset_id.in_(normalized_ids))
     operation = compile_markets_statement(
         statement,
         context=runtime.context,
         operation="select",
     )
-    rows = operation_result_rows(execute_markets_operation(operation, context=runtime.context))
+    detail_rows = operation_result_rows(
+        execute_markets_operation(operation, context=runtime.context)
+    )
+    detail_ids_by_asset_uid = {
+        str(row["asset_uid"]): str(normalize_alpaca_asset_id(row["alpaca_asset_id"]))
+        for row in detail_rows
+    }
+    assets = dict(assets_by_identifier(ids_by_identifier))
+    found_uids = {str(asset.uid) for asset in assets.values()}
+    assets_by_detail = assets_by_uid(
+        uid for uid in detail_ids_by_asset_uid if uid not in found_uids
+    )
     existing_assets: dict[str, Any] = {}
-    for row in rows:
-        asset = Asset.model_validate(row)
-        detail_id = row.get("alpaca_asset_id")
-        if detail_id is not None:
-            alpaca_asset_id = str(normalize_alpaca_asset_id(detail_id))
+    for asset in [*assets.values(), *assets_by_detail.values()]:
+        alpaca_asset_id = detail_ids_by_asset_uid.get(str(asset.uid))
+        if alpaca_asset_id is not None:
             expected_identifier = identifiers_by_id.get(alpaca_asset_id)
             if expected_identifier is None:
                 continue
@@ -769,7 +768,6 @@ def _query_registered_assets_by_symbols(
         return {}
 
     from msm.api.base import operation_result_rows
-    from msm.models import AssetTable
     from msm.repositories.base import compile_markets_statement, execute_markets_operation
     from sqlalchemy import select
 
@@ -789,17 +787,13 @@ def _query_registered_assets_by_symbols(
         }
     )
     runtime = start_markets_engine()
-    statement = (
-        select(
-            AssetTable.uid.label("asset_uid"),
-            AssetTable.unique_identifier,
-            AlpacaAssetDetailsTable.alpaca_asset_id,
-            AlpacaAssetDetailsTable.symbol,
-        )
-        .select_from(AlpacaAssetDetailsTable)
-        .join(AssetTable, AssetTable.uid == AlpacaAssetDetailsTable.asset_uid)
-        .where(AlpacaAssetDetailsTable.symbol.in_(candidate_symbols))
-    )
+    # The canonical identifier is ALPACA::<alpaca_asset_id> by construction (ADR 0004), so this
+    # reads this project's details table alone, without joining the Markets AssetTable.
+    statement = select(
+        AlpacaAssetDetailsTable.asset_uid,
+        AlpacaAssetDetailsTable.alpaca_asset_id,
+        AlpacaAssetDetailsTable.symbol,
+    ).where(AlpacaAssetDetailsTable.symbol.in_(candidate_symbols))
     operation = compile_markets_statement(
         statement,
         context=runtime.context,
@@ -810,11 +804,6 @@ def _query_registered_assets_by_symbols(
     for row in rows:
         alpaca_asset_id = uuid.UUID(str(row["alpaca_asset_id"]))
         expected_identifier = build_alpaca_unique_identifier(alpaca_asset_id)
-        if str(row["unique_identifier"]) != expected_identifier:
-            raise ValueError(
-                "Registered Alpaca symbol identity disagrees with its parent Asset: "
-                f"symbol {row['symbol']}, Asset {row['asset_uid']!s}."
-            )
         reference = RegisteredAlpacaAssetReference(
             asset_uid=str(row["asset_uid"]),
             unique_identifier=expected_identifier,
@@ -965,8 +954,7 @@ def _register_alpaca_asset(
     match: OpenFigiMatch | None = None,
 ) -> str:
     """Upsert one Alpaca asset; universe-sized callers use the batch implementation."""
-    from msm.api.assets import Asset, AssetType, OpenFigiDetails
-    from msm.time_index.assets import AssetSnapshot
+    from msm.api.assets import Asset, AssetSnapshots, AssetType, OpenFigiDetails
 
     from alpaca_connectors.assets.alpaca_asset_details import (
         build_alpaca_unique_identifier,
@@ -991,13 +979,15 @@ def _register_alpaca_asset(
     )
     if match is not None:
         OpenFigiDetails.upsert(**_openfigi_detail_registration_values(match, asset_uid=asset.uid))
-    AssetSnapshot().set_snapshots(
-        _asset_snapshot_registration_values(
-            alpaca_asset,
-            match,
-            time_index=dt.datetime.now(tz=dt.UTC),
-        )
-    ).run()
+    AssetSnapshots.publish(
+        [
+            _asset_snapshot_registration_values(
+                alpaca_asset,
+                match,
+                time_index=dt.datetime.now(tz=dt.UTC),
+            )
+        ]
+    )
     return str(asset.uid)
 
 
@@ -1005,41 +995,30 @@ def _register_alpaca_assets_batch(
     alpaca_assets: Sequence[AlpacaAssetRecord],
     matches_by_symbol: dict[str, OpenFigiMatch],
 ) -> dict[str, str]:
-    """Register one resolved asset batch with fixed-count MetaTable and snapshot operations."""
+    """Register one resolved asset batch with a fixed number of set-based operations.
+
+    Asset types, Assets, OpenFIGI details and asset snapshots go to Markets as one bulk call each
+    (``upsert_many`` / ``AssetSnapshots.publish``; write-policy resources ``asset-type``,
+    ``asset``, ``open-figi-details`` and ``asset-snapshots``); this project's details are one
+    bulk upsert on its own table.
+    """
     if not alpaca_assets:
         return {}
 
-    from msm.api.base import operation_result_rows
+    from msm.api.assets import Asset, AssetSnapshots, AssetType, OpenFigiDetails
     from msm.bootstrap import resolve_runtime
-    from msm.models import AssetTable, AssetTypeTable, OpenFigiAssetDetailsTable
     from msm.repositories.crud import bulk_upsert_model
-    from msm.time_index.assets import AssetSnapshot
 
     from alpaca_connectors.assets.alpaca_asset_details import (
         AlpacaAssetDetailsTable,
         build_alpaca_unique_identifier,
     )
 
-    runtime = resolve_runtime(
-        models=[
-            AssetTypeTable,
-            AssetTable,
-            AlpacaAssetDetailsTable,
-            OpenFigiAssetDetailsTable,
-        ],
-        row_model_name="Alpaca asset registration batch",
-    )
-    context = runtime.context
     asset_type_values_by_key = {
         values["asset_type"]: values
         for values in (_asset_type_registration_values(asset) for asset in alpaca_assets)
     }
-    bulk_upsert_model(
-        context,
-        model=AssetTypeTable,
-        values=list(asset_type_values_by_key.values()),
-        conflict_columns=("asset_type",),
-    )
+    AssetType.upsert_many(list(asset_type_values_by_key.values()))
 
     asset_values = [
         {
@@ -1048,16 +1027,8 @@ def _register_alpaca_assets_batch(
         }
         for asset in alpaca_assets
     ]
-    asset_result = bulk_upsert_model(
-        context,
-        model=AssetTable,
-        values=asset_values,
-        conflict_columns=("unique_identifier",),
-    )
-    asset_rows = operation_result_rows(asset_result)
-    asset_uids_by_identifier = {
-        str(row["unique_identifier"]): str(row["uid"]) for row in asset_rows
-    }
+    asset_rows = Asset.upsert_many(asset_values)
+    asset_uids_by_identifier = {str(row.unique_identifier): str(row.uid) for row in asset_rows}
     expected_identifiers = {str(values["unique_identifier"]) for values in asset_values}
     missing_identifiers = sorted(expected_identifiers - asset_uids_by_identifier.keys())
     if missing_identifiers:
@@ -1094,20 +1065,19 @@ def _register_alpaca_assets_batch(
             )
         )
 
+    runtime = resolve_runtime(
+        models=[AlpacaAssetDetailsTable],
+        row_model_name="Alpaca asset registration batch",
+    )
     bulk_upsert_model(
-        context,
+        runtime.context,
         model=AlpacaAssetDetailsTable,
         values=detail_values,
         conflict_columns=("asset_uid",),
     )
     if openfigi_values:
-        bulk_upsert_model(
-            context,
-            model=OpenFigiAssetDetailsTable,
-            values=openfigi_values,
-            conflict_columns=("asset_uid",),
-        )
-    AssetSnapshot().set_snapshots(snapshot_values).run()
+        OpenFigiDetails.upsert_many(openfigi_values)
+    AssetSnapshots.publish(snapshot_values)
     return assets_by_symbol
 
 

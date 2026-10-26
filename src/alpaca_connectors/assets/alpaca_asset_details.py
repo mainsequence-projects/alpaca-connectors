@@ -244,10 +244,8 @@ class AlpacaAssetDetails(MarketsMetaTableRow):
     model_config = ConfigDict(extra="ignore", frozen=True)
 
     __table__: ClassVar[type[AlpacaAssetDetailsTable]] = AlpacaAssetDetailsTable
-    __required_tables__: ClassVar[list[type[Any]]] = [
-        AssetTable,
-        AlpacaAssetDetailsTable,
-    ]
+    # Own tables only: the Asset foreign key is a reference by physical name (ms-markets ADR 0047).
+    __required_tables__: ClassVar[list[type[Any]]] = [AlpacaAssetDetailsTable]
     __upsert_keys__: ClassVar[tuple[str, ...]] = ("asset_uid",)
 
     uid: uuid.UUID = Field(validation_alias=AliasChoices("uid", "asset_uid"))
@@ -305,7 +303,7 @@ def upsert_alpaca_asset_details(
         )
 
     runtime = resolve_runtime(
-        models=[AssetTable, AlpacaAssetDetailsTable],
+        models=[AlpacaAssetDetailsTable],
         row_model_name="AlpacaAssetDetails",
     )
     result = upsert_model(

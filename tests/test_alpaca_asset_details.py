@@ -68,7 +68,6 @@ def test_detail_row_uses_asset_uid_as_its_generic_row_uid() -> None:
     assert detail.asset_uid == ASSET_UID
     assert AlpacaAssetDetails.__upsert_keys__ == ("asset_uid",)
     assert [model.__name__ for model in AlpacaAssetDetails.__required_tables__] == [
-        "AssetTable",
         "AlpacaAssetDetailsTable",
     ]
 

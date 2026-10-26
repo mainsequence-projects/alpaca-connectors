@@ -60,8 +60,6 @@ class AlpacaAssetRegistrationTests(unittest.TestCase):
     def test_batch_registration_uses_bulk_metatable_operations_and_one_snapshot_run(
         self,
     ) -> None:
-        from msm.models import AssetTable, AssetTypeTable
-
         from alpaca_connectors.assets.alpaca_asset_details import AlpacaAssetDetailsTable
 
         assets = [alpaca_asset("AAPL", AAPL_ID), alpaca_asset("SPY", SPY_ID)]
@@ -69,17 +67,18 @@ class AlpacaAssetRegistrationTests(unittest.TestCase):
             build_alpaca_unique_identifier(AAPL_ID): "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
             build_alpaca_unique_identifier(SPY_ID): "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
         }
+        markets_calls: list[tuple[str, list]] = []
 
-        def bulk_upsert(_context, *, model, values, conflict_columns):
-            if model is AssetTable:
-                return {
-                    "rows": [{**row, "uid": asset_uids[row["unique_identifier"]]} for row in values]
-                }
-            return {"rows": list(values)}
+        def upsert_assets(values):
+            markets_calls.append(("asset", list(values)))
+            return [
+                SimpleNamespace(
+                    uid=asset_uids[row["unique_identifier"]],
+                    unique_identifier=row["unique_identifier"],
+                )
+                for row in values
+            ]
 
-        snapshot = Mock()
-        snapshot.set_snapshots.return_value = snapshot
-        snapshot.run.return_value = (False, None)
         with (
             patch(
                 "msm.bootstrap.resolve_runtime",
@@ -87,9 +86,20 @@ class AlpacaAssetRegistrationTests(unittest.TestCase):
             ),
             patch(
                 "msm.repositories.crud.bulk_upsert_model",
-                side_effect=bulk_upsert,
+                side_effect=lambda _context, *, model, values, conflict_columns: {
+                    "rows": list(values)
+                },
             ) as bulk_upsert_model,
-            patch("msm.time_index.assets.AssetSnapshot", return_value=snapshot),
+            patch(
+                "msm.api.assets.AssetType.upsert_many",
+                side_effect=lambda values: markets_calls.append(("asset-type", list(values))),
+            ),
+            patch("msm.api.assets.Asset.upsert_many", side_effect=upsert_assets),
+            patch("msm.api.assets.OpenFigiDetails.upsert_many") as figi_upsert_many,
+            patch(
+                "msm.api.assets.AssetSnapshots.publish",
+                side_effect=lambda rows: markets_calls.append(("asset-snapshots", list(rows))),
+            ),
         ):
             result = _register_alpaca_assets_batch(assets, {})
 
@@ -100,18 +110,16 @@ class AlpacaAssetRegistrationTests(unittest.TestCase):
                 "SPY": asset_uids[build_alpaca_unique_identifier(SPY_ID)],
             },
         )
-        self.assertEqual(bulk_upsert_model.call_count, 3)
-        type_call, asset_call, details_call = bulk_upsert_model.call_args_list
-        self.assertIs(type_call.kwargs["model"], AssetTypeTable)
-        self.assertEqual(len(type_call.kwargs["values"]), 1)
-        self.assertIs(asset_call.kwargs["model"], AssetTable)
-        self.assertEqual(len(asset_call.kwargs["values"]), 2)
+        self.assertEqual(
+            [(name, len(values)) for name, values in markets_calls],
+            [("asset-type", 1), ("asset", 2), ("asset-snapshots", 2)],
+        )
+        figi_upsert_many.assert_not_called()
+        (details_call,) = bulk_upsert_model.call_args_list
         self.assertIs(details_call.kwargs["model"], AlpacaAssetDetailsTable)
         self.assertEqual(len(details_call.kwargs["values"]), 2)
-        snapshot_rows = snapshot.set_snapshots.call_args.args[0]
-        self.assertEqual(len(snapshot_rows), 2)
+        snapshot_rows = markets_calls[-1][1]
         self.assertEqual(len({row["time_index"] for row in snapshot_rows}), 1)
-        snapshot.run.assert_called_once_with()
 
     def test_registration_execution_delegates_the_complete_plan_to_one_batch(self) -> None:
         assets = [alpaca_asset("AAPL", AAPL_ID), alpaca_asset("SPY", SPY_ID)]
@@ -199,6 +207,8 @@ class AlpacaAssetRegistrationTests(unittest.TestCase):
 
     def test_bulk_identity_lookup_reuses_application_runtime(self) -> None:
         runtime = SimpleNamespace(context=object())
+        aapl_uid = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+        spy_uid = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
         with (
             patch(
                 "alpaca_connectors.runtime.start_markets_engine", return_value=runtime
@@ -206,16 +216,43 @@ class AlpacaAssetRegistrationTests(unittest.TestCase):
             patch(
                 "msm.repositories.base.compile_markets_statement",
                 return_value="compiled-operation",
-            ),
+            ) as compile_statement,
             patch(
                 "msm.repositories.base.execute_markets_operation",
-                return_value={"rows": []},
+                return_value={"rows": [{"asset_uid": spy_uid, "alpaca_asset_id": SPY_ID}]},
+            ),
+            patch(
+                "alpaca_connectors.markets_api.assets_by_identifier",
+                return_value={
+                    build_alpaca_unique_identifier(AAPL_ID): SimpleNamespace(
+                        uid=aapl_uid, unique_identifier=build_alpaca_unique_identifier(AAPL_ID)
+                    )
+                },
+            ),
+            patch(
+                "alpaca_connectors.markets_api.assets_by_uid",
+                side_effect=lambda uids: {
+                    uid: SimpleNamespace(
+                        uid=uid, unique_identifier=build_alpaca_unique_identifier(SPY_ID)
+                    )
+                    for uid in uids
+                },
             ),
         ):
             result = _query_existing_assets_by_alpaca_id([AAPL_ID, SPY_ID])
 
-        self.assertEqual(result, {})
+        self.assertEqual(
+            {key: str(value.uid) for key, value in result.items()},
+            {
+                str(AAPL_ID): aapl_uid,
+                str(SPY_ID): spy_uid,
+            },
+        )
         start_engine.assert_called_once_with()
+        sql = str(
+            compile_statement.call_args.args[0].compile(compile_kwargs={"literal_binds": True})
+        )
+        self.assertNotIn("ms_markets__", sql)
 
     def test_registration_client_resolves_registered_account_secret_references(self) -> None:
         registration = {
@@ -331,9 +368,6 @@ class AlpacaAssetRegistrationTests(unittest.TestCase):
             classification_pass_name="common_stock",
         )
         registered = Mock(uid="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
-        snapshot = Mock()
-        snapshot.set_snapshots.return_value = snapshot
-        snapshot.run.return_value = (False, None)
 
         with (
             patch("msm.api.assets.AssetType.upsert") as asset_type_upsert,
@@ -342,7 +376,7 @@ class AlpacaAssetRegistrationTests(unittest.TestCase):
                 "alpaca_connectors.assets.alpaca_asset_details.upsert_alpaca_asset_details"
             ) as alpaca_details_upsert,
             patch("msm.api.assets.OpenFigiDetails.upsert") as figi_details_upsert,
-            patch("msm.time_index.assets.AssetSnapshot", return_value=snapshot),
+            patch("msm.api.assets.AssetSnapshots.publish") as snapshots_publish,
         ):
             asset_uid = _register_alpaca_asset(asset_record, match)
 
@@ -356,7 +390,7 @@ class AlpacaAssetRegistrationTests(unittest.TestCase):
             alpaca_details_upsert.call_args.kwargs["values"]["alpaca_asset_id"], AAPL_ID
         )
         self.assertEqual(figi_details_upsert.call_args.kwargs["figi"], "BBG000B9XRY4")
-        payload = snapshot.set_snapshots.call_args.args[0]
+        (payload,) = snapshots_publish.call_args.args[0]
         self.assertEqual(payload["asset_identifier"], build_alpaca_unique_identifier(AAPL_ID))
         self.assertEqual(payload["ticker"], "AAPL")
 

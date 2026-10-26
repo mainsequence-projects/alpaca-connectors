@@ -5,7 +5,10 @@ In the storage-first ms-markets model, ``Asset`` carries only ``uid`` / ``unique
 FIGI metadata lives on a separate optional detail row. These helpers are reused by bars, universes,
 holdings, portfolios, and API catalog search.
 
-All callers must have an attached markets runtime (``alpaca_connectors.runtime.start_markets_engine``) first.
+Markets rows (``Asset``, ``AssetCategory`` memberships, ``OpenFigiDetails``) are read with batched
+``msm.api`` row calls, which run on the Markets API under the remote backend (ms-markets ADR
+0047); this project's details table is read with one compiled statement on its own runtime, and no
+statement joins a Markets table.
 """
 
 from __future__ import annotations
@@ -23,61 +26,37 @@ def get_asset_by_unique_identifier(unique_identifier: str) -> Any | None:
 
 
 def assets_by_uids(asset_uids: Sequence[Any]) -> dict[str, Any]:
-    """Load an Asset UID set with one governed backend query."""
-    from msm.api.assets import Asset
-    from msm.api.base import operation_result_rows
-    from msm.models import AssetTable
-    from msm.repositories.base import compile_markets_statement, execute_markets_operation
-    from sqlalchemy import select
+    """Load an Asset UID set with batched Markets reads."""
+    from alpaca_connectors.markets_api import assets_by_uid
 
-    from alpaca_connectors.runtime import start_markets_engine
-
-    normalized_uids = list(dict.fromkeys(uuid.UUID(str(asset_uid)) for asset_uid in asset_uids))
-    if not normalized_uids:
-        return {}
-    runtime = start_markets_engine()
-    operation = compile_markets_statement(
-        select(AssetTable).where(AssetTable.uid.in_(normalized_uids)),
-        context=runtime.context,
-        operation="select",
-    )
-    assets = [
-        Asset.model_validate(row)
-        for row in operation_result_rows(
-            execute_markets_operation(operation, context=runtime.context)
-        )
-    ]
-    return {str(asset.uid): asset for asset in assets}
+    return assets_by_uid(asset_uids)
 
 
 def assets_by_unique_identifiers(unique_identifiers: Sequence[str]) -> dict[str, Any]:
-    """Load an Asset identifier set with one governed backend query."""
-    from msm.api.assets import Asset
+    """Load an Asset identifier set with batched Markets reads."""
+    from alpaca_connectors.markets_api import assets_by_identifier
+
+    return assets_by_identifier(unique_identifiers)
+
+
+def _alpaca_details_rows(where: Any) -> list[dict[str, Any]]:
+    """Rows of this project's ``AlpacaAssetDetailsTable`` matching ``where`` (one query)."""
     from msm.api.base import operation_result_rows
-    from msm.models import AssetTable
     from msm.repositories.base import compile_markets_statement, execute_markets_operation
     from sqlalchemy import select
 
+    from alpaca_connectors.assets.alpaca_asset_details import AlpacaAssetDetailsTable
     from alpaca_connectors.runtime import start_markets_engine
 
-    normalized_identifiers = list(
-        dict.fromkeys(str(identifier) for identifier in unique_identifiers)
-    )
-    if not normalized_identifiers:
-        return {}
     runtime = start_markets_engine()
-    operation = compile_markets_statement(
-        select(AssetTable).where(AssetTable.unique_identifier.in_(normalized_identifiers)),
-        context=runtime.context,
-        operation="select",
-    )
-    assets = [
-        Asset.model_validate(row)
-        for row in operation_result_rows(
-            execute_markets_operation(operation, context=runtime.context)
-        )
-    ]
-    return {asset.unique_identifier: asset for asset in assets}
+    statement = select(
+        AlpacaAssetDetailsTable.asset_uid,
+        AlpacaAssetDetailsTable.alpaca_asset_id,
+        AlpacaAssetDetailsTable.symbol,
+        AlpacaAssetDetailsTable.name,
+    ).where(where)
+    operation = compile_markets_statement(statement, context=runtime.context, operation="select")
+    return operation_result_rows(execute_markets_operation(operation, context=runtime.context))
 
 
 def openfigi_details_for_asset_uid(asset_uid: Any) -> Any | None:
@@ -99,82 +78,58 @@ def ticker_and_optional_figi(unique_identifier: str) -> tuple[str | None, str | 
 def ticker_and_optional_figi_by_unique_identifiers(
     unique_identifiers: Sequence[str],
 ) -> dict[str, tuple[str | None, str | None]]:
-    """Resolve Alpaca symbols and optional FIGIs for an Asset set in one query."""
-    from msm.api.base import operation_result_rows
-    from msm.models import AssetTable, OpenFigiAssetDetailsTable
-    from msm.repositories.base import compile_markets_statement, execute_markets_operation
-    from sqlalchemy import select
+    """Resolve Alpaca symbols and optional FIGIs for an Asset set.
 
+    One batched Markets read for the Assets, one query of this project's details table and one
+    batched Markets read for OpenFIGI details; every existing Asset gets an entry, ``(None, None)``
+    when it has neither.
+    """
     from alpaca_connectors.assets.alpaca_asset_details import AlpacaAssetDetailsTable
-    from alpaca_connectors.runtime import start_markets_engine
+    from alpaca_connectors.markets_api import (
+        assets_by_identifier,
+        openfigi_details_by_asset_uid,
+    )
 
     normalized_identifiers = list(
         dict.fromkeys(str(identifier) for identifier in unique_identifiers)
     )
     if not normalized_identifiers:
         return {}
-    runtime = start_markets_engine()
-    statement = (
-        select(
-            AssetTable.unique_identifier,
-            AlpacaAssetDetailsTable.symbol.label("ticker"),
-            OpenFigiAssetDetailsTable.figi,
+    assets = assets_by_identifier(normalized_identifiers)
+    if not assets:
+        return {}
+    asset_uids = [uuid.UUID(str(asset.uid)) for asset in assets.values()]
+    symbols = {
+        str(row["asset_uid"]): row.get("symbol")
+        for row in _alpaca_details_rows(AlpacaAssetDetailsTable.asset_uid.in_(asset_uids))
+    }
+    figis = openfigi_details_by_asset_uid(str(uid) for uid in asset_uids)
+    return {
+        identifier: (
+            symbols.get(str(asset.uid)),
+            getattr(figis.get(str(asset.uid)), "figi", None),
         )
-        .select_from(AssetTable)
-        .outerjoin(
-            AlpacaAssetDetailsTable,
-            AlpacaAssetDetailsTable.asset_uid == AssetTable.uid,
-        )
-        .outerjoin(
-            OpenFigiAssetDetailsTable,
-            OpenFigiAssetDetailsTable.asset_uid == AssetTable.uid,
-        )
-        .where(AssetTable.unique_identifier.in_(normalized_identifiers))
-    )
-    operation = compile_markets_statement(
-        statement,
-        context=runtime.context,
-        operation="select",
-    )
-    rows = operation_result_rows(execute_markets_operation(operation, context=runtime.context))
-    return {str(row["unique_identifier"]): (row.get("ticker"), row.get("figi")) for row in rows}
+        for identifier, asset in assets.items()
+    }
 
 
 def asset_unique_identifiers_for_category(category_unique_identifier: str) -> list[str]:
     """Return the asset unique identifiers that are members of an asset category.
 
-    Raises ``ValueError`` if the category does not exist. Membership integrity is enforced by the
-    migrated foreign keys, and the membership-to-Asset join is executed as one governed query.
+    Raises ``ValueError`` if the category does not exist. The memberships and their Assets are
+    read from Markets in pages and batches.
     """
     from msm.api.assets import AssetCategory
-    from msm.api.base import operation_result_rows
-    from msm.models import AssetCategoryMembershipTable, AssetTable
-    from msm.repositories.base import compile_markets_statement, execute_markets_operation
-    from sqlalchemy import select
 
-    from alpaca_connectors.runtime import start_markets_engine
+    from alpaca_connectors.markets_api import assets_by_uid, category_member_asset_uids
 
     category = AssetCategory.get_by_unique_identifier(category_unique_identifier)
     if category is None:
         raise ValueError(
             f"Missing asset category for unique_identifier: {category_unique_identifier!r}"
         )
-
-    runtime = start_markets_engine()
-    statement = (
-        select(AssetTable.uid, AssetTable.unique_identifier)
-        .select_from(AssetCategoryMembershipTable)
-        .join(AssetTable, AssetTable.uid == AssetCategoryMembershipTable.asset_uid)
-        .where(AssetCategoryMembershipTable.category_uid == category.uid)
-        .order_by(AssetTable.unique_identifier.asc())
-    )
-    operation = compile_markets_statement(
-        statement,
-        context=runtime.context,
-        operation="select",
-    )
-    rows = operation_result_rows(execute_markets_operation(operation, context=runtime.context))
-    return [str(row["unique_identifier"]) for row in rows]
+    assets = assets_by_uid(category_member_asset_uids(category.uid))
+    return sorted(str(asset.unique_identifier) for asset in assets.values())
 
 
 def assets_for_ticker(ticker: str) -> list[Any]:
@@ -183,38 +138,15 @@ def assets_for_ticker(ticker: str) -> list[Any]:
     The current provider symbol is read only from required ``AlpacaAssetDetails``. Symbol is a
     lookup attribute, never the canonical identity. May return zero, one, or several assets.
     """
-    from msm.api.assets import Asset
-    from msm.api.base import operation_result_rows
-    from msm.models import AssetTable
-    from msm.repositories.base import compile_markets_statement, execute_markets_operation
-    from sqlalchemy import select
-
     from alpaca_connectors.assets.alpaca_asset_details import AlpacaAssetDetailsTable
-    from alpaca_connectors.runtime import start_markets_engine
+    from alpaca_connectors.markets_api import assets_by_uid
 
     normalized = (ticker or "").strip()
     if not normalized:
         return []
-
-    runtime = start_markets_engine()
-    statement = (
-        select(AssetTable)
-        .select_from(AlpacaAssetDetailsTable)
-        .join(AssetTable, AssetTable.uid == AlpacaAssetDetailsTable.asset_uid)
-        .where(AlpacaAssetDetailsTable.symbol == normalized.upper())
-        .order_by(AssetTable.uid.asc())
-    )
-    operation = compile_markets_statement(
-        statement,
-        context=runtime.context,
-        operation="select",
-    )
-    return [
-        Asset.model_validate(row)
-        for row in operation_result_rows(
-            execute_markets_operation(operation, context=runtime.context)
-        )
-    ]
+    rows = _alpaca_details_rows(AlpacaAssetDetailsTable.symbol == normalized.upper())
+    assets = assets_by_uid(row["asset_uid"] for row in rows)
+    return [assets[uid] for uid in sorted(assets)]
 
 
 def unique_identifiers_for_ticker(ticker: str) -> list[str]:

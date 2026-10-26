@@ -1,4 +1,4 @@
-"""Read-only catalog operations for shared ms-markets Assets."""
+"""Read-only catalog operations for the Alpaca-registered ms-markets Assets."""
 
 from __future__ import annotations
 
@@ -46,70 +46,68 @@ def list_assets(
     ordering: str = "ticker",
     category_uid: uuid.UUID | str | None = None,
 ) -> tuple[list[dict[str, Any]], int]:
-    from msm.api.base import operation_result_rows
-    from msm.models import (
-        AssetCategoryMembershipTable,
-        AssetTable,
-        OpenFigiAssetDetailsTable,
-    )
-    from msm.repositories.base import compile_markets_statement, execute_markets_operation
-    from sqlalchemy import String, func, or_, select
+    """Page this project's Alpaca asset details and add each page's Markets fields.
 
-    from alpaca_connectors.assets.alpaca_asset_details import AlpacaAssetDetailsTable
+    The page and the count are compiled statements on ``AlpacaAssetDetailsTable`` alone; the
+    canonical identifier is ``ALPACA::<alpaca_asset_id>`` by construction (ADR 0004). A category
+    filter reads the category's memberships from Markets first, and the page's Assets and
+    OpenFIGI details come from Markets in one batched read each (ms-markets ADR 0047).
+    """
+    from msm.api.base import operation_result_rows
+    from msm.repositories.base import compile_markets_statement, execute_markets_operation
+    from sqlalchemy import String, cast, func, literal, or_, select
+
+    from alpaca_connectors.assets.alpaca_asset_details import (
+        ALPACA_IDENTIFIER_PREFIX,
+        AlpacaAssetDetailsTable,
+    )
+    from alpaca_connectors.markets_api import (
+        assets_by_uid,
+        category_member_asset_uids,
+        openfigi_details_by_asset_uid,
+    )
     from alpaca_connectors.runtime import start_markets_engine
 
     runtime = start_markets_engine()
-    statement = (
-        select(
-            AssetTable.uid,
-            AssetTable.unique_identifier,
-            AssetTable.asset_type,
-            AlpacaAssetDetailsTable.alpaca_asset_id,
-            AlpacaAssetDetailsTable.symbol.label("ticker"),
-            AlpacaAssetDetailsTable.name,
-            AlpacaAssetDetailsTable.exchange,
-            AlpacaAssetDetailsTable.status,
-            AlpacaAssetDetailsTable.tradable,
-            OpenFigiAssetDetailsTable.figi,
-            OpenFigiAssetDetailsTable.composite.label("composite_figi"),
-        )
-        .select_from(AssetTable)
-        .join(
-            AlpacaAssetDetailsTable,
-            AlpacaAssetDetailsTable.asset_uid == AssetTable.uid,
-        )
-        .outerjoin(
-            OpenFigiAssetDetailsTable,
-            OpenFigiAssetDetailsTable.asset_uid == AssetTable.uid,
-        )
+    details = AlpacaAssetDetailsTable
+    unique_identifier = func.concat(
+        literal(ALPACA_IDENTIFIER_PREFIX), cast(details.alpaca_asset_id, String)
+    )
+    statement = select(
+        details.asset_uid,
+        details.alpaca_asset_id,
+        details.symbol.label("ticker"),
+        details.name,
+        details.exchange,
+        details.status,
+        details.tradable,
     )
     if category_uid is not None:
-        statement = statement.join(
-            AssetCategoryMembershipTable,
-            AssetCategoryMembershipTable.asset_uid == AssetTable.uid,
-        ).where(AssetCategoryMembershipTable.category_uid == uuid.UUID(str(category_uid)))
+        member_uids = [uuid.UUID(value) for value in category_member_asset_uids(category_uid)]
+        if not member_uids:
+            return [], 0
+        statement = statement.where(details.asset_uid.in_(member_uids))
     if search:
         pattern = f"%{search.strip()}%"
         statement = statement.where(
             or_(
-                AssetTable.unique_identifier.ilike(pattern),
-                AlpacaAssetDetailsTable.alpaca_asset_id.cast(String).ilike(pattern),
-                AlpacaAssetDetailsTable.symbol.ilike(pattern),
-                AlpacaAssetDetailsTable.name.ilike(pattern),
+                unique_identifier.ilike(pattern),
+                details.symbol.ilike(pattern),
+                details.name.ilike(pattern),
             )
         )
     count_statement = select(func.count().label("count")).select_from(statement.subquery())
     descending = ordering.startswith("-")
     ordering_key = ordering.removeprefix("-")
     ordering_columns = {
-        "ticker": AlpacaAssetDetailsTable.symbol,
-        "alpaca_asset_id": AlpacaAssetDetailsTable.alpaca_asset_id,
+        "ticker": details.symbol,
+        "alpaca_asset_id": details.alpaca_asset_id,
     }
     if ordering_key not in ordering_columns:
         raise ValueError(f"Unsupported asset ordering {ordering!r}.")
     ordering_column = ordering_columns[ordering_key]
     ordering_expression = ordering_column.desc() if descending else ordering_column.asc()
-    page_statement = statement.order_by(ordering_expression.nulls_last(), AssetTable.uid.asc())
+    page_statement = statement.order_by(ordering_expression.nulls_last(), details.asset_uid.asc())
     page_statement = page_statement.limit(limit).offset(offset)
     page_operation = compile_markets_statement(
         page_statement,
@@ -121,13 +119,34 @@ def list_assets(
         context=runtime.context,
         operation="select",
     )
-    items = operation_result_rows(
-        execute_markets_operation(page_operation, context=runtime.context)
-    )
+    rows = operation_result_rows(execute_markets_operation(page_operation, context=runtime.context))
     count_rows = operation_result_rows(
         execute_markets_operation(count_operation, context=runtime.context)
     )
     total = int(count_rows[0].get("count", 0)) if count_rows else 0
+    page_uids = [str(row["asset_uid"]) for row in rows]
+    assets = assets_by_uid(page_uids)
+    figis = openfigi_details_by_asset_uid(page_uids)
+    items = []
+    for row in rows:
+        asset_uid = str(row["asset_uid"])
+        asset = assets.get(asset_uid)
+        figi = figis.get(asset_uid)
+        values = {key: value for key, value in row.items() if key != "asset_uid"}
+        items.append(
+            {
+                "uid": row["asset_uid"],
+                "unique_identifier": (
+                    asset.unique_identifier
+                    if asset is not None
+                    else f"{ALPACA_IDENTIFIER_PREFIX}{row['alpaca_asset_id']}"
+                ),
+                "asset_type": getattr(asset, "asset_type", None),
+                **values,
+                "figi": getattr(figi, "figi", None),
+                "composite_figi": getattr(figi, "composite", None),
+            }
+        )
     return items, total
 
 
