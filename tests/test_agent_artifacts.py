@@ -56,7 +56,8 @@ class AgentArtifactsTests(unittest.TestCase):
         # TAU adds AGENTS.md to every Agent session, so it holds only developer rules; the runtime
         # prompt is .tau/SYSTEM.md, and the operator manual lives in docs/.
         content = AGENTS_PATH.read_text(encoding="utf-8")
-        self.assertLess(len(content.splitlines()), 80)
+        # 81: two lines carry the Markets API boundary rule (ms-markets ADR 0047).
+        self.assertLess(len(content.splitlines()), 82)
         for retired in (
             "dual-mandate agent",
             "mainsequence-agent-scaffold",

@@ -21,6 +21,8 @@ Repository rules:
   keeps existing signal UIDs stable. Never change either.
 - Keep planning, registration, holdings and bars logic in `alpaca_connectors`; ETF extraction
   comes from `etfhextractor`. The CLI, routes and Jobs only orchestrate; add no one-off scripts.
+- Reach Markets only by `msm.api` row calls (remote backend; ms-markets ADR 0047). Own tables and
+  `alpaca_connectors.instances` live in `alpaca-connectors` (operations/markets-api-boundary.md).
 - Only `.mainsequence/workflows/*.yaml` creates Jobs and sets their schedules; code never does.
   A configuration run (`operations/configuration_jobs.py`) selects it with `--configuration-uid`;
   JobRuns never own configuration. A Job cannot declare access to itself, so each kind's dispatcher
@@ -30,7 +32,7 @@ Repository rules:
 - Hosted schema changes come only from the workflow's migration Job (ADR 0012); never run
   `metatables migrations upgrade` or `downgrade` against a hosted environment. Revisions add first
   and drop later. Use `metatables` for MetaTables interfaces. A person owns each namespace;
-  workloads hold MetaTables roles (`data_viewer`, `data_writer`, `editor`), never `owner`.
+  workloads hold roles (`data_viewer`, `data_writer`, `editor`), never `owner` or a Markets one.
 
 FastAPI surface:
 
