@@ -152,12 +152,27 @@ Every Alpaca account's API key and secret key are stored in application-encrypte
 account table ([ADR 0017](../adrs/0017_encrypted_account_credentials.md), MetaTables ADR 0025).
 The connector seals and opens them with a keyring held by one Environment Secret,
 `ALPACA_CONNECTORS_DATA_KEY`, which the workflow files grant as `value_reader` to the API, the bars
-Jobs, the signal Job and the credential migration Job. Without it those workloads fail every
+Jobs, the signal Job and the credential migration Job. A workload that cannot read it fails every
 Alpaca call with `credential_key_unavailable`; nothing is ever written or read in plaintext.
 
-Create the Secret once per Environment, before the first registration or the credential
-migration. The command prints the keyring; store its output as the Secret's value in Command
-Center or with the CLI, and never commit or log it:
+Create the Secret once per Environment, before the first push of these workflows to it. The
+platform applies a declaration only to an object that exists, so a push to an Environment without
+the Secret fails as a whole:
+
+- `alpaca` is refused with `declared_access_not_granted` (`secrets/ALPACA_CONNECTORS_DATA_KEY
+  (value_reader): not_found`), and `alpaca-connectors-agent` is refused with it.
+- The migration Job is not admitted, and nothing migrates or deploys except the Jobs that declare
+  nothing on the Secret.
+
+Production pushes failed this way on 2026-10-25 (`8cb0023`, workflow run
+`6f083527-f74d-46ca-b9a0-046cdd6ea8f7`) and 2026-10-27 (`daeee4c`, run
+`b6bfc6ca-d598-445b-b007-c7fa4beaabe6`).
+
+The first command prints the keyring. Store its output as the Secret's value, in Command Center or
+with the CLI, and never commit or log it. The CLI creates the Secret in the Environment of the
+checkout's current branch, so run it from a checkout of the branch that deploys there (`main` for
+Production). It prompts for the value without echoing it. Push again afterwards, so the workflow
+runs with the Secret in place:
 
 ```bash
 .venv/bin/metatables encryption new-keyring
