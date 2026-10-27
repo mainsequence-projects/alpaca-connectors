@@ -80,7 +80,7 @@ fix = true                        # Apply fixes on `ruff check` without --fix.
 #     move ABCs to `collections.abc`, drop `u`-prefix on strings, remove obsolete compatibility code.
 #
 # If you already enable other rules elsewhere, use `extend-select = [...]` instead of replacing them.
-select = ["I"]
+select = ["I", "F821"]
 
 # Let Black handle these (they conflict or are redundant):
 # - E203: whitespace before ':' in slices (Black intentionally violates this).

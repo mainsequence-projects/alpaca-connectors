@@ -10,6 +10,7 @@ from typing import Sequence, Union
 
 import sqlalchemy as sa
 from alembic import op
+from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
 revision: str = "0020"
@@ -207,7 +208,7 @@ def upgrade() -> None:
         sa.Column("limit_price", sa.Float(), nullable=True),
         sa.Column("time_in_force", sa.String(), nullable=True),
         sa.Column("comments", sa.String(), nullable=True),
-        sa.Column("venue_metadata", postgresql.JSONB(astext_type=Text()), nullable=True),
+        sa.Column("venue_metadata", postgresql.JSONB(astext_type=sa.Text()), nullable=True),
         sa.ForeignKeyConstraint(
             ["account_identifier"],
             ["ms_markets__account.unique_identifier"],
@@ -253,7 +254,7 @@ def upgrade() -> None:
         sa.Column("settlement_cost", sa.Float(), nullable=True),
         sa.Column("settlement_asset_identifier", sa.String(length=255), nullable=True),
         sa.Column("comments", sa.String(), nullable=True),
-        sa.Column("venue_metadata", postgresql.JSONB(astext_type=Text()), nullable=True),
+        sa.Column("venue_metadata", postgresql.JSONB(astext_type=sa.Text()), nullable=True),
         sa.ForeignKeyConstraint(
             ["account_identifier"],
             ["ms_markets__account.unique_identifier"],
