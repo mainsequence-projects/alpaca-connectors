@@ -131,9 +131,9 @@ def _run_execution_node(
 class MarketsExecutionLedger:
     """The real ledger: Markets ``OrderManager`` rows and this application's orders and trades.
 
-    Order managers are Markets registry rows written through the Markets API (write-policy
-    resource ``order-manager``); orders and trades are written by the ms-markets ``Orders`` and
-    ``Trades`` updaters into ``alpaca_connectors.instances`` tables.
+    Order managers are Markets registry rows written through the Markets API; orders and trades
+    are written by the ms-markets ``Orders`` and ``Trades`` updaters into
+    ``alpaca_connectors.instances`` tables.
     """
 
     def get_batch(self, batch_id: str) -> Any | None:

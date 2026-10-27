@@ -998,9 +998,8 @@ def _register_alpaca_assets_batch(
     """Register one resolved asset batch with a fixed number of set-based operations.
 
     Asset types, Assets, OpenFIGI details and asset snapshots go to Markets as one bulk call each
-    (``upsert_many`` / ``AssetSnapshots.publish``; write-policy resources ``asset-type``,
-    ``asset``, ``open-figi-details`` and ``asset-snapshots``); this project's details are one
-    bulk upsert on its own table.
+    (``upsert_many`` / ``AssetSnapshots.publish``); this project's details are one bulk upsert on
+    its own table.
     """
     if not alpaca_assets:
         return {}

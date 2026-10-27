@@ -401,25 +401,13 @@ table access. The Harness Agent receives no table role.
 The connector reaches Markets through the Markets API (ms-markets ADR 0047): every entrypoint
 selects ms-markets' remote row backend (`alpaca_connectors.runtime.use_markets_api`), attaches only
 its own `alpaca-connectors` tables, and reads and writes Markets registries with `msm.api` row
-calls, `AccountHoldingsSnapshots`, `AssetSnapshots` and `PortfolioDatasets`. Two things make the
-calls work in each Environment:
+calls, `AccountHoldingsSnapshots`, `AssetSnapshots` and `PortfolioDatasets`. In each Environment
+the workflows grant every resource that calls Markets (the API, the signal and portfolio Jobs and
+their dispatchers, both bars Jobs and the credential migration) `reader` on the
+`MainSequenceMarkets` branch, which lets them find the Markets API and write through it; the
+migration Job and the Agent do not call it.
 
-- the workflows grant every resource that calls Markets (the API, the signal and portfolio Jobs
-  and their dispatchers, both bars Jobs and the credential migration) `reader` on the
-  `MainSequenceMarkets` branch, which lets them find the Markets API; the migration Job and the
-  Agent do not call it;
-- an Environment admin adds the workload User uids to the Markets `MARKETS_REGISTRY_WRITERS`
-  constant under the resources they write; the Markets API refuses an application's write to any
-  other resource with 403:
-
-  | Workload | Markets resources it writes |
-  |---|---|
-  | `alpaca` (API) | `asset-type`, `asset`, `open-figi-details`, `asset-snapshots`, `account`, `account-holdings`, `asset-category`, `signal-metadata`, `portfolio-datasets`, `order-manager` |
-  | `alpaca-etf-signal` | `asset-type`, `asset`, `asset-snapshots`, `asset-category`, `signal-metadata`, `portfolio-datasets` |
-  | `alpaca-etf-portfolio` | `calendar`, `portfolio`, `signal-metadata`, `portfolio-datasets` |
-
-The other workloads only read Markets. `MARKETS_API_URL` (with `MARKETS_API_TOKEN`) points a local
-process at a local Markets API.
+`MARKETS_API_URL` (with `MARKETS_API_TOKEN`) points a local process at a local Markets API.
 
 ## Operational Checks
 

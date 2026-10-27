@@ -344,8 +344,8 @@ def publish_resolved_account_holdings_snapshot(
 ) -> AccountHoldingsCaptureResult:
     """Publish rows that have already passed complete registered-asset resolution.
 
-    One ``AccountHoldingsSnapshots.publish`` call writes the holdings set and its rows in Markets
-    (write-policy resource ``account-holdings``), replacing a snapshot at the same time.
+    One ``AccountHoldingsSnapshots.publish`` call writes the holdings set and its rows in Markets,
+    replacing a snapshot at the same time.
     """
     from msm.api.accounts import AccountHoldingsSnapshots
 

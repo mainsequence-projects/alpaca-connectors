@@ -20,12 +20,12 @@ agent session; every command below is run by the person the step names.
 | Interpolated prices in `ms_markets__interpolated_prices__t_*` (Markets namespace) | `alpaca_connectors__interpolated_prices__t_*` (revision 0021) |
 | Portfolio reads of Markets tables only | each portfolio's Markets dataset catalog row points at the instances (`PortfolioDatasets.register` after every run; `register_signal` after every signal run) |
 | Job schema gate read the ms-markets Alembic version table | waits until the Markets API's `/health` reports at least the ms-markets release of the image |
-| 13 project tables in `mainsequence.markets` | in `alpaca-connectors` (step 8) |
+| 13 project tables in `mainsequence.markets` | in `alpaca-connectors` (step 7) |
 
 Identities do not change: the uid of every table, the physical names of the project tables, every
 `update_hash` (output tables and catalog namespaces do not enter it, and no hash namespace is
 passed) and every signal uid. Catalog identifiers of moved tables gain the `alpaca-connectors.`
-prefix (step 8).
+prefix (step 7).
 
 ## 0. Prerequisites On The Markets Side
 
@@ -34,8 +34,6 @@ These belong to the Markets deployment's owners, not to this repository:
 - ms-markets 3.0.0 is released, and the Environment's Markets deployment has applied its revision
   `0022` and deployed the `api` release that serves `/api/v1/rows/` and the portfolio dataset
   catalog routes.
-- The Environment has the `MARKETS_REGISTRY_WRITERS` constant, and the Markets workload holds
-  `reader` on it.
 
 ## 1. Roles On `alpaca-connectors`
 
@@ -52,35 +50,19 @@ workload can use the project tables once they leave `mainsequence.markets`:
 | `alpaca-etf-signal-dispatcher`, `alpaca-etf-portfolio-dispatcher` | `data_viewer` | preflight reads |
 | `alpaca-credential-migration` (one-off) | `data_writer` | reads and seals the account keys |
 
-No workload needs a role on `mainsequence.markets` once step 10 is done.
+No workload needs a role on `mainsequence.markets` once step 9 is done.
 
-## 2. Registry Write Allow-List
+## 2. Hold The Scheduled Runs
 
-An Environment admin adds the workload User uids to the Markets `MARKETS_REGISTRY_WRITERS`
-constant under the Markets resources each writes. The Markets API refuses any other application
-write with 403 (`MarketsAccessError`):
-
-| Workload | Resources |
-|---|---|
-| `alpaca` (API) | `asset-type`, `asset`, `open-figi-details`, `asset-snapshots`, `account`, `account-holdings`, `asset-category`, `signal-metadata`, `portfolio-datasets`, `order-manager` |
-| `alpaca-etf-signal` | `asset-type`, `asset`, `asset-snapshots`, `asset-category`, `signal-metadata`, `portfolio-datasets` |
-| `alpaca-etf-portfolio` | `calendar`, `portfolio`, `signal-metadata`, `portfolio-datasets` |
-
-The bars Jobs, the dispatchers and the credential migration only read Markets. People running
-the CLI (`asset register`, `account register`, `instances backfill --register-catalog` ...) act as
-themselves and are not restricted by the allow-list.
-
-## 3. Hold The Scheduled Runs
-
-A signal run before step 7 publishes into an empty signal instance, and a portfolio run would
+A signal run before step 6 publishes into an empty signal instance, and a portfolio run would
 then start from that observation. Either push right after the 02:00 UTC portfolio dispatch and
-finish step 7 before the 00:30 UTC signal dispatch, or take every configuration off the schedule
+finish step 6 before the 00:30 UTC signal dispatch, or take every configuration off the schedule
 first (`alpaca-connectors signal update <uid> --no-scheduled`,
-`alpaca-connectors portfolio update <uid> --no-scheduled`) and put it back in step 9. Until the
+`alpaca-connectors portfolio update <uid> --no-scheduled`) and put it back in step 8. Until the
 backfill, portfolio preflight blocks a run whose signal instance has no observation. Keep the runs
 held while a move or a rollback runs.
 
-## 4. Push This Release
+## 3. Push This Release
 
 The deployment workflow's migration Job applies revisions `0019` (account listing columns),
 `0020` (the time-series instances, registered in `alpaca-connectors`) and `0021` (the namespaced
@@ -88,7 +70,7 @@ interpolated-price tables); the API and the Agent deploy after it; the Jobs take
 their schema gate waits until the Markets API reports ms-markets 3.0.0 or later. The workflow
 grants every resource that calls Markets `reader` on the `MainSequenceMarkets` branch.
 
-## 5. Register The Namespaced Interpolated-Price Tables
+## 4. Register The Namespaced Interpolated-Price Tables
 
 As before for revision 0011, a person registers the dynamic interpolated-price tables with the
 documented wrapper and checks them:
@@ -100,7 +82,7 @@ alpaca-connectors portfolio prepare-interpolated-prices --check-only
 
 Revision 0021 already creates the tables of the two bars profiles, so no revision is generated.
 
-## 6. Let Markets Read The Instances
+## 5. Let Markets Read The Instances
 
 The owner of `alpaca-connectors` grants the Markets workload `data_viewer` on exactly
 `alpaca_connectors__portfoliosts__main`, `alpaca_connectors__portfolioweightsts__main` and
@@ -109,10 +91,10 @@ The owner of `alpaca-connectors` grants the Markets workload `data_viewer` on ex
 `alpaca_connectors__acct_alpaca`: that table holds the application-encrypted account keys and is
 not `include`d by Markets.
 
-## 7. Move The History
+## 6. Move The History
 
 As a person who holds `data_viewer` on the source tables in `mainsequence.markets` and
-`data_writer` on `alpaca-connectors`, with the scheduled runs held (step 3):
+`data_writer` on `alpaca-connectors`, with the scheduled runs held (step 2):
 
 ```bash
 alpaca-connectors account backfill-listing-fields             # dry run
@@ -140,7 +122,7 @@ Signal observations are live ETF extractions, so they are copied, never recomput
 writes only the rows the instance lacks (by the full index) through the ms-markets
 `TimeIndexRowsCopy` updater, then counts both sides per key. A move whose keys are all complete is
 `moved`; with `--register-catalog` it then binds its signals (`register_signal`) and writes its
-portfolio's catalog row last (`register`), which needs step 6; before any catalog call it
+portfolio's catalog row last (`register`), which needs step 5; before any catalog call it
 refuses a move whose signals have no `SignalMetadata` row. A key still missing rows leaves the move
 `incomplete` and changes nothing in Markets; rerunning copies only the gaps. `--batch-size N` sets
 how many keys one copy request reads (ms-markets `keys_per_read`). Calendar events
@@ -154,7 +136,7 @@ msm series move alpaca_connectors.operations.instance_backfill:series_moves     
 msm series move alpaca_connectors.operations.instance_backfill:series_moves --execute
 ```
 
-## 8. Move The Project Tables To `alpaca-connectors`
+## 7. Move The Project Tables To `alpaca-connectors`
 
 Until this release the project mixins inherited the `mainsequence.markets` namespace from
 ms-markets, so all thirteen project tables were registered there. The mixins in
@@ -206,7 +188,7 @@ destination namespace.
 
 When: after step 1 has given the workloads their roles on `alpaca-connectors` (a moved table is
 covered by the roles of its new namespace only; table-level roles move with the table), and
-before the roles on `mainsequence.markets` are revoked (step 10). Runtime attachment and updater
+before the roles on `mainsequence.markets` are revoked (step 9). Runtime attachment and updater
 binding resolve these tables by physical name, so both the previous and this release keep working
 on either side of the move.
 
@@ -241,9 +223,9 @@ Run it with `MSM_AUTO_REGISTER_NAMESPACE` unset, from a checkout of this release
 Environment's MetaTables (`mainsequence` session of the person above). Keep the printed `before`
 mapping: patching each table back with its old namespace and identifier undoes the move.
 
-## 9. Resume And Verify
+## 8. Resume And Verify
 
-Put the configurations held in step 3 back on the schedule, then check:
+Put the configurations held in step 2 back on the schedule, then check:
 
 - the API's portfolio configuration detail (`observation_limit`) and signal observations routes
   show the copied history;
@@ -254,7 +236,7 @@ Put the configurations held in step 3 back on the schedule, then check:
 
 ## Rolling Back
 
-Until step 10 revokes the roles on `mainsequence.markets`, the move can be undone. With the
+Until step 9 revokes the roles on `mainsequence.markets`, the move can be undone. With the
 scheduled runs held, as a person with write access on the shared Markets tables:
 
 ```bash
@@ -270,7 +252,7 @@ catalog row (`unregister`, keeping signal bindings) and unbinds only the signals
 returns the same moves. The instances keep their rows. This release always writes the instances and
 registers the catalog after every run, so deploy the previous release before resuming the runs.
 
-## 10. Revoke The Markets Roles
+## 9. Revoke The Markets Roles
 
 The owner of `mainsequence.markets` revokes every role this application's workloads and Team
 hold there: the namespace roles (`data_writer`, `data_viewer`, the migration Job's `editor`) and the
@@ -278,7 +260,7 @@ table `editor` grants on `AssetSnapshotsTS`, `AccountHoldingsTS`, `SignalWeights
 `InterpolatedPrices`, `PortfolioCalendarEventsTS`, `PortfolioRebalanceStateTS`,
 `PortfolioWeightsTS` and `PortfoliosTS`.
 
-## 11. Later
+## 10. Later
 
 - A later revision drops the revision-0011 tables `ms_markets__interpolated_prices__t_*` once
   every Environment has copied them (revisions add first and drop later).

@@ -115,8 +115,9 @@ The API verifies request identity before installing MCP; its worker-thread dispa
 context. This is not a blanket claim of per-person filtering on every table. The application's
 release-access boundary, explicit ownership checks, and workload permissions all matter. API and
 Job workload users hold MetaTables roles on this project's `alpaca-connectors` namespace only,
-granted by its owner, and reach Markets registries through the Markets API (ms-markets ADR 0047)
-under the Markets registry write policy; the Harness needs no table role to use these tools. See
+granted by its owner, and read and write Markets registries through the Markets API (ms-markets
+ADR 0047), which their workflow grant on the `MainSequenceMarkets` branch lets them reach; the
+Harness needs no table role to use these tools. See
 [Table Access And MetaTables Roles](operations/jobs.md#table-access-and-metatables-roles).
 
 ## Operational Boundaries

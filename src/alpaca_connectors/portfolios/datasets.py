@@ -3,9 +3,9 @@
 Portfolio values, weights and signal weights live in this application's contract instances
 (``alpaca_connectors.instances``). Markets reads them by table uid from its dataset catalog, which
 this application keeps current through the Markets API: a portfolio run registers (or refreshes)
-its catalog row and reconciles it, and a signal run binds the signal to its instance. Both are
-write-policy resource ``portfolio-datasets``. Registration needs the Markets workload to hold
-``data_viewer`` on the instance tables (docs/operations/markets-api-boundary.md).
+its catalog row and reconciles it, and a signal run binds the signal to its instance.
+Registration needs the Markets workload to hold ``data_viewer`` on the instance tables
+(docs/operations/markets-api-boundary.md).
 """
 
 from __future__ import annotations

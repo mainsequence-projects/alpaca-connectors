@@ -17,9 +17,9 @@ trades into the shared `ms_markets__*` time series. Its own thirteen tables inhe
 `data_writer` on the whole Markets namespace plus table `editor` roles, and a change of the Markets
 schema could break it.
 
-ms-markets ADR 0047 withdraws that pattern: registries are written through the Markets API under a
-registry write policy, providers keep their own tables and time-series instances in their own
-namespace, and Markets finds provider time series through its dataset catalog.
+ms-markets ADR 0047 withdraws that pattern: registries are written through the Markets API,
+providers keep their own tables and time-series instances in their own namespace, and Markets
+finds provider time series through its dataset catalog.
 
 ## Decision
 
@@ -58,9 +58,9 @@ namespace, and Markets finds provider time series through its dataset catalog.
 
 ## Consequences
 
-- No workload holds a role on `mainsequence.markets`; the workloads that write Markets are listed
-  per resource in `MARKETS_REGISTRY_WRITERS`, and every resource that calls Markets declares
-  `reader` on the `MainSequenceMarkets` branch.
+- No workload holds a role on `mainsequence.markets`; every resource that calls Markets declares
+  `reader` on the `MainSequenceMarkets` branch, which lets it reach the Markets API and write
+  through it.
 - Listing every holdings row of an account reads all its snapshots through the API (50 per call)
   because Markets offers no paged read of holdings rows across sets; universe member counts read
   the page's memberships because Markets has no grouped count.

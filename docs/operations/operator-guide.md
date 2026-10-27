@@ -133,11 +133,11 @@ skills are described in [the Agent page](../agent.md).
   or through the Environment's Team (for example `alpaca-connectors-production`) for the roles
   its members share ([Table Access And MetaTables Roles](jobs.md#table-access-and-metatables-roles));
   no workload holds a role on `mainsequence.markets`: Markets registries go through the Markets
-  API under the `MARKETS_REGISTRY_WRITERS` allow-list ([Markets API
-  Access](jobs.md#markets-api-access); moving an existing Environment:
-  [runbook](markets-api-boundary.md)). Every workflow resource that uses MetaTables declares
-  `access.branches: [{repository: MetaTables, policy: reader}]`; the `harness_agent` uses only the
-  API's MCP and declares no MetaTables access
+  API, which a workload's workflow grant on the `MainSequenceMarkets` branch lets it reach and
+  write through ([Markets API Access](jobs.md#markets-api-access); moving an existing
+  Environment: [runbook](markets-api-boundary.md)). Every workflow resource that uses MetaTables
+  declares `access.branches: [{repository: MetaTables, policy: reader}]`; the `harness_agent` uses
+  only the API's MCP and declares no MetaTables access
 - during development apply revisions to the local runtime, which has no ms-markets deployment, with
   `metatables --local migrations upgrade --provider msm_migrations:migration head`, then
   `metatables --local migrations upgrade --provider alpaca_connectors.migrations:migration head`; every revision must keep

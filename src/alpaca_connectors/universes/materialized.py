@@ -347,7 +347,7 @@ def delete_asset_universe(universe_uid: uuid.UUID | str) -> dict[str, Any]:
 
     category_uid = universe["asset_category_uid"]
     # Empty the category's memberships through Markets, then delete the registration and the
-    # category it owns (write-policy resource ``asset-category``).
+    # category it owns.
     AssetCategory.replace_memberships(category_uid=category_uid, asset_uids=[])
     AssetUniverse.delete(universe_uid)
     AssetCategory.delete(category_uid)
