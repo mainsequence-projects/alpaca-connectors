@@ -11,7 +11,7 @@ license-files = ["LICENSE"]
 requires-python = ">=3.13,<3.14"
 dependencies = [
     # Keep compatible ranges here and let uv.lock capture the reproducible environment.
-    "ms-markets>=3.0.0,<4",
+    "ms-markets>=3.0.1,<4",
     "mainsequence[mcp]>=9.0.31,<10",
     "mainsequence-metatable>=0.1.55,<0.2",
     "alpaca-py",
@@ -93,7 +93,7 @@ known-first-party = ["mainsequence","metatables","alpaca_connectors"]
 
 [tool.uv.sources]
 # The ETF library is released only as Git tags; consumers pin the tag of the release they tested.
-etfhextractor = { git = "https://github.com/mainsequence-projects/etfholdingextractor", tag = "v0.5.0" }
+etfhextractor = { git = "https://github.com/mainsequence-projects/etfholdingextractor", tag = "v0.5.1" }
 
 [dependency-groups]
 dev = [
