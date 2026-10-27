@@ -31,7 +31,7 @@ prefix (step 7).
 
 These belong to the Markets deployment's owners, not to this repository:
 
-- ms-markets 3.0.1 is released, and the Environment's Markets deployment has applied its revision
+- ms-markets 3.0.2 is released, and the Environment's Markets deployment has applied its revision
   `0022` and deployed the `api` release that serves `/api/v1/rows/` and the portfolio dataset
   catalog routes.
 
@@ -67,7 +67,7 @@ held while a move or a rollback runs.
 The deployment workflow's migration Job applies revisions `0019` (account listing columns),
 `0020` (the time-series instances, registered in `alpaca-connectors`) and `0021` (the namespaced
 interpolated-price tables); the API and the Agent deploy after it; the Jobs take the new image and
-their schema gate waits until the Markets API reports the installed ms-markets release (3.0.1) or later. The workflow
+their schema gate waits until the Markets API reports the installed ms-markets release (3.0.2) or later. The workflow
 grants every resource that calls Markets `reader` on the `MainSequenceMarkets` branch.
 
 ## 4. Register The Namespaced Interpolated-Price Tables
