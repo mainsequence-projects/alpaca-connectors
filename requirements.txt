@@ -43,7 +43,9 @@ certifi==2026.10.19
     #   etfhextractor
     #   httpcore
     #   httpx
+    #   mainsequence
     #   mainsequence-metatable
+    #   ms-markets
     #   requests
 cffi==2.1.1 ; platform_python_implementation != 'PyPy'
     # via cryptography
@@ -74,7 +76,7 @@ cryptography==50.0.2
     #   secretstorage
 empyrical-reloaded==0.5.12
     # via alpaca-connectors
-etfhextractor @ git+https://github.com/mainsequence-projects/etfholdingextractor@062f3f8a86881f112d9071f5076a1ee42ced86d3
+etfhextractor @ git+https://github.com/mainsequence-projects/etfholdingextractor@5f63fd532db2914d51e715e86b87e1131c8e76c3
     # via alpaca-connectors
 exchange-calendars==4.13.2
     # via pandas-market-calendars
@@ -166,13 +168,13 @@ linkify-it-py==2.2.0
     # via markdown-it-py
 loguru==0.7.3
     # via fastembed
-mainsequence==9.0.30
+mainsequence==9.0.33
     # via
     #   alpaca-connectors
     #   etfhextractor
     #   mainsequence-metatable
     #   ms-markets
-mainsequence-metatable==0.1.56
+mainsequence-metatable==0.1.57
     # via
     #   alpaca-connectors
     #   etfhextractor
@@ -224,7 +226,7 @@ more-itertools==11.1.0
     # via
     #   jaraco-classes
     #   jaraco-functools
-ms-markets==2.2.10
+ms-markets==3.0.0
     # via
     #   alpaca-connectors
     #   etfhextractor

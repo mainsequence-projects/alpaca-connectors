@@ -5,7 +5,7 @@ from importlib.metadata import version
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-from etfhextractor.portfolio_publish import required_calendar_window
+from etfhextractor.calendars import required_calendar_window
 from etfhextractor.portfolio_signal import ETFHoldingsSignal, ETFHoldingsSignalConfig
 from msm_portfolios.time_index.signals.storage import SignalWeightsStorage
 from packaging.specifiers import SpecifierSet

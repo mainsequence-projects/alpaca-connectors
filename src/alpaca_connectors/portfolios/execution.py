@@ -7,7 +7,7 @@ import uuid
 from dataclasses import dataclass
 from typing import Any
 
-from etfhextractor.portfolio_publish import ensure_trading_calendar
+from etfhextractor.calendars import ensure_trading_calendar
 
 from alpaca_connectors.portfolios.alpaca_etf_signal import build_alpaca_etf_holdings_signal
 from alpaca_connectors.portfolios.configurations import (

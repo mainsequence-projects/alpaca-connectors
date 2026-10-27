@@ -6,7 +6,7 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
-from etfhextractor.portfolio_publish import (
+from etfhextractor.calendars import (
     US_EQUITY_CALENDAR_KEY,
     ensure_trading_calendar,
 )

@@ -297,8 +297,9 @@ connection before relying on it.
 
 ## Current local compatibility review
 
-The installed and locked versions are Main Sequence **9.0.30**, TAU **2.0.23**, MetaTables
-(`mainsequence-metatable`) **0.1.56**, and ms-markets **2.2.10** (2026-10-25).
+The installed and locked versions are Main Sequence **9.0.33**, TAU **2.0.23**, MetaTables
+(`mainsequence-metatable`) **0.1.57**, ms-markets **3.0.0** and `etfhextractor` **0.5.0**
+(2026-10-27).
 
 - Since 2026-10-15 the platform's caller assertions carry only the caller's identity (`sub` and
   `is_organization_admin`, no `team_uids`). The hosted API on Main Sequence 9.0.22 answered every
@@ -312,15 +313,22 @@ The installed and locked versions are Main Sequence **9.0.30**, TAU **2.0.23**, 
   the range moved to `>=0.1.55` and resolved to 0.1.56 for
   [ADR 0017](adrs/0017_encrypted_account_credentials.md), which stores Alpaca account keys in
   such columns.
+- The platform's Agent reads no longer return `runtime_update`, which Main Sequence 9.0.30 and
+  earlier require, so the Agent lookup failed with `ValidationError` and the project
+  configuration returned no Agent. Main Sequence 9.0.31 drops the field; on 2026-10-27 the range
+  moved to `>=9.0.31`.
+- `etfhextractor` 0.5.0 pins `ms-markets==3.0.0`, so the two move together. Its calendar helpers
+  are imported from `etfhextractor.calendars`.
 
-`pyproject.toml` keeps non-exact compatibility ranges (`mainsequence[mcp]>=9.0.30,<10`,
-`mainsequence-metatable>=0.1.55,<0.2`, `ms-tau-sdk>=2.0.23,<3`), while `uv.lock` and the exported
-`requirements.txt` record the resolution. ms-markets was not upgraded. On 2026-10-14 Main Sequence
+`pyproject.toml` keeps non-exact compatibility ranges (`mainsequence[mcp]>=9.0.31,<10`,
+`mainsequence-metatable>=0.1.55,<0.2`, `ms-tau-sdk>=2.0.23,<3`, `ms-markets>=3.0.0,<4`), while
+`uv.lock` and the exported `requirements.txt` record the resolution. On 2026-10-14 Main Sequence
 had moved from 9.0.23 to 9.0.24, which stopped scaffolding `AGENTS.md` and ships its guidance in
 the SDK skills, and MetaTables from 0.1.34 to 0.1.35. The earlier SDK upgrade moved the official
 MCP dependency from **1.30.0** to **2.3.0**, with its required transport dependencies.
-The `etfhextractor` Git source is pinned to release tag `v0.4.4` (commit `062f3f8`), which requires
-compatible versions. No Alpaca workload reads or writes its only table, `DemoBarsTS`, so the
+The `etfhextractor` Git source is pinned to release tag `v0.5.0` (commit `5f63fd5`), which requires
+compatible versions. With these versions the suite passes 559 tests plus 93 subtests with network
+access blocked (2026-10-27). No Alpaca workload reads or writes its only table, `DemoBarsTS`, so the
 migration Job does not apply its provider.
 
 The API now uses MCP 2.x `MCPServer` and its supported stateless JSON ASGI application and

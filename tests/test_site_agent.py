@@ -102,6 +102,33 @@ def test_the_branchs_agent_is_returned_with_its_environment(platform: SimpleName
     assert platform.operations == ["Alpaca Agent lookup", "Alpaca Agent lookup"]
 
 
+def test_a_platform_agent_read_without_the_retired_runtime_update_is_returned(
+    platform: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The platform no longer returns runtime_update; Main Sequence 9.0.30 and earlier required it.
+    card = json.loads((REPO_ROOT / ".agents" / "agent_card.json").read_text(encoding="utf-8"))
+    read = {
+        "uid": AGENT_UID,
+        "name": card["name"],
+        "description": card["description"],
+        "agent_card": card,
+        "llm_thinking": "low",
+        "repository_branch": "main",
+        "organization_environment_uid": ENVIRONMENT_UID,
+        "organization_environment_name": "Production",
+        "code_repository_branch_uid": BRANCH_UID,
+        "runtime_release_uid": RELEASE_UID,
+        "orm_class": "Agent",
+    }
+    monkeypatch.setattr(
+        Agent, "filter", classmethod(lambda cls, **filters: [cls.model_validate(read)])
+    )
+
+    assert resolve_site_agent() == SiteAgent(
+        agent_uid=AGENT_UID, organization_environment_uid=ENVIRONMENT_UID
+    )
+
+
 @pytest.mark.parametrize(
     "agents",
     [
