@@ -21,6 +21,8 @@ resources:
     memory_request: '0.5'
     max_runtime_seconds: 3600
     spot: false
+    # Follows main like the API's Jobs: a pinned image kept running the pre-ADR 0017 code, which
+    # reads account keys from platform Secrets that the encrypted columns replaced.
     automatic_redeployment:
-      enabled: false
+      enabled: true
       tag_regex: null
