@@ -26,3 +26,4 @@ resources:
     automatic_redeployment:
       enabled: true
       tag_regex: null
+# Redeployed on 2026-11-04 so the Job leaves the pre-ADR-0017 image it was pinned to.
