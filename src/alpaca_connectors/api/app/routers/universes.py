@@ -16,6 +16,7 @@ from ..schemas import (
     ResourceCollection,
     ResourceDiscoveryResponse,
 )
+from ..services.accounts import require_named_account_access
 from ..services.common import (
     positive_float_option,
     required_string_option,
@@ -137,6 +138,7 @@ def universes_discovery() -> ResourceDiscoveryResponse:
 def universes_run_preflight(request: BulkActionRequest = Body(...)) -> dict[str, Any]:
     timeout = positive_float_option(request.options, "timeout", default=30.0, maximum=300.0)
     account_uid = required_string_option(request.options, "account_uid")
+    require_named_account_access(account_uid)
     results: list[dict[str, Any]] = []
     blockers: list[str] = []
     warnings: list[str] = []
@@ -184,6 +186,7 @@ def universes_run_preflight(request: BulkActionRequest = Body(...)) -> dict[str,
 def universes_run(request: BulkActionRequest = Body(...)) -> dict[str, Any]:
     timeout = positive_float_option(request.options, "timeout", default=30.0, maximum=300.0)
     account_uid = required_string_option(request.options, "account_uid")
+    require_named_account_access(account_uid)
     try:
         return {
             "results": [

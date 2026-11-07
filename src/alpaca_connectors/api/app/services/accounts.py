@@ -2,6 +2,12 @@
 
 from __future__ import annotations
 
+import logging
+from collections.abc import Iterable
+
+from msm.api.http import not_found
+
+from alpaca_connectors.account.ownership import AccountOwner, registered_owner
 from alpaca_connectors.account.services import (
     get_account_registration,
     list_account_registrations,
@@ -21,6 +27,8 @@ from ..schemas import (
     ManagedAlpacaCredentials,
 )
 from .common import collection_response
+
+logger = logging.getLogger(__name__)
 
 RegistrationRequest = AccountRegistrationRequest | AccountSecretNameRegistrationRequest
 UpdateRequest = AccountUpdateRequest | AccountSecretNameUpdateRequest
@@ -55,6 +63,7 @@ def list_accounts(
     active: bool | None,
     is_paper: bool | None,
     ordering: str,
+    owner: AccountOwner | None = None,
 ):
     items, total = list_account_registrations(
         limit=limit,
@@ -63,6 +72,7 @@ def list_accounts(
         active=active,
         is_paper=is_paper,
         ordering=ordering,
+        owner=owner,
     )
     safe_items = [AccountResponse.model_validate(item) for item in items]
     return collection_response(items=safe_items, total=total, limit=limit, offset=offset)
@@ -89,6 +99,7 @@ def create_account_registration(
     request: RegistrationRequest,
     *,
     actor_user_uid: str | None = None,
+    owner: AccountOwner | None = None,
 ) -> AccountResponse:
     from alpaca_connectors.account.key_requests import (
         complete_account_key_request,
@@ -109,6 +120,7 @@ def create_account_registration(
         paper=request.environment == "paper",
         account_name=request.account_name or (key_request.account_name if key_request else None),
         actor_user_uid=actor_user_uid,
+        owner=owner,
     )
     if key_request is not None:
         complete_account_key_request(key_request.uid, account_uid=result.account_uid)
@@ -116,6 +128,50 @@ def create_account_registration(
     if account is None:
         raise RuntimeError("Registered account could not be read back.")
     return AccountResponse.model_validate(account)
+
+
+def require_account_access(account_uid: str, owner: AccountOwner) -> None:
+    """Answer 404 unless an external person's call names that person's own account (ADR 0019).
+
+    Calls for a Main Sequence user are unchanged and read nothing here: whose account they may
+    use is the calling application's decision (ADR 0016 decision 7). An account the external
+    person does not own gets the same answer as a missing one, before Alpaca is called.
+    """
+    if not owner.is_external:
+        return
+    if registered_owner(get_account_registration(account_uid)) != owner:
+        raise not_found("Account registration not found.")
+
+
+def require_accounts_access(account_uids: Iterable[str], owner: AccountOwner) -> None:
+    for account_uid in account_uids:
+        require_account_access(account_uid, owner)
+
+
+def require_path_account_access(account_uid: str) -> None:
+    """Route dependency for the routes under ``/v1/accounts/{account_uid}/``."""
+    require_named_account_access(account_uid)
+
+
+def require_named_account_access(account_uid: str | None) -> None:
+    """Check an account a request names in its body or options, when it names one."""
+    from ..identity import acting_owner
+
+    if account_uid is not None:
+        require_account_access(str(account_uid).strip(), acting_owner())
+
+
+def log_account_action(action: str, *, owner: AccountOwner, account_uid: str | None) -> None:
+    """Record who an account action was for; the owner pair is public, keys never appear."""
+    logger.info(
+        "Account %s.",
+        action,
+        extra={
+            "account_uid": account_uid,
+            "owner_gateway_uid": owner.gateway_uid,
+            "owner_user_uid": owner.user_uid,
+        },
+    )
 
 
 def get_account(account_uid: str) -> AccountResponse | None:
@@ -201,8 +257,13 @@ __all__ = [
     "account_delete_blockers",
     "get_account",
     "list_accounts",
+    "log_account_action",
     "preflight_account_registration",
     "refresh_account",
     "remove_account",
+    "require_account_access",
+    "require_accounts_access",
+    "require_named_account_access",
+    "require_path_account_access",
     "update_account",
 ]

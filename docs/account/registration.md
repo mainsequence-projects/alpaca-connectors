@@ -23,6 +23,9 @@ API, the Admin, the Analyst, SQL and the database only ever see envelopes. The r
   `imported` when they were copied once from Main Sequence Secrets selected by name;
 - `credentials_updated_at` and `credentials_updated_by_user_uid`: when the keys last changed and
   the API caller who changed them, null for CLI and Tau writes;
+- `owner_gateway_uid` and `owner_user_uid`: the account's owner, set by the first API
+  registration and never changed by a rotation, `(uid, uid)` for a Main Sequence user
+  ([ADR 0019](../adrs/0019_account_owners_vouched_for_by_trusted_applications.md));
 - a non-reversible API-key fingerprint, which no response exposes;
 - `credentials_stored`, a read-only flag in every response: false only for a registration made
   before revision `0018` that the credential migration has not copied yet.

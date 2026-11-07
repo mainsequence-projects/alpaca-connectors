@@ -41,6 +41,12 @@ from alpaca_connectors.account.legacy_secrets import (
     delete_legacy_managed_secrets,
     legacy_secret_references,
 )
+from alpaca_connectors.account.ownership import (
+    OWNER_GATEWAY_COLUMN,
+    OWNER_USER_COLUMN,
+    AccountOwner,
+    require_owner_may_register,
+)
 from alpaca_connectors.holdings import DEFAULT_CASH_ASSET_IDENTIFIER, build_account_holdings_rows
 
 # Detail-table boolean/string/int metadata fields read straight off the TradeAccount (typed).
@@ -467,6 +473,7 @@ def register_alpaca_account(
     paper: bool = True,
     account_name: str | None = None,
     actor_user_uid: str | None = None,
+    owner: AccountOwner | None = None,
     snapshot_time: dt.datetime | None = None,
     cash_asset_identifier: str = DEFAULT_CASH_ASSET_IDENTIFIER,
     client: Any | None = None,
@@ -479,6 +486,12 @@ def register_alpaca_account(
     stored on the detail row, sealed by the model's encrypted columns in the same upsert as the
     rest of the registration (ADR 0017). Re-registering an identity that still referenced Main
     Sequence Secrets from before revision 0018 replaces them: the managed ones are deleted.
+
+    ``owner`` (ADR 0019) is checked against the existing registration of this Alpaca account
+    right after Alpaca has named it, before any write, the asset registration of held positions
+    included: an account another owner holds is refused with ``AccountOwnedByAnotherError``. A
+    new registration, or one without an owner, records ``owner``; the same owner registers again
+    unchanged. Without ``owner`` (the CLI) the recorded owner is left as it is.
     """
     resolved_credentials, credential_source = resolve_credential_input(credentials)
 
@@ -503,6 +516,9 @@ def register_alpaca_account(
         account_number=str(getattr(account_model, "account_number", "")), is_paper=paper
     )
     status = (_enum_str(getattr(account_model, "status", None)) or "").upper()
+
+    if owner is not None:
+        require_owner_may_register(_existing_registration(unique_identifier), owner)
 
     from alpaca_connectors.holdings.services import resolve_complete_account_holdings_rows
 
@@ -552,6 +568,8 @@ def register_alpaca_account(
             actor_user_uid=actor_user_uid,
         )
     )
+    if owner is not None:
+        detail_values.update(owner.column_values())
     upsert_model(
         context,
         model=AlpacaAccountDetails,
@@ -581,14 +599,19 @@ def register_alpaca_account(
     )
 
 
-def _previous_legacy_references(unique_identifier: str):
-    """The pre-ADR 0017 Secret references of an existing registration for this identity."""
+def _existing_registration(unique_identifier: str) -> dict[str, Any] | None:
+    """The registration already recorded for this Alpaca account identity, if any."""
     from msm.api.accounts import Account
 
     account = Account.get_by_unique_identifier(unique_identifier)
     if account is None:
         return None
-    registration = get_account_registration(str(account.uid))
+    return get_account_registration(str(account.uid))
+
+
+def _previous_legacy_references(unique_identifier: str):
+    """The pre-ADR 0017 Secret references of an existing registration for this identity."""
+    registration = _existing_registration(unique_identifier)
     if registration is None:
         return None
     return legacy_secret_references(registration)
@@ -729,12 +752,14 @@ def list_account_registrations(
     active: bool | None = None,
     is_paper: bool | None = None,
     ordering: str = "account_name",
+    owner: AccountOwner | None = None,
 ) -> tuple[list[dict[str, Any]], int]:
     """Return paginated Alpaca registrations, excluding unrelated ms-markets Accounts.
 
     Pages, filters, searches and orders on this project's details table, which carries the
     account identifier, paper flag and copies of the Account's name and active flag; the page's
     Accounts are then read from Markets in one batch (ms-markets ADR 0047, decision 4).
+    ``owner`` keeps only the registrations recorded for that exact owner pair (ADR 0019).
     """
     from msm.api.accounts import Account
     from msm.api.base import operation_result_rows
@@ -751,6 +776,11 @@ def list_account_registrations(
         statement = statement.where(details.c.account_is_active == active)
     if is_paper is not None:
         statement = statement.where(details.c.is_paper == is_paper)
+    if owner is not None:
+        statement = statement.where(
+            details.c[OWNER_GATEWAY_COLUMN] == owner.gateway_uid,
+            details.c[OWNER_USER_COLUMN] == owner.user_uid,
+        )
     if search:
         pattern = f"%{search.strip()}%"
         statement = statement.where(

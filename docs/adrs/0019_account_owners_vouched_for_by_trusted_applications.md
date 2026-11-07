@@ -2,17 +2,18 @@
 
 ## Status
 
-Proposed on 2026-11-07 for
-[issue #9](https://github.com/mainsequence-projects/alpaca-connectors/issues/9). Not accepted: the
-decision as a whole and every name under [Names to approve](#names-to-approve) need the owner's
-approval. The owner decided three points on 2026-11-07:
+Accepted on 2026-11-07 at the owner's request to implement it, for
+[issue #9](https://github.com/mainsequence-projects/alpaca-connectors/issues/9); that request
+approved the names under [Names](#names). Implemented in the connector the same day; the hosted
+review of section 8 runs once revision `0022` has been applied in each Environment. The owner
+decided three points on 2026-11-07:
 
 - a vouched call reaches only its person's accounts (section 6);
 - a malformed allow-list stops the API from starting (section 3);
 - existing accounts take their owner from whoever last entered the keys, services included, and
   the hosted accounts are reviewed once (section 8).
 
-When accepted, it amends:
+It amends:
 
 - [ADR 0014](0014_sdk_request_identity.md) §4: the identity module also reads the request's caller
   context, and only there;
@@ -254,7 +255,7 @@ is added, the vouching caller:
 - Main Sequence decides nothing from caller context (ADR-0057 §12); this connector decides only
   what sections 2, 5 and 6 say.
 
-## Names to approve
+## Names
 
 | Name | Kind |
 | --- | --- |
@@ -291,33 +292,46 @@ is added, the vouching caller:
   describe the acting owner, the allow-list and the scope.
 - The connector moves to `mainsequence` 9.0.38, which reads the caller context for it.
 
-## Verification (planned)
+## Verification
 
-- `tests/test_api_request_identity.py`: every row of section 2's table, including forged context
-  from a caller outside the allow-list, an untrusted gateway, a single key, equal values, and a
-  requester-bound call that carries context.
-- `tests/test_account_services.py`: a new registration records the owner; the same owner registers
-  again; another owner is refused with `409` before any Account, asset, detail or holdings write;
-  a legacy row without an owner is claimed; a rotation keeps the owner.
-- `tests/test_api_app.py`, `tests/test_orders_api.py`: on a vouched call, each account route in
-  section 6 answers `404` for another owner's account; the list is scoped; the owner filters work.
-- Allow-list parsing: unset, empty, valid, a gateway calling directly, and malformed (application
-  creation fails).
-- Revision `0022`: upgrade, backfill and downgrade.
-- Existing assertions that no key appears in a response, log line or error, extended to the new
-  paths.
+`tests/test_account_ownership.py` calls the API through the SDK's real local request identity,
+which attaches the `baggage` header once it has verified the caller:
 
-## Code (planned)
+- every row of section 2's table: a listed caller naming a person, without context, through an
+  untrusted gateway, with one key, equal values or an oversized value; context from a caller
+  outside the allow-list; and a requester-bound call that carries context. No refusal quotes the
+  gateway or the person id;
+- the allow-list: unset, empty, valid, each malformed shape (never quoted), application creation
+  failing on a malformed value, and the workflow's empty list;
+- registration: another owner's account is refused before any Account, asset, detail or holdings
+  write; a new, unowned or same-owner registration records the owner, and the vouching caller
+  stays the key author; a registration without an owner (the CLI) leaves it alone; a rotation's
+  values carry no owner;
+- the API: a vouched registration records the person and reports `owner`; a Main Sequence
+  caller's never does; `409 account_owned_by_another`; key requests refused for an external
+  person; the scoped and filtered listing; every account route of section 6 answering `404` for
+  another person's account without calling its service; a person's own account; calls for Main
+  Sequence users reading nothing extra; the Agent registering for its requester;
+- revision `0022`: its parent, columns, index name (equal to the model's), backfill and downgrade.
 
-- `src/alpaca_connectors/api/app/identity.py`: `acting_owner()` and the owner pair.
-- `src/alpaca_connectors/api/app/caller_context.py`: the allow-list.
-- `pyproject.toml` and `uv.lock`: `mainsequence` 9.0.38.
+`tests/test_schema_gate.py` expects head `0022`.
+
+## Code
+
+- `src/alpaca_connectors/account/ownership.py`: the owner pair, the registered owner and the
+  refusal of another owner's account.
 - `src/alpaca_connectors/account/alpaca_account_details.py` and
-  `migrations/versions/alpaca_connectors/0022_add_account_owner.py`: the columns.
-- `src/alpaca_connectors/account/services.py`: the owner on registration, the check before any
-  write, and the owner filters.
-- `src/alpaca_connectors/api/app/services/`: `require_account_access()` on every route that names
-  an account.
-- `src/alpaca_connectors/api/app/schemas.py`: `owner` on `AccountResponse`.
-- `.mainsequence/workflows/alpaca-connectors-api.yaml`: the variable, with no entry until a
-  vouching caller meets section 9.
+  `migrations/versions/alpaca_connectors/0022_add_account_owner.py`: the columns and the backfill.
+- `src/alpaca_connectors/account/services.py`: the check before any write, the owner on the
+  registration row, and the owner filter on the listing.
+- `src/alpaca_connectors/api/app/caller_context.py`: the allow-list, validated by `create_app()`.
+- `src/alpaca_connectors/api/app/identity.py`: `acting_owner()`.
+- `src/alpaca_connectors/api/app/services/accounts.py`: `require_account_access()`, its route
+  dependency for the holdings and order routes, and the owner action log; the account, asset,
+  universe, bar and signal configuration routers call it for every account they name.
+- `src/alpaca_connectors/api/app/schemas.py` and `errors.py`: `owner` on `AccountResponse` and
+  `409 account_owned_by_another`.
+- `src/alpaca_connectors/agent_tools.py`: the Agent registers for its requester.
+- `pyproject.toml` and `uv.lock`: `mainsequence` 9.0.38.
+- `.mainsequence/workflows/alpaca-connectors-api.yaml`: `ALPACA_CONNECTORS_VOUCHING_CALLERS` as
+  `[]` until a vouching caller meets section 9.

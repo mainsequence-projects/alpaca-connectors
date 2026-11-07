@@ -5,16 +5,18 @@ from __future__ import annotations
 import datetime as dt
 from typing import Any
 
-from fastapi import APIRouter, Body, Query
+from fastapi import APIRouter, Body, Depends, Query
 from msm.api.http import BulkActionPreflightResponse
 
 from ..errors import api_http_error, not_found
+from ..identity import acting_owner
 from ..schemas import (
     HoldingsCaptureRequest,
     HoldingsCaptureResponse,
     ResourceCollection,
     ResourceDiscoveryResponse,
 )
+from ..services.accounts import log_account_action, require_path_account_access
 from ..services.common import resource_discovery, validate_ordering, validate_page_window
 from ..services.holdings import (
     capture_holdings,
@@ -23,7 +25,12 @@ from ..services.holdings import (
     preflight_holdings,
 )
 
-router = APIRouter(prefix="/v1/accounts/{account_uid}/holdings", tags=["Holdings"])
+# An external person's call reaches only that person's accounts (ADR 0019).
+router = APIRouter(
+    prefix="/v1/accounts/{account_uid}/holdings",
+    tags=["Holdings"],
+    dependencies=[Depends(require_path_account_access)],
+)
 
 
 @router.get("", response_model=ResourceCollection)
@@ -123,9 +130,11 @@ def holdings_capture(
     _request: HoldingsCaptureRequest = Body(default=HoldingsCaptureRequest()),
 ) -> HoldingsCaptureResponse:
     try:
-        return HoldingsCaptureResponse.model_validate(capture_holdings(account_uid))
+        result = HoldingsCaptureResponse.model_validate(capture_holdings(account_uid))
     except Exception as exc:
         raise api_http_error(exc) from exc
+    log_account_action("holdings captured", owner=acting_owner(), account_uid=account_uid)
+    return result
 
 
 @router.get("/{holdings_set_uid}", response_model=dict[str, Any])

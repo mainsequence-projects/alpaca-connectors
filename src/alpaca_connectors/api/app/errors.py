@@ -14,6 +14,7 @@ from alpaca_connectors.account.credentials import (
     AlpacaCredentialsRejectedError,
     StoredCredentialError,
 )
+from alpaca_connectors.account.ownership import AccountOwnedByAnotherError
 from alpaca_connectors.execution.orders import PreTradeCheckError
 from alpaca_connectors.platform_secrets import PlatformSecretAccessError
 from metatables import EncryptionError
@@ -51,6 +52,13 @@ def api_http_error(exc: Exception) -> HTTPException:
         return api_error(
             status_code=400,
             code="alpaca_credentials_rejected",
+            message=str(exc),
+        )
+    if isinstance(exc, AccountOwnedByAnotherError):
+        # Never names the owner (ADR 0019).
+        return api_error(
+            status_code=409,
+            code="account_owned_by_another",
             message=str(exc),
         )
     if isinstance(exc, PreTradeCheckError):

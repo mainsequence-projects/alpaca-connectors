@@ -61,6 +61,12 @@ resources:
     # Command Center link in this Environment.
     - name: ALPACA_CONNECTORS_SITE_URL
       value: http://localhost:5173/app/links/1b572c68-e4f5-4589-b17c-23d12f474130
+    # The callers trusted to name an external person in the caller context, and the gateways
+    # each may vouch for (ADR 0019): a JSON list of {caller_uid, segment, gateway_uids}. An entry
+    # is added only once that caller meets ADR 0019 section 9; a malformed value stops the API
+    # from starting, and the previous revision keeps serving.
+    - name: ALPACA_CONNECTORS_VOUCHING_CALLERS
+      value: "[]"
 # The branch's one Harness Agent. It reaches every project tool through the `alpaca` API's MCP and
 # acts for the person whose request it serves (only an Organization admin's push enables this).
 # `user` on the API covers its own calls to the API's MCP; delegated calls use the person's access.

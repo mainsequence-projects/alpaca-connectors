@@ -307,7 +307,16 @@ def manage_account(arguments: Mapping[str, Any]) -> Any:
         request = _request_model(arguments, AccountSecretNameRegistrationRequest)
         if operation == "plan_create":
             return preflight_account_registration(request)
-        return create_account_registration(request, actor_user_uid=_acting_user_uid())
+        # The Agent works for a Main Sequence person, who owns what it registers (ADR 0019);
+        # the MCP tools never read caller context.
+        from alpaca_connectors.account.ownership import AccountOwner
+
+        actor_user_uid = _acting_user_uid()
+        return create_account_registration(
+            request,
+            actor_user_uid=actor_user_uid,
+            owner=AccountOwner.main_sequence_user(actor_user_uid),
+        )
     account_uid = _required_text(arguments, "account_uid")
     if operation == "update":
         return update_account(

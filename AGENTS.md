@@ -42,8 +42,8 @@ FastAPI surface:
   refuses an app without it), then `install_mcp`. Routes read the caller only through
   `alpaca_connectors.api.app.identity`, with no header, `request.state` or process-user fallback.
   No route is public. Call a local API with `Authorization: Bearer $(mainsequence auth token)`.
-- Authorship and ownership follow the acting user: the requester on an Agent's call, otherwise
-  the caller, never both. No UID comes from a body, header or tool argument.
+- Authorship follows the acting user (the requester on an Agent's call, else the caller), and
+  ownership the acting owner (ADR 0019); no other UID comes from a body, header or tool argument.
 - The workflow key `alpaca` is the Agent's MCP tool prefix (`^[a-z][a-z0-9_]{0,39}$`); sites name
   the release by repository and key. `GET /v1/project-state/configuration` returns `agent_uid`
   and `organization_environment_uid` from `api.app.site_agent`; never put either in a site build.

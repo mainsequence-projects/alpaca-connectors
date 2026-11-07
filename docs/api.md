@@ -351,6 +351,36 @@ is pending, unexpired (one hour), and matches the action, environment, and accou
 answers `404` (another person's or a missing request) or `409`. On success it completes the
 request with the account UID. A `PATCH` with `key_request_uid` must carry `credentials`.
 
+## Account Owners
+
+An account belongs to a person pair, `owner: {gateway_uid, user_uid}`
+([ADR 0019](adrs/0019_account_owners_vouched_for_by_trusted_applications.md)). A Main Sequence user
+is `(uid, uid)`. An external person, one of a gateway application's people who is not a Main
+Sequence user, is `(gateway workload User UID, the gateway's opaque person id)`; the two values
+always differ.
+
+A vouching caller names the person in the request's W3C Baggage (tdag-django ADR-0057) with
+`mainsequence.<segment>.external_user_gateway` and `mainsequence.<segment>.external_user_uid`. The
+API believes it only from a caller listed in `ALPACA_CONNECTORS_VOUCHING_CALLERS`, a JSON list of
+`{caller_uid, segment, gateway_uids}` set in the API's workflow file (empty today):
+
+| Call | Acting owner |
+| --- | --- |
+| The Agent working for a person (requester-bound) | `(requester, requester)`; caller context ignored |
+| A listed caller naming a person through an allowed gateway | `(gateway, person id)` |
+| A listed caller naming a person through another gateway | `403 caller_context_untrusted_gateway` |
+| A listed caller with one key, an invalid value or equal values | `400 caller_context_invalid` |
+| A listed caller with no person, or any other caller | `(caller, caller)` |
+
+- The owner is set by the first registration and never changed by a rotation. Registering an
+  Alpaca account that another owner holds answers `409 account_owned_by_another`, before any
+  write, and does not name the owner. A registration without an owner claims it.
+- A call for an external person reaches only that person's accounts: every route that names an
+  account, in its path, body or options, answers `404` for anyone else's, and `GET /v1/accounts`
+  lists only theirs. Account key requests are refused for them (`400`). Other calls are unchanged.
+- `GET /v1/accounts` filters by `owner_gateway_uid` and `owner_user_uid`, given together.
+- A malformed `ALPACA_CONNECTORS_VOUCHING_CALLERS` stops the API from starting.
+
 ## MCP
 
 `/mcp` serves the Agent's `alpaca` MCP application: stateless Streamable HTTP with JSON responses,
@@ -365,7 +395,8 @@ but other synchronous mutations can outlive a caller's timeout. See
 
 Create and rotate record the acting user ([Authentication](#authentication)) as
 `credentials_updated_by_user_uid`: the person an Agent's call works for, otherwise the verified
-caller. Calls the API makes to Main Sequence and MetaTables, the encrypted key writes
+caller. The first registration also records the account's owner, reported as `owner` on every
+account response ([Account Owners](#account-owners)). Calls the API makes to Main Sequence and MetaTables, the encrypted key writes
 included, run as the API's runtime principal. There is no trusted browser user UID. Governed
 MetaTable operations declare read/write scope; the Resource Release is the deployed application
 access boundary.
