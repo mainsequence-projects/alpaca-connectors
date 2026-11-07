@@ -16,6 +16,7 @@ from ..schemas import (
     ResourceCollection,
     ResourceDiscoveryResponse,
 )
+from ..services.accounts import require_named_account_access
 from ..services.bar_configurations import (
     create_configuration,
     delete_configuration,
@@ -93,6 +94,7 @@ def configurations_discovery() -> ResourceDiscoveryResponse:
 def configuration_create(
     request: BarConfigurationCreateRequest = Body(...),
 ) -> BarConfigurationResponse:
+    require_named_account_access(request.account_uid)
     try:
         return create_configuration(request)
     except Exception as exc:
@@ -112,6 +114,7 @@ def configuration_update(
     configuration_uid: str,
     request: BarConfigurationUpdateRequest = Body(...),
 ) -> BarConfigurationResponse:
+    require_named_account_access(request.account_uid)
     try:
         return update_configuration(configuration_uid, request)
     except Exception as exc:

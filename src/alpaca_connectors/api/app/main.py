@@ -21,6 +21,7 @@ from fastapi.responses import JSONResponse
 
 from mainsequence.server.fastapi import install_mcp, install_request_identity
 
+from .caller_context import vouching_callers
 from .identity import bound_acting_user_uid
 from .mcp_server import build_mcp_application
 from .routers.account_key_requests import router as account_key_requests_router
@@ -147,7 +148,11 @@ def create_app() -> FastAPI:
     checked against ``MAINSEQUENCE_ENDPOINT`` locally. Routes read it through
     ``alpaca_connectors.api.app.identity``. The platform's FastAPI launcher refuses to serve an
     application without this installation. Each call returns a new application with its own.
+
+    A malformed ``ALPACA_CONNECTORS_VOUCHING_CALLERS`` fails creation, so the revision that serves
+    keeps serving instead of a revision that silently trusts no caller (ADR 0019).
     """
+    vouching_callers()
     app = FastAPI(
         title="Alpaca Connectors API",
         version="0.1.28",

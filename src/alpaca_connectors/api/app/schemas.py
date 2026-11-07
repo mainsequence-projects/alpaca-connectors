@@ -284,8 +284,33 @@ class AccountSecretNameUpdateRequest(BaseModel):
         return self
 
 
+class AccountOwnerResponse(BaseModel):
+    """Who an account belongs to (ADR 0019): ``(uid, uid)`` for a Main Sequence user, or the
+    gateway application's workload User UID and its opaque person id for an external person."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    gateway_uid: str
+    user_uid: str
+
+
 class AccountResponse(BaseModel):
     model_config = ConfigDict(extra="ignore")
+
+    @model_validator(mode="before")
+    @classmethod
+    def owner_from_columns(cls, value: Any) -> Any:
+        """Build ``owner`` from the registration row's two owner columns."""
+        if isinstance(value, dict) and "owner" not in value:
+            gateway_uid = value.get("owner_gateway_uid")
+            user_uid = value.get("owner_user_uid")
+            owner = (
+                {"gateway_uid": gateway_uid, "user_uid": user_uid}
+                if gateway_uid and user_uid
+                else None
+            )
+            return {**value, "owner": owner}
+        return value
 
     uid: str
     account_uid: str
@@ -299,6 +324,8 @@ class AccountResponse(BaseModel):
     credentials_stored: bool = True
     credentials_updated_at: Any | None = None
     credentials_updated_by_user_uid: str | None = None
+    # Null only for a registration whose key author was never recorded (revision 0022).
+    owner: AccountOwnerResponse | None = None
     status: str | None = None
     currency: str | None = None
     snapshot_time: Any | None = None

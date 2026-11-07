@@ -3,23 +3,26 @@
 The contract the Hunch backend targets: submit a batch of market orders keyed by the caller's
 ``batch_id``, sync or cancel it, and list what was recorded. Every route needs a verified caller
 like the rest of the API; whose account an order may be placed on is the calling application's
-decision, as it is for the holdings capture.
+decision, as it is for the holdings capture. A call for an external person reaches only that
+person's accounts (ADR 0019).
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Body, Query
+from fastapi import APIRouter, Body, Depends, Query
 from msm.api.http import BulkActionPreflightResponse
 
 from ..errors import api_http_error
+from ..identity import acting_owner
 from ..schemas import (
     OrderBatchActionRequest,
     OrderBatchResponse,
     OrderBatchSubmitRequest,
     ResourceCollection,
 )
+from ..services.accounts import log_account_action, require_path_account_access
 from ..services.common import validate_page_window
 from ..services.orders import (
     cancel_orders,
@@ -29,7 +32,11 @@ from ..services.orders import (
     sync_orders,
 )
 
-router = APIRouter(prefix="/v1/accounts/{account_uid}/orders", tags=["Execution"])
+router = APIRouter(
+    prefix="/v1/accounts/{account_uid}/orders",
+    tags=["Execution"],
+    dependencies=[Depends(require_path_account_access)],
+)
 
 
 @router.get(
@@ -82,9 +89,11 @@ def orders_submit(
     account_uid: str, request: OrderBatchSubmitRequest = Body(...)
 ) -> OrderBatchResponse:
     try:
-        return OrderBatchResponse.model_validate(submit_orders(account_uid, request))
+        result = OrderBatchResponse.model_validate(submit_orders(account_uid, request))
     except Exception as exc:
         raise api_http_error(exc) from exc
+    log_account_action("orders submitted", owner=acting_owner(), account_uid=account_uid)
+    return result
 
 
 @router.post(

@@ -174,6 +174,7 @@ class AlpacaAccountDetails(ProjectStorageNameMixin, AlpacaMarketsMetaTableMixin,
         Index(None, "api_key_fingerprint"),
         Index(None, "api_key_secret_name"),
         Index(None, "secret_key_secret_name"),
+        Index(None, "owner_gateway_uid", "owner_user_uid"),
     )
 
     account_uid: Mapped[uuid.UUID] = _account_uid_pk_fk()
@@ -347,6 +348,31 @@ class AlpacaAccountDetails(ProjectStorageNameMixin, AlpacaMarketsMetaTableMixin,
             "description": (
                 "Main Sequence user UID of the person who last changed the credentials; null "
                 "when unknown."
+            ),
+        },
+    )
+    # The account's owner (ADR 0019): set at the first registration, never changed by a rotation.
+    owner_gateway_uid: Mapped[str | None] = mapped_column(
+        String(64),
+        nullable=True,
+        info={
+            "label": "Owner gateway",
+            "description": (
+                "First half of the account's owner: the Main Sequence user UID of a Main "
+                "Sequence owner, or the workload User UID of the gateway application that "
+                "vouches for an external person; null when unknown."
+            ),
+        },
+    )
+    owner_user_uid: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+        info={
+            "label": "Owner user",
+            "description": (
+                "Second half of the account's owner: the same Main Sequence user UID for a Main "
+                "Sequence owner, or the gateway application's opaque id for an external person; "
+                "null when unknown."
             ),
         },
     )

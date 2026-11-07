@@ -18,6 +18,7 @@ from ..schemas import (
     SignalJobRunResponse,
     SignalObservationsResponse,
 )
+from ..services.accounts import require_named_account_access
 from ..services.common import resource_discovery, validate_ordering, validate_page_window
 from ..services.signal_jobs import (
     configuration_runs,
@@ -89,6 +90,7 @@ def signal_jobs_discovery() -> ResourceDiscoveryResponse:
 def signal_job_create(
     request: SignalJobConfigurationCreateRequest = Body(...),
 ) -> SignalJobConfigurationResponse:
+    require_named_account_access(request.account_uid)
     try:
         return create_configuration(request)
     except Exception as exc:
@@ -122,6 +124,7 @@ def signal_job_update(
     configuration_uid: str,
     request: SignalJobConfigurationUpdateRequest = Body(...),
 ) -> SignalJobConfigurationResponse:
+    require_named_account_access(request.account_uid)
     try:
         return update_configuration(configuration_uid, request)
     except Exception as exc:

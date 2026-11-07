@@ -17,6 +17,7 @@ from ..schemas import (
     ResourceCollection,
     ResourceDiscoveryResponse,
 )
+from ..services.accounts import require_named_account_access
 from ..services.assets import (
     build_asset_registration_discovery,
     execute_asset_registration,
@@ -81,6 +82,7 @@ def assets_discovery() -> ResourceDiscoveryResponse:
 def asset_registration_plan(
     request: AssetRegistrationRequest = Body(...),
 ) -> AssetRegistrationDiscoveryResponse:
+    require_named_account_access(request.account_uid)
     try:
         return build_asset_registration_discovery(request)
     except Exception as exc:
@@ -99,6 +101,7 @@ def asset_registration_plan(
 def asset_registration_execute(
     request: AssetRegistrationRequest = Body(...),
 ) -> AssetRegistrationExecuteResponse:
+    require_named_account_access(request.account_uid)
     try:
         return execute_asset_registration(request)
     except Exception as exc:
@@ -122,6 +125,7 @@ def asset_registration_operation_start(
     # The operation belongs to the acting user (the person an Agent works for, otherwise the
     # verified caller); only that user can poll it.
     owner_uid = acting_user_uid()
+    require_named_account_access(operation_request.request.account_uid)
     try:
         operation = start_asset_registration_operation(
             action=operation_request.action,
