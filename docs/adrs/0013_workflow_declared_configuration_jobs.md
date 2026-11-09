@@ -80,7 +80,8 @@ Both Jobs declare:
 - `automatic_redeployment.enabled: true` with `tag_regex: null`, so every push promotes the code
   that the API calls.
 
-The times follow the 00:00 UTC daily bars Job in `daily-stock-bars-holdings-ivv.yaml`. US equity
+The times follow the 00:00 UTC daily bars Job in `daily-stock-bars-holdings-ivv.yaml` (retired on
+2026-11-09 without ever succeeding; no Job updates bars on a schedule since). US equity
 sessions close at 20:00 UTC in summer and 21:00 UTC in winter, so the 00:30 UTC signal run follows
 the close all year, and the 02:00 UTC portfolio run follows both the bars and the signal. Both run
 every day, like the bars Job. On the Sunday and Monday 00:30 UTC runs no session has closed since

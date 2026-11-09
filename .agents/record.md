@@ -11,7 +11,7 @@
 - Project migration provider: `src.migrations:migration`
 - Migration revisions: `src/migrations/versions/alpaca_connectors/`
 - Repository workflows: `.mainsequence/workflows/`
-- Scheduled launcher: `src/jobs/run_daily_stock_bars_holdings_ivv.py`
+- Job launchers: `src/jobs/` (the bars Job is `run_alpaca_bars_update.py`)
 - Documentation map: `docs/SUMMARY.md`
 - Project state: `.agents/status.md`, `.agents/tasks.md`, `.agents/journal.md`
 

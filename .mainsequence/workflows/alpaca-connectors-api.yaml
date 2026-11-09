@@ -184,7 +184,7 @@ resources:
 # The kinds' daily scheduled runs (ADR 0013). Each dispatcher's scheduled run (`--scheduled`) reads
 # the scheduled configurations and starts one run of its kind's Job per configuration, through
 # `runner` on that Job (operations/configuration_jobs.py). A push re-applies the declared schedule.
-# Both run after the 00:00 UTC daily bars Job.
+# Both run after the US equity close.
 - key: alpaca-etf-signal-dispatcher
   kind: job
   access:
