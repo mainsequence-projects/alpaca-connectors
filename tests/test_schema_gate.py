@@ -206,16 +206,11 @@ def test_migration_job_failure_fails_the_job() -> None:
             "dispatch_alpaca_etf_portfolio.py",
             "alpaca_connectors.operations.configuration_jobs.run_dispatcher_job",
         ),
-        (
-            "run_daily_stock_bars_holdings_ivv.py",
-            "alpaca_connectors.market_data.execute_market_data_update",
-        ),
     ],
 )
 def test_launchers_do_no_work_while_the_schema_is_behind(launcher, work) -> None:
     main = runpy.run_path(str(JOBS / launcher))["main"]
     with (
-        patch.dict(os.environ, {"ALPACA_BARS_CONFIGURATION_UID": "configuration-uid"}),
         patch(
             "alpaca_connectors.migrations.schema_gate.skip_if_schema_behind",
             return_value=True,
@@ -273,29 +268,29 @@ def test_api_deploys_only_after_the_migration_job_in_one_workflow() -> None:
     assert not (root / ".mainsequence/workflows/alpaca-connectors-migrations.yaml").exists()
 
 
-def test_bars_jobs_in_their_own_files_stay_outside_the_graph() -> None:
-    """The graph cannot reference another file, so neither bars Job waits for the migration.
+def test_the_bars_job_follows_main_outside_the_graph() -> None:
+    """The graph cannot reference another file, so the bars Job does not wait for the migration.
 
     `alpaca-bars-update` follows main like the API's Jobs (PRs #7 and #8, issue #11); its schema
-    gate turns a run in the rollout gap into a skip. The transitional
-    `daily-stock-bars-holdings-ivv` stays pinned until it is retired (operations/jobs.md).
+    gate turns a run in the rollout gap into a skip (tests/test_run_alpaca_bars_update.py).
     """
     import yaml
 
     root = JOBS.parents[1]
-    for name, key, follows_main in (
-        ("alpaca-bars-update.yaml", "alpaca-bars-update", True),
-        ("daily-stock-bars-holdings-ivv.yaml", "daily-stock-bars-holdings-ivv", False),
-    ):
-        workflow = yaml.safe_load((root / ".mainsequence/workflows" / name).read_text())
-        [resource] = workflow["resources"]
-        assert resource["key"] == key
-        assert resource["kind"] == "job"
-        assert resource["spec"]["automatic_redeployment"] == {
-            "enabled": follows_main,
-            "tag_regex": None,
-        }
-        assert "execution" not in workflow
+    workflow = yaml.safe_load(
+        (root / ".mainsequence/workflows/alpaca-bars-update.yaml").read_text()
+    )
+    [resource] = workflow["resources"]
+    assert (resource["key"], resource["kind"]) == ("alpaca-bars-update", "job")
+    assert resource["spec"]["automatic_redeployment"] == {"enabled": True, "tag_regex": None}
+    assert "execution" not in workflow
+
+
+def test_the_transitional_daily_bars_job_is_retired() -> None:
+    """Its declaration and launcher are gone, so the push that removed them deleted its Job."""
+    root = JOBS.parents[1]
+    assert not (root / ".mainsequence/workflows/daily-stock-bars-holdings-ivv.yaml").exists()
+    assert not (JOBS / "run_daily_stock_bars_holdings_ivv.py").exists()
 
 
 def test_every_resource_that_uses_metatables_declares_its_branch() -> None:
@@ -322,5 +317,4 @@ def test_every_resource_that_uses_metatables_declares_its_branch() -> None:
         "alpaca-etf-signal-dispatcher": True,
         "alpaca-etf-portfolio-dispatcher": True,
         "alpaca-bars-update": True,
-        "daily-stock-bars-holdings-ivv": True,
     }

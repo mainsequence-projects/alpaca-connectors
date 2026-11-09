@@ -46,7 +46,7 @@ workload can use the project tables once they leave `mainsequence.markets`:
 | `alpaca` (API) | `editor` | writes project rows; runs the signal (Universe run) and the orders and trades updaters in-process |
 | `alpaca-etf-signal` | `editor` | writes Universe and asset-detail rows; runs the signal updater |
 | `alpaca-etf-portfolio` | `editor` | runs the interpolation, calendar-event, rebalance, weights and values updaters |
-| `alpaca-bars-update`, `daily-stock-bars-holdings-ivv` | `data_viewer`, plus their table `editor` on the two bars tables (table roles move with the tables) | read configurations; run the bars updaters |
+| `alpaca-bars-update` | `data_viewer`, plus its table `editor` on the two bars tables (table roles move with the tables) | read configurations; run the bars updater |
 | `alpaca-etf-signal-dispatcher`, `alpaca-etf-portfolio-dispatcher` | `data_viewer` | preflight reads |
 | `alpaca-credential-migration` (one-off) | `data_writer` | reads and seals the account keys |
 

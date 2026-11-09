@@ -24,9 +24,9 @@ Amended on 2026-11-09 (issue #11): since PRs #7 and #8 (2026-11-04), `alpaca-bar
 automatic redeployment enabled and follows main like the API's Jobs, because the image it was
 pinned to read account keys from platform Secrets that ADR 0017 replaced. It stays outside the
 graph, so a push can promote it before the migration Job finishes, and its launcher's schema gate
-turns a run in that gap into a skip. Only the transitional `daily-stock-bars-holdings-ivv` is still
-promoted by hand, until it is retired
-([Transitional Scheduled Job](../operations/jobs.md#transitional-scheduled-job)).
+turns a run in that gap into a skip. The transitional `daily-stock-bars-holdings-ivv`, the other
+Job promoted by hand, was retired the same day
+([Retired Daily Bars Job](../operations/jobs.md#retired-daily-bars-job)).
 
 ## Context
 
@@ -212,10 +212,10 @@ Not yet gated by the graph:
 
 - **Coding agent:** `alpaca-connectors-agent.yaml` uses `kind: code_repository_coding_agent`, which
   the current platform rejects (`unsupported_kind`), so that declaration is not applied today.
-- **Declared Jobs:** `alpaca-bars-update` and `daily-stock-bars-holdings-ivv` are outside the
-  graph. Since 2026-11-04 every push promotes `alpaca-bars-update` (see Status), and its gate covers
-  the gap before the migration finishes; `daily-stock-bars-holdings-ivv` has automatic redeployment
-  disabled, so pushes never move it to a new image. The gate protects it when it is redeployed.
+- **Declared Jobs:** `alpaca-bars-update` is outside the graph. Since 2026-11-04 every push
+  promotes it (see Status), and its gate covers the gap before the migration finishes.
+  `daily-stock-bars-holdings-ivv`, which had automatic redeployment disabled, was retired on
+  2026-11-09.
 
 Until those resources join the graph, the agent can briefly serve new code against the old schema
 during a rollout; this is accepted during development. **Unverified:** whether converting the API

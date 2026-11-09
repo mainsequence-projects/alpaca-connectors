@@ -16,7 +16,7 @@ its Job.
 | `alpaca-etf-signal-dispatcher` | `Alpaca ETF Signal Dispatcher` | `30 0 * * *` UTC | `--scheduled` |
 | `alpaca-etf-portfolio-dispatcher` | `Alpaca ETF Portfolio Dispatcher` | `0 2 * * *` UTC | `--scheduled` |
 
-The dispatchers run after the 00:00 UTC daily bars Job and after the US equity close. All four Jobs
+The dispatchers run after the US equity close. All four Jobs
 use 0.25 CPU, 0.5 GiB and 3600 seconds, and every push promotes their image. No `execution.steps`
 entry references them, so a push may promote their image before the migration Job finishes; the
 schema gate in each entry point turns a run in that window into a clean skip
@@ -314,28 +314,26 @@ The GET returns normalized JobRun state, timestamps, frozen commit and image ide
 arguments, and the platform application-log URL. Poll responses use `Cache-Control: no-store`, and
 provider exception details are not exposed.
 
-## Transitional Scheduled Job
+## Retired Daily Bars Job
 
-The previous scheduled declaration and environment-variable launcher remain in the checkout until
-the generic Job has a ready image and one successful live update:
+`daily-stock-bars-holdings-ivv` (display name `Alpaca Stored Bar Configuration`) was a scheduled
+00:00 UTC Job that ran one stored bars configuration named by the `ALPACA_BARS_CONFIGURATION_UID`
+environment variable. It was retired on 2026-11-09 (issue #11), and its declaration
+`.mainsequence/workflows/daily-stock-bars-holdings-ivv.yaml` and launcher
+`src/jobs/run_daily_stock_bars_holdings_ivv.py` were removed.
 
-- `src/jobs/run_daily_stock_bars_holdings_ivv.py`;
-- `.mainsequence/workflows/daily-stock-bars-holdings-ivv.yaml`.
-
-After that proof, explicitly retire the old Job and remove those two local files. Under the current
-workflow contract, pushing removal of a valid workflow-bound declaration deletes its platform Job
-and associated JobRuns; inspect the repository event's deletion result. Jobs without a workflow
-binding are not removed by this reconciliation. Do not treat both Jobs as active production paths.
-
-The declaration sets no `ALPACA_BARS_CONFIGURATION_UID`, and a push changes no environment
-variable it does not declare. Unless the variable was set on the Job outside the workflow, every
-00:00 UTC run fails before the schema gate with "ALPACA_BARS_CONFIGURATION_UID must identify an
-enabled stored bar configuration."
-
-This Job keeps automatic redeployment disabled, so it is promoted by hand. On 2026-11-09 the
-Production Job `Alpaca Stored Bar Configuration` was still on the image of `7da1451`
-(2026-10-11), and none of its 28 runs had succeeded: each failed with that message. Enabling
-redeployment would not fix it; retiring it, as above, does.
+- **It never worked.** The declaration set no `ALPACA_BARS_CONFIGURATION_UID`, so every run
+  failed before the schema gate with "ALPACA_BARS_CONFIGURATION_UID must identify an enabled
+  stored bar configuration." On 2026-11-09 the Production Job was still pinned to the image of
+  `7da1451` (2026-10-11), with automatic redeployment disabled, and none of its 28 runs had
+  succeeded. Retiring it removed no working update.
+- **The push to main that removed the declaration deletes the platform Job,** its schedule and its
+  JobRuns, under the current workflow contract. Check the repository event's deletion result.
+- **Its workload User's roles can go.** It held `data_viewer` on `alpaca-connectors` and table
+  `editor` on the two bars tables; the namespace owner removes them.
+- **Nothing updates bars on a schedule since.** `Alpaca Bars Update` (above) runs one stored
+  configuration on demand. A recurring update must be declared in a workflow file, never created or
+  scheduled by application code.
 
 ## FastAPI Release
 
@@ -381,7 +379,7 @@ In each Environment where the project runs:
    | `alpaca` API | `editor`: it writes project rows and runs the signal (Universe run) and the orders and trades updaters in-process |
    | `alpaca-etf-signal` | `editor` |
    | `alpaca-etf-portfolio` | `editor` |
-   | `alpaca-bars-update`, `daily-stock-bars-holdings-ivv` | `data_viewer`, plus table `editor` on `alpaca_connectors__bars_1d_sip_all` and `alpaca_connectors__bars_1d_iex_raw` |
+   | `alpaca-bars-update` | `data_viewer`, plus table `editor` on `alpaca_connectors__bars_1d_sip_all` and `alpaca_connectors__bars_1d_iex_raw` |
    | `alpaca-etf-signal-dispatcher`, `alpaca-etf-portfolio-dispatcher` | `data_viewer` |
    | `alpaca-credential-migration` (one-off) | `data_writer` |
    | `alpaca-connectors-agent` | none: its tools run in the API |
