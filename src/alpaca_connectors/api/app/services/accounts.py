@@ -161,17 +161,25 @@ def require_named_account_access(account_uid: str | None) -> None:
         require_account_access(str(account_uid).strip(), acting_owner())
 
 
-def log_account_action(action: str, *, owner: AccountOwner, account_uid: str | None) -> None:
-    """Record who an account action was for; the owner pair is public, keys never appear."""
-    logger.info(
-        "Account %s.",
-        action,
-        extra={
-            "account_uid": account_uid,
-            "owner_gateway_uid": owner.gateway_uid,
-            "owner_user_uid": owner.user_uid,
-        },
-    )
+def log_account_action(
+    action: str,
+    *,
+    owner: AccountOwner,
+    account_uid: str | None,
+    error_code: str | None = None,
+) -> None:
+    """Record who an account action was for; the owner pair is public, keys never appear.
+
+    A failed action adds its public error code, never its message or exception.
+    """
+    extra = {
+        "account_uid": account_uid,
+        "owner_gateway_uid": owner.gateway_uid,
+        "owner_user_uid": owner.user_uid,
+    }
+    if error_code is not None:
+        extra["error_code"] = error_code
+    logger.info("Account %s.", action, extra=extra)
 
 
 def get_account(account_uid: str) -> AccountResponse | None:

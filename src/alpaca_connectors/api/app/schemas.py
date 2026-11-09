@@ -381,6 +381,44 @@ class HoldingsCaptureResponse(BaseModel):
     unresolved_symbols: list[str]
 
 
+# The account sync contract every venue connector serves (issue #14). These two types move to
+# `msm.api.http` once ms-markets ships them (MainSequenceMarkets#44); until then they are defined
+# here with the same names and fields, strict like the ms-markets HTTP contracts.
+class AccountSyncRequest(BaseModel):
+    """Which account a sync ran for: the ms-markets `Account` uid. The route takes no body."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    account_uid: str
+
+
+class AccountSyncResult(BaseModel):
+    """The `AccountHoldingsSet` a sync published; callers read the snapshot from ms-markets."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    account_uid: str
+    holdings_set_uid: str | None
+    time_index: dt.datetime
+    holdings_rows: int
+    # What this venue adds, here `unresolved_symbols`; callers never depend on it.
+    extra: dict[str, Any] = Field(default_factory=dict)
+
+
+class AccountSyncStepResponse(OperationStep):
+    """Alpaca schema name for the shared observable-operation step."""
+
+
+class AccountSyncOperationError(OperationError):
+    """Alpaca schema name for the shared observable-operation error."""
+
+
+class AccountSyncOperationResponse(ObservableOperation[AccountSyncRequest, AccountSyncResult]):
+    action: Literal["account_sync"]
+    steps: list[AccountSyncStepResponse]
+    error: AccountSyncOperationError | None = None
+
+
 OrderStatus = Literal[
     "submitted", "partially_filled", "filled", "cancelled", "rejected", "expired", "failed"
 ]

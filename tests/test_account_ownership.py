@@ -485,6 +485,7 @@ def _scoped_routes(client: TestClient, headers: dict[str, str]) -> dict[str, int
         "refresh": client.post(
             "/v1/accounts/account-uid/actions/refresh", headers=headers
         ).status_code,
+        "sync": client.post("/v1/accounts/account-uid/actions/sync", headers=headers).status_code,
         "remove": client.post(
             "/v1/accounts/actions/remove", json=selection, headers=headers
         ).status_code,
@@ -516,13 +517,14 @@ def test_an_external_person_reaches_no_other_persons_account(vouching) -> None:
         patch("alpaca_connectors.api.app.routers.accounts.update_account") as update,
         patch("alpaca_connectors.api.app.routers.accounts.remove_account") as remove,
         patch("alpaca_connectors.api.app.routers.accounts.refresh_account") as refresh,
+        patch("alpaca_connectors.api.app.routers.accounts.sync_account") as sync,
         patch("alpaca_connectors.api.app.routers.accounts.capture_holdings") as capture,
         patch("alpaca_connectors.api.app.routers.orders.submit_orders") as submit,
         patch("alpaca_connectors.api.app.routers.universes.run_universe") as run,
     ):
         answers = _scoped_routes(vouching.client, vouching.headers(**baggage()))
     assert set(answers.values()) == {404}, answers
-    for touched in (update, remove, refresh, capture, submit, run):
+    for touched in (update, remove, refresh, sync, capture, submit, run):
         touched.assert_not_called()
 
 

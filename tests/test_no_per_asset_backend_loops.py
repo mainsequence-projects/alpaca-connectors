@@ -30,6 +30,7 @@ BACKEND_METHOD_NAMES = {
 BACKEND_ROW_TYPES = {
     "Account",
     "AccountHoldingsSet",
+    "AccountSyncOperation",
     "AlpacaAssetDetails",
     "AlpacaBarsConfiguration",
     "AlpacaETFSignalJobConfiguration",

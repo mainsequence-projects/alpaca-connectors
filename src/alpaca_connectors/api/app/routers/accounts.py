@@ -3,6 +3,10 @@
 Every account is owned by a person pair (ADR 0019). A call for an external person, vouched for by
 a caller on the allow-list, registers accounts for that person and reaches only that person's
 accounts; every other call is unchanged.
+
+`POST /v1/accounts/{account_uid}/actions/sync` is the account sync every venue connector serves
+(issue #14): it answers 200 with a terminal `ObservableOperation`, which
+`GET /v1/operations/{operation_uid}` answers again to its owner.
 """
 
 from __future__ import annotations
@@ -19,11 +23,13 @@ from ..identity import acting_owner, acting_user_uid, caller_context_invalid
 from ..schemas import (
     AccountRegistrationRequest,
     AccountResponse,
+    AccountSyncOperationResponse,
     AccountUpdateRequest,
     BulkActionRequest,
     ResourceCollection,
     ResourceDiscoveryResponse,
 )
+from ..services.account_sync import sync_account
 from ..services.accounts import (
     account_delete_blockers,
     create_account_registration,
@@ -314,3 +320,37 @@ def account_refresh(account_uid: str) -> AccountResponse:
         return refresh_account(account_uid)
     except Exception as exc:
         raise api_http_error(exc) from exc
+
+
+@router.post(
+    "/{account_uid}/actions/sync",
+    response_model=AccountSyncOperationResponse,
+    summary="Sync an account's holdings into ms-markets",
+    description=(
+        "Read the Alpaca account with its stored keys and publish one AccountHoldingsSet into "
+        "ms-markets, then answer the terminal operation: succeeded with the snapshot it "
+        "published, or failed with a public error. Read the snapshot from ms-markets; read the "
+        "operation again at GET /v1/operations/{operation_uid}. An unknown account, or one the "
+        "acting owner may not reach (ADR 0019), is refused with 404 and runs nothing."
+    ),
+)
+def account_sync(account_uid: str) -> AccountSyncOperationResponse:
+    owner = acting_owner()
+    require_account_access(account_uid, owner)
+    try:
+        registered = get_account(account_uid)
+    except Exception as exc:
+        raise api_http_error(exc) from exc
+    if registered is None:
+        raise not_found("Account registration not found.")
+    try:
+        operation = sync_account(account_uid, owner=owner)
+    except Exception as exc:
+        raise api_http_error(exc) from exc
+    log_account_action(
+        "synced" if operation.status == "succeeded" else "sync failed",
+        owner=owner,
+        account_uid=account_uid,
+        error_code=operation.error.code if operation.error else None,
+    )
+    return operation

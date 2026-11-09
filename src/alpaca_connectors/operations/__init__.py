@@ -1,5 +1,17 @@
 """Durable operational records for user-visible project workflows."""
 
+from .account_sync import (
+    ACCOUNT_SYNC_ACTION,
+    AccountSyncOperation,
+    AccountSyncOperationTable,
+    fail_account_sync_operation,
+    get_account_sync_operation,
+    start_account_sync_operation,
+    succeed_account_sync_operation,
+)
+from .account_sync import (
+    project_operation_models as project_account_sync_operation_models,
+)
 from .asset_registration import (
     AssetRegistrationOperation,
     AssetRegistrationOperationTable,
@@ -59,11 +71,15 @@ def project_operation_models() -> list[type]:
     """All project-owned operational/control-plane MetaTables."""
     return [
         *project_asset_registration_operation_models(),
+        *project_account_sync_operation_models(),
         *project_signal_job_models(),
     ]
 
 
 __all__ = [
+    "ACCOUNT_SYNC_ACTION",
+    "AccountSyncOperation",
+    "AccountSyncOperationTable",
     "AssetRegistrationOperation",
     "AssetRegistrationOperationTable",
     "ALPACA_BARS_UPDATE_EXECUTION_PATH",
@@ -78,6 +94,10 @@ __all__ = [
     "ConfigurationJobState",
     "ConfigurationJobSubmission",
     "complete_asset_registration_operation",
+    "fail_account_sync_operation",
+    "get_account_sync_operation",
+    "start_account_sync_operation",
+    "succeed_account_sync_operation",
     "configuration_job_state",
     "create_signal_job_configuration",
     "create_asset_registration_operation",

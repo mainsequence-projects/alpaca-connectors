@@ -108,7 +108,7 @@ async def response_boundary_headers(request: Request, call_next):
         response.headers["Cache-Control"] = "private, max-age=0, must-revalidate"
         response.headers["ETag"] = f'"{digest}"'
         response.headers["Vary"] = "Authorization, X-Resource-Release-UID"
-    elif request.url.path.startswith("/v1/operations/job-runs/") or request.url.path.endswith(
+    elif request.url.path.startswith("/v1/operations/") or request.url.path.endswith(
         "/observations"
     ):
         response.headers["Cache-Control"] = "no-store"

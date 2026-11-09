@@ -125,6 +125,10 @@ idempotently ensures the built-in `currency` AssetType and `USD` Asset before pu
 It does not create an Alpaca asset-detail row or a currency-pair (`CurrencySpot`) record. There is
 no option to skip or relax initial holdings capture.
 
+Applications such as HunchAPI capture through the API's
+[account sync](../api.md#account-sync), `POST /v1/accounts/{account_uid}/actions/sync`, which runs
+the same capture and answers an observable operation they can read again.
+
 For crypto, Alpaca positions and its Asset catalog can expose different UUIDs for the same pair.
 The connector matches the position to the already-loaded catalog by normalized symbol (for example,
 `BTCUSD` resolving to catalog asset `BTC/USD`) and stores the immutable catalog Asset UUID. For
