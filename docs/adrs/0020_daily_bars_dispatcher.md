@@ -119,10 +119,18 @@ since the previous run, so the updates find no new bars.
 
 ## Verification
 
-- **Tests and lint.** `tests/test_bar_update_jobs.py` covers the dispatch, the entry point and the
-  declaration; `tests/test_schema_gate.py` covers the schema gate and the MetaTables access. The
-  validation commands in `AGENTS.md` pass.
+- **Tests and lint.** `pytest` passes 636 tests. `tests/test_bar_update_jobs.py` covers the
+  dispatch, the enabled-configuration query, the entry point, the declaration and its time against
+  the other dispatchers. `tests/test_schema_gate.py` covers the schema gate and the MetaTables
+  access. `ruff check`, `ruff format --check` and `mkdocs build --strict` pass.
+- **Workflow, offline.** The backend's own validator, `CodeRepositoryWorkflowService.validate` at
+  tdag-django `3b31ebe6c` (`development`, 2026-11-08), accepts `alpaca-bars-update.yaml` and
+  `alpaca-connectors-api.yaml` with no errors or warnings. Its normalized dispatcher keeps the
+  `0 0 * * *` UTC crontab and `["--scheduled"]`. The same file with `runner` on
+  `alpaca-etf-signal` is refused with `unknown_resource`, and with `runner` on the dispatcher
+  itself with `self_reference`, which is why the dispatcher lives beside the bars Job.
 - **Not verified:**
+  - `validate-workflow` on a running platform: the local backend was stopped;
   - the push that creates the dispatcher;
   - its first scheduled run, and `run-job` called from inside a Job runtime, which is also open for
     the ADR 0013 dispatchers;

@@ -16,7 +16,8 @@ its Job.
 | `alpaca-etf-signal-dispatcher` | `Alpaca ETF Signal Dispatcher` | `30 0 * * *` UTC | `--scheduled` |
 | `alpaca-etf-portfolio-dispatcher` | `Alpaca ETF Portfolio Dispatcher` | `0 2 * * *` UTC | `--scheduled` |
 
-The dispatchers run after the US equity close. All four Jobs
+The dispatchers run after the US equity close and after the 00:00 UTC
+[bars dispatcher](#daily-bars-dispatcher). All four Jobs
 use 0.25 CPU, 0.5 GiB and 3600 seconds, and every push promotes their image. No `execution.steps`
 entry references them, so a push may promote their image before the migration Job finishes; the
 schema gate in each entry point turns a run in that window into a clean skip
@@ -62,7 +63,8 @@ How they run:
 
 A dispatcher starts runs of another Job from inside a Job runtime, with its own workload's
 `runner` policy. This has not yet been checked on a hosted runtime: confirm it on the first
-scheduled runs after the push (00:30 and 02:00 UTC). Each dispatcher's workload User also needs its
+scheduled runs after the push (00:00, 00:30 and 02:00 UTC, the first being the bars dispatcher's).
+Each dispatcher's workload User also needs its
 MetaTables roles before then
 ([Table Access And MetaTables Roles](#table-access-and-metatables-roles)).
 
@@ -235,8 +237,10 @@ The canonical market-data Job is declared by:
 - `src/jobs/run_alpaca_bars_update.py`;
 - `.mainsequence/workflows/alpaca-bars-update.yaml`.
 
-The Job is named `Alpaca Bars Update`. It is generic and on-demand: each invocation supplies only
-the public UID of an enabled stored bars configuration.
+The Job is named `Alpaca Bars Update`. It is generic: each run supplies only the public UID of an
+enabled stored bars configuration. The API starts it on demand, and the
+[bars dispatcher](#daily-bars-dispatcher) in the same file starts it every day for each enabled
+configuration.
 
 ```bash
 mainsequence code-repository jobs run <JOB_UID> -- \
@@ -248,20 +252,54 @@ not accept a dataset UID, account override, asset-source override, bar-profile o
 name, credential value, hash namespace, or removed `force_update` option. Main Sequence records the
 two command arguments on the resulting JobRun.
 
-The workflow uses workflow API `3.0.0` and has no schedule or configuration environment variable.
-Automatic redeployment is enabled (PRs #7 and #8, 2026-11-04), so every push promotes this Job to
-the new image, as it does the API's Jobs. No `execution.steps` entry references it, so a push may
-promote it before the migration Job finishes; its launcher's schema gate turns a run in that window
-into a clean skip ([ADR 0012](../adrs/0012_deployment_workflow_migrations_and_schema_gated_jobs.md)).
-Workflow API `3.0.0` supports a durable `scheduled_command_args` vector; this on-demand declaration does not
-configure one. Any future recurring configuration must be explicitly declared in the workflow, not
-created or scheduled by application code.
+The workflow uses workflow API `3.0.0`. The Job has no schedule and no configuration environment
+variable; the dispatcher holds the schedule. Automatic redeployment is enabled (PRs #7 and #8,
+2026-11-04), so every push promotes this Job to the new image, as it does the API's Jobs. The file
+has no `execution.steps`, so a push may promote it before the migration Job finishes; its
+launcher's schema gate turns a run in that window into a clean skip
+([ADR 0012](../adrs/0012_deployment_workflow_migrations_and_schema_gated_jobs.md)).
 
 The API starts this Job through its branch `editor` policy. A workflow file's `access.resources`
 can name only resources of the same file (`unknown_resource`), so the API cannot declare `runner`
 on this Job alone while the Job lives in `alpaca-bars-update.yaml`. Moving the declaration into
 `alpaca-connectors-api.yaml` would create a new Job, because the backend identifies a workflow
 target by its file and key ([duplicate migration Job](#cleanup-of-the-duplicate-migration-job)).
+
+### Daily Bars Dispatcher
+
+`alpaca-bars-update.yaml` also declares `alpaca-bars-update-dispatcher`
+([ADR 0020](../adrs/0020_daily_bars_dispatcher.md)), the bars counterpart of the signal and
+portfolio dispatchers:
+
+| Key | Display name | Daily schedule | Arguments |
+|---|---|---|---|
+| `alpaca-bars-update` | `Alpaca Bars Update` | none | `--configuration-uid <uid>` per run |
+| `alpaca-bars-update-dispatcher` | `Alpaca Bars Update Dispatcher` | `0 0 * * *` UTC | `--scheduled` |
+
+- **It starts the daily runs and updates nothing itself.** Its scheduled run
+  (`src/jobs/dispatch_alpaca_bars_update.py`) starts one `--configuration-uid` run of
+  `Alpaca Bars Update` for each enabled bar configuration, through the `runner` policy it declares
+  on that Job. It must live in this file, because `access.resources` names only resources of the
+  same file.
+  - It skips a configuration whose run is pending or running among the Job's 500 newest runs.
+  - It runs no preflight: each run resolves its own configuration and records its own failure.
+  - It prints what it launched, skipped and failed, and fails if any start failed.
+- **`enabled` is the scheduled flag.** Bar configurations have no `scheduled` field, so every
+  enabled configuration is updated daily. To leave the daily run, disable the configuration
+  (`alpaca-connectors market-data bar-configuration update <uid> --no-enabled`, or `PATCH` with
+  `enabled: false`). That also refuses its manual runs and blocks the portfolios linked to it.
+- **00:00 UTC is the earliest daily time that includes the session just closed.** The `1d` updater
+  takes only bars that start before the current UTC midnight, and US sessions close at 20:00 UTC
+  in summer and 21:00 UTC in winter. The run precedes the 00:30 UTC signal and 02:00 UTC portfolio
+  dispatchers, so the bars runs have two hours before the portfolio runs read them. The Sunday and
+  Monday 00:00 UTC runs find no new session.
+- **Its compute matches the bars Job's** (0.25 CPU, 0.5 GiB, 3600 seconds, no spot), and every
+  push promotes it. It declares no Secret: it never opens account keys, the runs it starts do.
+- **`GET /v1/operations/job-runs/{uid}` does not return the dispatcher's runs,** only the
+  `Alpaca Bars Update` runs it starts.
+
+Its workload User needs `data_viewer` on `alpaca-connectors` before the first scheduled run
+([Table Access And MetaTables Roles](#table-access-and-metatables-roles)).
 
 ### Run arguments
 
@@ -296,9 +334,9 @@ mainsequence code-repository jobs run <JOB_UID>
 mainsequence code-repository jobs run <JOB_UID> -- --execute
 ```
 
-Like the API, the bars Jobs and the signal Job, it declares `value_reader` on the Secret in its
-`access.secrets`; the schema migration Job and the portfolio Job do not read keys and have no
-such grant.
+Like the API, the bars Job and the signal Job, it declares `value_reader` on the Secret in its
+`access.secrets`; the schema migration Job, the portfolio Job and the dispatchers do not read keys
+and have no such grant.
 
 ## API Invocation And Observation
 
@@ -331,9 +369,10 @@ environment variable. It was retired on 2026-11-09 (issue #11), and its declarat
   JobRuns, under the current workflow contract. Check the repository event's deletion result.
 - **Its workload User's roles can go.** It held `data_viewer` on `alpaca-connectors` and table
   `editor` on the two bars tables; the namespace owner removes them.
-- **Nothing updates bars on a schedule since.** `Alpaca Bars Update` (above) runs one stored
-  configuration on demand. A recurring update must be declared in a workflow file, never created or
-  scheduled by application code.
+- **The [bars dispatcher](#daily-bars-dispatcher) replaced it**
+  ([ADR 0020](../adrs/0020_daily_bars_dispatcher.md)). It updates every enabled configuration at
+  00:00 UTC through `Alpaca Bars Update`. Until it was declared, nothing updated bars on a
+  schedule.
 
 ## FastAPI Release
 
@@ -380,7 +419,7 @@ In each Environment where the project runs:
    | `alpaca-etf-signal` | `editor` |
    | `alpaca-etf-portfolio` | `editor` |
    | `alpaca-bars-update` | `data_viewer`, plus table `editor` on `alpaca_connectors__bars_1d_sip_all` and `alpaca_connectors__bars_1d_iex_raw` |
-   | `alpaca-etf-signal-dispatcher`, `alpaca-etf-portfolio-dispatcher` | `data_viewer` |
+   | `alpaca-etf-signal-dispatcher`, `alpaca-etf-portfolio-dispatcher`, `alpaca-bars-update-dispatcher` | `data_viewer` |
    | `alpaca-credential-migration` (one-off) | `data_writer` |
    | `alpaca-connectors-agent` | none: its tools run in the API |
 
@@ -408,7 +447,7 @@ selects ms-markets' remote row backend (`alpaca_connectors.runtime.use_markets_a
 its own `alpaca-connectors` tables, and reads and writes Markets registries with `msm.api` row
 calls, `AccountHoldingsSnapshots`, `AssetSnapshots` and `PortfolioDatasets`. In each Environment
 the workflows grant every resource that calls Markets (the API, the signal and portfolio Jobs and
-their dispatchers, both bars Jobs and the credential migration) `reader` on the
+their dispatchers, the bars Job and its dispatcher, and the credential migration) `reader` on the
 `MainSequenceMarkets` branch, which lets them find the Markets API and write through it; the
 migration Job and the Agent do not call it.
 

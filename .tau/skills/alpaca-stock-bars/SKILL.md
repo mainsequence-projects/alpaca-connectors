@@ -38,6 +38,10 @@ Collections use limit 1–100 and offset in multiples of the fixed limit. Exampl
 
 ## Resolve, Submit And Verify
 
+A workflow-declared dispatcher updates every enabled configuration once a day at 00:00 UTC;
+`run` is only for an update now. Setting `enabled` false removes a configuration from that daily
+update, refuses its runs and blocks the portfolios linked to it.
+
 1. Query `resolve` using the stored configuration UID; inspect derived Assets and output dataset.
    The schema also supports an optional hash namespace.
 2. Fix missing/ambiguous provider identities before running. A unique stored Alpaca Asset/detail

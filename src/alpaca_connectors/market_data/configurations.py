@@ -617,6 +617,36 @@ def list_bar_configurations(
     return rows, total
 
 
+def scheduled_bar_configuration_uids() -> list[uuid.UUID]:
+    """Return the configurations the daily bars dispatcher's scheduled run includes.
+
+    Bar configurations have no separate scheduled flag: every enabled configuration is updated
+    daily (ADR 0020). Ordered by name, then UID.
+    """
+    from msm.bootstrap import resolve_runtime
+    from msm.repositories.base import compile_markets_statement, execute_markets_operation
+    from sqlalchemy import select
+
+    from alpaca_connectors.runtime import account_runtime_models, start_markets_engine
+
+    table = AlpacaBarsConfigurationTable
+    start_markets_engine(models=account_runtime_models())
+    runtime = resolve_runtime(models=[table], row_model_name="AlpacaBarsConfiguration")
+    operation = compile_markets_statement(
+        select(table.uid)
+        .where(table.enabled.is_(True))
+        .order_by(table.name.asc(), table.uid.asc()),
+        context=runtime.context,
+        operation="select",
+    )
+    return [
+        uuid.UUID(str(row["uid"]))
+        for row in operation_result_rows(
+            execute_markets_operation(operation, context=runtime.context)
+        )
+    ]
+
+
 def update_bar_configuration(
     configuration_uid: uuid.UUID | str,
     *,
@@ -708,6 +738,7 @@ __all__ = [
     "get_bar_configuration",
     "list_bar_configurations",
     "project_configuration_models",
+    "scheduled_bar_configuration_uids",
     "update_bar_configuration",
     "validate_configuration_scope",
 ]
