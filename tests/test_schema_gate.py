@@ -273,20 +273,28 @@ def test_api_deploys_only_after_the_migration_job_in_one_workflow() -> None:
     assert not (root / ".mainsequence/workflows/alpaca-connectors-migrations.yaml").exists()
 
 
-def test_bars_jobs_in_their_own_files_are_promoted_by_hand() -> None:
-    """The graph cannot reference another file, so these two Jobs are never promoted by a push."""
+def test_bars_jobs_in_their_own_files_stay_outside_the_graph() -> None:
+    """The graph cannot reference another file, so neither bars Job waits for the migration.
+
+    `alpaca-bars-update` follows main like the API's Jobs (PRs #7 and #8, issue #11); its schema
+    gate turns a run in the rollout gap into a skip. The transitional
+    `daily-stock-bars-holdings-ivv` stays pinned until it is retired (operations/jobs.md).
+    """
     import yaml
 
     root = JOBS.parents[1]
-    for name, key in (
-        ("alpaca-bars-update.yaml", "alpaca-bars-update"),
-        ("daily-stock-bars-holdings-ivv.yaml", "daily-stock-bars-holdings-ivv"),
+    for name, key, follows_main in (
+        ("alpaca-bars-update.yaml", "alpaca-bars-update", True),
+        ("daily-stock-bars-holdings-ivv.yaml", "daily-stock-bars-holdings-ivv", False),
     ):
         workflow = yaml.safe_load((root / ".mainsequence/workflows" / name).read_text())
         [resource] = workflow["resources"]
         assert resource["key"] == key
         assert resource["kind"] == "job"
-        assert resource["spec"]["automatic_redeployment"] == {"enabled": False, "tag_regex": None}
+        assert resource["spec"]["automatic_redeployment"] == {
+            "enabled": follows_main,
+            "tag_regex": None,
+        }
         assert "execution" not in workflow
 
 

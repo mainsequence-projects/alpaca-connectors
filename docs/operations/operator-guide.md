@@ -124,7 +124,8 @@ instructions are `.tau/SYSTEM.md`; its tools and skills are described in
   applies only this project's provider; keep every deployed resource that reads project tables in
   that file with its own `needs: [migrate]` deploy step; the `harness_agent` deploys after the API
   (`deploy_agent` needs `deploy_api`), so a failed migration stops it too; the two bars Jobs in
-  their own files stay outside the graph with automatic redeployment disabled;
+  their own files stay outside the graph: every push promotes `alpaca-bars-update`, whose schema
+  gate covers the gap, and the transitional `daily-stock-bars-holdings-ivv` is promoted by hand;
   the ms-markets schema is migrated only by the ms-markets deployment's `migrate-markets` Job; never
   run `metatables migrations upgrade` or `downgrade` against a hosted environment from a developer
   or agent session

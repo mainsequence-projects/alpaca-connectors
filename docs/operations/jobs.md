@@ -248,10 +248,12 @@ not accept a dataset UID, account override, asset-source override, bar-profile o
 name, credential value, hash namespace, or removed `force_update` option. Main Sequence records the
 two command arguments on the resulting JobRun.
 
-The workflow uses workflow API `3.0.0`, has no schedule or configuration environment variable,
-and keeps automatic redeployment disabled. A push therefore does not promote this Job to the
-updated SDK image. Verify its image separately before relying on a hosted bars run. Workflow API
-`3.0.0` supports a durable `scheduled_command_args` vector; this on-demand declaration does not
+The workflow uses workflow API `3.0.0` and has no schedule or configuration environment variable.
+Automatic redeployment is enabled (PRs #7 and #8, 2026-11-04), so every push promotes this Job to
+the new image, as it does the API's Jobs. No `execution.steps` entry references it, so a push may
+promote it before the migration Job finishes; its launcher's schema gate turns a run in that window
+into a clean skip ([ADR 0012](../adrs/0012_deployment_workflow_migrations_and_schema_gated_jobs.md)).
+Workflow API `3.0.0` supports a durable `scheduled_command_args` vector; this on-demand declaration does not
 configure one. Any future recurring configuration must be explicitly declared in the workflow, not
 created or scheduled by application code.
 
@@ -329,6 +331,11 @@ The declaration sets no `ALPACA_BARS_CONFIGURATION_UID`, and a push changes no e
 variable it does not declare. Unless the variable was set on the Job outside the workflow, every
 00:00 UTC run fails before the schema gate with "ALPACA_BARS_CONFIGURATION_UID must identify an
 enabled stored bar configuration."
+
+This Job keeps automatic redeployment disabled, so it is promoted by hand. On 2026-11-09 the
+Production Job `Alpaca Stored Bar Configuration` was still on the image of `7da1451`
+(2026-10-11), and none of its 28 runs had succeeded: each failed with that message. Enabling
+redeployment would not fix it; retiring it, as above, does.
 
 ## FastAPI Release
 
