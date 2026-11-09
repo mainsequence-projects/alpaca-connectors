@@ -44,14 +44,14 @@ process restarts; the shared in-memory operation repository is intentionally not
 | Project State | `GET /health`, `GET /v1/project-state/capabilities`, `GET /v1/project-state/configuration` |
 | Assets | `GET /v1/assets`, `GET /v1/assets/{asset_uid}`, synchronous registration plan/execute, and observable registration operations |
 | Accounts | `GET/POST /v1/accounts`, `POST /v1/accounts/registration/preflight`, `GET/PATCH/DELETE /v1/accounts/{account_uid}`, refresh and bulk actions; the signed-in person's key requests under `/v1/accounts/key-requests` |
-| Holdings | list/get and capture under `/v1/accounts/{account_uid}/holdings`; `/latest` lists only the newest immutable snapshot |
+| Holdings | list/get and capture under `/v1/accounts/{account_uid}/holdings`; `/latest` lists only the newest immutable snapshot; the [account sync](#account-sync) at `POST /v1/accounts/{account_uid}/actions/sync` |
 | Execution | submit (with preflight), sync and cancel order batches, and list recorded orders, under `/v1/accounts/{account_uid}/orders` |
 | Universe Sources | Explicit extraction-configuration CRUD and read-only source preview under `/v1/universe-sources` |
 | Universes | Create/list/get/update registered `AssetUniverse` rows; list linked category Assets at `GET /v1/universes/{universe_uid}/assets`; run, activate, deactivate, and confirmed delete actions under `/v1/universes` |
 | Market Data | configuration CRUD and resolve/update actions under `/v1/market-data/bar-configurations`; dataset list/get and bounded observations under `/v1/market-data/datasets` |
 | ETF Signals | signal configuration CRUD under `/v1/signal-jobs`; run, pause, resume, reconcile, and JobRun-history actions on the shared signal Job |
 | ETF Portfolios | configuration CRUD under `/v1/portfolio-configurations`; reusable calendar-event policies under `/v1/portfolio-rebalance-configurations`; run and JobRun-history actions on the shared portfolio Job |
-| Operations | poll an accepted Alpaca bars, ETF signal, or ETF portfolio JobRun under `GET /v1/operations/job-runs/{job_run_uid}` |
+| Operations | poll an accepted Alpaca bars, ETF signal, or ETF portfolio JobRun under `GET /v1/operations/job-runs/{job_run_uid}`; read an account sync again at `GET /v1/operations/{operation_uid}` |
 
 Market-data writes are configuration-oriented. Create one stored definition with exactly one
 source (`assets`, `universe`, or `account_holdings`), review it with the `resolve` action, and run it
@@ -269,6 +269,62 @@ response records the exact observation count, date window, 252-period annualizat
 risk-free-rate assumption. Alpha and beta are not reported because this workflow has no configured
 benchmark. If the requested window is shorter than the stored history, the response marks it as
 truncated rather than presenting the statistics as since-inception results.
+
+## Account Sync
+
+Every venue connector answers an application's request for an account's holdings the same way
+([issue #14](https://github.com/mainsequence-projects/alpaca-connectors/issues/14)): the connector
+reads the venue with the account's stored keys and publishes one `AccountHoldingsSet` into
+ms-markets, and the application reads the snapshot from ms-markets, not from this answer.
+
+```text
+POST /v1/accounts/{account_uid}/actions/sync
+GET  /v1/operations/{operation_uid}
+```
+
+`account_uid` is the ms-markets `Account` uid; the POST takes no body. It runs the holdings
+capture inside the request and answers `200` with a terminal
+`ObservableOperation[AccountSyncRequest, AccountSyncResult]`, `action: "account_sync"`:
+
+```json
+{
+  "operation_uid": "0f6d2c1e-4b8a-4c1f-9a51-3a7e2b9d6c40",
+  "action": "account_sync",
+  "status": "succeeded",
+  "current_step": null,
+  "steps": [{"key": "capture_holdings", "label": "Read the Alpaca account and publish its holdings", "status": "succeeded", "...": "..."}],
+  "request": {"account_uid": "..."},
+  "result": {
+    "account_uid": "...",
+    "holdings_set_uid": "...",
+    "time_index": "2026-11-09T15:30:00Z",
+    "holdings_rows": 3,
+    "extra": {"unresolved_symbols": []}
+  },
+  "error": null
+}
+```
+
+- A capture that fails is still `200`, with `status: "failed"`, `result: null` and
+  `error: {code, message, retryable}`: the code and message the account routes would answer
+  (`alpaca_credentials_rejected`, `credential_key_unavailable`, `account_credentials_missing`,
+  `action_conflict` for a held asset that cannot be registered, `dependency_unavailable` for
+  anything unexpected, with no internals).
+- A refused request is an HTTP error and runs nothing: `404` for an unknown account, or for an
+  account that is not the acting owner's under [ADR 0019](#account-owners), as
+  `GET /v1/accounts/{account_uid}` answers it.
+- Each sync is one row of the `alpaca_connectors__account_sync_operation` MetaTable, owned by the
+  acting owner. `GET /v1/operations/{operation_uid}` answers that owner the same operation, from
+  any API process, with `Cache-Control: no-store`; any other caller, and an unknown UID, get `404`.
+- No key value appears in an operation, its row, a log line or an error. The API logs each sync
+  with the account UID, the owner pair and, on failure, the error code.
+- `AccountSyncRequest` and `AccountSyncResult` are defined here until ms-markets ships them in
+  `msm.api.http`
+  ([MainSequenceMarkets#44](https://github.com/mainsequence-projects/MainSequenceMarkets/issues/44)),
+  with the same fields.
+- `POST /v1/accounts/{account_uid}/holdings/actions/capture` and the bulk
+  `POST /v1/accounts/actions/capture-holdings` stay, running the same capture, until HunchAPI has
+  moved to the sync.
 
 ## Observable Asset Registration
 

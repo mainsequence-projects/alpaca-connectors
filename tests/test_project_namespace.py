@@ -35,6 +35,10 @@ PHYSICAL_TABLES = {
         "alpaca_connectors__asset_registration_operation",
         "AssetRegistrationOperation",
     ),
+    "AccountSyncOperationTable": (
+        "alpaca_connectors__account_sync_operation",
+        "AccountSyncOperation",
+    ),
     "AlpacaETFSignalJobConfigurationTable": (
         "alpaca_connectors__etf_signal_job_configuration",
         "AlpacaETFSignalJobConfiguration",
@@ -75,6 +79,7 @@ def test_project_row_classes_stay_on_the_local_runtime() -> None:
     from alpaca_connectors.account.key_requests import AccountKeyRequest
     from alpaca_connectors.assets.alpaca_asset_details import AlpacaAssetDetails
     from alpaca_connectors.market_data.configurations import AlpacaBarsConfiguration
+    from alpaca_connectors.operations.account_sync import AccountSyncOperation
     from alpaca_connectors.operations.asset_registration import AssetRegistrationOperation
     from alpaca_connectors.operations.signal_job_configurations import (
         AlpacaETFSignalJobConfiguration,
@@ -88,6 +93,7 @@ def test_project_row_classes_stay_on_the_local_runtime() -> None:
 
     for row in (
         AccountKeyRequest,
+        AccountSyncOperation,
         AlpacaAssetDetails,
         AlpacaBarsConfiguration,
         AssetRegistrationOperation,
