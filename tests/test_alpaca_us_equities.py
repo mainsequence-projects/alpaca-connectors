@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import datetime as dt
 import unittest
 import uuid
 from types import SimpleNamespace
@@ -16,6 +17,7 @@ from alpaca_connectors.assets.alpaca_us_equities import (
     AlpacaEquityClassificationPass,
     OpenFigiMatch,
     RegisteredAlpacaAssetReference,
+    _alpaca_detail_registration_values,
     _query_existing_assets_by_alpaca_id,
     _register_alpaca_asset,
     _register_alpaca_assets_batch,
@@ -23,6 +25,7 @@ from alpaca_connectors.assets.alpaca_us_equities import (
     build_alpaca_us_equity_registration_plan,
     build_alpaca_us_equity_trading_client,
     classify_alpaca_us_equities,
+    fetch_alpaca_asset_catalog,
     fetch_alpaca_us_equities,
     register_alpaca_us_equity_assets,
     resolve_alpaca_us_equity_registration_plan,
@@ -54,6 +57,39 @@ def alpaca_asset(
         easy_to_borrow=True,
         fractionable=True,
     )
+
+
+# TXSE is first known to alpaca-py 0.45.0; no alpaca-py release knows XTEST.
+NEW_EXCHANGES = ("TXSE", "XTEST")
+
+
+def alpaca_catalog_asset(
+    symbol: str,
+    asset_id: uuid.UUID,
+    *,
+    exchange: str = "NASDAQ",
+    asset_class: str = "us_equity",
+    **fields,
+) -> dict:
+    """One asset as Alpaca's ``GET /v2/assets`` returns it."""
+    return {
+        "id": str(asset_id),
+        "class": asset_class,
+        "exchange": exchange,
+        "symbol": symbol,
+        "name": f"{symbol} Name",
+        "status": "active",
+        "tradable": True,
+        "marginable": True,
+        "maintenance_margin_requirement": 30,
+        "margin_requirement_long": "30",
+        "margin_requirement_short": "100",
+        "shortable": True,
+        "easy_to_borrow": True,
+        "fractionable": True,
+        "attributes": [],
+        **fields,
+    }
 
 
 class AlpacaAssetRegistrationTests(unittest.TestCase):
@@ -149,36 +185,29 @@ class AlpacaAssetRegistrationTests(unittest.TestCase):
         self.assertEqual(result["created_assets"], {"SPY": created_uid})
 
     def test_registration_resolves_inactive_and_non_tradable_assets(self) -> None:
-        active_non_tradable = SimpleNamespace(
-            id=AAPL_ID,
-            symbol="AAPL",
+        active_non_tradable = alpaca_catalog_asset(
+            "AAPL",
+            AAPL_ID,
             name="Apple Inc.",
-            exchange="NASDAQ",
-            asset_class="us_equity",
-            status="active",
             tradable=False,
             marginable=False,
             shortable=False,
             easy_to_borrow=False,
             fractionable=False,
-            attributes=[],
         )
-        inactive_non_tradable = SimpleNamespace(
-            id=HOLX_ID,
-            symbol="HOLX",
+        inactive_non_tradable = alpaca_catalog_asset(
+            "HOLX",
+            HOLX_ID,
             name="Hologic, Inc. Common Stock",
-            exchange="NASDAQ",
-            asset_class="us_equity",
             status="inactive",
             tradable=False,
             marginable=False,
             shortable=False,
             easy_to_borrow=False,
             fractionable=False,
-            attributes=[],
         )
         trading_client = Mock()
-        trading_client.get_all_assets.return_value = [
+        trading_client.get.return_value = [
             active_non_tradable,
             inactive_non_tradable,
         ]
@@ -192,7 +221,8 @@ class AlpacaAssetRegistrationTests(unittest.TestCase):
         self.assertFalse(assets[0].tradable)
         self.assertEqual(assets[1].status, "inactive")
         self.assertFalse(assets[1].tradable)
-        trading_client.get_all_assets.assert_called_once()
+        trading_client.get.assert_called_once_with("/assets", {"asset_class": "us_equity"})
+        trading_client.get_all_assets.assert_not_called()
         trading_client.get_asset.assert_not_called()
 
         plan = build_alpaca_us_equity_registration_plan(
@@ -204,6 +234,61 @@ class AlpacaAssetRegistrationTests(unittest.TestCase):
 
         self.assertEqual([asset.symbol for asset in plan.alpaca_assets], ["AAPL", "HOLX"])
         self.assertEqual(plan.missing_symbols_from_alpaca, [])
+
+    def test_catalog_keeps_an_exchange_alpaca_py_does_not_know(self) -> None:
+        from alpaca.trading.client import TradingClient
+        from pydantic import ValidationError
+
+        for exchange in NEW_EXCHANGES:
+            with self.subTest(exchange=exchange):
+                catalog = [
+                    alpaca_catalog_asset("AAPL", AAPL_ID),
+                    alpaca_catalog_asset("SPY", SPY_ID, exchange=exchange),
+                ]
+                # Offline client; only its catalog response is replaced.
+                trading_client = TradingClient("PKTEST", "SKTEST", paper=True)
+                with patch.object(trading_client, "get", return_value=catalog):
+                    if exchange == "XTEST":
+                        # The typed read fails the whole catalog over one asset.
+                        with self.assertRaises(ValidationError):
+                            trading_client.get_all_assets()
+                    assets = fetch_alpaca_us_equities(
+                        trading_client=trading_client,
+                        symbols=["AAPL", "SPY"],
+                    )
+
+                self.assertEqual([asset.symbol for asset in assets], ["AAPL", "SPY"])
+                self.assertEqual(assets[1].alpaca_asset_id, SPY_ID)
+                self.assertEqual(assets[1].exchange, exchange)
+                self.assertEqual(assets[1].raw_payload, catalog[1])
+                details = _alpaca_detail_registration_values(
+                    assets[1], asset_uid="spy-uid", refreshed_at=dt.datetime(2026, 11, 12)
+                )
+                self.assertEqual(details["exchange"], exchange)
+
+    def test_catalog_skips_and_logs_an_entry_that_is_not_an_asset_record(self) -> None:
+        trading_client = Mock()
+        trading_client.get.return_value = [
+            alpaca_catalog_asset("AAPL", AAPL_ID),
+            alpaca_catalog_asset("BROKEN", SPY_ID, id=None),
+            "not an asset",
+            alpaca_catalog_asset("HOLX", HOLX_ID, exchange="XTEST"),
+        ]
+
+        with self.assertLogs("alpaca_connectors.assets.alpaca_us_equities", "WARNING") as logs:
+            records = fetch_alpaca_asset_catalog(trading_client=trading_client)
+
+        self.assertEqual([record.symbol for record in records], ["AAPL", "HOLX"])
+        trading_client.get.assert_called_once_with("/assets", {})
+        self.assertIn("Skipped 2 of 4", logs.output[0])
+
+    def test_catalog_record_reads_borrow_status_when_easy_to_borrow_is_gone(self) -> None:
+        reported = alpaca_catalog_asset("AAPL", AAPL_ID, borrow_status="hard_to_borrow")
+        unreported = alpaca_catalog_asset("AAPL", AAPL_ID)
+        del reported["easy_to_borrow"], unreported["easy_to_borrow"]
+
+        self.assertIs(AlpacaAssetRecord.from_catalog_payload(reported).easy_to_borrow, False)
+        self.assertIsNone(AlpacaAssetRecord.from_catalog_payload(unreported).easy_to_borrow)
 
     def test_bulk_identity_lookup_reuses_application_runtime(self) -> None:
         runtime = SimpleNamespace(context=object())

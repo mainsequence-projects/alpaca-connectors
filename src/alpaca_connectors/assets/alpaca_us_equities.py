@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import datetime as dt
+import logging
 import time
 import uuid
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from typing import Any
 
 import requests
@@ -25,6 +26,8 @@ from alpaca_connectors.settings import (
     get_figi_security_type_reit,
     get_openfigi_api_key,
 )
+
+logger = logging.getLogger(__name__)
 
 AssetRegistrationProgressCallback = Callable[[str, str, str | None], None]
 
@@ -151,6 +154,35 @@ class AlpacaAssetRecord(BaseModel):
             fractionable=asset.fractionable,
             attributes=list(asset.attributes or []),
             raw_payload=(asset.model_dump(mode="json") if hasattr(asset, "model_dump") else None),
+        )
+
+    @classmethod
+    def from_catalog_payload(cls, payload: Mapping[str, Any]) -> "AlpacaAssetRecord":
+        """Build the record from one asset of the raw catalog response, as Alpaca sent it.
+
+        ``exchange``, ``class`` and ``status`` keep Alpaca's strings, so a value the alpaca-py
+        enums do not know yet (an exchange Alpaca adds) is stored rather than refused. Missing
+        identity or ``tradable`` raises ``ValueError``.
+        """
+        symbol = payload.get("symbol")
+        easy_to_borrow = payload.get("easy_to_borrow")
+        if easy_to_borrow is None and payload.get("borrow_status") is not None:
+            # Alpaca is replacing easy_to_borrow with borrow_status.
+            easy_to_borrow = payload["borrow_status"] == "easy_to_borrow"
+        return cls(
+            alpaca_asset_id=payload.get("id"),
+            symbol=symbol.upper() if isinstance(symbol, str) else symbol,
+            name=payload.get("name"),
+            exchange=payload.get("exchange"),
+            asset_class=payload.get("class") or AssetClass.US_EQUITY.value,
+            status=payload.get("status") or AssetStatus.ACTIVE.value,
+            tradable=payload.get("tradable"),
+            marginable=payload.get("marginable"),
+            shortable=payload.get("shortable"),
+            easy_to_borrow=easy_to_borrow,
+            fractionable=payload.get("fractionable"),
+            attributes=list(payload.get("attributes") or []),
+            raw_payload=dict(payload),
         )
 
 
@@ -312,6 +344,43 @@ def build_alpaca_us_equity_trading_client(*, account_uid: str) -> TradingClient:
     return build_registered_account_client(registration)
 
 
+def fetch_alpaca_asset_catalog(
+    *,
+    trading_client: TradingClient,
+    request: GetAssetsRequest | None = None,
+) -> list[AlpacaAssetRecord]:
+    """Read Alpaca's asset catalog so that no single asset can fail the whole read.
+
+    ``TradingClient.get_all_assets`` validates every asset's ``exchange``, ``class`` and
+    ``status`` against alpaca-py enums that trail Alpaca, so one asset on an exchange the installed
+    alpaca-py does not know fails the request for all of them. The same ``GET /assets`` is read raw
+    instead, each record keeps the values Alpaca sent, and an entry that is not an asset record is
+    skipped and logged.
+    """
+    params = request.to_request_fields() if request is not None else {}
+    payload = trading_client.get("/assets", params)
+    if not isinstance(payload, list):
+        raise ValueError("The Alpaca asset catalog response is not a list of assets.")
+
+    records: list[AlpacaAssetRecord] = []
+    skipped = 0
+    for entry in payload:
+        if not isinstance(entry, Mapping):
+            skipped += 1
+            continue
+        try:
+            records.append(AlpacaAssetRecord.from_catalog_payload(entry))
+        except (TypeError, ValueError):
+            skipped += 1
+    if skipped:
+        logger.warning(
+            "Skipped %d of %d Alpaca catalog entries that are not readable asset records.",
+            skipped,
+            len(payload),
+        )
+    return records
+
+
 def fetch_alpaca_us_equities(
     *,
     trading_client: TradingClient,
@@ -325,8 +394,10 @@ def fetch_alpaca_us_equities(
     request = GetAssetsRequest(
         asset_class=AssetClass.US_EQUITY,
     )
-    assets = trading_client.get_all_assets(request)
-    normalized_assets = [AlpacaUsEquity.from_trading_asset(asset) for asset in assets]
+    normalized_assets = fetch_alpaca_asset_catalog(
+        trading_client=trading_client,
+        request=request,
+    )
 
     requested_symbols = sorted(
         {symbol.strip().upper() for symbol in symbols or [] if symbol.strip()}

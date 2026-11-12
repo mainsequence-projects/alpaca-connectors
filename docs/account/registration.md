@@ -117,9 +117,12 @@ catalog and stored as `ALPACA::<alpaca_catalog_asset_uuid>`. Missing Alpaca asse
 before the Account or holdings set is written, for every supported Alpaca asset class. The whole
 position set uses one unfiltered Alpaca catalog request, one set-based Main Sequence identity
 query, and one bulk registration operation per row type; it never performs one backend operation
-per position. OpenFIGI enrichment is optional. If a position lacks a valid Alpaca UUID, Alpaca cannot return its asset
-record, or the asset catalog returns a conflicting identity, the operation reports the affected
-symbol and identifiers and writes no partial Account or snapshot. Cash is stored against the
+per position. The catalog is read as Alpaca sends it, so an asset on an exchange (or with a class
+or status) the installed `alpaca-py` does not know yet keeps Alpaca's value instead of failing the
+read; a catalog entry that is not an asset record is skipped and logged. OpenFIGI enrichment is
+optional. If a position lacks a valid Alpaca UUID, Alpaca cannot return its asset record, or the
+asset catalog returns a conflicting identity, the operation reports the affected symbol and
+identifiers and writes no partial Account or snapshot. Cash is stored against the
 shared ms-markets currency Asset `USD`. A dry run reports when that row is missing; execution
 idempotently ensures the built-in `currency` AssetType and `USD` Asset before publishing holdings.
 It does not create an Alpaca asset-detail row or a currency-pair (`CurrencySpot`) record. There is
