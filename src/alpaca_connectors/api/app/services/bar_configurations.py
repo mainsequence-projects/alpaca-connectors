@@ -39,12 +39,14 @@ def list_configurations(
     enabled: bool | None,
     asset_source: str | None,
     ordering: str,
+    scheduled: bool | None = None,
 ):
     items, total = list_bar_configurations(
         limit=limit,
         offset=offset,
         search=search,
         enabled=enabled,
+        scheduled=scheduled,
         asset_source=asset_source,
         ordering=ordering,
     )

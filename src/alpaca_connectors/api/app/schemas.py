@@ -603,6 +603,13 @@ class BarConfigurationCreateRequest(BaseModel):
     name: str = Field(min_length=1, max_length=255)
     description: str | None = None
     enabled: bool = True
+    scheduled: bool = Field(
+        default=True,
+        description=(
+            "Include the configuration in the daily bars update; an unscheduled one still "
+            "runs on demand while enabled."
+        ),
+    )
     account_uid: str
     asset_source: Literal["assets", "universe", "account_holdings"]
     asset_uids: list[str] = Field(default_factory=list)
@@ -628,6 +635,10 @@ class BarConfigurationUpdateRequest(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=255)
     description: str | None = None
     enabled: bool | None = None
+    scheduled: bool | None = Field(
+        default=None,
+        description="Include the configuration in the daily bars update.",
+    )
     account_uid: str | None = None
     asset_source: Literal["assets", "universe", "account_holdings"] | None = None
     asset_uids: list[str] | None = None
@@ -662,6 +673,7 @@ class BarConfigurationResponse(BaseModel):
     name: str
     description: str | None
     enabled: bool
+    scheduled: bool
     account_uid: str
     asset_source: Literal["assets", "universe", "account_holdings"]
     asset_uids: list[str]
@@ -1011,6 +1023,7 @@ class PortfolioLinkedBarsResponse(BaseModel):
     name: str
     description: str | None
     enabled: bool
+    scheduled: bool
     account_name: str
     account_environment: Literal["paper", "live"]
     asset_source: Literal["assets", "universe", "account_holdings"]

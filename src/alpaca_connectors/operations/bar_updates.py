@@ -3,8 +3,8 @@
 `.mainsequence/workflows/alpaca-bars-update.yaml` declares the `Alpaca Bars Update` Job, whose
 runs each execute one configuration (``--configuration-uid <uid>``), and its dispatcher, which holds
 the daily schedule (ADR 0021). The dispatcher's scheduled run carries ``--scheduled`` and starts one
-run of the bars Job per enabled configuration, through the ``runner`` policy it declares on that
-Job: a Job cannot declare access to itself. No code here creates a Job or changes its schedule.
+run of the bars Job per enabled, scheduled configuration, through the ``runner`` policy it
+declares on that Job: a Job cannot declare access to itself. No code here creates a Job or changes its schedule.
 """
 
 from __future__ import annotations
@@ -197,7 +197,7 @@ def _active_configuration_uids(job: Any) -> set[str]:
 
 
 def dispatch_scheduled_bar_updates() -> dict[str, Any]:
-    """Start one bars Job run per enabled configuration: all the dispatcher does (ADR 0021).
+    """Start one bars Job run per enabled, scheduled configuration (ADR 0021).
 
     The dispatcher's scheduled run calls this; it holds ``runner`` on the bars Job. A
     configuration with a pending or running run is skipped. There is no preflight: each run
@@ -245,14 +245,18 @@ def build_bars_dispatcher_argument_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog=ALPACA_BARS_UPDATE_DISPATCHER_EXECUTION_PATH,
         description=(
-            f"Start one {ALPACA_BARS_UPDATE_JOB_NAME!r} run per enabled stored bar configuration."
+            f"Start one {ALPACA_BARS_UPDATE_JOB_NAME!r} run per enabled, scheduled stored bar "
+            "configuration."
         ),
     )
     parser.add_argument(
         SCHEDULED_ARGUMENT,
         action="store_true",
         required=True,
-        help="Start one run per enabled bar configuration (the dispatcher's scheduled run).",
+        help=(
+            "Start one run per enabled, scheduled bar configuration (the dispatcher's scheduled "
+            "run)."
+        ),
     )
     return parser
 

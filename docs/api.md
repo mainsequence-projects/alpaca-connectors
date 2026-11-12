@@ -75,6 +75,11 @@ source (`assets`, `universe`, or `account_holdings`), review it with the `resolv
 with the `update` action. Neither request accepts a dataset UID. The response reports the derived
 output MetaTable only as diagnostics.
 
+A bar configuration's `scheduled` field (default `true`) includes it in the daily bars update at
+00:00 UTC ([ADR 0021](adrs/0021_daily_bars_dispatcher.md)). An unscheduled configuration still
+runs through the `update` action while it is `enabled`; a disabled one runs neither way. The list
+filters on `scheduled` as on `enabled`.
+
 The bar-configuration `update` action is asynchronous. It performs a read-only configuration
 preflight, submits the branch-owned `Alpaca Bars Update` Job with exactly
 `--configuration-uid <UUID>`, and returns `202 Accepted` with a JobRun status URL. The HTTP process

@@ -216,6 +216,7 @@ def get_configuration_detail(
                 "name": bars_configuration.name,
                 "description": bars_configuration.description,
                 "enabled": bars_configuration.enabled,
+                "scheduled": bars_configuration.scheduled,
                 "account_name": bars_account["account_name"],
                 "account_environment": "paper" if bars_account["is_paper"] else "live",
                 "asset_source": bars_configuration.asset_source,

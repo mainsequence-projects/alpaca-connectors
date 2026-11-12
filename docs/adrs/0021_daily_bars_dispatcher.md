@@ -4,8 +4,12 @@
 
 Proposed on 2026-11-09 and implemented the same day. It applies the dispatcher pattern of
 [ADR 0013](0013_workflow_declared_configuration_jobs.md) (decision 8) to the `alpaca-bars-update`
-Job. Open: the owner's review of [decision 2](#2-enabled-is-the-scheduled-flag) and the hosted
-checks under [Verification](#verification).
+Job.
+
+Amended on 2026-11-12 at the owner's review: the first draft reused `enabled` as the scheduled
+flag. The owner wants configurations that stay usable but run only on demand, so
+[decision 2](#2-a-scheduled-flag-beside-enabled) adds a `scheduled` column (revision 0024). Open:
+the hosted checks under [Verification](#verification).
 
 ## Context
 
@@ -60,23 +64,34 @@ the `ALPACA_BARS_CONFIGURATION_UID` its launcher required
 - The dispatcher's workload User needs `data_viewer` on `alpaca-connectors` to read the
   configurations.
 
-### 2. `enabled` is the scheduled flag
+### 2. A scheduled flag beside `enabled`
 
-Bar configurations get no `scheduled` column. The dispatcher includes every enabled configuration.
+Bar configurations get a `scheduled` column, as portfolios did in revision 0016. The dispatcher
+includes a configuration only when it is both enabled and scheduled:
 
-- **`enabled` already means this.** A scheduled update is a price update, and an enabled
-  configuration is one that price updates may run.
-- **Portfolios accept only enabled bars configurations, and they need fresh bars.** A separate flag
-  would allow a configuration that portfolios accept but nothing updates, and those portfolios
-  would silently value on stale bars.
-- **Every stored configuration is daily**, so no frequency needs a different schedule.
-- **Nothing else changes:** no revision, and no API, CLI, Agent tool or site change.
+| `enabled` | `scheduled` | Daily update | On-demand run | Linked portfolios |
+|---|---|---|---|---|
+| true | true | yes | yes | accepted |
+| true | false | no | yes | accepted |
+| false | either | no | refused | blocked |
 
-The cost is that disabling is the only way to leave the daily run. It also refuses manual runs and
-blocks the portfolios linked to the configuration. Signals, by contrast, reuse `enabled` as
-`scheduled` and a manual run of a paused signal still starts (ADR 0013, decision 4). If a
-configuration must ever run only on demand, or a non-daily profile is added, a later ADR adds a
-`scheduled` column (`NOT NULL`, default true), as revision 0016 did for portfolios.
+- **Revision 0024** adds `scheduled` (`BOOLEAN NOT NULL`, server default `true`). Every existing
+  configuration stays in the daily update, and the release still serving during the rollout keeps
+  inserting rows without the column. Revisions add first, so nothing is dropped.
+- **`enabled` keeps its meaning**: whether price updates may run the configuration at all. Its
+  three checks (see Context) are unchanged, so an on-demand run of an unscheduled configuration
+  still starts.
+- **Create defaults to `scheduled: true`.** Update takes it like any field. An update that changes
+  only `scheduled` skips the scope and reference checks, as portfolios do, so a configuration
+  whose account or universe is gone can still be left out of the daily run.
+- **Every surface carries it:** the typed row, the API's create, update and response bodies, a
+  `scheduled` list filter and discovery column, the CLI's `--scheduled/--no-scheduled`, the Agent's
+  bar-configuration tools, and the portfolio detail's linked bars.
+
+Portfolios still accept an unscheduled bars configuration. Such a portfolio values on the bars last
+updated, and its `valuation_maximum_staleness_seconds` and `fail_on_missing_prices` decide what a
+run does with prices that are too old. The portfolio detail shows `linked_bars.scheduled`, so the
+gap is visible.
 
 ### 3. The scheduled run
 
@@ -85,7 +100,8 @@ The dispatcher's entry point runs the schema gate and then, with `--scheduled` a
 
 - It finds the `Alpaca Bars Update` Job the way the API does: by name, with the reviewed execution
   path and a ready image. Otherwise it fails and starts nothing.
-- It reads the enabled configurations and starts one `--configuration-uid <uid>` run for each.
+- It reads the enabled, scheduled configurations and starts one `--configuration-uid <uid>` run
+  for each.
 - It skips a configuration with a pending or running run among the Job's 500 newest runs.
 - One failed start does not stop the others, but the scheduled run then exits 1.
 - It prints what it launched, skipped and failed.
@@ -104,14 +120,15 @@ since the previous run, so the updates find no new bars.
 
 ## Consequences
 
-- **Every enabled configuration is updated daily** without anyone starting a run.
+- **Every enabled, scheduled configuration is updated daily** without anyone starting a run. An
+  unscheduled one is updated only when someone runs it.
 - **All configurations share one time and one compute size.** Changing them means editing the
   workflow file and pushing; a schedule edited on the platform reverts at the next push.
 - **The dispatcher's runs are not bars runs.** `GET /v1/operations/job-runs/{uid}` returns only
   runs of `Alpaca Bars Update`, so it returns the runs the dispatcher starts but not the
   dispatcher's own.
-- **The API is unchanged.** It keeps branch `editor` to start the bars Job, and no response
-  reports the bars schedule.
+- **The API gains only the `scheduled` field.** It keeps branch `editor` to start the bars Job,
+  and no response reports the dispatcher's crontab.
 - **Many runs can start at 00:00 UTC.** Runs of one Job may overlap, and each takes the bars Job's
   compute.
 - **A run longer than two hours delays the portfolio's bars**, since the portfolio dispatcher does
@@ -119,10 +136,12 @@ since the previous run, so the updates find no new bars.
 
 ## Verification
 
-- **Tests and lint.** `pytest` passes 678 tests on main `91238c5` (636 before the rebase). `tests/test_bar_update_jobs.py` covers the
-  dispatch, the enabled-configuration query, the entry point, the declaration and its time against
-  the other dispatchers. `tests/test_schema_gate.py` covers the schema gate and the MetaTables
-  access. `ruff check`, `ruff format --check` and `mkdocs build --strict` pass.
+- **Tests and lint.** `pytest` passes 687 tests on main `91238c5`.
+  `tests/test_bar_update_jobs.py` covers the dispatch, the enabled-and-scheduled query, the entry
+  point, the declaration and its time against the other dispatchers.
+  `tests/test_bar_configurations.py` covers revision 0024, the column, and `scheduled` through the
+  API, the CLI and a scheduled-only update. `tests/test_schema_gate.py` covers the schema gate and
+  the MetaTables access. `ruff check`, `ruff format --check` and `mkdocs build --strict` pass.
 - **Workflow, offline.** The backend's own validator, `CodeRepositoryWorkflowService.validate` at
   tdag-django `3b31ebe6c` (`development`, 2026-11-08), accepts `alpaca-bars-update.yaml` and
   `alpaca-connectors-api.yaml` with no errors or warnings. Its normalized dispatcher keeps the
@@ -131,7 +150,7 @@ since the previous run, so the updates find no new bars.
   itself with `self_reference`, which is why the dispatcher lives beside the bars Job.
 - **Not verified:**
   - `validate-workflow` on a running platform: the local backend was stopped;
-  - the push that creates the dispatcher;
+  - the push that creates the dispatcher, and revision 0024 applied by the migration Job;
   - its first scheduled run, and `run-job` called from inside a Job runtime, which is also open for
     the ADR 0013 dispatchers;
   - that the hosted runtime passes run arguments to the script

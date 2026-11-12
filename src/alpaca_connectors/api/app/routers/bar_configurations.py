@@ -37,6 +37,7 @@ def configurations_list(
     offset: int = Query(default=0, ge=0),
     search: str | None = None,
     enabled: bool | None = None,
+    scheduled: bool | None = None,
     asset_source: str | None = None,
     ordering: str = "name",
 ) -> ResourceCollection:
@@ -48,6 +49,7 @@ def configurations_list(
             offset=offset,
             search=search,
             enabled=enabled,
+            scheduled=scheduled,
             asset_source=asset_source,
             ordering=ordering,
         )
@@ -63,8 +65,8 @@ def configurations_discovery() -> ResourceDiscoveryResponse:
         item_label="configuration",
         identity_fields=["uid"],
         searchable_fields=["name", "description"],
-        filterable_fields=["enabled", "asset_source"],
-        filter_types={"enabled": "boolean"},
+        filterable_fields=["enabled", "scheduled", "asset_source"],
+        filter_types={"enabled": "boolean", "scheduled": "boolean"},
         filter_options={
             "asset_source": [
                 {"value": "account_holdings", "label": "Latest account holdings"},
@@ -80,6 +82,12 @@ def configurations_discovery() -> ResourceDiscoveryResponse:
             {"id": "feed", "header": "Feed"},
             {"id": "adjustment", "header": "Adjustment"},
             {"id": "enabled", "header": "Enabled", "data_type": "boolean", "filter_key": "enabled"},
+            {
+                "id": "scheduled",
+                "header": "Daily Update",
+                "data_type": "boolean",
+                "filter_key": "scheduled",
+            },
             {
                 "id": "updated_at",
                 "header": "Updated",

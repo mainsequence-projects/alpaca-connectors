@@ -225,7 +225,7 @@ def test_scheduled_run_needs_the_declared_bars_job_before_reading_configurations
     assert all(job.calls == [] for job in jobs)
 
 
-def test_enabled_bar_configurations_are_the_scheduled_ones() -> None:
+def test_enabled_and_scheduled_bar_configurations_are_dispatched() -> None:
     from alpaca_connectors.market_data.configurations import (
         AlpacaBarsConfigurationTable,
         scheduled_bar_configuration_uids,
@@ -251,9 +251,10 @@ def test_enabled_bar_configurations_are_the_scheduled_ones() -> None:
     statement = compile_statement.call_args.args[0]
     table = AlpacaBarsConfigurationTable.__table__.name
     sql = " ".join(str(statement.compile(compile_kwargs={"literal_binds": True})).split())
-    # Bar configurations have no separate scheduled flag: `enabled` decides.
+    # Both flags decide: an unscheduled configuration still runs on demand (revision 0024).
     assert sql == (
         f"SELECT {table}.uid FROM {table} WHERE {table}.enabled IS true "
+        f"AND {table}.scheduled IS true "
         f"ORDER BY {table}.name ASC, {table}.uid ASC"
     )
 

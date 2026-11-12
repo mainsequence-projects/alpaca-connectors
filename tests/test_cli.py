@@ -327,7 +327,31 @@ class CliTests(unittest.TestCase):
             feed="sip",
             adjustment="all",
             enabled=True,
+            scheduled=True,
         )
+
+    def test_bar_configuration_update_can_leave_the_daily_run(self) -> None:
+        row = SimpleNamespace(
+            model_dump=lambda mode=None: {"uid": "configuration-uid", "scheduled": False}
+        )
+        with (
+            patch(
+                "alpaca_connectors.market_data.update_bar_configuration", return_value=row
+            ) as update,
+            contextlib.redirect_stdout(io.StringIO()),
+        ):
+            exit_code = main(
+                [
+                    "market-data",
+                    "bar-configuration",
+                    "update",
+                    "configuration-uid",
+                    "--no-scheduled",
+                ]
+            )
+
+        self.assertEqual(exit_code, 0)
+        update.assert_called_once_with("configuration-uid", scheduled=False)
 
     def test_signal_create_stores_only_the_configuration_and_scheduled_flag(self) -> None:
         row = SimpleNamespace(

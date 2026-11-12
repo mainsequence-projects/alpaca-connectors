@@ -239,8 +239,8 @@ The canonical market-data Job is declared by:
 
 The Job is named `Alpaca Bars Update`. It is generic: each run supplies only the public UID of an
 enabled stored bars configuration. The API starts it on demand, and the
-[bars dispatcher](#daily-bars-dispatcher) in the same file starts it every day for each enabled
-configuration.
+[bars dispatcher](#daily-bars-dispatcher) in the same file starts it every day for each enabled,
+scheduled configuration.
 
 ```bash
 mainsequence code-repository jobs run <JOB_UID> -- \
@@ -278,16 +278,19 @@ portfolio dispatchers:
 
 - **It starts the daily runs and updates nothing itself.** Its scheduled run
   (`src/jobs/dispatch_alpaca_bars_update.py`) starts one `--configuration-uid` run of
-  `Alpaca Bars Update` for each enabled bar configuration, through the `runner` policy it declares
-  on that Job. It must live in this file, because `access.resources` names only resources of the
-  same file.
+  `Alpaca Bars Update` for each enabled, scheduled bar configuration, through the `runner` policy
+  it declares on that Job. It must live in this file, because `access.resources` names only
+  resources of the same file.
   - It skips a configuration whose run is pending or running among the Job's 500 newest runs.
   - It runs no preflight: each run resolves its own configuration and records its own failure.
   - It prints what it launched, skipped and failed, and fails if any start failed.
-- **`enabled` is the scheduled flag.** Bar configurations have no `scheduled` field, so every
-  enabled configuration is updated daily. To leave the daily run, disable the configuration
-  (`alpaca-connectors market-data bar-configuration update <uid> --no-enabled`, or `PATCH` with
-  `enabled: false`). That also refuses its manual runs and blocks the portfolios linked to it.
+- **`scheduled` decides the daily run; `enabled` decides whether any run may start.** A
+  configuration is updated daily only when both are true (revision 0024; `scheduled` defaults to
+  true). To leave the daily run but keep on-demand updates, unschedule it
+  (`alpaca-connectors market-data bar-configuration update <uid> --no-scheduled`, or `PATCH` with
+  `scheduled: false`). Disabling it (`--no-enabled`) also refuses its on-demand runs and blocks the
+  portfolios linked to it. A portfolio may use an unscheduled configuration; its valuation
+  staleness settings decide what it does with bars that were not updated.
 - **00:00 UTC is the earliest daily time that includes the session just closed.** The `1d` updater
   takes only bars that start before the current UTC midnight, and US sessions close at 20:00 UTC
   in summer and 21:00 UTC in winter. The run precedes the 00:30 UTC signal and 02:00 UTC portfolio
@@ -370,8 +373,8 @@ environment variable. It was retired on 2026-11-09 (issue #11), and its declarat
 - **Its workload User's roles can go.** It held `data_viewer` on `alpaca-connectors` and table
   `editor` on the two bars tables; the namespace owner removes them.
 - **The [bars dispatcher](#daily-bars-dispatcher) replaced it**
-  ([ADR 0021](../adrs/0021_daily_bars_dispatcher.md)). It updates every enabled configuration at
-  00:00 UTC through `Alpaca Bars Update`. Until it was declared, nothing updated bars on a
+  ([ADR 0021](../adrs/0021_daily_bars_dispatcher.md)). It updates every enabled, scheduled
+  configuration at 00:00 UTC through `Alpaca Bars Update`. Until it was declared, nothing updated bars on a
   schedule.
 
 ## FastAPI Release

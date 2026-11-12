@@ -51,7 +51,7 @@ workload can use the project tables once they leave `mainsequence.markets`:
 | `alpaca-etf-portfolio` | `editor` | runs the interpolation, calendar-event, rebalance, weights and values updaters |
 | `alpaca-bars-update` | `data_viewer`, plus its table `editor` on the two bars tables (table roles move with the tables) | read configurations; run the bars updater |
 | `alpaca-etf-signal-dispatcher`, `alpaca-etf-portfolio-dispatcher` | `data_viewer` | preflight reads |
-| `alpaca-bars-update-dispatcher` | `data_viewer` | read the enabled bar configurations (ADR 0021) |
+| `alpaca-bars-update-dispatcher` | `data_viewer` | read the enabled, scheduled bar configurations (ADR 0021) |
 | `alpaca-credential-migration` (one-off) | `data_writer` | reads and seals the account keys |
 
 No workload needs a role on `mainsequence.markets` once step 9 is done.
@@ -66,11 +66,11 @@ first (`alpaca-connectors signal update <uid> --no-scheduled`,
 backfill, portfolio preflight blocks a run whose signal instance has no observation. Keep the runs
 held while a move or a rollback runs.
 
-Since ADR 0021 the bars dispatcher also starts a run for every enabled bar configuration at 00:00
-UTC, and those runs write the bars tables that step 7 moves. Bar configurations have no scheduled
-flag: finish the move between 00:00 UTC runs, or disable each one
-(`alpaca-connectors market-data bar-configuration update <uid> --no-enabled`) and enable it again in
-step 8. A disabled bars configuration also blocks the portfolios linked to it until then.
+Since ADR 0021 the bars dispatcher also starts a run for every enabled, scheduled bar
+configuration at 00:00 UTC, and those runs write the bars tables that step 7 moves. Finish the move
+between 00:00 UTC runs, or take each one off the schedule
+(`alpaca-connectors market-data bar-configuration update <uid> --no-scheduled`) and put it back in
+step 8. An unscheduled configuration keeps its portfolios linked, unlike a disabled one.
 
 ## 3. Push This Release
 

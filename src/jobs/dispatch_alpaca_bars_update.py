@@ -1,8 +1,8 @@
 """Entry point of the workflow-declared `alpaca-bars-update-dispatcher` Job (ADR 0021).
 
 The dispatcher holds the daily bars schedule. Its scheduled run carries `--scheduled` and starts one
-`alpaca-bars-update` run (`--configuration-uid <uid>`) per enabled stored bar configuration, through
-the `runner` policy it declares on that Job: a Job cannot declare access to itself, so the bars Job
+`alpaca-bars-update` run (`--configuration-uid <uid>`) per enabled, scheduled stored bar
+configuration, through the `runner` policy it declares on that Job: a Job cannot declare access to itself, so the bars Job
 cannot start its own runs. The schema gate (ADR 0012) comes first.
 """
 

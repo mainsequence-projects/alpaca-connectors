@@ -14,8 +14,8 @@ Amended on 2026-10-21: the scheduled runs moved to two dispatcher Jobs
 Job needs `runner` on it, and a Job cannot declare access to itself.
 
 Amended on 2026-11-09: [ADR 0021](0021_daily_bars_dispatcher.md) applies decision 8 to the
-`alpaca-bars-update` Job. Its dispatcher, in `alpaca-bars-update.yaml`, updates every enabled bar
-configuration at 00:00 UTC, the bars run the times in decision 1 follow.
+`alpaca-bars-update` Job. Its dispatcher, in `alpaca-bars-update.yaml`, updates every enabled,
+scheduled bar configuration at 00:00 UTC, the bars run the times in decision 1 follow.
 
 ## Context
 

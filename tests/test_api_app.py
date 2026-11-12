@@ -1194,6 +1194,24 @@ class ApiAppTests(unittest.TestCase):
             asset_source["options"],
         )
 
+    def test_bar_configurations_filter_and_show_the_scheduled_flag(self) -> None:
+        discovery = self.client.get("/v1/market-data/bar-configurations/discovery").json()
+        filters = discovery["list"]["controls"]["filters"]
+        self.assertIn("scheduled", [item["key"] for item in filters])
+        self.assertIn("scheduled", [column["id"] for column in discovery["list"]["columns"]])
+
+        from alpaca_connectors.api.app.services.common import collection_response
+
+        empty = collection_response(items=[], total=0, limit=25, offset=0)
+        with patch(
+            "alpaca_connectors.api.app.routers.bar_configurations.list_configurations",
+            return_value=empty,
+        ) as listed:
+            response = self.client.get("/v1/market-data/bar-configurations?scheduled=false")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIs(listed.call_args.kwargs["scheduled"], False)
+
     def test_asset_name_discovery_column_has_generic_renderer_metadata(self) -> None:
         response = self.client.get("/v1/assets/discovery")
 
