@@ -42,6 +42,7 @@
   - [0017 Account Keys As Application-Encrypted Columns](adrs/0017_encrypted_account_credentials.md)
   - [0018 Markets Through The Markets API](adrs/0018_markets_api_boundary.md)
   - [0019 Account Owners Vouched For By Trusted Applications](adrs/0019_account_owners_vouched_for_by_trusted_applications.md)
+  - [0020 Dependencies That Are Starting](adrs/0020_dependencies_that_are_starting.md)
 - Implementation Records
   - [SDK 8 And ms-markets Migration](implementation_tasks/0001_ms_markets_storage_first_migration.md)
   - [Alpaca Account Storage](implementation_tasks/0002_alpaca_account_module.md)

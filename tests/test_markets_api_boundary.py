@@ -299,9 +299,10 @@ def test_start_markets_engine_selects_the_api_and_attaches_only_own_tables(monke
 
     runtime.start_markets_engine()
 
-    from msm.client import LazyRemoteBackend
+    from alpaca_connectors.dependencies import MarketsApiBackend
 
-    assert isinstance(attached["backend"], LazyRemoteBackend)
+    # ms-markets' lazy backend, whose discovery a row call waits for by its caller's deadline.
+    assert isinstance(attached["backend"], MarketsApiBackend)
     names = {model.__table__.name for model in attached["models"]}
     assert all(name.startswith("alpaca_connectors__") for name in names), names
     assert {"alpaca_connectors__acct_alpaca", "alpaca_connectors__asset_alpaca"} <= names

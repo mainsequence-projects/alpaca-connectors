@@ -37,6 +37,23 @@ parsing, provider-error classification, and business services remain in this rep
 registration operation rows also remain in the project-owned MetaTable so polling survives API
 process restarts; the shared in-memory operation repository is intentionally not used.
 
+## Errors
+
+An error answers `{"detail": {"code", "message", "retryable"}}` and never carries a dependency's
+exception text. Besides the codes each section below names, every route can answer:
+
+| Status | Code | When |
+|---|---|---|
+| `503` | `dependency_starting` | A Main Sequence release the work needs (the Markets API, the MetaTables API) is still starting. `retryable: true` and `Retry-After` (seconds): send the request again then ([ADR 0020](adrs/0020_dependencies_that_are_starting.md)). |
+| `503` | `dependency_unavailable` | Anything unexpected; the API logs it. `retryable: true`. |
+| `502` | `provider_failure` | Alpaca or the holdings provider failed, or answered with data the connector cannot read (the log names the fields, never their values). |
+| `409` | `action_conflict` | A conflict the connector finds itself, in its own words. |
+
+A request waits for a starting release at most as long as its caller will
+(`Mainsequence-Request-Timeout-Ms`, read by the SDK's request identity from mainsequence 9.0.39).
+The API's startup starts the Markets API without waiting for it, so a caller that wakes the API
+before its work finds the Markets API starting as well.
+
 ## Resources
 
 | Resource | Main endpoints |
@@ -308,8 +325,9 @@ capture inside the request and answers `200` with a terminal
 - A capture that fails is still `200`, with `status: "failed"`, `result: null` and
   `error: {code, message, retryable}`: the code and message the account routes would answer
   (`alpaca_credentials_rejected`, `credential_key_unavailable`, `account_credentials_missing`,
-  `action_conflict` for a held asset that cannot be registered, `dependency_unavailable` for
-  anything unexpected, with no internals).
+  `action_conflict` for a held asset that cannot be registered, `provider_failure`,
+  `dependency_starting` with `retryable: true` while a release it needs starts, and
+  `dependency_unavailable` for anything unexpected, with no internals).
 - A refused request is an HTTP error and runs nothing: `404` for an unknown account, or for an
   account that is not the acting owner's under [ADR 0019](#account-owners), as
   `GET /v1/accounts/{account_uid}` answers it.
