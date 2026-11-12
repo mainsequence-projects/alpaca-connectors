@@ -138,7 +138,7 @@ def test_job_run_projection_hides_unrelated_jobs() -> None:
         assert get_alpaca_bars_update_job_run(JOB_RUN_UID) is None
 
 
-# ADR 0020: the dispatcher's scheduled run starts one bars Job run per enabled configuration.
+# ADR 0021: the dispatcher's scheduled run starts one bars Job run per enabled configuration.
 
 
 class FakeBarsJob:

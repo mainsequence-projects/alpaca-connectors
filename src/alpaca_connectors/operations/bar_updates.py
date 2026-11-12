@@ -2,7 +2,7 @@
 
 `.mainsequence/workflows/alpaca-bars-update.yaml` declares the `Alpaca Bars Update` Job, whose
 runs each execute one configuration (``--configuration-uid <uid>``), and its dispatcher, which holds
-the daily schedule (ADR 0020). The dispatcher's scheduled run carries ``--scheduled`` and starts one
+the daily schedule (ADR 0021). The dispatcher's scheduled run carries ``--scheduled`` and starts one
 run of the bars Job per enabled configuration, through the ``runner`` policy it declares on that
 Job: a Job cannot declare access to itself. No code here creates a Job or changes its schedule.
 """
@@ -197,7 +197,7 @@ def _active_configuration_uids(job: Any) -> set[str]:
 
 
 def dispatch_scheduled_bar_updates() -> dict[str, Any]:
-    """Start one bars Job run per enabled configuration: all the dispatcher does (ADR 0020).
+    """Start one bars Job run per enabled configuration: all the dispatcher does (ADR 0021).
 
     The dispatcher's scheduled run calls this; it holds ``runner`` on the bars Job. A
     configuration with a pending or running run is skipped. There is no preflight: each run

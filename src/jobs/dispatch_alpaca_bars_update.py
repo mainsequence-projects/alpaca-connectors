@@ -1,4 +1,4 @@
-"""Entry point of the workflow-declared `alpaca-bars-update-dispatcher` Job (ADR 0020).
+"""Entry point of the workflow-declared `alpaca-bars-update-dispatcher` Job (ADR 0021).
 
 The dispatcher holds the daily bars schedule. Its scheduled run carries `--scheduled` and starts one
 `alpaca-bars-update` run (`--configuration-uid <uid>`) per enabled stored bar configuration, through

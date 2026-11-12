@@ -268,7 +268,7 @@ target by its file and key ([duplicate migration Job](#cleanup-of-the-duplicate-
 ### Daily Bars Dispatcher
 
 `alpaca-bars-update.yaml` also declares `alpaca-bars-update-dispatcher`
-([ADR 0020](../adrs/0020_daily_bars_dispatcher.md)), the bars counterpart of the signal and
+([ADR 0021](../adrs/0021_daily_bars_dispatcher.md)), the bars counterpart of the signal and
 portfolio dispatchers:
 
 | Key | Display name | Daily schedule | Arguments |
@@ -370,7 +370,7 @@ environment variable. It was retired on 2026-11-09 (issue #11), and its declarat
 - **Its workload User's roles can go.** It held `data_viewer` on `alpaca-connectors` and table
   `editor` on the two bars tables; the namespace owner removes them.
 - **The [bars dispatcher](#daily-bars-dispatcher) replaced it**
-  ([ADR 0020](../adrs/0020_daily_bars_dispatcher.md)). It updates every enabled configuration at
+  ([ADR 0021](../adrs/0021_daily_bars_dispatcher.md)). It updates every enabled configuration at
   00:00 UTC through `Alpaca Bars Update`. Until it was declared, nothing updated bars on a
   schedule.
 

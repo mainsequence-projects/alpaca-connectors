@@ -276,7 +276,7 @@ def test_the_bars_jobs_follow_main_outside_the_graph() -> None:
     """The graph cannot reference another file, so the bars Jobs do not wait for the migration.
 
     `alpaca-bars-update` follows main like the API's Jobs (PRs #7 and #8, issue #11), and so does
-    its dispatcher (ADR 0020); their schema gates turn a run in the rollout gap into a skip
+    its dispatcher (ADR 0021); their schema gates turn a run in the rollout gap into a skip
     (tests/test_run_alpaca_bars_update.py, tests/test_bar_update_jobs.py).
     """
     import yaml

@@ -13,7 +13,7 @@ Amended on 2026-10-21: the scheduled runs moved to two dispatcher Jobs
 ([decision 8](#8-dispatcher-jobs-hold-the-schedules)). Under workflow API 3.0.0 starting a run of a
 Job needs `runner` on it, and a Job cannot declare access to itself.
 
-Amended on 2026-11-09: [ADR 0020](0020_daily_bars_dispatcher.md) applies decision 8 to the
+Amended on 2026-11-09: [ADR 0021](0021_daily_bars_dispatcher.md) applies decision 8 to the
 `alpaca-bars-update` Job. Its dispatcher, in `alpaca-bars-update.yaml`, updates every enabled bar
 configuration at 00:00 UTC, the bars run the times in decision 1 follow.
 
@@ -86,7 +86,7 @@ Both Jobs declare:
 
 The times follow the 00:00 UTC daily bars run. Until 2026-11-09 that was the
 `daily-stock-bars-holdings-ivv.yaml` Job, which never succeeded and was retired; nothing updated
-bars on a schedule until the bars dispatcher of [ADR 0020](0020_daily_bars_dispatcher.md) took the
+bars on a schedule until the bars dispatcher of [ADR 0021](0021_daily_bars_dispatcher.md) took the
 same time. US equity sessions close at 20:00 UTC in summer and 21:00 UTC in winter, so the 00:30
 UTC signal run follows the close all year, and the 02:00 UTC portfolio run follows both the bars
 and the signal. Both run every day, like the bars dispatcher. On the Sunday and Monday 00:30 UTC runs no session has closed since

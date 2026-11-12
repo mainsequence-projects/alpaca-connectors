@@ -621,7 +621,7 @@ def scheduled_bar_configuration_uids() -> list[uuid.UUID]:
     """Return the configurations the daily bars dispatcher's scheduled run includes.
 
     Bar configurations have no separate scheduled flag: every enabled configuration is updated
-    daily (ADR 0020). Ordered by name, then UID.
+    daily (ADR 0021). Ordered by name, then UID.
     """
     from msm.bootstrap import resolve_runtime
     from msm.repositories.base import compile_markets_statement, execute_markets_operation

@@ -1,4 +1,4 @@
-# ADR 0020: A Daily Dispatcher For Stored Bar Configurations
+# ADR 0021: A Daily Dispatcher For Stored Bar Configurations
 
 ## Status
 
