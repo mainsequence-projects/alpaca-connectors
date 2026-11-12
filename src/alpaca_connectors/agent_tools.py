@@ -569,6 +569,7 @@ def query_bar_configurations(arguments: Mapping[str, Any]) -> Any:
         offset=offset,
         search=_optional_text(arguments, "search"),
         enabled=arguments.get("enabled"),
+        scheduled=arguments.get("scheduled"),
         asset_source=_optional_text(arguments, "asset_source"),
         ordering=str(arguments.get("ordering") or "name"),
     )
@@ -1133,6 +1134,7 @@ PROJECT_AGENT_TOOLS: tuple[ProjectAgentTool, ...] = (
                     **SEARCH,
                     **ORDERING,
                     "enabled": {"type": "boolean"},
+                    "scheduled": {"type": "boolean"},
                     "asset_source": {
                         "type": "string",
                         "enum": ["assets", "universe", "account_holdings"],
@@ -1180,7 +1182,9 @@ PROJECT_AGENT_TOOLS: tuple[ProjectAgentTool, ...] = (
         label="Manage Alpaca Bar Configuration",
         description=(
             "Create, update, delete, or submit the dedicated Job for a stored Alpaca bar "
-            "configuration. The asset scope and dataset are resolved from the configuration."
+            "configuration. The asset scope and dataset are resolved from the configuration. "
+            "`scheduled` includes it in the daily bars update; an unscheduled configuration "
+            "still runs on demand while enabled."
         ),
         parameters=_operations(
             _operation_case(
@@ -1196,7 +1200,7 @@ PROJECT_AGENT_TOOLS: tuple[ProjectAgentTool, ...] = (
                     "configuration_uid": _uid("bar configuration"),
                     "request": _request(
                         BarConfigurationUpdateRequest,
-                        "Mutable bar-configuration fields.",
+                        "Mutable bar-configuration fields, including scheduled.",
                     ),
                 },
                 required=("configuration_uid", "request"),

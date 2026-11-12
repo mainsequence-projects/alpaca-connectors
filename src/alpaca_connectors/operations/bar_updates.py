@@ -1,14 +1,33 @@
-"""Main Sequence Job orchestration for stored Alpaca bars configurations."""
+"""Main Sequence Job orchestration for stored Alpaca bars configurations.
+
+`.mainsequence/workflows/alpaca-bars-update.yaml` declares the `Alpaca Bars Update` Job, whose
+runs each execute one configuration (``--configuration-uid <uid>``), and its dispatcher, which holds
+the daily schedule (ADR 0021). The dispatcher's scheduled run carries ``--scheduled`` and starts one
+run of the bars Job per enabled, scheduled configuration, through the ``runner`` policy it
+declares on that Job: a Job cannot declare access to itself. No code here creates a Job or changes its schedule.
+"""
 
 from __future__ import annotations
 
+import argparse
 import datetime as dt
 import uuid
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from typing import Any
 
+from alpaca_connectors.operations.configuration_jobs import (
+    RUN_SCAN_LIMIT,
+    RUNNING_JOB_STATUSES,
+    SCHEDULED_ARGUMENT,
+    configuration_uid_from_command_args,
+)
+
 ALPACA_BARS_UPDATE_JOB_NAME = "Alpaca Bars Update"
 ALPACA_BARS_UPDATE_EXECUTION_PATH = "src/jobs/run_alpaca_bars_update.py"
+ALPACA_BARS_UPDATE_DISPATCHER_JOB_NAME = "Alpaca Bars Update Dispatcher"
+ALPACA_BARS_UPDATE_DISPATCHER_EXECUTION_PATH = "src/jobs/dispatch_alpaca_bars_update.py"
+ALPACA_BARS_WORKFLOW_PATH = ".mainsequence/workflows/alpaca-bars-update.yaml"
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,7 +87,8 @@ def _resolve_update_job() -> Any:
     jobs = list(Job.filter(name=ALPACA_BARS_UPDATE_JOB_NAME, timeout=60))
     if not jobs:
         raise ValueError(
-            f"The {ALPACA_BARS_UPDATE_JOB_NAME!r} Job has not been deployed for this branch."
+            f"The {ALPACA_BARS_UPDATE_JOB_NAME!r} Job has not been deployed for this branch; a "
+            f"push of {ALPACA_BARS_WORKFLOW_PATH} creates it."
         )
     if len(jobs) > 1:
         raise RuntimeError(f"More than one branch Job is named {ALPACA_BARS_UPDATE_JOB_NAME!r}.")
@@ -93,16 +113,19 @@ def launch_alpaca_bars_update(
         label="Configuration UID",
     )
     resolve_market_data_update(configuration_uid=canonical_configuration_uid)
-    job = _resolve_update_job()
+    return _start_update(_resolve_update_job(), canonical_configuration_uid)
+
+
+def _start_update(job: Any, configuration_uid: str) -> AlpacaBarsUpdateSubmission:
     payload = job.run_job(
         timeout=60,
-        command_args=["--configuration-uid", canonical_configuration_uid],
+        command_args=["--configuration-uid", configuration_uid],
     )
     job_run_uid = payload.get("uid") or payload.get("job_run_uid")
     if not job_run_uid:
         raise RuntimeError("Main Sequence accepted the Job request without returning a JobRun UID.")
     return AlpacaBarsUpdateSubmission(
-        configuration_uid=canonical_configuration_uid,
+        configuration_uid=configuration_uid,
         job_uid=str(job.uid),
         job_run_uid=str(job_run_uid),
         status=_normalized_status(payload.get("status")),
@@ -156,11 +179,105 @@ def get_alpaca_bars_update_job_run(
     )
 
 
+def _recent_update_runs(job_uid: Any) -> Iterator[Any]:
+    from mainsequence.client import JobRun
+
+    return JobRun.iter_filter(job__uid=str(job_uid), max_items=RUN_SCAN_LIMIT, timeout=60)
+
+
+def _active_configuration_uids(job: Any) -> set[str]:
+    active: set[str] = set()
+    for run in _recent_update_runs(job.uid):
+        configuration_uid = configuration_uid_from_command_args(run.command_args)
+        if configuration_uid is not None and _normalized_status(run.status) in (
+            RUNNING_JOB_STATUSES
+        ):
+            active.add(configuration_uid)
+    return active
+
+
+def dispatch_scheduled_bar_updates() -> dict[str, Any]:
+    """Start one bars Job run per enabled, scheduled configuration (ADR 0021).
+
+    The dispatcher's scheduled run calls this; it holds ``runner`` on the bars Job. A
+    configuration with a pending or running run is skipped. There is no preflight: each run
+    resolves its configuration and records its own failure. One failed start does not stop the
+    others.
+    """
+    from alpaca_connectors.market_data import scheduled_bar_configuration_uids
+
+    job = _resolve_update_job()
+    configuration_uids = [
+        _canonical_uid(value, label="Configuration UID")
+        for value in scheduled_bar_configuration_uids()
+    ]
+    active = _active_configuration_uids(job)
+    launched: list[dict[str, str]] = []
+    skipped: list[dict[str, str]] = []
+    failed: list[dict[str, str]] = []
+    for configuration_uid in configuration_uids:
+        if configuration_uid in active:
+            skipped.append(
+                {"configuration_uid": configuration_uid, "reason": "pending or running JobRun"}
+            )
+            continue
+        # One configuration's failure must not stop the others.
+        try:
+            submission = _start_update(job, configuration_uid)
+        except Exception as exc:
+            failed.append({"configuration_uid": configuration_uid, "error": repr(exc)})
+            continue
+        launched.append(
+            {"configuration_uid": configuration_uid, "job_run_uid": submission.job_run_uid}
+        )
+    return {
+        "kind": "bars",
+        "job_uid": str(job.uid),
+        "scheduled_configurations": len(configuration_uids),
+        "launched": launched,
+        "skipped": skipped,
+        "failed": failed,
+    }
+
+
+def build_bars_dispatcher_argument_parser() -> argparse.ArgumentParser:
+    """Arguments of the bars dispatcher: its scheduled run's ``--scheduled`` and nothing else."""
+    parser = argparse.ArgumentParser(
+        prog=ALPACA_BARS_UPDATE_DISPATCHER_EXECUTION_PATH,
+        description=(
+            f"Start one {ALPACA_BARS_UPDATE_JOB_NAME!r} run per enabled, scheduled stored bar "
+            "configuration."
+        ),
+    )
+    parser.add_argument(
+        SCHEDULED_ARGUMENT,
+        action="store_true",
+        required=True,
+        help=(
+            "Start one run per enabled, scheduled bar configuration (the dispatcher's scheduled "
+            "run)."
+        ),
+    )
+    return parser
+
+
+def run_bars_dispatcher_job(argv: Sequence[str] | None = None) -> dict[str, Any]:
+    """Entry point of the bars dispatcher Job: the scheduled dispatch."""
+    build_bars_dispatcher_argument_parser().parse_args(argv)
+    return dispatch_scheduled_bar_updates()
+
+
 __all__ = [
+    "ALPACA_BARS_UPDATE_DISPATCHER_EXECUTION_PATH",
+    "ALPACA_BARS_UPDATE_DISPATCHER_JOB_NAME",
     "ALPACA_BARS_UPDATE_EXECUTION_PATH",
     "ALPACA_BARS_UPDATE_JOB_NAME",
+    "ALPACA_BARS_WORKFLOW_PATH",
     "AlpacaBarsUpdateJobRun",
     "AlpacaBarsUpdateSubmission",
+    "build_bars_dispatcher_argument_parser",
+    "dispatch_scheduled_bar_updates",
     "get_alpaca_bars_update_job_run",
     "launch_alpaca_bars_update",
+    "run_bars_dispatcher_job",
 ]

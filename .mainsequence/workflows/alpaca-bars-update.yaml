@@ -27,3 +27,38 @@ resources:
       enabled: true
       tag_regex: null
 # Redeployed on 2026-11-04 so the Job leaves the pre-ADR-0017 image it was pinned to.
+#
+# The daily bars update (ADR 0021). Its scheduled run (`--scheduled`) reads the enabled, scheduled
+# bar configurations and starts one `alpaca-bars-update` run per configuration, through `runner` on that
+# Job (operations/bar_updates.py); a Job cannot declare access to itself, and `access.resources`
+# names only this file's resources, so the dispatcher lives here. 00:00 UTC is the first run whose
+# daily cutoff includes the session that just closed; it precedes the 00:30 signal and 02:00
+# portfolio dispatchers. It opens no account keys, so it declares no Secret.
+- key: alpaca-bars-update-dispatcher
+  kind: job
+  access:
+    branches:
+    - repository: MetaTables
+      policy: reader
+    - repository: MainSequenceMarkets
+      policy: reader
+    resources:
+    - key: alpaca-bars-update
+      policy: runner
+  spec:
+    name: Alpaca Bars Update Dispatcher
+    description: Start one Alpaca Bars Update run per enabled, scheduled stored bar configuration (--scheduled).
+    execution_path: src/jobs/dispatch_alpaca_bars_update.py
+    cpu_request: '0.25'
+    memory_request: '0.5'
+    max_runtime_seconds: 3600
+    spot: false
+    task_schedule:
+      schedule:
+        type: crontab
+        expression: '0 0 * * *'
+        timezone: UTC
+    scheduled_command_args: ['--scheduled']
+    automatic_redeployment:
+      enabled: true
+      tag_regex: null

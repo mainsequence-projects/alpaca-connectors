@@ -83,6 +83,10 @@ _LAZY_IMPORTS = {
         "alpaca_connectors.market_data.services",
         "resolve_market_data_update",
     ),
+    "scheduled_bar_configuration_uids": (
+        "alpaca_connectors.market_data.configurations",
+        "scheduled_bar_configuration_uids",
+    ),
     "update_bar_configuration": (
         "alpaca_connectors.market_data.configurations",
         "update_bar_configuration",

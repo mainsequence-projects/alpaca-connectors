@@ -28,6 +28,11 @@ turns a run in that gap into a skip. The transitional `daily-stock-bars-holdings
 Job promoted by hand, was retired the same day
 ([Retired Daily Bars Job](../operations/jobs.md#retired-daily-bars-job)).
 
+Amended again on 2026-11-09 ([ADR 0021](0021_daily_bars_dispatcher.md)): `alpaca-bars-update.yaml`
+also declares `alpaca-bars-update-dispatcher`, which starts the daily bars runs at 00:00 UTC. Like
+the bars Job it follows main outside the graph, and its launcher starts with the schema gate, so a
+scheduled run in the gap is a skip and the next day's run does the work.
+
 ## Context
 
 Until now, project MetaTable revisions were applied by hand. AGENTS.md told operators to run
@@ -212,8 +217,10 @@ Not yet gated by the graph:
 
 - **Coding agent:** `alpaca-connectors-agent.yaml` uses `kind: code_repository_coding_agent`, which
   the current platform rejects (`unsupported_kind`), so that declaration is not applied today.
-- **Declared Jobs:** `alpaca-bars-update` is outside the graph. Since 2026-11-04 every push
-  promotes it (see Status), and its gate covers the gap before the migration finishes.
+- **Declared Jobs:** `alpaca-bars-update` and, since ADR 0021, its dispatcher
+  `alpaca-bars-update-dispatcher` are outside the graph. Since 2026-11-04 every push promotes the
+  bars Job, and the dispatcher since its declaration (see Status); their gates cover the gap
+  before the migration finishes.
   `daily-stock-bars-holdings-ivv`, which had automatic redeployment disabled, was retired on
   2026-11-09.
 

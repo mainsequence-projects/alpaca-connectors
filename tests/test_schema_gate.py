@@ -42,7 +42,7 @@ def test_job_migrates_only_this_application_but_the_gate_also_waits_for_ms_marke
 
 def test_each_provider_ships_one_head() -> None:
     heads = _heads()
-    assert heads[APP] == "0023"
+    assert heads[APP] == "0024"
     assert heads[MSM]
 
 
@@ -51,7 +51,8 @@ def test_each_provider_ships_one_head() -> None:
     [
         ((), True),  # never migrated
         (("0016",), True),  # this image's revision not applied yet
-        (("0023",), False),  # current
+        (("0023",), True),  # one revision behind
+        (("0024",), False),  # current
         (("0099_from_a_newer_release",), False),  # database ahead: older image still runs
     ],
 )
@@ -59,7 +60,7 @@ def test_provider_state_compares_database_with_code(applied, behind) -> None:
     state = schema_state([APP], read_applied=lambda migration: applied, read_markets=None)
 
     assert state.providers == (
-        ProviderSchemaState(provider=APP, applied=applied, code_head="0023", behind=behind),
+        ProviderSchemaState(provider=APP, applied=applied, code_head="0024", behind=behind),
     )
     assert state.behind is behind
 
@@ -206,6 +207,10 @@ def test_migration_job_failure_fails_the_job() -> None:
             "dispatch_alpaca_etf_portfolio.py",
             "alpaca_connectors.operations.configuration_jobs.run_dispatcher_job",
         ),
+        (
+            "dispatch_alpaca_bars_update.py",
+            "alpaca_connectors.operations.bar_updates.run_bars_dispatcher_job",
+        ),
     ],
 )
 def test_launchers_do_no_work_while_the_schema_is_behind(launcher, work) -> None:
@@ -268,11 +273,12 @@ def test_api_deploys_only_after_the_migration_job_in_one_workflow() -> None:
     assert not (root / ".mainsequence/workflows/alpaca-connectors-migrations.yaml").exists()
 
 
-def test_the_bars_job_follows_main_outside_the_graph() -> None:
-    """The graph cannot reference another file, so the bars Job does not wait for the migration.
+def test_the_bars_jobs_follow_main_outside_the_graph() -> None:
+    """The graph cannot reference another file, so the bars Jobs do not wait for the migration.
 
-    `alpaca-bars-update` follows main like the API's Jobs (PRs #7 and #8, issue #11); its schema
-    gate turns a run in the rollout gap into a skip (tests/test_run_alpaca_bars_update.py).
+    `alpaca-bars-update` follows main like the API's Jobs (PRs #7 and #8, issue #11), and so does
+    its dispatcher (ADR 0021); their schema gates turn a run in the rollout gap into a skip
+    (tests/test_run_alpaca_bars_update.py, tests/test_bar_update_jobs.py).
     """
     import yaml
 
@@ -280,9 +286,11 @@ def test_the_bars_job_follows_main_outside_the_graph() -> None:
     workflow = yaml.safe_load(
         (root / ".mainsequence/workflows/alpaca-bars-update.yaml").read_text()
     )
-    [resource] = workflow["resources"]
-    assert (resource["key"], resource["kind"]) == ("alpaca-bars-update", "job")
-    assert resource["spec"]["automatic_redeployment"] == {"enabled": True, "tag_regex": None}
+    resources = {resource["key"]: resource for resource in workflow["resources"]}
+    assert set(resources) == {"alpaca-bars-update", "alpaca-bars-update-dispatcher"}
+    for resource in resources.values():
+        assert resource["kind"] == "job"
+        assert resource["spec"]["automatic_redeployment"] == {"enabled": True, "tag_regex": None}
     assert "execution" not in workflow
 
 
@@ -317,4 +325,5 @@ def test_every_resource_that_uses_metatables_declares_its_branch() -> None:
         "alpaca-etf-signal-dispatcher": True,
         "alpaca-etf-portfolio-dispatcher": True,
         "alpaca-bars-update": True,
+        "alpaca-bars-update-dispatcher": True,
     }

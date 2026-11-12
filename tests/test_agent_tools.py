@@ -55,6 +55,25 @@ class ProjectAgentToolTests(unittest.TestCase):
                 else:
                     self.assertIs(tool.parameters["additionalProperties"], False)
 
+    def test_bar_configuration_tools_carry_the_scheduled_flag(self) -> None:
+        tools = {tool.name: tool for tool in PROJECT_AGENT_TOOLS}
+
+        def case(tool_name: str, operation: str) -> dict:
+            return next(
+                item
+                for item in tools[tool_name].parameters["oneOf"]
+                if item["properties"]["operation"]["const"] == operation
+            )
+
+        listing = case("alpaca_query_bar_configurations", "list")
+        self.assertEqual(listing["properties"]["scheduled"], {"type": "boolean"})
+        for operation in ("create", "update"):
+            with self.subTest(operation=operation):
+                request = case("alpaca_manage_bar_configuration", operation)["properties"][
+                    "request"
+                ]
+                self.assertIn("scheduled", request["properties"])
+
     def test_read_tools_are_parallel_and_mutations_are_sequential(self) -> None:
         for tool in PROJECT_AGENT_TOOLS:
             with self.subTest(tool=tool.name):

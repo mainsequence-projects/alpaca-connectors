@@ -51,6 +51,7 @@ def configure_configuration_list_parser(parser: argparse.ArgumentParser) -> None
     parser.add_argument("--offset", type=int, default=0)
     parser.add_argument("--search")
     parser.add_argument("--enabled", action=argparse.BooleanOptionalAction, default=None)
+    parser.add_argument("--scheduled", action=argparse.BooleanOptionalAction, default=None)
     parser.add_argument("--asset-source", choices=("assets", "universe", "account_holdings"))
     parser.add_argument("--ordering", default="name")
     parser.set_defaults(handler=run_configuration_list_command)
@@ -79,6 +80,15 @@ def _add_configuration_values(parser: argparse.ArgumentParser, *, required: bool
         "--enabled",
         action=argparse.BooleanOptionalAction,
         default=True if required else None,
+    )
+    parser.add_argument(
+        "--scheduled",
+        action=argparse.BooleanOptionalAction,
+        default=True if required else None,
+        help=(
+            "Include the configuration in the daily bars update; --no-scheduled leaves it to "
+            "on-demand runs."
+        ),
     )
 
 
@@ -144,6 +154,7 @@ def run_configuration_list_command(args: argparse.Namespace) -> int:
         offset=args.offset,
         search=args.search,
         enabled=args.enabled,
+        scheduled=args.scheduled,
         asset_source=args.asset_source,
         ordering=args.ordering,
     )
@@ -173,6 +184,7 @@ def _configuration_values(args: argparse.Namespace, *, exclude_none: bool) -> di
         "feed": args.feed,
         "adjustment": args.adjustment,
         "enabled": args.enabled,
+        "scheduled": args.scheduled,
     }
     return (
         {key: value for key, value in values.items() if value is not None}

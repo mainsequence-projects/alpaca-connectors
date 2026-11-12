@@ -17,7 +17,17 @@ from msm.base import MarketsBase, markets_table_args, new_markets_uid
 from msm.models import AccountTable
 from msm.models.assets.core import AssetTable
 from pydantic import ConfigDict, Field
-from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, Index, String, Text, delete
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Index,
+    String,
+    Text,
+    delete,
+    true,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.types import Uuid
 
@@ -188,6 +198,21 @@ class AlpacaBarsConfigurationTable(
             "description": "Time, in UTC, the configuration last changed.",
         },
     )
+    scheduled: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=True,
+        # Revision 0024 (ADR 0021). The server default stays: a release that predates the column
+        # inserts rows without it.
+        server_default=true(),
+        info={
+            "label": "Scheduled",
+            "description": (
+                "Whether the daily bars update includes this configuration; an unscheduled one "
+                "still runs on demand while enabled."
+            ),
+        },
+    )
 
 
 class AlpacaBarsConfigurationAssetTable(
@@ -255,6 +280,7 @@ class AlpacaBarsConfiguration(MarketsMetaTableRow):
     adjustment: str
     created_at: dt.datetime
     updated_at: dt.datetime
+    scheduled: bool
     asset_uids: list[uuid.UUID] = Field(default_factory=list)
 
 
@@ -473,6 +499,7 @@ def create_bar_configuration(
     universe_uid: uuid.UUID | str | None = None,
     description: str | None = None,
     enabled: bool = True,
+    scheduled: bool = True,
     uid: uuid.UUID | str | None = None,
 ) -> AlpacaBarsConfiguration:
     from msm.bootstrap import resolve_runtime
@@ -509,6 +536,7 @@ def create_bar_configuration(
         "name": _normalize_name(name),
         "description": _normalize_description(description),
         "enabled": bool(enabled),
+        "scheduled": bool(scheduled),
         "account_uid": normalized_account_uid,
         "asset_source": source,
         "universe_uid": normalized_universe_uid,
@@ -547,6 +575,7 @@ def list_bar_configurations(
     offset: int = 0,
     search: str | None = None,
     enabled: bool | None = None,
+    scheduled: bool | None = None,
     asset_source: str | None = None,
     ordering: str = "name",
 ) -> tuple[list[AlpacaBarsConfiguration], int]:
@@ -564,6 +593,8 @@ def list_bar_configurations(
     statement = select(AlpacaBarsConfigurationTable)
     if enabled is not None:
         statement = statement.where(AlpacaBarsConfigurationTable.enabled == enabled)
+    if scheduled is not None:
+        statement = statement.where(AlpacaBarsConfigurationTable.scheduled == scheduled)
     if asset_source is not None:
         normalized_source = asset_source.strip().lower()
         if normalized_source not in ASSET_SOURCES:
@@ -617,12 +648,44 @@ def list_bar_configurations(
     return rows, total
 
 
+def scheduled_bar_configuration_uids() -> list[uuid.UUID]:
+    """Return the configurations the daily bars dispatcher's scheduled run includes.
+
+    A configuration is updated daily when it is both enabled and scheduled (ADR 0021): an
+    unscheduled one still runs on demand, and a disabled one runs neither way. Ordered by name,
+    then UID.
+    """
+    from msm.bootstrap import resolve_runtime
+    from msm.repositories.base import compile_markets_statement, execute_markets_operation
+    from sqlalchemy import select
+
+    from alpaca_connectors.runtime import account_runtime_models, start_markets_engine
+
+    table = AlpacaBarsConfigurationTable
+    start_markets_engine(models=account_runtime_models())
+    runtime = resolve_runtime(models=[table], row_model_name="AlpacaBarsConfiguration")
+    operation = compile_markets_statement(
+        select(table.uid)
+        .where(table.enabled.is_(True), table.scheduled.is_(True))
+        .order_by(table.name.asc(), table.uid.asc()),
+        context=runtime.context,
+        operation="select",
+    )
+    return [
+        uuid.UUID(str(row["uid"]))
+        for row in operation_result_rows(
+            execute_markets_operation(operation, context=runtime.context)
+        )
+    ]
+
+
 def update_bar_configuration(
     configuration_uid: uuid.UUID | str,
     *,
     name: str | None = None,
     description: str | None | object = _UNSET,
     enabled: bool | None = None,
+    scheduled: bool | None = None,
     account_uid: uuid.UUID | str | None = None,
     asset_source: str | None = None,
     asset_uids: list[uuid.UUID | str] | None | object = _UNSET,
@@ -631,6 +694,11 @@ def update_bar_configuration(
     feed: str | None = None,
     adjustment: str | None = None,
 ) -> AlpacaBarsConfiguration:
+    """Update the configuration's fields, its flags, or both.
+
+    Changing only ``scheduled`` skips the scope and reference validation, so a configuration
+    whose account or universe is gone can still be left out of the daily run (as for portfolios).
+    """
     from alpaca_connectors.market_data.alpaca_bars_support import (
         normalize_adjustment,
         normalize_feed,
@@ -641,6 +709,27 @@ def update_bar_configuration(
     current = get_bar_configuration(configuration_uid)
     if current is None:
         raise LookupError(f"Bar configuration {configuration_uid!s} does not exist.")
+    other_fields = (
+        name,
+        enabled,
+        account_uid,
+        asset_source,
+        frequency_id,
+        feed,
+        adjustment,
+    )
+    if (
+        scheduled is not None
+        and all(value is None for value in other_fields)
+        and description is _UNSET
+        and asset_uids is _UNSET
+        and universe_uid is _UNSET
+    ):
+        row = AlpacaBarsConfiguration.update(
+            configuration_uid,
+            {"scheduled": bool(scheduled), "updated_at": utc_now()},
+        )
+        return _with_memberships(row, asset_uids=list(current.asset_uids))
     requested_source = asset_source if asset_source is not None else current.asset_source
     if asset_source is None and asset_uids is _UNSET and universe_uid is _UNSET:
         requested_asset_uids = list(current.asset_uids)
@@ -681,6 +770,8 @@ def update_bar_configuration(
         )
     if enabled is not None:
         values["enabled"] = bool(enabled)
+    if scheduled is not None:
+        values["scheduled"] = bool(scheduled)
     row = AlpacaBarsConfiguration.update(configuration_uid, values)
     _replace_memberships(configuration_uid, normalized_asset_uids)
     return _with_memberships(row)
@@ -708,6 +799,7 @@ __all__ = [
     "get_bar_configuration",
     "list_bar_configurations",
     "project_configuration_models",
+    "scheduled_bar_configuration_uids",
     "update_bar_configuration",
     "validate_configuration_scope",
 ]

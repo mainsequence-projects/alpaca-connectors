@@ -107,7 +107,8 @@ uv run mkdocs build
 - `alpaca-connectors portfolio rebalance create ...`
 - `alpaca-connectors portfolio create ...`
 - `alpaca-connectors portfolio run <CONFIGURATION_UID>`
-- `src/jobs/run_alpaca_bars_update.py`
-- `.mainsequence/workflows/alpaca-bars-update.yaml`
+- `src/jobs/run_alpaca_bars_update.py` and its daily dispatcher
+  `src/jobs/dispatch_alpaca_bars_update.py`, declared in
+  `.mainsequence/workflows/alpaca-bars-update.yaml`
 - `src/jobs/run_alpaca_etf_signal.py` and `src/jobs/run_alpaca_etf_portfolio.py`, declared in
   `.mainsequence/workflows/alpaca-connectors-api.yaml`

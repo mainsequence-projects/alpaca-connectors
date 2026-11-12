@@ -47,6 +47,7 @@ def _typed_configuration_row() -> AlpacaBarsConfiguration:
         name="Daily bars",
         description="Daily account holdings",
         enabled=True,
+        scheduled=True,
         account_uid=uuid.UUID("22222222-2222-4222-8222-222222222222"),
         asset_source="account_holdings",
         asset_uids=[],
@@ -447,3 +448,147 @@ def test_execute_uses_physical_bar_progress_instead_of_cached_updater_statistics
     node.scope_update_statistics_to_assets.assert_called_once_with(physical_statistics)
     node.run.assert_called_once_with(override_update_stats=scoped_physical_statistics)
     assert result["rows_persisted"] == 2
+
+
+# ------------------------------------------------------------------------------------------------
+# The scheduled flag (ADR 0021, revision 0024)
+# ------------------------------------------------------------------------------------------------
+def test_revision_0024_adds_the_scheduled_column_the_model_declares() -> None:
+    import importlib.util
+    from pathlib import Path
+
+    path = (
+        Path(__file__).resolve().parents[1]
+        / "src/alpaca_connectors/migrations/versions/alpaca_connectors"
+        / "0024_add_bar_configuration_scheduled_flag.py"
+    )
+    spec = importlib.util.spec_from_file_location("revision_0024", path)
+    revision = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(revision)
+    model = AlpacaBarsConfigurationTable.__table__.columns["scheduled"]
+
+    assert (revision.revision, revision.down_revision) == ("0024", "0023")
+    assert revision.TABLE_NAME == AlpacaBarsConfigurationTable.__table__.name
+    op = MagicMock()
+    with patch.object(revision, "op", op):
+        revision.upgrade()
+    [added] = op.add_column.call_args_list
+    table_name, column = added.args
+    assert table_name == revision.TABLE_NAME
+    assert (column.name, type(column.type), column.nullable) == (
+        "scheduled",
+        type(model.type),
+        False,
+    )
+    # Existing rows join the daily update, and the release serving during the rollout still
+    # inserts rows without the column.
+    assert str(column.server_default.arg) == str(model.server_default.arg) == "true"
+    assert model.nullable is False and model.default.arg is True
+    assert "scheduled" in AlpacaBarsConfiguration.model_fields
+
+    op = MagicMock()
+    with patch.object(revision, "op", op):
+        revision.downgrade()
+    op.drop_column.assert_called_once_with(revision.TABLE_NAME, "scheduled")
+
+
+def test_api_create_defaults_to_scheduled_and_passes_the_flag_through() -> None:
+    values = {
+        "name": "Daily bars",
+        "account_uid": "22222222-2222-4222-8222-222222222222",
+        "asset_source": "account_holdings",
+        "frequency_id": "1d",
+        "feed": "sip",
+        "adjustment": "all",
+    }
+    assert BarConfigurationCreateRequest(**values).scheduled is True
+
+    row = _typed_configuration_row().model_copy(update={"scheduled": False})
+    with patch(
+        "alpaca_connectors.api.app.services.bar_configurations.create_bar_configuration",
+        return_value=row,
+    ) as create:
+        created = create_api_configuration(BarConfigurationCreateRequest(**values, scheduled=False))
+
+    assert create.call_args.kwargs["scheduled"] is False
+    assert created.scheduled is False
+
+
+def _update_dependencies(current: AlpacaBarsConfiguration):
+    module = "alpaca_connectors.market_data.configurations"
+    return (
+        patch(f"{module}.get_bar_configuration", return_value=current),
+        patch(f"{module}._validate_references"),
+        patch(f"{module}._replace_memberships"),
+        patch(f"{module}._configuration_asset_uids", return_value=[]),
+        patch.object(
+            AlpacaBarsConfiguration,
+            "update",
+            side_effect=lambda uid, values: current.model_copy(update=values),
+        ),
+    )
+
+
+def test_a_scheduled_only_update_skips_the_scope_checks() -> None:
+    from alpaca_connectors.market_data.configurations import update_bar_configuration
+
+    current = _typed_configuration_row().model_copy(update={"asset_uids": [uuid.uuid4()]})
+    get, validate, replace, read_members, update = _update_dependencies(current)
+    with (
+        get,
+        validate as validate_references,
+        replace as replace_memberships,
+        read_members as read_memberships,
+        update as stored,
+    ):
+        updated = update_bar_configuration(current.uid, scheduled=False)
+
+    validate_references.assert_not_called()
+    replace_memberships.assert_not_called()
+    read_memberships.assert_not_called()
+    [call] = stored.call_args_list
+    assert set(call.args[1]) == {"scheduled", "updated_at"}
+    assert call.args[1]["scheduled"] is False
+    assert (updated.scheduled, updated.enabled, updated.asset_uids) == (
+        False,
+        True,
+        current.asset_uids,
+    )
+
+
+def test_an_update_with_other_fields_stores_scheduled_beside_them() -> None:
+    from alpaca_connectors.market_data.configurations import update_bar_configuration
+
+    current = _typed_configuration_row()
+    get, validate, replace, read_members, update = _update_dependencies(current)
+    with get, validate as validate_references, replace, read_members, update as stored:
+        update_bar_configuration(current.uid, name="Renamed", scheduled=False)
+
+    validate_references.assert_called_once()
+    values = stored.call_args.args[1]
+    assert (values["name"], values["scheduled"]) == ("Renamed", False)
+
+
+def test_the_list_filters_on_scheduled() -> None:
+    from alpaca_connectors.market_data.configurations import list_bar_configurations
+
+    with (
+        patch("alpaca_connectors.runtime.account_runtime_models", return_value=[]),
+        patch("alpaca_connectors.runtime.start_markets_engine"),
+        patch("msm.bootstrap.resolve_runtime", return_value=SimpleNamespace(context=object())),
+        patch("msm.repositories.base.compile_markets_statement") as compile_statement,
+        patch(
+            "msm.repositories.base.execute_markets_operation",
+            side_effect=[{"rows": []}, {"rows": [{"count": 0}]}],
+        ),
+        patch(
+            "alpaca_connectors.market_data.configurations."
+            "_configuration_asset_uids_by_configuration",
+            return_value={},
+        ),
+    ):
+        assert list_bar_configurations(scheduled=False) == ([], 0)
+
+    page = compile_statement.call_args_list[0].args[0]
+    sql = " ".join(str(page.compile(compile_kwargs={"literal_binds": True})).split())
+    assert f"{AlpacaBarsConfigurationTable.__table__.name}.scheduled = false" in sql

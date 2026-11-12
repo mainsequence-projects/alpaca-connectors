@@ -367,6 +367,7 @@ def test_portfolio_detail_resolves_business_labels_and_value_history() -> None:
         name="Daily IVV bars",
         description="Daily SIP adjusted prices.",
         enabled=True,
+        scheduled=False,
         account_uid=signal.account_uid,
         asset_source="universe",
         universe_uid=signal.universe_uid,
@@ -439,6 +440,8 @@ def test_portfolio_detail_resolves_business_labels_and_value_history() -> None:
     assert detail.linked_signal.universe_name == "S&P 500 holdings"
     assert detail.linked_bars.asset_source_name == "S&P 500 holdings (IVV)"
     assert detail.linked_bars.asset_count == 504
+    # An unscheduled bars configuration stays linked, and the detail shows it is not updated daily.
+    assert detail.linked_bars.scheduled is False
     assert detail.linked_rebalance.name == "NYSE close"
     assert detail.canonical_portfolio.observation_count == 1
     assert detail.canonical_portfolio.latest_close == 103.25
@@ -461,6 +464,7 @@ def test_portfolio_detail_route_loads_latest_100_observations(api_client) -> Non
                 "name": "Daily IVV bars",
                 "description": None,
                 "enabled": True,
+                "scheduled": True,
                 "account_name": "Paper account",
                 "account_environment": "paper",
                 "asset_source": "universe",
