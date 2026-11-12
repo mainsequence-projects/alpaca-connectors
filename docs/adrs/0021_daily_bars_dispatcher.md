@@ -119,7 +119,7 @@ since the previous run, so the updates find no new bars.
 
 ## Verification
 
-- **Tests and lint.** `pytest` passes 636 tests. `tests/test_bar_update_jobs.py` covers the
+- **Tests and lint.** `pytest` passes 678 tests on main `91238c5` (636 before the rebase). `tests/test_bar_update_jobs.py` covers the
   dispatch, the enabled-configuration query, the entry point, the declaration and its time against
   the other dispatchers. `tests/test_schema_gate.py` covers the schema gate and the MetaTables
   access. `ruff check`, `ruff format --check` and `mkdocs build --strict` pass.
