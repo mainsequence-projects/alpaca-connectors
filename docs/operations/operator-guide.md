@@ -109,7 +109,9 @@ instructions are `.tau/SYSTEM.md`; its tools and skills are described in
 - registrations that predate revision `0018` need the one-off `alpaca-credential-migration` Job
   (or `alpaca-connectors account migrate-credentials --execute`) once per Environment
 - account registration and holdings capture resolve the whole position set from one Alpaca catalog
-  request and use bulk Main Sequence identity lookup and registration operations
+  request and write the account, the held assets Markets lacks and the holdings in one Markets
+  `registerAccount` call, which needs ms-markets 3.4.0 or later on the Markets API
+  ([registration](../account/registration.md#holdings))
 - if a stored bar configuration resolves an asset that is missing or ambiguous in Alpaca, fix its
   source or register the asset correctly instead of loosening the resolver
 - if `mainsequence code-repository current --debug` reports that the local SDK is behind the

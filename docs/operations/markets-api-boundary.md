@@ -14,6 +14,7 @@ agent session; every command below is run by the person the step names.
 |---|---|
 | Asset types, assets, OpenFIGI details compiled as SQL on Markets tables | `AssetType`/`Asset`/`OpenFigiDetails.upsert_many` and batched `filter` row calls |
 | Asset snapshots and holdings written by in-process ms-markets updaters | `AssetSnapshots.publish`, `AccountHoldingsSnapshots.publish`/`get_many` |
+| Account registration and holdings sync: asset type, asset and account upserts, `AssetSnapshots.publish`, the `USD` Asset ensured, `AccountHoldingsSnapshots.publish` | one `registerAccount` call (`POST /api/v1/account/registration/`, ms-markets 3.4.0, ADR 0051) |
 | Registration listing joined `AccountTable` | pages `alpaca_connectors__acct_alpaca` (revision 0019 adds the account name and active flag) and reads the page's Accounts in one batch |
 | Universe listing and detail joined `AssetCategoryTable` and counted memberships | own universes plus `AssetCategory`/`AssetCategoryMembership` batched reads |
 | Signal weights, portfolio values, weights, rebalance state, calendar events, orders, trades in `ms_markets__*` | `alpaca_connectors__<contract>__main` instances (revision 0020) |
@@ -34,6 +35,8 @@ These belong to the Markets deployment's owners, not to this repository:
 - ms-markets 3.0.2 is released, and the Environment's Markets deployment has applied its revision
   `0022` and deployed the `api` release that serves `/api/v1/rows/` and the portfolio dataset
   catalog routes.
+- Account registration and holdings sync need ms-markets 3.4.0 or later on the Markets API,
+  which serves `registerAccount` from that release.
 
 ## 1. Roles On `alpaca-connectors`
 

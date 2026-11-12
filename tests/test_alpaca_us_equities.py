@@ -287,19 +287,15 @@ class AlpacaAssetRegistrationTests(unittest.TestCase):
             json.loads(details["attributes"]), ["fractional_eh_enabled", "has_options"]
         )
 
-        def offline(statement, *, context, operation, dialect=None):
-            return base.compile_markets_statement(
-                statement, context=context, operation=operation, dialect="postgresql"
-            )
-
+        # A DataSource uid and dialect compile offline (ms-markets 3.4.0), as on PostgreSQL.
         context = base.MarketsRepositoryContext(data_source_uid=str(uuid.uuid4()))
-        with patch.object(crud, "compile_markets_statement", offline):
-            operation = crud.build_bulk_upsert_model_operation(
-                context,
-                model=AlpacaAssetDetailsTable,
-                values=[details],
-                conflict_columns=("asset_uid",),
-            )
+        operation = crud.build_bulk_upsert_model_operation(
+            context,
+            model=AlpacaAssetDetailsTable,
+            values=[details],
+            conflict_columns=("asset_uid",),
+            dialect="postgresql",
+        )
         sent = operation.statement.parameters["attributes_m0"]
         self.assertIsInstance(sent, str)
         self.assertEqual(json.loads(sent), ["fractional_eh_enabled", "has_options"])

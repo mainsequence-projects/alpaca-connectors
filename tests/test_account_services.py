@@ -31,9 +31,9 @@ from alpaca_connectors.account.services import (
 from alpaca_connectors.holdings import build_account_holdings_rows
 from alpaca_connectors.holdings.services import (
     AccountHoldingsRegistryError,
+    AccountRegistrationHoldings,
     _holdings_sets,
-    publish_account_holdings_snapshot,
-    resolve_complete_account_holdings_rows,
+    resolve_account_registration_holdings,
 )
 
 
@@ -170,26 +170,6 @@ class StubTradingClient:
         if path == "/assets":
             return self._catalog
         return self._raw if path == "/account" else {}
-
-
-class _FakeNode:
-    """Stand-in for AccountHoldings / AlpacaAccountBalancesNode (avoids backend storage binding)."""
-
-    frames: list = []
-
-    def __init__(self, config=None):
-        pass
-
-    @classmethod
-    def default_config(cls):
-        return None
-
-    def set_frame(self, frame):
-        type(self).frames.append(frame)
-        return self
-
-    def run(self, **kwargs):
-        return (False, None)
 
 
 class AccountServiceShapingTests(unittest.TestCase):
@@ -465,53 +445,55 @@ class AccountServiceShapingTests(unittest.TestCase):
         client.get_asset.assert_called_once_with("BTCUSD")
 
     def test_unresolved_position_blocks_snapshot_before_storage(self) -> None:
-        snapshot_time = SimpleNamespace()
-        with (
-            patch(
-                "alpaca_connectors.account.services.ensure_cash_currency_asset", return_value="USD"
-            ),
-            patch("msm.api.accounts.AccountHoldingsSet") as holdings_set,
-        ):
+        client = StubTradingClient(_stub_account(), [], raw={}, catalog=[])
+        with patch(
+            "alpaca_connectors.assets.alpaca_us_equities.alpaca_asset_ids_with_details"
+        ) as described:
             with self.assertRaisesRegex(
                 AccountHoldingsRegistryError,
                 "11111111-1111-4111-8111-111111111111",
             ):
-                publish_account_holdings_snapshot(
-                    account_uid="account-uid",
+                resolve_account_registration_holdings(
+                    trading_client=client,
                     positions=[_stub_positions()[0]],
                     cash="0",
-                    snapshot_time=snapshot_time,
-                    asset_resolver=lambda _position: None,
                 )
 
-        holdings_set.upsert.assert_not_called()
+        described.assert_not_called()
 
     def test_crypto_position_is_not_rejected_by_class(self) -> None:
+        btc_id = uuid.UUID("276e2673-764b-4ab6-a611-caf665ca6340")
+        catalog = [alpaca_catalog_asset("BTC/USD", btc_id, exchange="CRYPTO", asset_class="crypto")]
+        client = StubTradingClient(_stub_account(), [], raw={}, catalog=catalog)
         with patch(
-            "alpaca_connectors.account.services.ensure_cash_currency_asset", return_value="USD"
+            "alpaca_connectors.assets.alpaca_us_equities.alpaca_asset_ids_with_details",
+            return_value=set(),
         ):
-            rows = resolve_complete_account_holdings_rows(
+            holdings = resolve_account_registration_holdings(
+                trading_client=client,
                 positions=[_stub_positions()[1]],
                 cash="0",
-                asset_resolver=lambda position: f"ALPACA::{position.asset_id}",
             )
-        self.assertEqual(
-            rows[0]["asset_identifier"], "ALPACA::22222222-2222-4222-8222-222222222222"
-        )
+        # The crypto position names the catalog's asset UUID, found by symbol.
+        self.assertEqual(holdings.positions[0]["asset_identifier"], f"ALPACA::{btc_id}")
+        self.assertEqual([asset.asset_class for asset in holdings.assets], ["crypto"])
 
-    def test_nonzero_cash_ensures_and_uses_canonical_currency_asset(self) -> None:
-        with patch(
-            "alpaca_connectors.account.services.ensure_cash_currency_asset", return_value="USD"
-        ) as ensure_cash:
-            rows = resolve_complete_account_holdings_rows(
+    def test_nonzero_cash_is_a_position_of_the_canonical_currency_asset(self) -> None:
+        client = StubTradingClient(_stub_account(), [], raw={})
+        with patch("alpaca_connectors.account.services.ensure_cash_currency_asset") as ensure_cash:
+            holdings = resolve_account_registration_holdings(
+                trading_client=client,
                 positions=[],
                 cash="1000.50",
-                asset_resolver=lambda _position: None,
+                cash_asset_identifier="usd",
             )
 
-        ensure_cash.assert_called_once_with("USD")
-        self.assertEqual(rows[0]["asset_identifier"], "USD")
-        self.assertEqual(rows[0]["extra_details"], {"kind": "cash"})
+        # Markets creates the currency asset in the registration call (``cash_currency``).
+        ensure_cash.assert_not_called()
+        self.assertEqual(holdings.cash_currency, "USD")
+        self.assertEqual(holdings.positions[0]["asset_identifier"], "USD")
+        self.assertEqual(holdings.positions[0]["extra_details"], {"kind": "cash"})
+        self.assertEqual(holdings.assets, [])
 
     def test_account_plan_reports_missing_cash_asset_without_writing_it(self) -> None:
         client = StubTradingClient(_stub_account(), [], raw={"cash": "1000.50"})
@@ -573,69 +555,84 @@ class AccountServiceShapingTests(unittest.TestCase):
         self.assertIn("canonical cash currency Asset 'USD'", plan["warnings"][0])
 
 
+ACCOUNT_UID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+
+
+def _markets_account(**fields):
+    """The ms-markets Account row a registration answers."""
+    from msm.api.accounts import Account
+
+    return Account(
+        uid=ACCOUNT_UID,
+        unique_identifier="010203ABCD__ALPACA_PAPER",
+        account_name="010203ABCD__ALPACA_PAPER",
+        is_paper=True,
+        account_is_active=True,
+        **fields,
+    )
+
+
+def _registration_holdings(*identifiers: str) -> AccountRegistrationHoldings:
+    return AccountRegistrationHoldings(
+        positions=[
+            {"asset_identifier": identifier, "quantity": 1, "direction": 1, "extra_details": {}}
+            for identifier in identifiers
+        ],
+        assets=[],
+        described_asset_ids=frozenset(),
+        cash_currency="USD",
+    )
+
+
 class RegisterAlpacaAccountTests(unittest.TestCase):
     def test_register_flow_writes_account_detail_balances_and_holdings(self) -> None:
-        _FakeNode.frames = []
-        account_row = SimpleNamespace(uid="acc-uid-1")
-        fake_account = MagicMock()
-        fake_account.upsert.return_value = account_row
         upsert_model = MagicMock()
         runtime = SimpleNamespace(context=SimpleNamespace())
-        capture_result = SimpleNamespace(
-            holdings_rows=2,
-            unresolved_symbols=[],
-        )
-
         client = StubTradingClient(
             _stub_account(), [_stub_positions()[0]], raw={"cash": "1000.50", "equity": "2500.00"}
         )
-        resolved_rows = [
-            {"asset_identifier": "ALPACA::11111111-1111-4111-8111-111111111111"},
-            {"asset_identifier": "USD"},
-        ]
+        holdings = _registration_holdings("ALPACA::11111111-1111-4111-8111-111111111111", "USD")
 
         with (
             patch("alpaca_connectors.runtime.start_markets_engine", return_value=runtime),
-            patch("msm.api.accounts.Account", fake_account),
             patch("msm.repositories.crud.upsert_model", upsert_model),
             _imported(),
+            patch("alpaca_connectors.account.services._existing_registration", return_value=None),
             patch(
-                "alpaca_connectors.account.services._previous_legacy_references", return_value=None
-            ),
-            patch(
-                "alpaca_connectors.holdings.services.resolve_complete_account_holdings_rows",
-                return_value=resolved_rows,
+                "alpaca_connectors.holdings.services.resolve_account_registration_holdings",
+                return_value=holdings,
             ) as resolve_holdings,
             patch(
-                "alpaca_connectors.holdings.services.publish_resolved_account_holdings_snapshot",
-                return_value=capture_result,
-            ) as publish_holdings,
+                "alpaca_connectors.holdings.services.register_account_holdings",
+                return_value=SimpleNamespace(account=_markets_account()),
+            ) as register_holdings,
         ):
             result = register_alpaca_account(
                 credentials=EXTERNAL_NAMES,
                 paper=True,
                 client=client,
-                asset_resolver=lambda position: f"ALPACA::{position.asset_id}",
                 actor_user_uid="user-uid",
             )
 
         self.assertEqual(result.account_unique_identifier, "010203ABCD__ALPACA_PAPER")
-        self.assertEqual(result.account_uid, "acc-uid-1")
+        self.assertEqual(result.account_uid, ACCOUNT_UID)
         self.assertTrue(result.is_paper)
         self.assertEqual(result.holdings_rows, 2)  # AAPL + USD cash
         # no bespoke balances time-series table/node is written
         self.assertFalse(hasattr(result, "balances_written"))
 
-        # Account upserted with the stable identity + paper + active status.
-        _, account_kwargs = fake_account.upsert.call_args
-        self.assertEqual(account_kwargs["unique_identifier"], "010203ABCD__ALPACA_PAPER")
-        self.assertTrue(account_kwargs["is_paper"])
-        self.assertTrue(account_kwargs["account_is_active"])
+        # One registerAccount: the stable identity + paper + active status, and the holdings.
+        account_values = register_holdings.call_args.kwargs["account"]
+        self.assertEqual(account_values["unique_identifier"], "010203ABCD__ALPACA_PAPER")
+        self.assertTrue(account_values["is_paper"])
+        self.assertTrue(account_values["account_is_active"])
+        self.assertIs(register_holdings.call_args.kwargs["holdings"], holdings)
+        self.assertEqual(resolve_holdings.call_args.kwargs["positions"], client._positions)
 
         # Detail sidecar upserted once on account_uid, carrying the current financials.
         upsert_model.assert_called_once()
         _, detail_kwargs = upsert_model.call_args
-        self.assertEqual(detail_kwargs["values"]["account_uid"], "acc-uid-1")
+        self.assertEqual(str(detail_kwargs["values"]["account_uid"]), ACCOUNT_UID)
         self.assertEqual(detail_kwargs["conflict_columns"], ("account_uid",))
         self.assertEqual(str(detail_kwargs["values"]["cash"]), "1000.50")
         self.assertEqual(str(detail_kwargs["values"]["equity"]), "2500.00")
@@ -654,9 +651,6 @@ class RegisterAlpacaAccountTests(unittest.TestCase):
         self.assertEqual(result.credential_source, CREDENTIAL_SOURCE_IMPORTED)
         self.assertFalse(hasattr(result, "api_key_secret_name"))
 
-        resolve_holdings.assert_called_once()
-        self.assertEqual(publish_holdings.call_args.kwargs["rows"], resolved_rows)
-
     def test_register_resolves_held_assets_on_exchanges_alpaca_py_may_not_know(self) -> None:
         held_id = uuid.UUID("77777777-7777-4777-8777-777777777777")
         for exchange in NEW_EXCHANGES:
@@ -670,48 +664,34 @@ class RegisterAlpacaAccountTests(unittest.TestCase):
                 client = StubTradingClient(
                     _stub_account(), [aapl, held], raw={"cash": "1000.50"}, catalog=catalog
                 )
-                fake_account = MagicMock()
-                fake_account.upsert.return_value = SimpleNamespace(uid="acc-uid-1")
-                resolution = SimpleNamespace(missing_assets=[])
 
                 with (
                     patch(
                         "alpaca_connectors.runtime.start_markets_engine",
                         return_value=SimpleNamespace(context=SimpleNamespace()),
                     ),
-                    patch("msm.api.accounts.Account", fake_account),
                     patch("msm.repositories.crud.upsert_model"),
                     _imported(),
                     patch(
-                        "alpaca_connectors.account.services._previous_legacy_references",
+                        "alpaca_connectors.account.services._existing_registration",
                         return_value=None,
                     ),
                     patch(
-                        "alpaca_connectors.account.services.ensure_cash_currency_asset",
-                        return_value="USD",
+                        "alpaca_connectors.assets.alpaca_us_equities.alpaca_asset_ids_with_details",
+                        return_value=set(),
                     ),
                     patch(
-                        "alpaca_connectors.assets.alpaca_us_equities.resolve_alpaca_us_equity_registration_plan",
-                        return_value=resolution,
-                    ) as resolve_registration,
-                    patch(
-                        "alpaca_connectors.assets.alpaca_us_equities.register_alpaca_us_equity_assets"
-                    ) as register_assets,
-                    patch(
-                        "alpaca_connectors.holdings.services.publish_resolved_account_holdings_snapshot",
-                        return_value=SimpleNamespace(holdings_rows=3, unresolved_symbols=[]),
-                    ) as publish_holdings,
+                        "alpaca_connectors.holdings.services.register_account_holdings",
+                        return_value=SimpleNamespace(account=_markets_account()),
+                    ) as register_holdings,
                 ):
                     result = register_alpaca_account(credentials=EXTERNAL_NAMES, client=client)
 
-                self.assertEqual(result.account_uid, "acc-uid-1")
-                plan = resolve_registration.call_args.args[0]
-                exchanges = {asset.symbol: asset.exchange for asset in plan.alpaca_assets}
+                self.assertEqual(result.account_uid, ACCOUNT_UID)
+                holdings = register_holdings.call_args.kwargs["holdings"]
+                exchanges = {asset.symbol: asset.exchange for asset in holdings.assets}
                 self.assertEqual(exchanges, {"AAPL": "NASDAQ", "TXCO": exchange})
-                register_assets.assert_called_once_with(registration_resolution=resolution)
-                identifiers = [
-                    row["asset_identifier"] for row in publish_holdings.call_args.kwargs["rows"]
-                ]
+                identifiers = [row["asset_identifier"] for row in holdings.positions]
                 self.assertEqual(
                     identifiers,
                     [f"ALPACA::{aapl.asset_id}", f"ALPACA::{held_id}", "USD"],
@@ -730,24 +710,21 @@ class RegisterAlpacaAccountTests(unittest.TestCase):
             patch("msm.api.accounts.Account", fake_account),
             patch("msm.repositories.crud.upsert_model") as upsert_model,
             _imported(),
+            patch("alpaca_connectors.account.services._existing_registration", return_value=None),
             patch(
-                "alpaca_connectors.holdings.services.resolve_complete_account_holdings_rows",
+                "alpaca_connectors.holdings.services.resolve_account_registration_holdings",
                 side_effect=registry_error,
             ),
             patch(
-                "alpaca_connectors.account.services.prepare_alpaca_position_assets",
-                return_value=({}, SimpleNamespace()),
-            ),
-            patch(
-                "alpaca_connectors.holdings.services.publish_resolved_account_holdings_snapshot"
-            ) as publish_holdings,
+                "alpaca_connectors.holdings.services.register_account_holdings"
+            ) as register_holdings,
         ):
             with self.assertRaises(AccountHoldingsRegistryError):
                 register_alpaca_account(credentials=EXTERNAL_NAMES, client=client)
 
         fake_account.upsert.assert_not_called()
         upsert_model.assert_not_called()
-        publish_holdings.assert_not_called()
+        register_holdings.assert_not_called()
 
     def test_import_rotation_rejects_a_different_alpaca_account(self) -> None:
         candidate_client = SimpleNamespace(
@@ -893,10 +870,13 @@ class ManagedCredentialRegistrationTests(unittest.TestCase):
     def _register(self, client, **patches):
         """Run a managed registration with storage and holdings mocked."""
         events: list[str] = []
-        fake_account = MagicMock()
-        fake_account.upsert.side_effect = patches.get(
-            "account_upsert",
-            lambda **kwargs: events.append("account") or SimpleNamespace(uid="acc-uid-1"),
+        register_holdings = MagicMock(
+            side_effect=patches.get(
+                "register_holdings",
+                lambda **kwargs: (
+                    events.append("account") or SimpleNamespace(account=_markets_account())
+                ),
+            )
         )
         upsert_model = MagicMock(side_effect=lambda *args, **kwargs: events.append("detail"))
         with (
@@ -904,19 +884,19 @@ class ManagedCredentialRegistrationTests(unittest.TestCase):
                 "alpaca_connectors.runtime.start_markets_engine",
                 return_value=SimpleNamespace(context=SimpleNamespace()),
             ),
-            patch("msm.api.accounts.Account", fake_account),
             patch("msm.repositories.crud.upsert_model", upsert_model),
             patch(
-                "alpaca_connectors.holdings.services.resolve_complete_account_holdings_rows",
-                side_effect=lambda **kwargs: events.append("holdings") or [],
+                "alpaca_connectors.holdings.services.resolve_account_registration_holdings",
+                side_effect=lambda **kwargs: (
+                    events.append("holdings") or _registration_holdings("USD")
+                ),
             ),
             patch(
-                "alpaca_connectors.holdings.services.publish_resolved_account_holdings_snapshot",
-                return_value=SimpleNamespace(holdings_rows=1, unresolved_symbols=[]),
+                "alpaca_connectors.holdings.services.register_account_holdings", register_holdings
             ),
             patch(
-                "alpaca_connectors.account.services._previous_legacy_references",
-                return_value=patches.get("previous_references"),
+                "alpaca_connectors.account.services._existing_registration",
+                return_value=patches.get("existing"),
             ),
             patch(
                 "alpaca_connectors.account.services.delete_legacy_managed_secrets",
@@ -930,12 +910,11 @@ class ManagedCredentialRegistrationTests(unittest.TestCase):
                     credentials=SUBMITTED,
                     paper=True,
                     client=client,
-                    asset_resolver=lambda position: None,
                     actor_user_uid="user-uid",
                 )
             except Exception as exc:  # noqa: BLE001 - returned for assertions
                 outcome = exc
-        return outcome, events, fake_account, upsert_model, delete_legacy, read_secret
+        return outcome, events, register_holdings, upsert_model, delete_legacy, read_secret
 
     def test_managed_registration_stores_the_keys_after_alpaca_and_holdings_checks(self) -> None:
         client = StubTradingClient(_stub_account(), [], raw={"cash": "1000.50"})
@@ -957,33 +936,34 @@ class ManagedCredentialRegistrationTests(unittest.TestCase):
 
     def test_rejected_credentials_write_nothing(self) -> None:
         client = _RejectingTradingClient(_stub_account(), [], raw={})
-        outcome, events, fake_account, upsert_model, _, _ = self._register(client)
+        outcome, events, register_holdings, upsert_model, _, _ = self._register(client)
 
         self.assertIsInstance(outcome, AlpacaCredentialsRejectedError)
         self.assertEqual(events, [])
-        fake_account.upsert.assert_not_called()
+        register_holdings.assert_not_called()
         upsert_model.assert_not_called()
 
     def test_a_failed_account_write_stores_no_keys(self) -> None:
-        def failing_upsert(**kwargs):
+        def failing_registration(**kwargs):
             raise RuntimeError("account write failed")
 
         client = StubTradingClient(_stub_account(), [], raw={})
-        outcome, _, _, upsert_model, _, _ = self._register(client, account_upsert=failing_upsert)
+        outcome, _, _, upsert_model, _, _ = self._register(
+            client, register_holdings=failing_registration
+        )
 
         self.assertIsInstance(outcome, RuntimeError)
         upsert_model.assert_not_called()
 
     def test_reregistering_a_legacy_identity_deletes_the_secrets_it_still_referenced(self) -> None:
-        previous = _legacy_managed_references()
         client = StubTradingClient(_stub_account(), [], raw={})
         result, _, _, upsert_model, delete_legacy, _ = self._register(
             client,
-            previous_references=previous,
+            existing=_legacy_registration(),
             deleted=([], ["Managed Secret 'X' could not be deleted."]),
         )
 
-        delete_legacy.assert_called_once_with(previous)
+        delete_legacy.assert_called_once_with(_legacy_managed_references())
         self.assertEqual(result.warnings, ["Managed Secret 'X' could not be deleted."])
         # The new keys replace the references whatever happened to the old Secrets.
         values = upsert_model.call_args.kwargs["values"]
@@ -1005,49 +985,45 @@ class RegistrationSealingTests(unittest.TestCase):
         set_keyring_source(None)
 
     def test_the_registration_upsert_carries_envelopes_not_values(self) -> None:
-        from metatables.compiled_sql.v1 import compile_sqlalchemy_statement
+        from msm.repositories import base, crud
+
         from metatables.encryption import is_envelope
 
         operations = []
 
-        def offline_compile(statement, *, context, operation, dialect=None):
-            return compile_sqlalchemy_statement(
-                statement, operation=operation, data_source_uid="ds", dialect="postgresql"
+        def offline_upsert(context, *, model, values, conflict_columns):
+            # The registration's own upsert, compiled as ms-markets compiles it for PostgreSQL.
+            operations.append(
+                crud.build_upsert_model_operation(
+                    base.MarketsRepositoryContext(data_source_uid=str(uuid.uuid4())),
+                    model=model,
+                    values=values,
+                    conflict_columns=conflict_columns,
+                    dialect="postgresql",
+                )
             )
+            return {}
 
         client = StubTradingClient(_stub_account(), [], raw={"cash": "1000.50"})
-        fake_account = MagicMock()
-        fake_account.upsert.return_value = SimpleNamespace(uid="acc-uid-1")
         with (
             patch(
                 "alpaca_connectors.runtime.start_markets_engine",
                 return_value=SimpleNamespace(context=SimpleNamespace()),
             ),
-            patch("msm.api.accounts.Account", fake_account),
-            patch("msm.repositories.crud.compile_markets_statement", offline_compile),
+            patch("msm.repositories.crud.upsert_model", offline_upsert),
+            patch("alpaca_connectors.account.services._existing_registration", return_value=None),
             patch(
-                "msm.repositories.crud.execute_markets_operation",
-                side_effect=lambda operation, context: operations.append(operation) or {},
+                "alpaca_connectors.holdings.services.resolve_account_registration_holdings",
+                return_value=_registration_holdings("USD"),
             ),
             patch(
-                "alpaca_connectors.holdings.services.resolve_complete_account_holdings_rows",
-                return_value=[],
-            ),
-            patch(
-                "alpaca_connectors.holdings.services.publish_resolved_account_holdings_snapshot",
-                return_value=SimpleNamespace(holdings_rows=0, unresolved_symbols=[]),
-            ),
-            patch(
-                "alpaca_connectors.account.services._previous_legacy_references", return_value=None
+                "alpaca_connectors.holdings.services.register_account_holdings",
+                return_value=SimpleNamespace(account=_markets_account()),
             ),
         ):
-            register_alpaca_account(
-                credentials=SUBMITTED,
-                paper=True,
-                client=client,
-                asset_resolver=lambda position: None,
-            )
+            result = register_alpaca_account(credentials=SUBMITTED, paper=True, client=client)
 
+        self.assertNotIn("PKSUBMITTED", str(result))
         (operation,) = operations
         serialized = str(operation.model_dump(mode="json"))
         self.assertNotIn("PKSUBMITTED", serialized)

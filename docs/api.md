@@ -325,7 +325,8 @@ capture inside the request and answers `200` with a terminal
 - A capture that fails is still `200`, with `status: "failed"`, `result: null` and
   `error: {code, message, retryable}`: the code and message the account routes would answer
   (`alpaca_credentials_rejected`, `credential_key_unavailable`, `account_credentials_missing`,
-  `action_conflict` for a held asset that cannot be registered, `provider_failure`,
+  `action_conflict` for a held asset that cannot be registered or that Markets stores with another
+  asset type, `provider_failure`,
   `dependency_starting` with `retryable: true` while a release it needs starts, and
   `dependency_unavailable` for anything unexpected, with no internals).
 - A refused request is an HTTP error and runs nothing: `404` for an unknown account, or for an
@@ -393,6 +394,11 @@ by `source` ([ADR 0017](adrs/0017_encrypted_account_credentials.md)):
 `PATCH` without `credentials` changes only the name or active state and never reads credentials.
 Rotation must authenticate as the registered Alpaca account and replaces the stored keys in one
 write. Preflight reports the identity, holdings and `credential_source` and writes nothing.
+`POST /v1/accounts` writes the Account, its held assets and its initial holdings with one Markets
+`registerAccount` call (ms-markets 3.4.0 or later), then the account's row, and answers from what
+it wrote ([registration](account/registration.md#holdings)). Sending the same registration again,
+for example after a client timeout, succeeds; a held asset that Markets stores with another asset
+type answers `409 action_conflict` and writes nothing.
 Responses expose `credential_source`, `credentials_stored` and
 `credentials_updated_at`/`_by_user_uid`; never values, Secret names or the key fingerprint.
 `DELETE` deletes the row and its keys; it still reports `deleted_secrets` and `warnings`, which

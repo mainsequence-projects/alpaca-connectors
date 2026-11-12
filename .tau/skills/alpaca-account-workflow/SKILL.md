@@ -20,9 +20,10 @@ call `alpaca_project_state` with empty arguments. No shell or direct table-write
   imported.
 - `environment: paper | live` is Alpaca brokerage access, not an Organization Environment
   selector. Platform Environment resolution is automatic.
-- Creation always registers position Assets, ensures the canonical ms-markets currency Asset if
-  missing, and captures initial holdings. These are mandatory. Cash uses `USD`, not an
-  Alpaca-specific Asset or `CurrencySpot` pair.
+- Creation always registers missing position Assets, the canonical ms-markets currency Asset if
+  missing, and the initial holdings, in one Markets call. These are mandatory. Cash uses `USD`,
+  not an Alpaca-specific Asset or `CurrencySpot` pair. A held Asset Markets stores with another
+  asset type refuses the whole registration and writes nothing.
 - Deleting a registration deletes its stored keys with the row. Main Sequence Secrets a person
   named are never changed or deleted; historical holdings are retained.
 
@@ -71,8 +72,9 @@ Query holdings only for the selected Account, not every Account in the list:
 
 `holdings_snapshot` takes the Account UID and a returned holdings-set UID. Reads never capture
 holdings. `alpaca_manage_account` supports `update` (name, active state, or new keys imported
-from both Secret names), `refresh` (provider state), and `capture_holdings` (register the complete position
-set and publish one snapshot). Send one capture, never one request per position.
+from both Secret names), `refresh` (provider state), and `capture_holdings` (publish one snapshot of
+the complete position set, registering only Assets Markets lacks). Send one capture, never one
+request per position.
 
 Deletion requires the person's exact `DELETE <account_uid>` confirmation. Stop on reference
 blockers; do not cascade into linked configurations. Writes can outlast an MCP timeout: inspect

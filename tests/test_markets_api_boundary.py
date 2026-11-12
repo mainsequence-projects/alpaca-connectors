@@ -48,27 +48,20 @@ def _snapshot(set_uid: str, when: dt.datetime, *identifiers: str) -> dict[str, A
     }
 
 
-def test_holdings_publish_through_the_snapshot_composite(monkeypatch) -> None:
-    from msm.api.accounts import AccountHoldingsSnapshots
+def test_account_registration_is_one_composite_call_through_the_backend(monkeypatch) -> None:
+    from msm.api import remote
 
-    from alpaca_connectors.holdings.services import publish_resolved_account_holdings_snapshot
+    from alpaca_connectors.markets_api import register_account
 
-    calls: list[dict[str, Any]] = []
-    monkeypatch.setattr(
-        AccountHoldingsSnapshots,
-        "publish",
-        classmethod(lambda cls, **kw: calls.append(kw) or _snapshot("s1", WHEN, "ALPACA::A")),
-    )
-    rows = [{"asset_identifier": "ALPACA::A", "quantity": 10, "direction": 1, "extra_details": {}}]
+    calls: list[Any] = []
+    client = SimpleNamespace(register_account=lambda request: calls.append(request) or "answer")
+    backend = SimpleNamespace(client=client)
+    monkeypatch.setattr(remote, "_remote_backend", backend)
+    request = {"account": {"unique_identifier": "U", "account_name": "U"}}
 
-    result = publish_resolved_account_holdings_snapshot(
-        account_uid=ACCOUNT, rows=rows, snapshot_time=WHEN
-    )
-
-    assert (result.holdings_set_uid, result.holdings_rows) == ("s1", 1)
-    assert calls == [
-        {"account_uid": ACCOUNT, "holdings_date": WHEN, "positions": rows, "overwrite": True}
-    ]
+    # The process's Markets API backend: the one row calls use, with its deadline (ADR 0020).
+    assert register_account(request) == "answer"
+    assert calls == [request]
 
 
 def test_holdings_listing_reads_sets_then_snapshots_in_batches(monkeypatch, no_engine) -> None:
