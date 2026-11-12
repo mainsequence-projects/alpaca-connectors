@@ -19,9 +19,11 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from alpaca_connectors.dependencies import is_dependency_starting
 from mainsequence.server.fastapi import install_mcp, install_request_identity
 
 from .caller_context import vouching_callers
+from .errors import dependency_starting
 from .identity import bound_acting_user_uid
 from .mcp_server import build_mcp_application
 from .routers.account_key_requests import router as account_key_requests_router
@@ -57,15 +59,24 @@ ROUTERS = (
 
 @asynccontextmanager
 async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
-    """Attach the ms-markets runtime for the API process lifetime."""
+    """Start the Markets API without waiting, then attach the ms-markets runtime (ADR 0020)."""
+    from alpaca_connectors.dependencies import prewarm_dependencies
     from alpaca_connectors.runtime import start_markets_engine
 
+    prewarm_dependencies()
     start_markets_engine()
     yield
 
 
-async def sanitized_unhandled_error(_request: Request, _exc: Exception) -> JSONResponse:
+async def sanitized_unhandled_error(_request: Request, exc: Exception) -> JSONResponse:
     """Keep dependency exception internals out of API responses and server exception logging."""
+    if is_dependency_starting(exc):
+        error = dependency_starting()
+        return JSONResponse(
+            status_code=error.status_code,
+            content={"detail": error.detail},
+            headers=error.headers,
+        )
     return JSONResponse(
         status_code=503,
         content={

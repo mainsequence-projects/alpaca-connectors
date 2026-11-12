@@ -16,7 +16,8 @@ never creates schema (that is the migration provider's job). ``msm.start_engine`
 and cached per configuration, so calling it more than once in a process is safe.
 
 Call this once at every process entrypoint (CLI ``main()``, each job ``main()``, FastAPI
-startup). Never call it from the SDK-free ETF extractor import graph.
+startup, which first starts the Markets API: ``alpaca_connectors.dependencies``). Never call it
+from the SDK-free ETF extractor import graph.
 """
 
 from __future__ import annotations
@@ -24,19 +25,22 @@ from __future__ import annotations
 from typing import Any
 
 
-def use_markets_api() -> None:
+def use_markets_api() -> Any:
     """Send this process's Markets row calls to the Markets API (once per process).
 
-    The Markets API is found in the caller's Environment on the first row call
-    (``LazyRemoteBackend``), so a process that never touches a Markets registry never needs to
-    see it. The workflow grants every resource that does ``reader`` on the
-    ``MainSequenceMarkets`` branch; ``MARKETS_API_URL`` selects a local Markets API.
+    The Markets API is found in the caller's Environment on the first row call, or from the API's
+    startup (``MarketsApiBackend``, ADR 0020), so a process that never touches a Markets registry
+    never needs to see it. The workflow grants every resource that does ``reader`` on the
+    ``MainSequenceMarkets`` branch; ``MARKETS_API_URL`` selects a local Markets API. Returns the
+    process's remote backend.
     """
     from msm.api.remote import active_remote_backend, use_remote_backend
-    from msm.client import LazyRemoteBackend
+
+    from alpaca_connectors.dependencies import MarketsApiBackend
 
     if active_remote_backend() is None:
-        use_remote_backend(LazyRemoteBackend())
+        use_remote_backend(MarketsApiBackend())
+    return active_remote_backend()
 
 
 def project_runtime_models() -> list[type[Any]]:

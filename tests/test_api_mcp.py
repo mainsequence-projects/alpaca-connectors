@@ -34,10 +34,17 @@ def requester(uid: str = PERSON_UID, **claims: object) -> dict[str, object]:
 
 @pytest.fixture
 def mcp_client() -> Iterator[TestClient]:
-    """The application with its lifespan running, which starts the MCP session manager."""
+    """The application with its lifespan running, which starts the MCP session manager.
+
+    Hosted callers make the process look like a deployment, so the lifespan's Markets API start is
+    replaced too: no test reaches the platform.
+    """
     from alpaca_connectors.api.app.main import create_app
 
-    with patch("alpaca_connectors.runtime.start_markets_engine"):
+    with (
+        patch("alpaca_connectors.dependencies.prewarm_dependencies"),
+        patch("alpaca_connectors.runtime.start_markets_engine"),
+    ):
         with TestClient(create_app()) as client:
             yield client
 
