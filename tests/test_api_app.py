@@ -424,12 +424,11 @@ class ApiAppTests(unittest.TestCase):
         with (
             patch(
                 "alpaca_connectors.api.app.services.accounts.register_alpaca_account",
-                return_value=SimpleNamespace(account_uid="account-uid"),
+                return_value=SimpleNamespace(account_uid="account-uid", registration=registration),
             ) as register,
             patch(
                 "alpaca_connectors.api.app.services.accounts.get_account_registration",
-                return_value=registration,
-            ),
+            ) as read_back,
         ):
             response = self.client.post(
                 "/v1/accounts",
@@ -445,6 +444,8 @@ class ApiAppTests(unittest.TestCase):
             )
 
         self.assertEqual(response.status_code, 201)
+        # The answer is what the registration wrote; it is not read back.
+        read_back.assert_not_called()
         credentials = register.call_args.kwargs["credentials"]
         self.assertIsInstance(credentials, ResolvedAlpacaCredentials)
         self.assertEqual(credentials.api_key, "PKVALUE5566")

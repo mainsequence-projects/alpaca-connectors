@@ -124,10 +124,8 @@ def create_account_registration(
     )
     if key_request is not None:
         complete_account_key_request(key_request.uid, account_uid=result.account_uid)
-    account = get_account_registration(result.account_uid)
-    if account is None:
-        raise RuntimeError("Registered account could not be read back.")
-    return AccountResponse.model_validate(account)
+    # Answered from what the registration wrote; it is not read back.
+    return AccountResponse.model_validate(result.registration)
 
 
 def require_account_access(account_uid: str, owner: AccountOwner) -> None:

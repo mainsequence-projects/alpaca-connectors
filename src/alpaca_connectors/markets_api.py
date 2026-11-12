@@ -4,13 +4,14 @@ Markets registries (assets, categories and their memberships, accounts, holdings
 are reached with ``msm.api`` row calls, which run on the Markets API once the process selected the
 remote row backend (``alpaca_connectors.runtime.use_markets_api``; ms-markets ADR 0047). These
 helpers keep those reads set-based: a request carries at most ``MARKETS_BATCH_SIZE`` keys, and a
-collection is read in pages of that size, never one call per row.
+collection is read in pages of that size, never one call per row. Account registration is the one
+composite route: ``register_account`` (ms-markets ADR 0051).
 """
 
 from __future__ import annotations
 
 import uuid
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from typing import Any, TypeVar
 
 T = TypeVar("T")
@@ -81,6 +82,20 @@ def category_member_asset_uids(category_uid: Any) -> list[str]:
     return [str(row.asset_uid) for row in rows]
 
 
+def register_account(request: Mapping[str, Any]) -> Any:
+    """One ``registerAccount`` call (ms-markets ADR 0051): account, assets and holdings at once.
+
+    Markets creates the missing asset types, assets and cash currency asset, writes the asset
+    snapshots that changed, creates the account or updates its differing fields, and writes the
+    holdings, in one transaction; it writes nothing when nothing changed. The call goes through the
+    process's Markets API backend, so it waits for a starting Markets API only as long as the
+    caller will (ADR 0020). Returns ms-markets' ``AccountRegistrationResponse``.
+    """
+    from alpaca_connectors.runtime import use_markets_api
+
+    return use_markets_api().client.register_account(request)
+
+
 __all__ = [
     "MARKETS_BATCH_SIZE",
     "assets_by_identifier",
@@ -90,4 +105,5 @@ __all__ = [
     "openfigi_details_by_asset_uid",
     "read_all_pages",
     "read_in_batches",
+    "register_account",
 ]

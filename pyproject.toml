@@ -11,7 +11,7 @@ license-files = ["LICENSE"]
 requires-python = ">=3.13,<3.14"
 dependencies = [
     # Keep compatible ranges here and let uv.lock capture the reproducible environment.
-    "ms-markets>=3.0.2,<4",
+    "ms-markets>=3.4.0,<4",
     "mainsequence[mcp]>=9.0.38,<10",
     "mainsequence-metatable>=0.1.55,<0.2",
     # 0.45.0 is the first release whose asset model knows the TXSE exchange.
@@ -95,6 +95,13 @@ known-first-party = ["mainsequence","metatables","alpaca_connectors"]
 [tool.uv.sources]
 # The ETF library is released only as Git tags; consumers pin the tag of the release they tested.
 etfhextractor = { git = "https://github.com/mainsequence-projects/etfholdingextractor", tag = "v0.5.2" }
+
+[tool.uv]
+# TEMPORARY: etfhextractor v0.5.2 pins `ms-markets==3.0.2`; account registration needs 3.4.0's
+# composite call. Its code runs on 3.4.0, but the image's `pip install -r requirements.txt` still
+# refuses the conflict, so release only after an etfhextractor tag that accepts 3.4.0 replaces
+# v0.5.2 above and this override is removed.
+override-dependencies = ["ms-markets>=3.4.0,<4"]
 
 [dependency-groups]
 dev = [

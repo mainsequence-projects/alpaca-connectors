@@ -18,7 +18,14 @@ import pytest
 import yaml
 from conftest import CALLER_UID, OTHER_CALLER_UID
 from fastapi.testclient import TestClient
-from test_account_services import EXTERNAL_NAMES, StubTradingClient, _imported, _stub_account
+from test_account_services import (
+    EXTERNAL_NAMES,
+    StubTradingClient,
+    _imported,
+    _markets_account,
+    _registration_holdings,
+    _stub_account,
+)
 
 from alpaca_connectors.account.credentials import stored_credential_values
 from alpaca_connectors.account.ownership import (
@@ -260,33 +267,23 @@ def test_a_requester_bound_call_ignores_the_context(vouching) -> None:
 # Registration
 # ------------------------------------------------------------------------------------------------
 def _register(owner: AccountOwner | None, existing: dict[str, Any] | None):
-    fake_account = MagicMock()
-    fake_account.upsert.return_value = SimpleNamespace(
-        uid="acc-uid-1", account_name="Paper", account_is_active=True
-    )
     runtime = SimpleNamespace(context=SimpleNamespace())
     client = StubTradingClient(_stub_account(), [], raw={"cash": "1000.50"})
     with (
         patch("alpaca_connectors.runtime.start_markets_engine", return_value=runtime),
-        patch("msm.api.accounts.Account", fake_account),
         patch("msm.repositories.crud.upsert_model") as upsert_model,
         _imported(),
         patch(
             "alpaca_connectors.account.services._existing_registration", return_value=existing
         ) as read_existing,
-        patch("alpaca_connectors.account.services._previous_legacy_references", return_value=None),
         patch(
-            "alpaca_connectors.account.services.prepare_alpaca_position_assets",
-            return_value=({}, SimpleNamespace()),
-        ) as prepare_assets,
+            "alpaca_connectors.holdings.services.resolve_account_registration_holdings",
+            return_value=_registration_holdings("USD"),
+        ) as resolve_holdings,
         patch(
-            "alpaca_connectors.holdings.services.resolve_complete_account_holdings_rows",
-            return_value=[{"asset_identifier": "USD"}],
-        ),
-        patch(
-            "alpaca_connectors.holdings.services.publish_resolved_account_holdings_snapshot",
-            return_value=SimpleNamespace(holdings_rows=1, unresolved_symbols=[]),
-        ) as publish,
+            "alpaca_connectors.holdings.services.register_account_holdings",
+            return_value=SimpleNamespace(account=_markets_account()),
+        ) as register_holdings,
     ):
         error = None
         try:
@@ -297,22 +294,21 @@ def _register(owner: AccountOwner | None, existing: dict[str, Any] | None):
             error = exc
     return SimpleNamespace(
         error=error,
-        account=fake_account,
         upsert_model=upsert_model,
         read_existing=read_existing,
-        prepare_assets=prepare_assets,
-        publish=publish,
+        resolve_holdings=resolve_holdings,
+        register_holdings=register_holdings,
+        runtime=runtime,
     )
 
 
 def test_registering_another_owners_account_writes_nothing() -> None:
     result = _register(AccountOwner.main_sequence_user(CALLER_UID), registration(PERSON))
     assert isinstance(result.error, AccountOwnedByAnotherError)
-    result.read_existing.assert_called_once_with("010203ABCD__ALPACA_PAPER")
-    result.prepare_assets.assert_not_called()
-    result.account.upsert.assert_not_called()
+    result.read_existing.assert_called_once_with(result.runtime.context, "010203ABCD__ALPACA_PAPER")
+    result.resolve_holdings.assert_not_called()
+    result.register_holdings.assert_not_called()
     result.upsert_model.assert_not_called()
-    result.publish.assert_not_called()
 
 
 @pytest.mark.parametrize(
@@ -330,7 +326,8 @@ def test_a_registration_records_its_owner(existing) -> None:
 def test_a_registration_without_an_owner_leaves_the_recorded_owner_alone() -> None:
     result = _register(None, registration(PERSON))
     assert result.error is None
-    result.read_existing.assert_not_called()
+    # Read once all the same: the same row carries Secret references from before revision 0018.
+    result.read_existing.assert_called_once()
     values = result.upsert_model.call_args.kwargs["values"]
     assert "owner_gateway_uid" not in values
     assert "owner_user_uid" not in values

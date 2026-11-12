@@ -590,11 +590,13 @@ def test_membership_replacement_bulk_upserts_then_deletes_stale_rows_once() -> N
     asset_uids = [uuid.UUID(int=index + 1) for index in range(503)]
     context = object()
 
+    # ms-markets 3.4.0 runs the upsert itself (``bulk_upsert_model``), which leaves unchanged
+    # memberships unwritten; the stale delete is still one operation.
     with (
         patch(
-            "msm.repositories.asset_categories.build_bulk_upsert_model_operation",
-            return_value="bulk-upsert-operation",
-        ) as build_bulk_upsert,
+            "msm.repositories.asset_categories.bulk_upsert_model",
+            return_value={"rows": []},
+        ) as bulk_upsert,
         patch(
             "msm.repositories.asset_categories."
             "build_delete_stale_asset_category_memberships_operation",
@@ -602,7 +604,7 @@ def test_membership_replacement_bulk_upserts_then_deletes_stale_rows_once() -> N
         ) as build_delete_stale,
         patch(
             "msm.repositories.asset_categories.execute_markets_operation",
-            side_effect=[{"rows": []}, {"rows": []}],
+            return_value={"rows": []},
         ) as execute_operation,
     ):
         result = replace_asset_category_memberships(
@@ -612,22 +614,19 @@ def test_membership_replacement_bulk_upserts_then_deletes_stale_rows_once() -> N
         )
 
     assert result == [{"rows": []}, {"rows": []}]
-    build_bulk_upsert.assert_called_once_with(
+    bulk_upsert.assert_called_once_with(
         context,
         model=AssetCategoryMembershipTable,
         values=[{"category_uid": category_uid, "asset_uid": asset_uid} for asset_uid in asset_uids],
         conflict_columns=("category_uid", "asset_uid"),
     )
-    assert len(build_bulk_upsert.call_args.kwargs["values"]) == 503
+    assert len(bulk_upsert.call_args.kwargs["values"]) == 503
     build_delete_stale.assert_called_once_with(
         context,
         category_uid=category_uid,
         retained_asset_uids=asset_uids,
     )
-    assert execute_operation.call_args_list == [
-        call("bulk-upsert-operation", context=context),
-        call("delete-stale-operation", context=context),
-    ]
+    assert execute_operation.call_args_list == [call("delete-stale-operation", context=context)]
 
 
 def test_market_data_rejects_inactive_asset_universe() -> None:

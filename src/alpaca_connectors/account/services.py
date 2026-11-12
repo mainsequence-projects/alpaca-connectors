@@ -4,8 +4,8 @@ Registration accepts credential values a person submitted (``managed``) or the n
 Sequence Secrets to import them from once (``imported``). Either way the keys are stored on the
 account's detail row in application-encrypted columns (ADR 0017), and the plaintext never leaves
 process memory except into the compiled statement that seals it. Account registration always
-resolves/registers held assets and creates the initial holdings snapshot; later holdings captures
-remain an independent lifecycle operation.
+resolves held assets and creates the initial holdings snapshot, in one Markets ``registerAccount``
+call (ms-markets ADR 0051); later holdings captures remain an independent lifecycle operation.
 """
 
 from __future__ import annotations
@@ -90,6 +90,9 @@ class AlpacaAccountRegistrationResult:
     credential_source: str
     unresolved_symbols: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    # The registration as written (the Account merged with its details row, never the keys), so
+    # a caller answers from it instead of reading it back.
+    registration: dict[str, Any] = field(default_factory=dict)
 
 
 # --------------------------------------------------------------------------------------------------
@@ -476,21 +479,24 @@ def register_alpaca_account(
     snapshot_time: dt.datetime | None = None,
     cash_asset_identifier: str = DEFAULT_CASH_ASSET_IDENTIFIER,
     client: Any | None = None,
-    asset_resolver: Callable[[Any], str | None] | None = None,
 ) -> AlpacaAccountRegistrationResult:
     """Register the Alpaca account and its mandatory initial holdings snapshot.
 
-    Alpaca must accept the credentials, and every non-zero position must resolve or register by
-    immutable Alpaca asset UUID, before any Account, detail, or holdings write. The keys are then
-    stored on the detail row, sealed by the model's encrypted columns in the same upsert as the
-    rest of the registration (ADR 0017). Re-registering an identity that still referenced Main
-    Sequence Secrets from before revision 0018 replaces them: the managed ones are deleted.
+    Alpaca must accept the credentials, and every non-zero position must resolve by immutable
+    Alpaca asset UUID, before anything is written. Then one ``registerAccount`` call (ms-markets
+    ADR 0051) writes the Account, every held asset Markets does not know yet, the cash currency
+    asset and the holdings snapshot, in one Markets transaction. This project's details rows
+    follow: one per new held asset, and the account's, whose keys are sealed by the model's
+    encrypted columns in the same upsert as the rest of the row (ADR 0017). Each write is
+    idempotent, so a caller that sends the same registration again, or twice at once, succeeds.
+    Re-registering an identity that still referenced Main Sequence Secrets from before revision
+    0018 replaces them: the managed ones are deleted.
 
-    ``owner`` (ADR 0019) is checked against the existing registration of this Alpaca account
-    right after Alpaca has named it, before any write, the asset registration of held positions
-    included: an account another owner holds is refused with ``AccountOwnedByAnotherError``. A
-    new registration, or one without an owner, records ``owner``; the same owner registers again
-    unchanged. Without ``owner`` (the CLI) the recorded owner is left as it is.
+    The existing registration is read once, from this project's details table, right after Alpaca
+    has named the account. ``owner`` (ADR 0019) is checked against it before any write: an account
+    another owner holds is refused with ``AccountOwnedByAnotherError``. A new registration, or one
+    without an owner, records ``owner``; the same owner registers again unchanged. Without
+    ``owner`` (the CLI) the recorded owner is left as it is.
     """
     resolved_credentials, credential_source = resolve_credential_input(credentials)
 
@@ -498,6 +504,10 @@ def register_alpaca_account(
     from msm.api.accounts import Account
     from msm.repositories.crud import upsert_model
 
+    from alpaca_connectors.holdings.services import (
+        register_account_holdings,
+        resolve_account_registration_holdings,
+    )
     from alpaca_connectors.runtime import account_runtime_models, start_markets_engine
 
     runtime = start_markets_engine(models=account_runtime_models())
@@ -516,39 +526,33 @@ def register_alpaca_account(
     )
     status = (_enum_str(getattr(account_model, "status", None)) or "").upper()
 
+    existing = _existing_registration(context, unique_identifier)
     if owner is not None:
-        require_owner_may_register(_existing_registration(unique_identifier), owner)
+        require_owner_may_register(existing, owner)
 
-    from alpaca_connectors.holdings.services import resolve_complete_account_holdings_rows
-
-    active_asset_resolver = asset_resolver
-    if active_asset_resolver is None:
-        identifiers_by_position_id, _ = prepare_alpaca_position_assets(
-            trading_client=trading_client,
-            positions=snapshot.positions,
-            register_missing=True,
-        )
-        active_asset_resolver = lambda position: identifiers_by_position_id.get(id(position))
-
-    resolved_holdings_rows = resolve_complete_account_holdings_rows(
+    holdings = resolve_account_registration_holdings(
+        trading_client=trading_client,
         positions=snapshot.positions,
         cash=getattr(account_model, "cash", None),
-        asset_resolver=active_asset_resolver,
         cash_asset_identifier=cash_asset_identifier,
     )
+    account_values = {
+        "unique_identifier": unique_identifier,
+        "account_name": account_name or unique_identifier,
+        "is_paper": paper,
+        "account_is_active": status == "ACTIVE",
+    }
+    if holdings.positions:
+        registered = register_account_holdings(
+            account=account_values, holdings=holdings, holdings_date=when
+        )
+        account = registered.account
+    else:
+        # Markets registers an account with at least one position; one that holds nothing, not
+        # even cash, is written alone and gets no holdings snapshot.
+        account = Account.upsert(**account_values)
 
-    previous_references = _previous_legacy_references(unique_identifier)
-
-    from alpaca_connectors.holdings.services import publish_resolved_account_holdings_snapshot
-
-    account = Account.upsert(
-        unique_identifier=unique_identifier,
-        account_name=account_name or unique_identifier,
-        is_paper=paper,
-        account_is_active=(status == "ACTIVE"),
-    )
-
-    # (3) detail sidecar row: metadata + current financials + the sealed keys.
+    # Detail sidecar row: metadata + current financials + the sealed keys.
     detail_values = build_account_detail_values(
         account=account_model,
         configuration=snapshot.configuration,
@@ -569,6 +573,8 @@ def register_alpaca_account(
     )
     if owner is not None:
         detail_values.update(owner.column_values())
+    # On ``account_uid``, so a repeated or concurrent registration of this account updates the
+    # same row instead of conflicting.
     upsert_model(
         context,
         model=AlpacaAccountDetails,
@@ -576,13 +582,8 @@ def register_alpaca_account(
         conflict_columns=("account_uid",),
     )
 
-    capture_result = publish_resolved_account_holdings_snapshot(
-        account_uid=account.uid,
-        rows=resolved_holdings_rows,
-        snapshot_time=when,
-    )
-
     warnings: list[str] = []
+    previous_references = legacy_secret_references(existing) if existing is not None else None
     if previous_references is not None:
         _, warnings = delete_legacy_managed_secrets(previous_references)
 
@@ -591,29 +592,59 @@ def register_alpaca_account(
         account_uid=str(account.uid),
         is_paper=paper,
         detail_table=AlpacaAccountDetails.__metatable_identifier__,
-        holdings_rows=capture_result.holdings_rows,
+        holdings_rows=len(holdings.positions),
         credential_source=credential_source,
-        unresolved_symbols=capture_result.unresolved_symbols,
         warnings=warnings,
+        registration=_written_registration(account, existing, detail_values),
     )
 
 
-def _existing_registration(unique_identifier: str) -> dict[str, Any] | None:
-    """The registration already recorded for this Alpaca account identity, if any."""
-    from msm.api.accounts import Account
+def _registration_details(context: Any, condition: Any) -> dict[str, Any] | None:
+    """One details row matching ``condition``, without the keys (``registration_columns``)."""
+    from msm.api.base import operation_result_rows
+    from msm.repositories.base import compile_markets_statement, execute_markets_operation
+    from sqlalchemy import select
 
-    account = Account.get_by_unique_identifier(unique_identifier)
-    if account is None:
-        return None
-    return get_account_registration(str(account.uid))
+    statement = select(*registration_columns()).where(condition).limit(1)
+    rows = operation_result_rows(
+        execute_markets_operation(
+            compile_markets_statement(statement, context=context, operation="select"),
+            context=context,
+        )
+    )
+    return rows[0] if rows else None
 
 
-def _previous_legacy_references(unique_identifier: str):
-    """The pre-ADR 0017 Secret references of an existing registration for this identity."""
-    registration = _existing_registration(unique_identifier)
-    if registration is None:
-        return None
-    return legacy_secret_references(registration)
+def _existing_registration(context: Any, unique_identifier: str) -> dict[str, Any] | None:
+    """The details row already recorded for this Alpaca account identity, if any.
+
+    It carries what registration checks, the owner (ADR 0019) and Secret references from before
+    revision 0018, so this one read of this project's table is the only one; Markets is not read.
+    """
+    return _registration_details(
+        context,
+        AlpacaAccountDetails.__table__.c.account_unique_identifier == unique_identifier,
+    )
+
+
+def _written_registration(
+    account: Any, existing: dict[str, Any] | None, detail_values: dict[str, Any]
+) -> dict[str, Any]:
+    """The registration as just written, without the keys: what a registration read answers."""
+    from metatables import EncryptedString
+
+    sealed = {
+        column.key
+        for column in AlpacaAccountDetails.__table__.columns
+        if isinstance(column.type, EncryptedString)
+    }
+    detail = {
+        **(existing or {}),
+        **{key: value for key, value in detail_values.items() if key not in sealed},
+        "account_uid": str(account.uid),
+        "credentials_stored": True,
+    }
+    return _registration_row(account.model_dump(mode="json"), detail)
 
 
 def plan_alpaca_account(
@@ -694,27 +725,17 @@ def get_account_registration(account_uid: str) -> dict[str, Any] | None:
     keys when an Alpaca client is built.
     """
     from msm.api.accounts import Account
-    from msm.api.base import operation_result_rows
-    from msm.repositories.base import compile_markets_statement, execute_markets_operation
-    from sqlalchemy import select
 
     from alpaca_connectors.runtime import account_runtime_models, start_markets_engine
 
     runtime = start_markets_engine(models=account_runtime_models())
     account = Account.get_by_uid(account_uid)
-    statement = (
-        select(*registration_columns())
-        .where(AlpacaAccountDetails.__table__.c.account_uid == account_uid)
-        .limit(1)
+    detail = _registration_details(
+        runtime.context, AlpacaAccountDetails.__table__.c.account_uid == account_uid
     )
-    detail_result = execute_markets_operation(
-        compile_markets_statement(statement, context=runtime.context, operation="select"),
-        context=runtime.context,
-    )
-    detail_rows = operation_result_rows(detail_result)
-    if account is None or not detail_rows:
+    if account is None or detail is None:
         return None
-    return _registration_row(account.model_dump(mode="json"), detail_rows[0])
+    return _registration_row(account.model_dump(mode="json"), detail)
 
 
 def _listing_values(account: Any) -> dict[str, Any]:

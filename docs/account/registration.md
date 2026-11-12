@@ -64,7 +64,8 @@ alpaca-connectors account register \
   --plan-only
 ```
 
-Register the account, every missing held asset, and the initial holdings snapshot in one flow:
+Register the account, every missing held asset, and the initial holdings snapshot in one Markets
+call (see [Holdings](#holdings)):
 
 ```bash
 alpaca-connectors account register \
@@ -113,20 +114,44 @@ alpaca-connectors holdings capture --account-uid <ACCOUNT_UID> --execute
 
 Account registration always creates an initial holdings snapshot and enforces the same hard
 registry as every later holdings capture. Every non-zero position is resolved to the Alpaca Asset
-catalog and stored as `ALPACA::<alpaca_catalog_asset_uuid>`. Missing Alpaca assets are registered
-before the Account or holdings set is written, for every supported Alpaca asset class. The whole
-position set uses one unfiltered Alpaca catalog request, one set-based Main Sequence identity
-query, and one bulk registration operation per row type; it never performs one backend operation
-per position. The catalog is read as Alpaca sends it, so an asset on an exchange (or with a class
-or status) the installed `alpaca-py` does not know yet keeps Alpaca's value instead of failing the
-read; a catalog entry that is not an asset record is skipped and logged. OpenFIGI enrichment is
-optional. If a position lacks a valid Alpaca UUID, Alpaca cannot return its asset record, or the
-asset catalog returns a conflicting identity, the operation reports the affected symbol and
-identifiers and writes no partial Account or snapshot. Cash is stored against the
-shared ms-markets currency Asset `USD`. A dry run reports when that row is missing; execution
-idempotently ensures the built-in `currency` AssetType and `USD` Asset before publishing holdings.
-It does not create an Alpaca asset-detail row or a currency-pair (`CurrencySpot`) record. There is
-no option to skip or relax initial holdings capture.
+catalog and stored as `ALPACA::<alpaca_catalog_asset_uuid>`, for every supported Alpaca asset
+class. The whole position set uses one unfiltered Alpaca catalog request; it never performs one
+backend operation per position. The catalog is read as Alpaca sends it, so an asset on an exchange
+(or with a class or status) the installed `alpaca-py` does not know yet keeps Alpaca's value instead
+of failing the read; a catalog entry that is not an asset record is skipped and logged. If a
+position lacks a valid Alpaca UUID, Alpaca cannot return its asset record, or the asset catalog
+returns a conflicting identity, the operation reports the affected symbol and identifiers and
+writes nothing.
+
+Registration and capture then write to Markets in one ms-markets `registerAccount` call
+(`POST /api/v1/account/registration/`, ms-markets ADR 0051), one Markets transaction that:
+
+- creates each held asset, with its asset type, that Markets does not have yet, and writes an
+  asset snapshot (name, ticker, exchange) only where it differs from the asset's latest one, a
+  comparison Markets makes, not the connector;
+- creates the shared ms-markets currency Asset `USD`, which cash is stored against, when it is
+  missing (no Alpaca asset-detail row and no currency-pair `CurrencySpot` record);
+- creates the Account or changes only its differing fields; a capture sends the Account's current
+  name and no flags, so it leaves the Account as it is;
+- writes the holdings set, replacing a snapshot at the same time, as a holdings publish always did.
+
+This project's own rows follow the call: an `AlpacaAssetDetails` row for each held asset that has
+none yet, keyed by the uid Markets answered, and, for a registration, the account's details row.
+A registration of a known account therefore makes one Markets call (`registerAccount`) and, on this
+project's tables, reads the account's details row and which held assets have detail rows, and
+writes the account's details row. A capture makes two Markets calls (the Account read and
+`registerAccount`) and the same two reads. The API answers a registration from what it wrote,
+without reading it back. A dry run reports which assets and whether the `USD` Asset would be
+created, and writes nothing. OpenFIGI enrichment is optional. There is no option to skip or relax
+initial holdings capture.
+
+Every write is idempotent. Markets answers a repeat with the same holdings at the same time without
+writing, and the account's details row is an upsert on the account uid, so a caller that sends a
+registration again after its own timeout, or twice at once, succeeds. An asset Markets already
+stores with another asset type makes Markets refuse the whole call, and the API answers
+`409 action_conflict` in its own words, naming neither the asset nor the stored type; nothing is
+written. The `registerAccount` route exists from ms-markets 3.4.0, so the Environment's Markets
+deployment must run 3.4.0 or later before this connector release.
 
 Applications such as HunchAPI capture through the API's
 [account sync](../api.md#account-sync), `POST /v1/accounts/{account_uid}/actions/sync`, which runs

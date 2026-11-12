@@ -21,8 +21,8 @@ Repository rules:
   keeps existing signal UIDs stable. Never change either.
 - Keep planning, registration, holdings and bars logic in `alpaca_connectors`; ETF extraction
   comes from `etfhextractor`. The CLI, routes and Jobs only orchestrate; add no one-off scripts.
-- Reach Markets only by `msm.api` row calls (remote backend; ms-markets ADR 0047). Own tables and
-  `alpaca_connectors.instances` live in `alpaca-connectors` (operations/markets-api-boundary.md).
+- Reach Markets only by `msm.api` row calls and `markets_api.register_account` (ms-markets ADRs
+  0047, 0051). Own tables and `instances` live in `alpaca-connectors` (markets-api-boundary.md).
 - Only `.mainsequence/workflows/*.yaml` creates Jobs and sets their schedules; code never does.
   A configuration run (`operations/configuration_jobs.py`) selects it with `--configuration-uid`;
   JobRuns never own configuration. A Job cannot declare access to itself, so each kind's dispatcher

@@ -308,8 +308,8 @@ connection before relying on it.
 ## Current local compatibility review
 
 The installed and locked versions are Main Sequence **9.0.33**, TAU **2.0.26**, MetaTables
-(`mainsequence-metatable`) **0.1.57**, ms-markets **3.0.2** and `etfhextractor` **0.5.2**
-(2026-10-28).
+(`mainsequence-metatable`) **0.1.63**, ms-markets **3.4.0** and `etfhextractor` **0.5.2**
+(2026-11-12).
 
 - Since 2026-10-15 the platform's caller assertions carry only the caller's identity (`sub` and
   `is_organization_admin`, no `team_uids`). The hosted API on Main Sequence 9.0.22 answered every
@@ -327,20 +327,27 @@ The installed and locked versions are Main Sequence **9.0.33**, TAU **2.0.26**, 
   earlier require, so the Agent lookup failed with `ValidationError` and the project
   configuration returned no Agent. Main Sequence 9.0.31 drops the field; on 2026-10-27 the range
   moved to `>=9.0.31`.
-- `etfhextractor` 0.5.2 pins `ms-markets==3.0.2`, so the two move together. Its calendar helpers
-  are imported from `etfhextractor.calendars`.
+- `etfhextractor` 0.5.2 pins `ms-markets==3.0.2`. Its calendar helpers are imported from
+  `etfhextractor.calendars`.
+- On 2026-11-12 the range moved to `ms-markets>=3.4.0` for its `registerAccount` call (ms-markets
+  ADR 0051), which registers an account, its held assets and its holdings in one Markets call. The
+  resolution pulls MetaTables 0.1.63. Until an `etfhextractor` release accepts ms-markets 3.4,
+  `[tool.uv] override-dependencies` lets uv resolve past its pin, which is enough for the lock and
+  the tests. The image's `pip install -r requirements.txt` still refuses the conflict, so nothing
+  is released until that `etfhextractor` tag replaces `v0.5.2` and the override is removed.
+  etfhextractor's own `AssetSnapshots.publish` call ignores the result, whose type 3.4.0 changed.
 - TAU 2.0.26 (ADR 0025) reads the deployed Agent's resources only from `.tau/`, so the six skills
   moved from `.agents/skills/mcp_tools/` to `.tau/skills/` in the same change.
 
 `pyproject.toml` keeps non-exact compatibility ranges (`mainsequence[mcp]>=9.0.31,<10`,
-`mainsequence-metatable>=0.1.55,<0.2`, `ms-tau-sdk>=2.0.26,<3`, `ms-markets>=3.0.2,<4`), while
+`mainsequence-metatable>=0.1.55,<0.2`, `ms-tau-sdk>=2.0.26,<3`, `ms-markets>=3.4.0,<4`), while
 `uv.lock` and the exported `requirements.txt` record the resolution. On 2026-10-14 Main Sequence
 had moved from 9.0.23 to 9.0.24, which stopped scaffolding `AGENTS.md` and ships its guidance in
 the SDK skills, and MetaTables from 0.1.34 to 0.1.35. The earlier SDK upgrade moved the official
 MCP dependency from **1.30.0** to **2.3.0**, with its required transport dependencies.
 The `etfhextractor` Git source is pinned to release tag `v0.5.2` (commit `0572f96`), which requires
-compatible versions. With these versions the suite passes 562 tests plus 93 subtests with network
-access blocked (2026-10-28). No Alpaca workload reads or writes its only table, `DemoBarsTS`, so the
+compatible versions. With these versions the suite passes 664 tests plus 97 subtests with network
+access blocked (2026-11-12). No Alpaca workload reads or writes its only table, `DemoBarsTS`, so the
 migration Job does not apply its provider.
 
 The API now uses MCP 2.x `MCPServer` and its supported stateless JSON ASGI application and

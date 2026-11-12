@@ -217,13 +217,9 @@ def test_submitting_keys_completes_the_persons_registration_request(api_client, 
         ) as required,
         patch(
             "alpaca_connectors.api.app.services.accounts.register_alpaca_account",
-            return_value=SimpleNamespace(account_uid="account-uid"),
+            return_value=SimpleNamespace(account_uid="account-uid", registration=REGISTRATION),
         ) as registered,
         patch("alpaca_connectors.account.key_requests.complete_account_key_request") as completed,
-        patch(
-            "alpaca_connectors.api.app.services.accounts.get_account_registration",
-            return_value=REGISTRATION,
-        ),
     ):
         response = api_client.post(
             "/v1/accounts",
