@@ -49,7 +49,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "alpaca-py" },
+    { name = "alpaca-py", specifier = ">=0.45.0" },
     { name = "empyrical-reloaded", specifier = ">=0.5.12" },
     { name = "etfhextractor", git = "https://github.com/mainsequence-projects/etfholdingextractor?tag=v0.5.2" },
     { name = "fastapi", specifier = ">=0.135.3" },
@@ -72,20 +72,20 @@ dev = [
 
 [[package]]
 name = "alpaca-py"
-version = "0.43.4"
+version = "0.45.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "msgpack" },
     { name = "pandas" },
     { name = "pydantic" },
-    { name = "pytz" },
     { name = "requests" },
     { name = "sseclient-py" },
+    { name = "typing-extensions" },
     { name = "websockets" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/2f/9d/3003f661c15b8003655c447c187aec10f0843647e5c98b391701b04ac3d8/alpaca_py-0.43.4.tar.gz", hash = "sha256:7d529b3654d4e817d9fd7ab461131c4f06a315c736b6a9e4a87d5406bb71114a", size = 97990, upload-time = "2026-04-29T08:41:48.775Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/d0/5f/c113a99128a7f670688a931aebed290dcced9ec59501682ceeb6fe75a2c8/alpaca_py-0.45.0.tar.gz", hash = "sha256:89b39e29b734e3bb13832691126366b4508998511e42f66159faa547f9493256", size = 127005, upload-time = "2026-11-05T09:12:29.655Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/3a/d5/1f57cc03e7b5925a927cb7f8e7ee5f873e22632633778d28d5d23681c871/alpaca_py-0.43.4-py3-none-any.whl", hash = "sha256:dd49ac30e0f2a8f38550ef1f27a58e7fd8f3f3875deaa4e757443cdbd033a1b4", size = 122534, upload-time = "2026-04-29T08:41:50.149Z" },
+    { url = "https://files.pythonhosted.org/packages/05/32/5aeaa0ca00e9bd1caba768eadb9c72bada3e136d0a2b3a6a8552a6d6f080/alpaca_py-0.45.0-py3-none-any.whl", hash = "sha256:49d1969520f93f0f3f194a595b4ac8dc180e9e7e1eb84b5b8fd5bd641f217dd2", size = 150030, upload-time = "2026-11-05T09:12:30.821Z" },
 ]
 
 [[package]]

@@ -5,7 +5,7 @@ alembic==1.18.4
     # via
     #   mainsequence-metatable
     #   ms-markets
-alpaca-py==0.43.4
+alpaca-py==0.45.0
     # via alpaca-connectors
 annotated-doc==0.0.4
     # via
@@ -169,7 +169,7 @@ linkify-it-py==2.2.0
     # via markdown-it-py
 loguru==0.7.3
     # via fastembed
-mainsequence==9.0.33
+mainsequence==9.0.38
     # via
     #   alpaca-connectors
     #   etfhextractor
@@ -393,9 +393,7 @@ python-multipart==0.0.32
     #   mcp
     #   ms-tau-sdk
 pytz==2026.2
-    # via
-    #   alpaca-py
-    #   ms-markets
+    # via ms-markets
 pywin32==312 ; sys_platform == 'win32'
     # via
     #   mcp
@@ -493,6 +491,7 @@ typer==0.26.7
 typing-extensions==4.15.0
     # via
     #   alembic
+    #   alpaca-py
     #   fastapi
     #   grpcio
     #   huggingface-hub

@@ -14,7 +14,8 @@ dependencies = [
     "ms-markets>=3.0.2,<4",
     "mainsequence[mcp]>=9.0.38,<10",
     "mainsequence-metatable>=0.1.55,<0.2",
-    "alpaca-py",
+    # 0.45.0 is the first release whose asset model knows the TXSE exchange.
+    "alpaca-py>=0.45.0",
     "playwright",
     "mkdocs>=1.6.1",
     "mkdocs-material>=9.7.6",

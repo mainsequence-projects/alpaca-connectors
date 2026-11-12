@@ -340,7 +340,7 @@ def resolve_alpaca_asset_records_for_positions(
 ) -> dict[int, Any]:
     """Resolve every held position from one unfiltered Alpaca catalog request."""
     from alpaca_connectors.assets.alpaca_asset_details import normalize_alpaca_asset_id
-    from alpaca_connectors.assets.alpaca_us_equities import AlpacaAssetRecord
+    from alpaca_connectors.assets.alpaca_us_equities import fetch_alpaca_asset_catalog
 
     positions_with_identity = [
         position
@@ -350,8 +350,7 @@ def resolve_alpaca_asset_records_for_positions(
     if not positions_with_identity:
         return {}
 
-    provider_assets = trading_client.get_all_assets()
-    catalog = [AlpacaAssetRecord.from_trading_asset(asset) for asset in provider_assets]
+    catalog = fetch_alpaca_asset_catalog(trading_client=trading_client)
     records_by_id = {str(asset.alpaca_asset_id): asset for asset in catalog}
     records_by_symbol = {_normalized_alpaca_symbol(asset.symbol): asset for asset in catalog}
     resolved: dict[int, Any] = {}

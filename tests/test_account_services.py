@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from msm.constants import ASSET_TYPE_CURRENCY, ASSET_TYPE_CURRENCY_DEFINITION
+from test_alpaca_us_equities import NEW_EXCHANGES, alpaca_catalog_asset
 
 from alpaca_connectors.account import api_key_fingerprint
 from alpaca_connectors.account.credentials import (
@@ -148,10 +149,11 @@ def test_latest_holdings_set_query_is_account_scoped_and_deterministic() -> None
 
 
 class StubTradingClient:
-    def __init__(self, account, positions, raw):
+    def __init__(self, account, positions, raw, catalog=()):
         self._account = account
         self._positions = positions
         self._raw = raw
+        self._catalog = list(catalog)
         self.position_reads = 0
 
     def get_account(self):
@@ -164,7 +166,9 @@ class StubTradingClient:
         self.position_reads += 1
         return self._positions
 
-    def get(self, path):
+    def get(self, path, data=None):
+        if path == "/assets":
+            return self._catalog
         return self._raw if path == "/account" else {}
 
 
@@ -369,37 +373,24 @@ class AccountServiceShapingTests(unittest.TestCase):
     def test_position_set_uses_one_provider_catalog_and_one_registration_batch(self) -> None:
         positions = _stub_positions()
         provider_assets = [
-            SimpleNamespace(
-                id=uuid.UUID("11111111-1111-4111-8111-111111111111"),
-                symbol="AAPL",
+            alpaca_catalog_asset(
+                "AAPL",
+                uuid.UUID("11111111-1111-4111-8111-111111111111"),
                 name="Apple Inc.",
-                exchange=SimpleNamespace(value="NASDAQ"),
-                asset_class=SimpleNamespace(value="us_equity"),
-                status=SimpleNamespace(value="active"),
-                tradable=True,
-                marginable=True,
-                shortable=True,
-                easy_to_borrow=True,
-                fractionable=True,
-                attributes=[],
             ),
-            SimpleNamespace(
-                id=uuid.UUID("276e2673-764b-4ab6-a611-caf665ca6340"),
-                symbol="BTC/USD",
+            alpaca_catalog_asset(
+                "BTC/USD",
+                uuid.UUID("276e2673-764b-4ab6-a611-caf665ca6340"),
+                exchange="CRYPTO",
+                asset_class="crypto",
                 name="Bitcoin / US Dollar",
-                exchange=SimpleNamespace(value="CRYPTO"),
-                asset_class=SimpleNamespace(value="crypto"),
-                status=SimpleNamespace(value="active"),
-                tradable=True,
                 marginable=False,
                 shortable=False,
                 easy_to_borrow=False,
-                fractionable=True,
-                attributes=[],
             ),
         ]
         client = MagicMock()
-        client.get_all_assets.return_value = provider_assets
+        client.get.return_value = provider_assets
         resolution = SimpleNamespace(missing_assets=[])
 
         with (
@@ -425,7 +416,8 @@ class AccountServiceShapingTests(unittest.TestCase):
                 id(positions[1]): "ALPACA::276e2673-764b-4ab6-a611-caf665ca6340",
             },
         )
-        client.get_all_assets.assert_called_once_with()
+        client.get.assert_called_once_with("/assets", {})
+        client.get_all_assets.assert_not_called()
         client.get_asset.assert_not_called()
         resolve_registration.assert_called_once()
         self.assertEqual(len(resolve_registration.call_args.args[0].alpaca_assets), 2)
@@ -664,6 +656,66 @@ class RegisterAlpacaAccountTests(unittest.TestCase):
 
         resolve_holdings.assert_called_once()
         self.assertEqual(publish_holdings.call_args.kwargs["rows"], resolved_rows)
+
+    def test_register_resolves_held_assets_on_exchanges_alpaca_py_may_not_know(self) -> None:
+        held_id = uuid.UUID("77777777-7777-4777-8777-777777777777")
+        for exchange in NEW_EXCHANGES:
+            with self.subTest(exchange=exchange):
+                aapl = _stub_positions()[0]
+                held = SimpleNamespace(**{**vars(aapl), "symbol": "TXCO", "asset_id": held_id})
+                catalog = [
+                    alpaca_catalog_asset("AAPL", aapl.asset_id),
+                    alpaca_catalog_asset("TXCO", held_id, exchange=exchange),
+                ]
+                client = StubTradingClient(
+                    _stub_account(), [aapl, held], raw={"cash": "1000.50"}, catalog=catalog
+                )
+                fake_account = MagicMock()
+                fake_account.upsert.return_value = SimpleNamespace(uid="acc-uid-1")
+                resolution = SimpleNamespace(missing_assets=[])
+
+                with (
+                    patch(
+                        "alpaca_connectors.runtime.start_markets_engine",
+                        return_value=SimpleNamespace(context=SimpleNamespace()),
+                    ),
+                    patch("msm.api.accounts.Account", fake_account),
+                    patch("msm.repositories.crud.upsert_model"),
+                    _imported(),
+                    patch(
+                        "alpaca_connectors.account.services._previous_legacy_references",
+                        return_value=None,
+                    ),
+                    patch(
+                        "alpaca_connectors.account.services.ensure_cash_currency_asset",
+                        return_value="USD",
+                    ),
+                    patch(
+                        "alpaca_connectors.assets.alpaca_us_equities.resolve_alpaca_us_equity_registration_plan",
+                        return_value=resolution,
+                    ) as resolve_registration,
+                    patch(
+                        "alpaca_connectors.assets.alpaca_us_equities.register_alpaca_us_equity_assets"
+                    ) as register_assets,
+                    patch(
+                        "alpaca_connectors.holdings.services.publish_resolved_account_holdings_snapshot",
+                        return_value=SimpleNamespace(holdings_rows=3, unresolved_symbols=[]),
+                    ) as publish_holdings,
+                ):
+                    result = register_alpaca_account(credentials=EXTERNAL_NAMES, client=client)
+
+                self.assertEqual(result.account_uid, "acc-uid-1")
+                plan = resolve_registration.call_args.args[0]
+                exchanges = {asset.symbol: asset.exchange for asset in plan.alpaca_assets}
+                self.assertEqual(exchanges, {"AAPL": "NASDAQ", "TXCO": exchange})
+                register_assets.assert_called_once_with(registration_resolution=resolution)
+                identifiers = [
+                    row["asset_identifier"] for row in publish_holdings.call_args.kwargs["rows"]
+                ]
+                self.assertEqual(
+                    identifiers,
+                    [f"ALPACA::{aapl.asset_id}", f"ALPACA::{held_id}", "USD"],
+                )
 
     def test_initial_holdings_registry_failure_prevents_account_creation(self) -> None:
         fake_account = MagicMock()

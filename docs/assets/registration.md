@@ -39,6 +39,11 @@ A symbol is eligible for registration when:
 2. Alpaca provides a valid immutable asset UUID
 3. it is missing from Main Sequence when checked by `ALPACA::<uuid>`
 
+The catalog request is read as Alpaca sends it (`fetch_alpaca_asset_catalog`): exchange, class
+and status keep Alpaca's strings, so a value `alpaca-py` does not know yet, such as a new exchange,
+never fails the catalog, and an entry that is not an asset record is skipped and logged. The raw
+payload stored on `AlpacaAssetDetails` is that catalog entry.
+
 Missing or failed OpenFIGI enrichment is returned as a warning. The asset remains eligible.
 Alpaca `status` and `tradable` values are stored on `AlpacaAssetDetails`; inactive and
 non-tradable values do not make an asset ineligible for registration.
