@@ -266,6 +266,44 @@ class AlpacaAssetRegistrationTests(unittest.TestCase):
                 )
                 self.assertEqual(details["exchange"], exchange)
 
+    def test_detail_attributes_reach_the_json_column_as_a_json_array(self) -> None:
+        """A compiled bulk upsert sends a Python list as a PostgreSQL array, which a JSON column
+        refuses; the attributes go as JSON text that PostgreSQL parses into the array."""
+        import json
+
+        from msm.repositories import base, crud
+
+        from alpaca_connectors.assets.alpaca_asset_details import AlpacaAssetDetailsTable
+
+        record = AlpacaAssetRecord.from_catalog_payload(
+            alpaca_catalog_asset(
+                "AAPL", AAPL_ID, attributes=["fractional_eh_enabled", "has_options"]
+            )
+        )
+        details = _alpaca_detail_registration_values(
+            record, asset_uid=uuid.uuid4(), refreshed_at=dt.datetime(2026, 11, 12, tzinfo=dt.UTC)
+        )
+        self.assertEqual(
+            json.loads(details["attributes"]), ["fractional_eh_enabled", "has_options"]
+        )
+
+        def offline(statement, *, context, operation, dialect=None):
+            return base.compile_markets_statement(
+                statement, context=context, operation=operation, dialect="postgresql"
+            )
+
+        context = base.MarketsRepositoryContext(data_source_uid=str(uuid.uuid4()))
+        with patch.object(crud, "compile_markets_statement", offline):
+            operation = crud.build_bulk_upsert_model_operation(
+                context,
+                model=AlpacaAssetDetailsTable,
+                values=[details],
+                conflict_columns=("asset_uid",),
+            )
+        sent = operation.statement.parameters["attributes_m0"]
+        self.assertIsInstance(sent, str)
+        self.assertEqual(json.loads(sent), ["fractional_eh_enabled", "has_options"])
+
     def test_catalog_skips_and_logs_an_entry_that_is_not_an_asset_record(self) -> None:
         trading_client = Mock()
         trading_client.get.return_value = [

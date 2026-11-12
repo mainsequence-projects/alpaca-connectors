@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import json
 import logging
 import time
 import uuid
@@ -976,7 +977,9 @@ def _alpaca_detail_registration_values(
         "shortable": alpaca_asset.shortable,
         "easy_to_borrow": alpaca_asset.easy_to_borrow,
         "fractionable": alpaca_asset.fractionable,
-        "attributes": alpaca_asset.attributes,
+        # A compiled bulk upsert binds a Python list as a PostgreSQL array, which a JSON column
+        # refuses ("Token ... is invalid"); JSON text is parsed into the JSON array instead.
+        "attributes": json.dumps(list(alpaca_asset.attributes)),
         "raw_payload": alpaca_asset.raw_payload,
         "refreshed_at": refreshed_at,
     }
