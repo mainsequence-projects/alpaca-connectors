@@ -8,6 +8,7 @@ from __future__ import annotations
 from dataclasses import asdict
 from typing import Any
 
+from alpaca_connectors.account.ownership import AccountOwner
 from alpaca_connectors.operations import (
     configuration_job_state,
     create_signal_job_configuration,
@@ -32,6 +33,7 @@ from ..schemas import (
     SignalObservationAssetResponse,
     SignalObservationsResponse,
 )
+from .accounts import require_owner_may_configure_account
 from .common import collection_response
 from .configuration_jobs import accepted_run, job_fields, lifecycle_state
 
@@ -135,9 +137,27 @@ def get_configuration_observations(
     )
 
 
+def _require_owner_of_configured_account(
+    configuration_uid: str,
+    account_uid: Any,
+    owner: AccountOwner,
+) -> None:
+    """Check the account the configuration will run with: the new one, else its current one."""
+    if account_uid is None:
+        current = get_signal_job_configuration(configuration_uid)
+        if current is None:
+            return  # The configuration service reports the missing configuration.
+        account_uid = current.account_uid
+    require_owner_may_configure_account(str(account_uid), owner)
+
+
 def create_configuration(
     request: SignalJobConfigurationCreateRequest,
+    *,
+    owner: AccountOwner,
 ) -> SignalJobConfigurationResponse:
+    """Create a configuration; an account another owner holds is refused (ADR 0022)."""
+    require_owner_may_configure_account(str(request.account_uid), owner)
     row = create_signal_job_configuration(**request.model_dump())
     return _responses([row])[0]
 
@@ -145,7 +165,11 @@ def create_configuration(
 def update_configuration(
     configuration_uid: str,
     request: SignalJobConfigurationUpdateRequest,
+    *,
+    owner: AccountOwner,
 ) -> SignalJobConfigurationResponse:
+    """Update a configuration; one that runs with another owner's keys is refused (ADR 0022)."""
+    _require_owner_of_configured_account(configuration_uid, request.account_uid, owner)
     row = update_signal_job_configuration(
         configuration_uid,
         **request.model_dump(exclude_unset=True),
@@ -166,7 +190,11 @@ def pause_configuration(
 
 def resume_configuration(
     configuration_uid: str,
+    *,
+    owner: AccountOwner,
 ) -> SignalJobConfigurationResponse:
+    """Resume a configuration; one that runs with another owner's keys is refused (ADR 0022)."""
+    _require_owner_of_configured_account(configuration_uid, None, owner)
     row = resume_signal_job_configuration(configuration_uid)
     return _responses([row])[0]
 

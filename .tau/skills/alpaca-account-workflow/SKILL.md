@@ -76,6 +76,9 @@ from both Secret names), `refresh` (provider state), and `capture_holdings` (pub
 the complete position set, registering only Assets Markets lacks). Send one capture, never one
 request per position.
 
-Deletion requires the person's exact `DELETE <account_uid>` confirmation. Stop on reference
-blockers; do not cascade into linked configurations. Writes can outlast an MCP timeout: inspect
+Deletion requires the person's exact `DELETE <account_uid>` confirmation. Before asking for it,
+tell the person that deletion also disables every enabled signal and bar configuration that runs
+with the account's keys. It never deletes them; report the configuration UIDs the result names as
+disabled. Only an Account's owner configures it: another owner's Account answers
+`account_owned_by_another`. Writes can outlast an MCP timeout: inspect
 Account/key-request/holdings state before retrying an ambiguous result, never assume rollback.

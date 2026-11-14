@@ -193,6 +193,7 @@ def run_account_refresh_command(args: argparse.Namespace) -> int:
 
 def run_account_remove_command(args: argparse.Namespace) -> int:
     from alpaca_connectors.account.services import (
+        enabled_account_configurations,
         get_account_registration,
         remove_account_registration,
     )
@@ -202,15 +203,20 @@ def run_account_remove_command(args: argparse.Namespace) -> int:
     if account is None:
         raise SystemExit(f"Alpaca account registration {args.account_uid} does not exist.")
     _, holdings_count = list_account_holdings(args.account_uid, limit=1)
+    dependents = enabled_account_configurations(args.account_uid)
     preflight = {
         "allowed": True,
         "account_uid": args.account_uid,
         "retained_holdings_rows": holdings_count,
         "credential_source": account.get("credential_source"),
+        "disables_signal_configuration_uids": list(dependents.signal_uids),
+        "disables_bar_configuration_uids": list(dependents.bar_uids),
         "detail": (
             "The Alpaca binding, its stored keys included, will be removed and Account will be "
-            "deactivated. Main Sequence Secrets a registration made before revision 0018 still "
-            "references are deleted when this application created them and kept otherwise."
+            "deactivated. The enabled signal and bar configurations that run with its keys are "
+            "disabled first (ADR 0022). Main Sequence Secrets a registration made before revision "
+            "0018 still references are deleted when this application created them and kept "
+            "otherwise."
         ),
     }
     if not args.execute:

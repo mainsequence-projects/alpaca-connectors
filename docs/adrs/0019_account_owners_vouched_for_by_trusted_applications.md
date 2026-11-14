@@ -26,6 +26,14 @@ It amends:
 
 No Environment lists a vouching caller until that caller meets section 9.
 
+Amended on 2026-11-14 by [ADR 0022](0022_configurations_never_block_an_owners_removal.md) for
+issue #25:
+
+- configurations never block an owner's removal, which disables them instead;
+- only an account's owner configures it;
+- an external person's claim of an account without an owner is refused while enabled
+  configurations run with its keys (section 5).
+
 ## Terms
 
 | Term | Meaning |

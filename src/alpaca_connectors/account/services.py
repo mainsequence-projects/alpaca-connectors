@@ -44,7 +44,9 @@ from alpaca_connectors.account.legacy_secrets import (
 from alpaca_connectors.account.ownership import (
     OWNER_GATEWAY_COLUMN,
     OWNER_USER_COLUMN,
+    AccountInUseError,
     AccountOwner,
+    is_claim_by_external_person,
     require_owner_may_register,
 )
 from alpaca_connectors.holdings import DEFAULT_CASH_ASSET_IDENTIFIER, build_account_holdings_rows
@@ -497,6 +499,10 @@ def register_alpaca_account(
     another owner holds is refused with ``AccountOwnedByAnotherError``. A new registration, or one
     without an owner, records ``owner``; the same owner registers again unchanged. Without
     ``owner`` (the CLI) the recorded owner is left as it is.
+
+    An external person who would become the owner of an account that has none is refused with
+    ``AccountInUseError`` while enabled configurations run with its keys (ADR 0022): another
+    principal made them, and they would run on the person's keys from then on.
     """
     resolved_credentials, credential_source = resolve_credential_input(credentials)
 
@@ -529,6 +535,10 @@ def register_alpaca_account(
     existing = _existing_registration(context, unique_identifier)
     if owner is not None:
         require_owner_may_register(existing, owner)
+    if is_claim_by_external_person(existing, owner) and _claimed_account_in_use(
+        existing, unique_identifier
+    ):
+        raise AccountInUseError()
 
     holdings = resolve_account_registration_holdings(
         trading_client=trading_client,
@@ -619,12 +629,85 @@ def _existing_registration(context: Any, unique_identifier: str) -> dict[str, An
     """The details row already recorded for this Alpaca account identity, if any.
 
     It carries what registration checks, the owner (ADR 0019) and Secret references from before
-    revision 0018, so this one read of this project's table is the only one; Markets is not read.
+    revision 0018, so this one read of this project's table is the only one. Markets is read only
+    for an external person's claim of an account without a details row
+    (``_claimed_account_in_use``).
     """
     return _registration_details(
         context,
         AlpacaAccountDetails.__table__.c.account_unique_identifier == unique_identifier,
     )
+
+
+def _claimed_account_in_use(existing: dict[str, Any] | None, unique_identifier: str) -> bool:
+    """Whether enabled configurations run on the account an external person would claim.
+
+    Without a details row the Account can still exist, from a registration removed earlier, and
+    configurations can still name it, so Markets is asked for it by identity.
+    """
+    if existing is not None:
+        account_uid = existing.get("account_uid")
+    else:
+        from msm.api.accounts import Account
+
+        account = Account.get_by_unique_identifier(unique_identifier)
+        account_uid = account.uid if account is not None else None
+    return account_uid is not None and bool(enabled_account_configurations(account_uid))
+
+
+@dataclass(frozen=True)
+class AccountConfigurations:
+    """The enabled configurations that run with one account's keys (ADR 0022)."""
+
+    signal_uids: tuple[str, ...] = ()
+    bar_uids: tuple[str, ...] = ()
+
+    def __bool__(self) -> bool:
+        return bool(self.signal_uids or self.bar_uids)
+
+    def __len__(self) -> int:
+        return len(self.signal_uids) + len(self.bar_uids)
+
+
+def enabled_account_configurations(account_uid: uuid.UUID | str) -> AccountConfigurations:
+    """The signal and bar configurations that run with the account's keys.
+
+    A signal configuration runs while it is in the scheduled run (``enabled``, reported as
+    ``scheduled``); a bar configuration runs at all only while it is ``enabled``.
+    """
+    from alpaca_connectors.market_data.configurations import bar_configurations_for_account
+    from alpaca_connectors.operations.signal_job_configurations import (
+        signal_job_configurations_for_account,
+    )
+
+    return AccountConfigurations(
+        signal_uids=tuple(
+            str(configuration.uid)
+            for configuration in signal_job_configurations_for_account(account_uid)
+            if configuration.enabled
+        ),
+        bar_uids=tuple(
+            str(configuration.uid)
+            for configuration in bar_configurations_for_account(account_uid)
+            if configuration.enabled
+        ),
+    )
+
+
+def disable_account_configurations(configurations: AccountConfigurations) -> None:
+    """Leave the signal configurations out of the scheduled run and stop the bar configurations.
+
+    Only the flag is written, so a configuration whose universe is gone is disabled all the same.
+    """
+    from alpaca_connectors.market_data.configurations import disable_bar_configuration
+    from alpaca_connectors.operations.signal_job_configurations import (
+        update_signal_job_configuration_row,
+    )
+
+    for configuration_uid in configurations.signal_uids:
+        update_signal_job_configuration_row(configuration_uid, values={"enabled": False})
+    for configuration_uid in configurations.bar_uids:
+        disable_bar_configuration(configuration_uid)
 
 
 def _written_registration(
@@ -1016,6 +1099,11 @@ def remove_account_registration(account_uid: str) -> dict[str, Any]:
 
     The stored keys go with the row. A registration that still referenced Main Sequence Secrets
     from before revision 0018 has its managed ones deleted; external ones are kept.
+
+    Configurations never block a removal (ADR 0022): the enabled signal and bar configurations
+    that run with the account's keys are disabled first, and the result names them. They keep
+    their account and stay until someone deletes them; the account's owner can enable them again
+    once the account is registered again.
     """
     from msm.api.accounts import Account, AccountHoldingsSet
     from msm.repositories.crud import delete_model
@@ -1025,20 +1113,8 @@ def remove_account_registration(account_uid: str) -> dict[str, Any]:
     current = get_account_registration(account_uid)
     if current is None:
         raise LookupError(f"Alpaca account registration {account_uid!s} does not exist.")
-    from alpaca_connectors.operations.signal_job_configurations import (
-        signal_job_configurations_for_account,
-    )
-
-    signal_configurations = signal_job_configurations_for_account(account_uid)
-    if signal_configurations:
-        dependencies = ", ".join(
-            f"{configuration.name} ({configuration.uid!s})"
-            for configuration in signal_configurations
-        )
-        raise ValueError(
-            f"Alpaca account registration {account_uid!s} is referenced by signal Job "
-            f"configuration(s): {dependencies}. Delete or change those configurations first."
-        )
+    dependents = enabled_account_configurations(account_uid)
+    disable_account_configurations(dependents)
     runtime = start_markets_engine(models=account_runtime_models())
     retained_holdings_sets = AccountHoldingsSet.count(account_uid=str(account_uid))
     delete_model(runtime.context, model=AlpacaAccountDetails, uid=account_uid)
@@ -1053,6 +1129,8 @@ def remove_account_registration(account_uid: str) -> dict[str, Any]:
         "registration_removed": True,
         "account_deactivated": True,
         "retained_holdings_sets": retained_holdings_sets,
+        "disabled_signal_configuration_uids": list(dependents.signal_uids),
+        "disabled_bar_configuration_uids": list(dependents.bar_uids),
         "deleted_secrets": deleted_secrets,
         "warnings": warnings,
     }
@@ -1112,6 +1190,7 @@ def refresh_alpaca_account(
 
 
 __all__ = [
+    "AccountConfigurations",
     "AlpacaAccountRegistrationResult",
     "AlpacaAccountSnapshot",
     "backfill_account_listing_fields",
@@ -1121,6 +1200,8 @@ __all__ = [
     "build_registered_account_client",
     "canonical_identifier_for_position",
     "cash_asset_exists",
+    "disable_account_configurations",
+    "enabled_account_configurations",
     "ensure_cash_currency_asset",
     "get_account_registration",
     "list_account_registrations",

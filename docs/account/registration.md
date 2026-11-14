@@ -89,7 +89,15 @@ alpaca-connectors account remove <ACCOUNT_UID> --execute
 same way; the new keys must authenticate as the registered Alpaca account.
 
 Removal deletes the project binding, its stored keys included, and deactivates the shared Account.
-It retains historical holdings.
+It retains historical holdings. Configurations never block it
+([ADR 0022](../adrs/0022_configurations_never_block_an_owners_removal.md)): the enabled signal and
+bar configurations that run with the account's keys are disabled first, and the result lists their
+UIDs. They keep their account until someone deletes them, and the owner can enable them again once
+the account is registered again. `remove` without `--execute` lists the ones it would disable.
+
+Once an account has an owner, only that owner creates, updates or resumes a signal or bar
+configuration on it. An external person cannot claim an account without an owner while enabled
+configurations run with its keys.
 
 Registrations created before revision `0018` still hold their keys in Main Sequence Secrets. The
 one-off `alpaca-credential-migration` Job, or this command, copies them into the encrypted

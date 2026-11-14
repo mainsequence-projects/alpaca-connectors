@@ -31,7 +31,7 @@ from ..schemas import (
 )
 from ..services.account_sync import sync_account
 from ..services.accounts import (
-    account_delete_blockers,
+    configurations_disabled_by_removal,
     create_account_registration,
     get_account,
     list_accounts,
@@ -182,15 +182,23 @@ def accounts_remove_preflight(request: BulkActionRequest = Body(...)) -> dict[st
         missing = [uid for uid in request.selection.uids if get_account(uid) is None]
         blockers = [f"Missing account: {uid}" for uid in missing]
         retained_rows = 0
+        disabled_configurations = 0
         if not missing:
             from alpaca_connectors.holdings import list_account_holdings
 
             for uid in request.selection.uids:
-                blockers.extend(account_delete_blockers(uid))
+                # Configurations never block a removal; they are disabled (ADR 0022).
+                disabled_configurations += configurations_disabled_by_removal(uid)
                 _, count = list_account_holdings(uid, limit=1)
                 retained_rows += count
     except Exception as exc:
         raise api_http_error(exc) from exc
+    warnings = [f"{retained_rows} historical holdings rows will be retained."]
+    if disabled_configurations:
+        warnings.append(
+            f"{disabled_configurations} enabled signal or bar configurations that run with these "
+            "accounts' keys will be disabled."
+        )
     return {
         "contract": "command-center.bulk_action_preflight@v1",
         "allowed": not blockers,
@@ -198,11 +206,11 @@ def accounts_remove_preflight(request: BulkActionRequest = Body(...)) -> dict[st
             "Registrations will be removed with their stored keys, accounts deactivated, and "
             "holdings retained."
             if not blockers
-            else "One or more account registrations have blocking dependencies."
+            else "One or more selected account registrations do not exist."
         ),
         "matched_count": len(request.selection.uids) - len(missing),
         "blockers": blockers,
-        "warnings": [f"{retained_rows} historical holdings rows will be retained."],
+        "warnings": warnings,
     }
 
 

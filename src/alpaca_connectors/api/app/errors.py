@@ -15,7 +15,7 @@ from alpaca_connectors.account.credentials import (
     AlpacaCredentialsRejectedError,
     StoredCredentialError,
 )
-from alpaca_connectors.account.ownership import AccountOwnedByAnotherError
+from alpaca_connectors.account.ownership import AccountInUseError, AccountOwnedByAnotherError
 from alpaca_connectors.dependencies import STARTING_RETRY_SECONDS, is_dependency_starting
 from alpaca_connectors.execution.orders import PreTradeCheckError
 from alpaca_connectors.platform_secrets import PlatformSecretAccessError
@@ -78,6 +78,13 @@ def api_http_error(exc: Exception) -> HTTPException:
         return api_error(
             status_code=409,
             code="account_owned_by_another",
+            message=str(exc),
+        )
+    if isinstance(exc, AccountInUseError):
+        # Never names the configurations (ADR 0022).
+        return api_error(
+            status_code=409,
+            code="account_in_use",
             message=str(exc),
         )
     if isinstance(exc, PreTradeCheckError):

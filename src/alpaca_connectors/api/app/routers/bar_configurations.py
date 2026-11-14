@@ -5,6 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Body, Query
 
 from ..errors import api_http_error, not_found
+from ..identity import acting_owner
 from ..schemas import (
     BarConfigurationCreateRequest,
     BarConfigurationResolutionResponse,
@@ -16,7 +17,6 @@ from ..schemas import (
     ResourceCollection,
     ResourceDiscoveryResponse,
 )
-from ..services.accounts import require_named_account_access
 from ..services.bar_configurations import (
     create_configuration,
     delete_configuration,
@@ -102,9 +102,8 @@ def configurations_discovery() -> ResourceDiscoveryResponse:
 def configuration_create(
     request: BarConfigurationCreateRequest = Body(...),
 ) -> BarConfigurationResponse:
-    require_named_account_access(request.account_uid)
     try:
-        return create_configuration(request)
+        return create_configuration(request, owner=acting_owner())
     except Exception as exc:
         raise api_http_error(exc) from exc
 
@@ -122,9 +121,8 @@ def configuration_update(
     configuration_uid: str,
     request: BarConfigurationUpdateRequest = Body(...),
 ) -> BarConfigurationResponse:
-    require_named_account_access(request.account_uid)
     try:
-        return update_configuration(configuration_uid, request)
+        return update_configuration(configuration_uid, request, owner=acting_owner())
     except Exception as exc:
         raise api_http_error(exc) from exc
 

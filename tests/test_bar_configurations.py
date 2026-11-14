@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from pydantic import ValidationError
 
+from alpaca_connectors.account.ownership import AccountOwner
 from alpaca_connectors.api.app.schemas import (
     BarConfigurationCreateRequest,
     BarConfigurationUpdateRequest,
@@ -39,6 +40,8 @@ from alpaca_connectors.market_data.services import (
     execute_market_data_update,
 )
 from alpaca_connectors.market_data.storage import AlpacaStockBars1dSipAllStorage
+
+OWNER = AccountOwner.main_sequence_user("33333333-3333-4333-8333-333333333333")
 
 
 def _typed_configuration_row() -> AlpacaBarsConfiguration:
@@ -88,14 +91,23 @@ def test_api_service_projects_typed_configuration_rows_for_create_get_and_update
             "alpaca_connectors.api.app.services.bar_configurations.update_bar_configuration",
             return_value=row,
         ),
+        patch(
+            "alpaca_connectors.api.app.services.bar_configurations.require_owner_may_configure_account"
+        ) as require_owner,
     ):
-        created = create_api_configuration(create_request)
+        created = create_api_configuration(create_request, owner=OWNER)
         retrieved = get_api_configuration(str(row.uid))
         updated = update_api_configuration(
             str(row.uid),
             BarConfigurationUpdateRequest(name="Updated"),
+            owner=OWNER,
         )
 
+    # Create checks the account it names; an update without one checks the configuration's own.
+    assert [item.args for item in require_owner.call_args_list] == [
+        (str(row.account_uid), OWNER),
+        (str(row.account_uid), OWNER),
+    ]
     assert created.uid == str(row.uid)
     assert retrieved is not None and retrieved.account_uid == str(row.account_uid)
     assert updated.asset_uids == []
@@ -504,11 +516,18 @@ def test_api_create_defaults_to_scheduled_and_passes_the_flag_through() -> None:
     assert BarConfigurationCreateRequest(**values).scheduled is True
 
     row = _typed_configuration_row().model_copy(update={"scheduled": False})
-    with patch(
-        "alpaca_connectors.api.app.services.bar_configurations.create_bar_configuration",
-        return_value=row,
-    ) as create:
-        created = create_api_configuration(BarConfigurationCreateRequest(**values, scheduled=False))
+    with (
+        patch(
+            "alpaca_connectors.api.app.services.bar_configurations.create_bar_configuration",
+            return_value=row,
+        ) as create,
+        patch(
+            "alpaca_connectors.api.app.services.bar_configurations.require_owner_may_configure_account"
+        ),
+    ):
+        created = create_api_configuration(
+            BarConfigurationCreateRequest(**values, scheduled=False), owner=OWNER
+        )
 
     assert create.call_args.kwargs["scheduled"] is False
     assert created.scheduled is False

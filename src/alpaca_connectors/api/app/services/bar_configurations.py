@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from typing import Any
+
+from alpaca_connectors.account.ownership import AccountOwner
 from alpaca_connectors.market_data import (
     create_bar_configuration,
     delete_bar_configuration,
@@ -20,6 +23,7 @@ from ..schemas import (
     BarConfigurationUpdateAcceptedResponse,
     BarConfigurationUpdateRequest,
 )
+from .accounts import require_owner_may_configure_account
 from .common import collection_response
 
 
@@ -53,9 +57,27 @@ def list_configurations(
     return collection_response(items=items, total=total, limit=limit, offset=offset)
 
 
+def _require_owner_of_configured_account(
+    configuration_uid: str,
+    account_uid: Any,
+    owner: AccountOwner,
+) -> None:
+    """Check the account the configuration will run with: the new one, else its current one."""
+    if account_uid is None:
+        current = get_bar_configuration(configuration_uid)
+        if current is None:
+            return  # The configuration service reports the missing configuration.
+        account_uid = current.account_uid
+    require_owner_may_configure_account(str(account_uid), owner)
+
+
 def create_configuration(
     request: BarConfigurationCreateRequest,
+    *,
+    owner: AccountOwner,
 ) -> BarConfigurationResponse:
+    """Create a configuration; an account another owner holds is refused (ADR 0022)."""
+    require_owner_may_configure_account(str(request.account_uid), owner)
     return _configuration_response(create_bar_configuration(**request.model_dump()))
 
 
@@ -67,7 +89,11 @@ def get_configuration(configuration_uid: str) -> BarConfigurationResponse | None
 def update_configuration(
     configuration_uid: str,
     request: BarConfigurationUpdateRequest,
+    *,
+    owner: AccountOwner,
 ) -> BarConfigurationResponse:
+    """Update a configuration; one that runs with another owner's keys is refused (ADR 0022)."""
+    _require_owner_of_configured_account(configuration_uid, request.account_uid, owner)
     return _configuration_response(
         update_bar_configuration(
             configuration_uid,
