@@ -43,6 +43,45 @@ def dependency_starting() -> HTTPException:
     return error
 
 
+def _identifier(value: object) -> str | None:
+    """A short error code as given, or None; never free text that can quote submitted values."""
+    if isinstance(value, str) and 0 < len(value) <= 80 and value.replace("_", "").isalnum():
+        return value
+    return None
+
+
+def upstream_failure(exc: BaseException) -> dict[str, object]:
+    """What a refused Main Sequence call answered, for the log (issue #27).
+
+    The status, method, URL path and public error code of the first SDK ``ApiError`` in the
+    exception's chain. Never the answer's text or the request's values, which can quote the data
+    sent.
+    """
+    from urllib.parse import urlsplit
+
+    from mainsequence.client.exceptions import ApiError
+
+    seen: set[int] = set()
+    cause: BaseException | None = exc
+    while cause is not None and id(cause) not in seen:
+        seen.add(id(cause))
+        if isinstance(cause, ApiError):
+            body = cause.payload if isinstance(cause.payload, dict) else {}
+            detail = body.get("detail")
+            code = _identifier(body.get("code")) or _identifier(
+                detail.get("code") if isinstance(detail, dict) else detail
+            )
+            return {
+                "upstream_status": cause.status_code,
+                "upstream_method": cause.method,
+                "upstream_path": urlsplit(str(cause.url)).path if cause.url else None,
+                "upstream_code": code,
+                "upstream_error": type(cause).__name__,
+            }
+        cause = cause.__cause__ or cause.__context__
+    return {"upstream_error": type(exc).__name__}
+
+
 def api_http_error(exc: Exception) -> HTTPException:
     if is_dependency_starting(exc):
         return dependency_starting()
@@ -125,8 +164,22 @@ def api_http_error(exc: Exception) -> HTTPException:
             message="Alpaca or the holdings provider could not complete the operation.",
         )
     if not isinstance(exc, (HTTPException, LookupError, TypeError)):
-        logger.exception("Unhandled API dependency failure")
+        upstream = upstream_failure(exc)
+        logger.exception(
+            "Unhandled API dependency failure: %s %s answered %s (%s)",
+            upstream.get("upstream_method"),
+            upstream.get("upstream_path"),
+            upstream.get("upstream_status"),
+            upstream.get("upstream_code") or upstream["upstream_error"],
+            extra=upstream,
+        )
     return markets_api_http_error(exc)
 
 
-__all__ = ["api_http_error", "bad_request", "dependency_starting", "not_found"]
+__all__ = [
+    "api_http_error",
+    "bad_request",
+    "dependency_starting",
+    "not_found",
+    "upstream_failure",
+]

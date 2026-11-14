@@ -51,6 +51,25 @@ uv run ruff format --check api src tests
 uv run mkdocs build --strict
 ```
 
+### Writes on PostgreSQL
+
+Hosted MetaTables runs PostgreSQL, so `tests/test_postgresql_json_columns.py` runs the
+connector's operation writes against a real PostgreSQL. It binds each compiled statement with
+the MetaTables PostgreSQL backend's own `parameters_for`, the step that refused the JSON list in
+issue #27. The tests are skipped unless `ALPACA_CONNECTORS_TEST_POSTGRES_URL` names a disposable
+`alpaca_*` database on localhost, and they drop and recreate its `public` schema:
+
+```bash
+docker run -d --rm --name alpaca-connectors-pg-test -e POSTGRES_PASSWORD=alpaca \
+  -e POSTGRES_DB=alpaca_test -p 127.0.0.1:5448:5432 postgres:16-alpine
+ALPACA_CONNECTORS_TEST_POSTGRES_URL=postgresql://postgres:alpaca@127.0.0.1:5448/alpaca_test \
+  uv run pytest tests/test_postgresql_json_columns.py
+```
+
+The project requires MetaTables 0.1.65 or later, which types JSON parameters as `json`
+(MetaTables#111). On an earlier client these tests fail with the hosted error,
+`cannot adapt type 'dict' using placeholder '%s'`: a list was bound as a PostgreSQL array.
+
 ## Exercise The Backend
 
 ```bash

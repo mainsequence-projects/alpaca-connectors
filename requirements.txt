@@ -175,7 +175,7 @@ mainsequence==9.0.38
     #   etfhextractor
     #   mainsequence-metatable
     #   ms-markets
-mainsequence-metatable==0.1.63
+mainsequence-metatable==0.1.65
     # via
     #   alpaca-connectors
     #   etfhextractor

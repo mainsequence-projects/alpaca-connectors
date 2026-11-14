@@ -13,7 +13,7 @@ dependencies = [
     # Keep compatible ranges here and let uv.lock capture the reproducible environment.
     "ms-markets>=3.4.0,<4",
     "mainsequence[mcp]>=9.0.38,<10",
-    "mainsequence-metatable>=0.1.55,<0.2",
+    "mainsequence-metatable>=0.1.65,<0.2",
     # 0.45.0 is the first release whose asset model knows the TXSE exchange.
     "alpaca-py>=0.45.0",
     "playwright",

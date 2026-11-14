@@ -45,14 +45,27 @@ REGISTRATION = {
 }
 
 
-def runtime_access(state: str, *, active_revision_uid: str | None = "revision") -> SimpleNamespace:
-    """The platform's answer about a release that cannot take requests yet, or ever."""
-    return SimpleNamespace(
-        resource_release_uid=RELEASE_UID,
-        release_kind="fastapi",
-        runtime_access=SimpleNamespace(state=state, can_request=False, retry_after_ms=3000),
-        routing=SimpleNamespace(state="not_routable", active_revision_uid=active_revision_uid),
-        access=None,
+def runtime_access(state: str, *, active_revision_uid: str | None = "revision"):
+    """The platform's answer about a release that cannot take requests yet, or ever.
+
+    Built with the SDK's own model, so a change to the answer's shape fails here (MetaTables
+    0.1.64 began reading ``runtime_presence``).
+    """
+    from mainsequence.client import ResourceReleaseRuntimeAccess
+
+    return ResourceReleaseRuntimeAccess.model_validate(
+        {
+            "resource_release_uid": RELEASE_UID,
+            "release_kind": "fastapi",
+            "runtime_access": {"state": state, "can_request": False, "retry_after_ms": 3000},
+            "runtime_presence": {
+                "phase": "starting" if state == "waking" else state,
+                "replicas": {"desired": 1, "actual": 0},
+                "detail": "The release has no serving replica.",
+            },
+            "routing": {"state": "not_routable", "active_revision_uid": active_revision_uid},
+            "access": None,
+        }
     )
 
 

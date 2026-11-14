@@ -1,7 +1,7 @@
 schema=1
 library_name=mainsequence-metatable
 namespace=metatables
-pinned_version=0.1.56
-skills_path=/Users/jose/mainsequence-dev/main-sequence-workbench/projects/alpacaconnectors-945bfddd-5f1f-4541-a87a-faea3af6271f/.venv/lib/python3.13/site-packages/metatables/_client_skills
-copied_at_utc=2026-10-25T14:30:34Z
+pinned_version=0.1.65
+skills_path=/Users/jose/mainsequence-dev/main-sequence-workbench/projects/alpacaconnectors-945bfddd-5f1f-4541-a87a-faea3af6271f/.claude/worktrees/account-removal-unblocked/.venv/lib/python3.13/site-packages/metatables/_client_skills
+copied_at_utc=2026-11-14T19:19:25Z
 command=metatables copy-metatables-skills
