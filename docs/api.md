@@ -463,6 +463,19 @@ API believes it only from a caller listed in `ALPACA_CONNECTORS_VOUCHING_CALLERS
 - A call for an external person reaches only that person's accounts: every route that names an
   account, in its path, body or options, answers `404` for anyone else's, and `GET /v1/accounts`
   lists only theirs. Account key requests are refused for them (`400`). Other calls are unchanged.
+- Only an account's owner creates, updates or resumes a signal or bar configuration on it, judged
+  on the account the configuration will run with: the one the request names, else its current
+  one ([ADR 0022](adrs/0022_configurations_never_block_an_owners_removal.md)). Anyone else gets
+  `409 account_owned_by_another`, and an external person `404`. The signal pause action and
+  deleting a configuration are unchanged, and an account without an owner stays open to every
+  caller.
+- An external person's registration of an account without an owner answers `409 account_in_use`
+  while enabled signal or bar configurations run with its keys. It names none of them.
+- Configurations never block a removal. `DELETE /v1/accounts/{account_uid}` and the bulk remove
+  first disable the enabled signal configurations (out of the scheduled run) and bar
+  configurations (no runs) that use the account, and return their UIDs as
+  `disabled_signal_configuration_uids` and `disabled_bar_configuration_uids`. The remove preflight
+  counts them in a warning.
 - `GET /v1/accounts` filters by `owner_gateway_uid` and `owner_user_uid`, given together.
 - A malformed `ALPACA_CONNECTORS_VOUCHING_CALLERS` stops the API from starting.
 

@@ -7,8 +7,13 @@ from collections.abc import Iterable
 
 from msm.api.http import not_found
 
-from alpaca_connectors.account.ownership import AccountOwner, registered_owner
+from alpaca_connectors.account.ownership import (
+    AccountOwner,
+    registered_owner,
+    require_owner_may_configure,
+)
 from alpaca_connectors.account.services import (
+    enabled_account_configurations,
     get_account_registration,
     list_account_registrations,
     plan_alpaca_account,
@@ -141,6 +146,19 @@ def require_account_access(account_uid: str, owner: AccountOwner) -> None:
         raise not_found("Account registration not found.")
 
 
+def require_owner_may_configure_account(account_uid: str, owner: AccountOwner) -> None:
+    """Refuse a configuration that would run with another owner's keys (ADR 0022).
+
+    An external person reaches only their own accounts (``404``, ADR 0019 section 6). Anyone else
+    configuring an account that another owner holds gets ``409 account_owned_by_another``; an
+    account without an owner stays open to every caller, and a missing one is left for the
+    configuration service to report.
+    """
+    require_account_access(account_uid, owner)
+    if not owner.is_external:
+        require_owner_may_configure(get_account_registration(account_uid), owner)
+
+
 def require_accounts_access(account_uids: Iterable[str], owner: AccountOwner) -> None:
     for account_uid in account_uids:
         require_account_access(account_uid, owner)
@@ -246,21 +264,14 @@ def remove_account(account_uid: str) -> dict:
     return remove_account_registration(account_uid)
 
 
-def account_delete_blockers(account_uid: str) -> list[str]:
-    from alpaca_connectors.operations.signal_job_configurations import (
-        signal_job_configurations_for_account,
-    )
-
-    return [
-        f"Account {account_uid} is referenced by signal Job configuration "
-        f"{configuration.name} ({configuration.uid!s})."
-        for configuration in signal_job_configurations_for_account(account_uid)
-    ]
+def configurations_disabled_by_removal(account_uid: str) -> int:
+    """How many enabled configurations removing the account disables (ADR 0022)."""
+    return len(enabled_account_configurations(account_uid))
 
 
 __all__ = [
+    "configurations_disabled_by_removal",
     "create_account_registration",
-    "account_delete_blockers",
     "get_account",
     "list_accounts",
     "log_account_action",
@@ -270,6 +281,7 @@ __all__ = [
     "require_account_access",
     "require_accounts_access",
     "require_named_account_access",
+    "require_owner_may_configure_account",
     "require_path_account_access",
     "update_account",
 ]

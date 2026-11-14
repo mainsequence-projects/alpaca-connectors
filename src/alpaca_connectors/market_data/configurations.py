@@ -369,6 +369,31 @@ def bar_configurations_for_universe(
     )
 
 
+def bar_configurations_for_account(
+    account_uid: uuid.UUID | str,
+) -> list[AlpacaBarsConfiguration]:
+    """Return stored bar configurations that run with one account's keys."""
+    from alpaca_connectors.runtime import account_runtime_models, start_markets_engine
+
+    start_markets_engine(models=account_runtime_models())
+    return sorted(
+        AlpacaBarsConfiguration.filter(account_uid=str(account_uid), limit=10_000),
+        key=lambda configuration: (configuration.name, str(configuration.uid)),
+    )
+
+
+def disable_bar_configuration(configuration_uid: uuid.UUID | str) -> AlpacaBarsConfiguration:
+    """Stop every run of the configuration, writing only ``enabled`` (ADR 0022).
+
+    The removal of the account it runs with calls this, so nothing the configuration references
+    is validated: a configuration whose universe is gone is still disabled.
+    """
+    return AlpacaBarsConfiguration.update(
+        configuration_uid,
+        {"enabled": False, "updated_at": utc_now()},
+    )
+
+
 def _configuration_asset_uids(configuration_uid: uuid.UUID | str) -> list[uuid.UUID]:
     return _configuration_asset_uids_by_configuration([configuration_uid]).get(
         str(configuration_uid),
@@ -794,8 +819,10 @@ __all__ = [
     "AlpacaBarsConfigurationTable",
     "AssetSource",
     "create_bar_configuration",
+    "bar_configurations_for_account",
     "bar_configurations_for_universe",
     "delete_bar_configuration",
+    "disable_bar_configuration",
     "get_bar_configuration",
     "list_bar_configurations",
     "project_configuration_models",

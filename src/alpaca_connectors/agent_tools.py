@@ -290,7 +290,6 @@ def query_accounts(arguments: Mapping[str, Any]) -> Any:
 
 def manage_account(arguments: Mapping[str, Any]) -> Any:
     from alpaca_connectors.api.app.services.accounts import (
-        account_delete_blockers,
         create_account_registration,
         preflight_account_registration,
         refresh_account,
@@ -307,15 +306,10 @@ def manage_account(arguments: Mapping[str, Any]) -> Any:
         request = _request_model(arguments, AccountSecretNameRegistrationRequest)
         if operation == "plan_create":
             return preflight_account_registration(request)
-        # The Agent works for a Main Sequence person, who owns what it registers (ADR 0019);
-        # the MCP tools never read caller context.
-        from alpaca_connectors.account.ownership import AccountOwner
-
-        actor_user_uid = _acting_user_uid()
         return create_account_registration(
             request,
-            actor_user_uid=actor_user_uid,
-            owner=AccountOwner.main_sequence_user(actor_user_uid),
+            actor_user_uid=_acting_user_uid(),
+            owner=_acting_owner(),
         )
     account_uid = _required_text(arguments, "account_uid")
     if operation == "update":
@@ -333,10 +327,18 @@ def manage_account(arguments: Mapping[str, Any]) -> Any:
             raise ValueError(blockers)
         return capture_holdings(account_uid)
     _confirm_delete(arguments, account_uid)
-    blockers = account_delete_blockers(account_uid)
-    if blockers:
-        raise ValueError(" ".join(blockers))
+    # Configurations never block a removal; the result names those it disabled (ADR 0022).
     return remove_account(account_uid)
+
+
+def _acting_owner():
+    """The Main Sequence person the Agent works for, who owns what it registers and configures.
+
+    The MCP tools never read caller context (ADR 0019).
+    """
+    from alpaca_connectors.account.ownership import AccountOwner
+
+    return AccountOwner.main_sequence_user(_acting_user_uid())
 
 
 def _acting_user_uid() -> str:
@@ -585,12 +587,16 @@ def manage_bar_configuration(arguments: Mapping[str, Any]) -> Any:
 
     operation = _operation(arguments, {"create", "delete", "run", "update"})
     if operation == "create":
-        return create_configuration(_request_model(arguments, BarConfigurationCreateRequest))
+        return create_configuration(
+            _request_model(arguments, BarConfigurationCreateRequest),
+            owner=_acting_owner(),
+        )
     configuration_uid = _required_text(arguments, "configuration_uid")
     if operation == "update":
         return update_configuration(
             configuration_uid,
             _request_model(arguments, BarConfigurationUpdateRequest),
+            owner=_acting_owner(),
         )
     if operation == "run":
         return submit_configuration_update(configuration_uid)
@@ -644,12 +650,16 @@ def manage_etf_signal(arguments: Mapping[str, Any]) -> Any:
 
     operation = _operation(arguments, {"create", "delete", "run", "update"})
     if operation == "create":
-        return create_configuration(_request_model(arguments, SignalJobConfigurationCreateRequest))
+        return create_configuration(
+            _request_model(arguments, SignalJobConfigurationCreateRequest),
+            owner=_acting_owner(),
+        )
     configuration_uid = _required_text(arguments, "configuration_uid")
     if operation == "update":
         return update_configuration(
             configuration_uid,
             _request_model(arguments, SignalJobConfigurationUpdateRequest),
+            owner=_acting_owner(),
         )
     if operation == "run":
         return run_configuration(configuration_uid)
@@ -900,7 +910,9 @@ PROJECT_AGENT_TOOLS: tuple[ProjectAgentTool, ...] = (
             "always performs the connector's mandatory initial asset registration and holdings "
             "capture. Never ask a user for Alpaca key values; to register an account or replace "
             "keys from values the person holds, use alpaca_account_key_request so the person "
-            "enters them on the Alpaca site. Deleting an account deletes its stored keys."
+            "enters them on the Alpaca site. Deleting an account deletes its stored keys and "
+            "disables the enabled signal and bar configurations that run with them; the result "
+            "lists their UIDs."
         ),
         parameters=_operations(
             *[
@@ -1184,7 +1196,8 @@ PROJECT_AGENT_TOOLS: tuple[ProjectAgentTool, ...] = (
             "Create, update, delete, or submit the dedicated Job for a stored Alpaca bar "
             "configuration. The asset scope and dataset are resolved from the configuration. "
             "`scheduled` includes it in the daily bars update; an unscheduled configuration "
-            "still runs on demand while enabled."
+            "still runs on demand while enabled. An Account that has an owner is configured "
+            "only for that owner."
         ),
         parameters=_operations(
             _operation_case(
@@ -1270,7 +1283,8 @@ PROJECT_AGENT_TOOLS: tuple[ProjectAgentTool, ...] = (
         description=(
             "Create, update, delete, or run a Universe-backed ETF signal configuration. The "
             "shared signal Job declared in the workflow runs it; `scheduled` includes it in that "
-            "Job's daily scheduled run."
+            "Job's daily scheduled run. An Account that has an owner is configured only for that "
+            "owner."
         ),
         parameters=_operations(
             _operation_case(

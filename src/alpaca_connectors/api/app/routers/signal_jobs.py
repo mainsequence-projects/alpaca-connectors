@@ -8,6 +8,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Body, Query
 
 from ..errors import api_http_error, not_found
+from ..identity import acting_owner
 from ..schemas import (
     ResourceCollection,
     ResourceDiscoveryResponse,
@@ -18,7 +19,6 @@ from ..schemas import (
     SignalJobRunResponse,
     SignalObservationsResponse,
 )
-from ..services.accounts import require_named_account_access
 from ..services.common import resource_discovery, validate_ordering, validate_page_window
 from ..services.signal_jobs import (
     configuration_runs,
@@ -90,9 +90,8 @@ def signal_jobs_discovery() -> ResourceDiscoveryResponse:
 def signal_job_create(
     request: SignalJobConfigurationCreateRequest = Body(...),
 ) -> SignalJobConfigurationResponse:
-    require_named_account_access(request.account_uid)
     try:
-        return create_configuration(request)
+        return create_configuration(request, owner=acting_owner())
     except Exception as exc:
         raise api_http_error(exc) from exc
 
@@ -124,9 +123,8 @@ def signal_job_update(
     configuration_uid: str,
     request: SignalJobConfigurationUpdateRequest = Body(...),
 ) -> SignalJobConfigurationResponse:
-    require_named_account_access(request.account_uid)
     try:
-        return update_configuration(configuration_uid, request)
+        return update_configuration(configuration_uid, request, owner=acting_owner())
     except Exception as exc:
         raise api_http_error(exc) from exc
 
@@ -193,7 +191,11 @@ def signal_job_pause(
 def signal_job_resume(
     configuration_uid: str,
 ) -> SignalJobConfigurationResponse:
-    return _configuration_action(configuration_uid, resume_configuration)
+    owner = acting_owner()
+    return _configuration_action(
+        configuration_uid,
+        lambda uid: resume_configuration(uid, owner=owner),
+    )
 
 
 @router.post(

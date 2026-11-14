@@ -7,6 +7,10 @@ an external person is never reported as a Main Sequence user.
 
 The owner is set by the first registration and never changed by a rotation, a rename or an
 active-state change. Registering an Alpaca account that another owner holds is refused.
+
+Configurations run with an account's keys, so an owned account is configured only by its owner,
+and an external person never claims an account without an owner while configurations that another
+principal made would run on it (ADR 0022).
 """
 
 from __future__ import annotations
@@ -45,6 +49,17 @@ class AccountOwnedByAnotherError(Exception):
         super().__init__("This Alpaca account is registered to another owner.")
 
 
+class AccountInUseError(Exception):
+    """An external person's registration would claim an account that configurations run on."""
+
+    def __init__(self) -> None:
+        # Never names the configurations: another principal made them (ADR 0022).
+        super().__init__(
+            "This Alpaca account has no owner and enabled configurations run with its keys, so "
+            "it cannot be registered for an external person until they are disabled."
+        )
+
+
 def registered_owner(registration: Mapping[str, Any] | None) -> AccountOwner | None:
     """The owner recorded on a registration row, or None when it has none."""
     if not registration:
@@ -70,11 +85,34 @@ def require_owner_may_register(
         raise AccountOwnedByAnotherError()
 
 
+def require_owner_may_configure(
+    registration: Mapping[str, Any] | None,
+    owner: AccountOwner,
+) -> None:
+    """Refuse a configuration that would run with another owner's keys (ADR 0022).
+
+    An account without an owner stays open to every principal, as before; a missing one is left
+    for the configuration service to report.
+    """
+    require_owner_may_register(registration, owner)
+
+
+def is_claim_by_external_person(
+    registration: Mapping[str, Any] | None,
+    owner: AccountOwner | None,
+) -> bool:
+    """Whether a registration would make an external person the owner of an unowned account."""
+    return owner is not None and owner.is_external and registered_owner(registration) is None
+
+
 __all__ = [
     "OWNER_GATEWAY_COLUMN",
     "OWNER_USER_COLUMN",
+    "AccountInUseError",
     "AccountOwnedByAnotherError",
     "AccountOwner",
+    "is_claim_by_external_person",
     "registered_owner",
+    "require_owner_may_configure",
     "require_owner_may_register",
 ]

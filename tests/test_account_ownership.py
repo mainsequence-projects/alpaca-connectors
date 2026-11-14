@@ -29,6 +29,7 @@ from test_account_services import (
 
 from alpaca_connectors.account.credentials import stored_credential_values
 from alpaca_connectors.account.ownership import (
+    AccountInUseError,
     AccountOwnedByAnotherError,
     AccountOwner,
     registered_owner,
@@ -266,7 +267,8 @@ def test_a_requester_bound_call_ignores_the_context(vouching) -> None:
 # ------------------------------------------------------------------------------------------------
 # Registration
 # ------------------------------------------------------------------------------------------------
-def _register(owner: AccountOwner | None, existing: dict[str, Any] | None):
+def _register(owner: AccountOwner | None, existing: dict[str, Any] | None, *, in_use: bool = False):
+    """Register through the real service; ``in_use`` is whether configurations run on it."""
     runtime = SimpleNamespace(context=SimpleNamespace())
     client = StubTradingClient(_stub_account(), [], raw={"cash": "1000.50"})
     with (
@@ -284,16 +286,20 @@ def _register(owner: AccountOwner | None, existing: dict[str, Any] | None):
             "alpaca_connectors.holdings.services.register_account_holdings",
             return_value=SimpleNamespace(account=_markets_account()),
         ) as register_holdings,
+        patch(
+            "alpaca_connectors.account.services._claimed_account_in_use", return_value=in_use
+        ) as claimed_in_use,
     ):
         error = None
         try:
             register_alpaca_account(
                 credentials=EXTERNAL_NAMES, client=client, actor_user_uid=CALLER_UID, owner=owner
             )
-        except AccountOwnedByAnotherError as exc:
+        except (AccountOwnedByAnotherError, AccountInUseError) as exc:
             error = exc
     return SimpleNamespace(
         error=error,
+        claimed_in_use=claimed_in_use,
         upsert_model=upsert_model,
         read_existing=read_existing,
         resolve_holdings=resolve_holdings,
