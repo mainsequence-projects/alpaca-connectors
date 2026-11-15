@@ -10,6 +10,7 @@ statement reads the Markets holdings tables.
 from __future__ import annotations
 
 import datetime as dt
+import math
 import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -28,6 +29,9 @@ class AccountHoldingsCaptureResult:
     time_index: dt.datetime
     holdings_rows: int
     unresolved_symbols: list[str] = field(default_factory=list)
+    # Alpaca's reported equity from the same read as the holdings: the account value a share of
+    # NAV is sized from (ADR 0022). Never published into Markets.
+    equity: float | None = None
 
 
 class AccountHoldingsRegistryError(ValueError):
@@ -428,6 +432,15 @@ def plan_alpaca_account_holdings(
     }
 
 
+def _reported_equity(account: Any) -> float | None:
+    """The ``equity`` Alpaca reports for the account, or None when it reports none."""
+    try:
+        equity = float(getattr(account, "equity", None))
+    except (TypeError, ValueError):
+        return None
+    return equity if math.isfinite(equity) else None
+
+
 def capture_alpaca_account_holdings(
     account_uid: uuid.UUID | str,
     *,
@@ -460,6 +473,7 @@ def capture_alpaca_account_holdings(
             "The stored keys resolve to a different Alpaca account than the registered row."
         )
     when = snapshot_time or dt.datetime.now(dt.timezone.utc).replace(microsecond=0)
+    equity = _reported_equity(snapshot.account)
     holdings = resolve_account_registration_holdings(
         trading_client=active_client,
         positions=snapshot.positions,
@@ -471,6 +485,7 @@ def capture_alpaca_account_holdings(
             holdings_set_uid=None,
             time_index=when,
             holdings_rows=0,
+            equity=equity,
         )
     # The flags are left out, so Markets keeps them; the name is the one just read.
     response = register_account_holdings(
@@ -488,6 +503,7 @@ def capture_alpaca_account_holdings(
         holdings_set_uid=str(response.holdings_set_uid),
         time_index=when,
         holdings_rows=len(holdings.positions),
+        equity=equity,
     )
 
 

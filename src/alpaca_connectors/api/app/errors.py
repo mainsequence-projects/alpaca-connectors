@@ -18,6 +18,8 @@ from alpaca_connectors.account.credentials import (
 from alpaca_connectors.account.ownership import AccountOwnedByAnotherError
 from alpaca_connectors.dependencies import STARTING_RETRY_SECONDS, is_dependency_starting
 from alpaca_connectors.execution.orders import PreTradeCheckError
+from alpaca_connectors.holdings.allocation import RETRYABLE_REFUSALS
+from alpaca_connectors.holdings.sizing import FundAllocationError
 from alpaca_connectors.platform_secrets import PlatformSecretAccessError
 from metatables import EncryptionError
 
@@ -90,6 +92,14 @@ def api_http_error(exc: Exception) -> HTTPException:
                 "retryable": False,
                 "checks": [check.as_payload() for check in exc.checks],
             },
+        )
+    if isinstance(exc, FundAllocationError):
+        # A sync that could not size or allocate the target (ADR 0022), in the connector's words.
+        return api_error(
+            status_code=409,
+            code=exc.code,
+            message=str(exc),
+            retryable=exc.code in RETRYABLE_REFUSALS,
         )
     if isinstance(exc, ValidationError):
         # A provider's payload that its model refuses. pydantic's message dumps the payload's

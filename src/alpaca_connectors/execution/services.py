@@ -230,6 +230,8 @@ class ExecutionDependencies:
     ledger: ExecutionLedger
     price_reader: PriceReader
     capture_holdings: Callable[[], Any]
+    # Sizes the account's target and allocates the snapshot a capture just published (ADR 0022).
+    allocate_holdings: Callable[[Any], Any] | None = None
     now: Callable[[], dt.datetime] = _utc_now
     sleep: Callable[[float], None] = time.sleep
     # Sells are placed before buys; when a batch has both, the buys wait this long for the sells to
@@ -258,18 +260,26 @@ def build_dependencies(
         build_alpaca_trading_client,
         resolve_registered_alpaca_credentials,
     )
+    from alpaca_connectors.holdings.allocation import size_and_allocate
     from alpaca_connectors.holdings.services import capture_alpaca_account_holdings
 
     credentials = resolve_registered_alpaca_credentials(registration)
     trading_client = client or build_alpaca_trading_client(
         credentials=credentials, paper=bool(registration["is_paper"])
     )
+    price_reader = alpaca_latest_trade_prices(credentials)
     return ExecutionDependencies(
         client=trading_client,
         ledger=MarketsExecutionLedger(),
-        price_reader=alpaca_latest_trade_prices(credentials),
+        price_reader=price_reader,
         capture_holdings=lambda: capture_alpaca_account_holdings(
             account_uid, client=trading_client
+        ),
+        allocate_holdings=lambda capture: size_and_allocate(
+            account_uid,
+            valuation_time=capture.time_index,
+            equity=getattr(capture, "equity", None),
+            price_reader=price_reader,
         ),
     )
 
@@ -319,6 +329,8 @@ class OrderBatchResult:
     message: str | None = None
     warnings: list[str] = field(default_factory=list)
     holdings_set_uid: str | None = None
+    # The time of that snapshot: an allocation in Markets is addressed by it (ADR 0022).
+    holdings_time: dt.datetime | None = None
 
     def as_payload(self) -> dict[str, Any]:
         return {
@@ -329,6 +341,7 @@ class OrderBatchResult:
             "message": self.message,
             "warnings": list(self.warnings),
             "holdings_set_uid": self.holdings_set_uid,
+            "holdings_time": self.holdings_time,
             "orders": [record.to_payload() for record in self.orders],
         }
 
@@ -698,6 +711,16 @@ def _require_batch(ledger: ExecutionLedger, account_uid: str, batch_id: str) -> 
     return batch
 
 
+def _stored_time(value: Any) -> dt.datetime | None:
+    """A snapshot time kept in the batch metadata, read back as a datetime."""
+    if isinstance(value, dt.datetime):
+        return value
+    try:
+        return dt.datetime.fromisoformat(str(value)) if value else None
+    except ValueError:
+        return None
+
+
 def _batch_metadata(
     registration: dict[str, Any],
     records: list[OrderRecord],
@@ -706,6 +729,7 @@ def _batch_metadata(
     now: dt.datetime,
     holdings_set_uid: str | None,
     previous: dict[str, Any] | None,
+    holdings_time: dt.datetime | None = None,
 ) -> dict[str, Any]:
     metadata = dict(previous or {})
     metadata.update(
@@ -722,6 +746,8 @@ def _batch_metadata(
     )
     if holdings_set_uid is not None:
         metadata["holdings_set_uid"] = holdings_set_uid
+    if holdings_time is not None:
+        metadata["holdings_time"] = holdings_time.isoformat()
     return _json_safe(metadata)
 
 
@@ -737,7 +763,11 @@ def _persist(
     warnings: list[str],
     message: str | None = None,
 ) -> OrderBatchResult:
-    """Write the batch, order and trade rows, publish holdings after fills, return the result."""
+    """Write the batch, order and trade rows, publish holdings after fills, return the result.
+
+    A snapshot published after fills is sized and allocated like a sync's (ADR 0022). A failure
+    of the capture or of the allocation is a warning on the answer, never an error.
+    """
     account_uid = str(registration["account_uid"])
     account_identifier = str(registration["unique_identifier"])
     status = batch_status(records)
@@ -771,16 +801,29 @@ def _persist(
         deps.ledger.ensure_cash_asset()
         deps.ledger.write_trades(trade_rows)
     holdings_set_uid = (previous_metadata or {}).get("holdings_set_uid")
+    holdings_time = _stored_time((previous_metadata or {}).get("holdings_time"))
     if new_fills(previous, records):
+        capture = None
         try:
             capture = deps.capture_holdings()
             holdings_set_uid = str(getattr(capture, "holdings_set_uid", None) or "") or None
+            holdings_time = getattr(capture, "time_index", None) if holdings_set_uid else None
         except Exception:
             logger.exception("Holdings snapshot after fills failed for account %s", account_uid)
             warnings = [
                 *warnings,
                 "The holdings snapshot after the fills could not be published; capture holdings.",
             ]
+        if capture is not None and holdings_set_uid and deps.allocate_holdings is not None:
+            try:
+                deps.allocate_holdings(capture)
+            except Exception:
+                logger.exception("Fund allocation after fills failed for account %s", account_uid)
+                warnings = [
+                    *warnings,
+                    "The holdings snapshot after the fills was published but could not be "
+                    "allocated to the account's funds; sync the account.",
+                ]
     deps.ledger.update_batch(
         batch.uid,
         status=status,
@@ -792,6 +835,7 @@ def _persist(
             now=now,
             holdings_set_uid=holdings_set_uid,
             previous=previous_metadata,
+            holdings_time=holdings_time,
         ),
     )
     return OrderBatchResult(
@@ -802,6 +846,7 @@ def _persist(
         message=message,
         warnings=list(warnings),
         holdings_set_uid=holdings_set_uid,
+        holdings_time=holdings_time,
     )
 
 

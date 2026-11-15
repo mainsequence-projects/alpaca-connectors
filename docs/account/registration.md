@@ -155,7 +155,10 @@ deployment must run 3.4.0 or later before this connector release.
 
 Applications such as HunchAPI capture through the API's
 [account sync](../api.md#account-sync), `POST /v1/accounts/{account_uid}/actions/sync`, which runs
-the same capture and answers an observable operation they can read again.
+the same capture and answers an observable operation they can read again. When the account has
+a target in ms-markets, the sync also sizes it and allocates the snapshot to the account's funds
+([ADR 0022](../adrs/0022_account_sync_sizes_and_allocates_funds.md)). The capture routes and the
+Agent's `capture_holdings` publish the snapshot only.
 
 For crypto, Alpaca positions and its Asset catalog can expose different UUIDs for the same pair.
 The connector matches the position to the already-loaded catalog by normalized symbol (for example,

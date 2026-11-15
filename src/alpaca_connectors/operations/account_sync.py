@@ -1,7 +1,8 @@
 """Durable records of account syncs (issue #14).
 
-`POST /v1/accounts/{account_uid}/actions/sync` reads the Alpaca account with its stored keys and
-publishes one `AccountHoldingsSet` into ms-markets. Each call is one row here, in the shape of
+`POST /v1/accounts/{account_uid}/actions/sync` reads the Alpaca account with its stored keys,
+publishes one `AccountHoldingsSet` into ms-markets, sizes the account's target and allocates the
+snapshot to the account's funds (ADR 0022). Each call is one row here, in the shape of
 `msm.api.http.ObservableOperation`, so `GET /v1/operations/{operation_uid}` can answer it again,
 from any API process, to the owner it ran for. The owner is the acting owner of ADR 0019. A row
 holds identifiers, counts and a public error, never a key value.
@@ -26,9 +27,14 @@ from alpaca_connectors.metatables import AlpacaMarketsMetaTableMixin, ProjectSto
 
 ACCOUNT_SYNC_ACTION = "account_sync"
 CAPTURE_STEP = "capture_holdings"
+SIZE_STEP = "size_targets"
+ALLOCATE_STEP = "allocate_funds"
 ACCOUNT_SYNC_STEPS: tuple[tuple[str, str], ...] = (
     (CAPTURE_STEP, "Read the Alpaca account and publish its holdings"),
+    (SIZE_STEP, "Size the account's target into units"),
+    (ALLOCATE_STEP, "Allocate the holdings to the account's funds"),
 )
+NO_TARGET_MESSAGE = "Not run: the account has no target, or the capture published no snapshot."
 
 UTC = dt.timezone.utc
 
@@ -239,7 +245,7 @@ def start_account_sync_operation(
     account_uid: str,
     owner: AccountOwner,
 ) -> AccountSyncOperation:
-    """Record a sync that starts now, with its one step running."""
+    """Record a sync that starts now, with its first step running."""
     now = utc_now()
     steps = [
         OperationStep(
@@ -274,21 +280,34 @@ def start_account_sync_operation(
 def _finished_steps(
     operation: AccountSyncOperation,
     *,
-    status: str,
+    failed_step: str | None,
+    skipped: tuple[str, ...],
     message: str | None,
     now: dt.datetime,
 ) -> list[dict[str, Any]]:
+    """Every step in its terminal state.
+
+    The sync runs inside one request and is written when it ends. Steps before the failed one
+    succeeded, the failed one carries the error's message, and the ones after it did not run.
+    Without a failure every step succeeded, except the ones named in ``skipped``.
+    """
     finished: list[dict[str, Any]] = []
+    failed_seen = False
     for step in operation.steps:
         item = step.model_dump(mode="json")
-        if item["key"] == operation.current_step:
-            item.update(status=status, message=message, completed_at=now.isoformat())
-        elif item["status"] == "pending":
-            item.update(
-                status="skipped",
-                message="Not run because a previous step failed." if status == "failed" else None,
-                completed_at=now.isoformat(),
-            )
+        if item["key"] == failed_step:
+            failed_seen = True
+            item.update(status="failed", message=message)
+        elif failed_seen:
+            item.update(status="skipped", message="Not run because a previous step failed.")
+        elif item["key"] in skipped:
+            item.update(status="skipped", message=NO_TARGET_MESSAGE)
+        else:
+            item.update(status="succeeded", message=None)
+        item["started_at"] = item.get("started_at") or now.isoformat()
+        item["completed_at"] = now.isoformat()
+        if item["status"] == "skipped":
+            item["started_at"] = None
         finished.append(item)
     return finished
 
@@ -297,6 +316,7 @@ def succeed_account_sync_operation(
     operation: AccountSyncOperation,
     *,
     result: dict[str, Any],
+    skipped: tuple[str, ...] = (),
 ) -> AccountSyncOperation:
     now = utc_now()
     return AccountSyncOperation.update(
@@ -304,7 +324,9 @@ def succeed_account_sync_operation(
         {
             "status": "succeeded",
             "current_step": None,
-            "steps": _finished_steps(operation, status="succeeded", message=None, now=now),
+            "steps": _finished_steps(
+                operation, failed_step=None, skipped=skipped, message=None, now=now
+            ),
             "result": result,
             "error": None,
             "updated_at": now,
@@ -317,14 +339,19 @@ def fail_account_sync_operation(
     operation: AccountSyncOperation,
     *,
     error: OperationError,
+    step: str | None = None,
 ) -> AccountSyncOperation:
+    """End the sync as failed at ``step``, the capture when none is named."""
     now = utc_now()
+    failed_step = step or operation.current_step or CAPTURE_STEP
     return AccountSyncOperation.update(
         operation.uid,
         {
             "status": "failed",
-            "current_step": operation.current_step,
-            "steps": _finished_steps(operation, status="failed", message=error.message, now=now),
+            "current_step": failed_step,
+            "steps": _finished_steps(
+                operation, failed_step=failed_step, skipped=(), message=error.message, now=now
+            ),
             "error": error.model_dump(mode="json"),
             "updated_at": now,
             "completed_at": now,
@@ -344,7 +371,10 @@ def project_operation_models() -> list[type[AccountSyncOperationTable]]:
 __all__ = [
     "ACCOUNT_SYNC_ACTION",
     "ACCOUNT_SYNC_STEPS",
+    "ALLOCATE_STEP",
     "CAPTURE_STEP",
+    "NO_TARGET_MESSAGE",
+    "SIZE_STEP",
     "AccountSyncOperation",
     "AccountSyncOperationTable",
     "fail_account_sync_operation",

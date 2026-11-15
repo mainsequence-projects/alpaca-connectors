@@ -7,6 +7,9 @@ resolution-markers = [
     "sys_platform != 'emscripten' and sys_platform != 'win32'",
 ]
 
+[manifest]
+overrides = [{ name = "ms-markets", specifier = ">=3.7.0,<4" }]
+
 [[package]]
 name = "alembic"
 version = "1.18.4"
@@ -58,7 +61,7 @@ requires-dist = [
     { name = "mainsequence-metatable", specifier = ">=0.1.55,<0.2" },
     { name = "mkdocs", specifier = ">=1.6.1" },
     { name = "mkdocs-material", specifier = ">=9.7.6" },
-    { name = "ms-markets", specifier = ">=3.4.0,<4" },
+    { name = "ms-markets", specifier = ">=3.7.0,<4" },
     { name = "ms-tau-sdk", specifier = ">=2.0.26,<3" },
     { name = "playwright" },
     { name = "uvicorn", specifier = ">=0.52.4,<0.53" },
@@ -538,8 +541,8 @@ name = "httpcore2"
 version = "2.13.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "h11" },
-    { name = "truststore" },
+    { name = "h11", marker = "sys_platform != 'emscripten'" },
+    { name = "truststore", marker = "sys_platform != 'emscripten'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/cb/f3/1db7aa2bc2524062192bb0e0323969492d1883152a232fe36eea65f4e35c/httpcore2-2.13.1.tar.gz", hash = "sha256:e0aa977abe17e69a3b820a24542a6fa88702676d83880b8d194dcd18408e5103", size = 68071, upload-time = "2026-09-23T07:47:22.372Z" }
 wheels = [
@@ -810,7 +813,7 @@ mcp = [
 
 [[package]]
 name = "mainsequence-metatable"
-version = "0.1.63"
+version = "0.1.65"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "alembic" },
@@ -843,9 +846,9 @@ dependencies = [
     { name = "urllib3" },
     { name = "uvicorn" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/8c/4c/ff33426a424bce80beaa16c10c2f61afc46b04a56fcd08d55f3b1554153e/mainsequence_metatable-0.1.63.tar.gz", hash = "sha256:2ae5134705d595d3cf34adf1e4cba2e100a5a73c4d7acd2f1a5084c4ccf2e05b", size = 1361808, upload-time = "2026-11-12T17:30:57.115Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/c7/63/492ba95c9f0199f95798f0662c904178dbddffcfa82a5069c97d1de3dc83/mainsequence_metatable-0.1.65.tar.gz", hash = "sha256:e9ddcf77fc2d5574edff98827741877431f0d7f50c06a1c1aafe91f4486f77f9", size = 1365381, upload-time = "2026-11-14T19:17:25.814Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/a6/2c/bc4c16e5c2146ec73d2832d473be7aff75c6af551eb5f285b53cc94954a2/mainsequence_metatable-0.1.63-py3-none-any.whl", hash = "sha256:ddbc3f67cff8551b2dec21a23350b3ad14e6133309adc959436d5e7fbddf21b3", size = 2581528, upload-time = "2026-11-12T17:30:55.072Z" },
+    { url = "https://files.pythonhosted.org/packages/9a/57/793c530b329c0b284b9b1f8fa7c33ddb9f5cdde3c52bb155f2c3ca4fcbc1/mainsequence_metatable-0.1.65-py3-none-any.whl", hash = "sha256:0e29d9294b47e7266348ab226efb321bb989d5ae4af755e304eb184800ba4e74", size = 2584292, upload-time = "2026-11-14T19:17:24.065Z" },
 ]
 
 [[package]]
@@ -1095,7 +1098,7 @@ wheels = [
 
 [[package]]
 name = "ms-markets"
-version = "3.4.0"
+version = "3.7.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "alembic" },
@@ -1115,9 +1118,9 @@ dependencies = [
     { name = "sqlalchemy" },
     { name = "uvicorn" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/bb/ac/1bc2786c72fdca479b46c0ad4ea704e203fa233956f3c42a6d20f6592655/ms_markets-3.4.0.tar.gz", hash = "sha256:22c90526884f4e0d62da0efc1045f5ee5c85621993c40c52d32e99e5ff938322", size = 2704236, upload-time = "2026-11-12T17:32:22.383Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/70/73/6fd4cd6dab32598c5db81ccebfe4646108e13966fc949df4973cfd7ab2a8/ms_markets-3.7.1.tar.gz", hash = "sha256:8b63d96927896643e7bd654bb88f91c560f45988b60ce4b1727b7199cf2c1e0a", size = 2752870, upload-time = "2026-11-15T21:44:41.004Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/1b/5c/58b5416e7148b22f98a6e6b69d365afee89800229ef97ccfd2378bac7a72/ms_markets-3.4.0-py3-none-any.whl", hash = "sha256:c92cc42af37a03c3eb512b51b064ba96fda239c1b9cbdaf903b45d3867492594", size = 865669, upload-time = "2026-11-12T17:32:19.967Z" },
+    { url = "https://files.pythonhosted.org/packages/24/ca/6d002cbedecda43678b241fa70a40e812d2b4c43bb4ff0c7f5e8a0da30b5/ms_markets-3.7.1-py3-none-any.whl", hash = "sha256:acf3b6c8680b53f6392382c71b4159660a57b17554d6a13c29fb16754fdd83cd", size = 874272, upload-time = "2026-11-15T21:44:39.446Z" },
 ]
 
 [[package]]
@@ -1970,8 +1973,8 @@ name = "secretstorage"
 version = "3.5.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "cryptography" },
-    { name = "jeepney" },
+    { name = "cryptography", marker = "sys_platform != 'emscripten' and sys_platform != 'win32'" },
+    { name = "jeepney", marker = "sys_platform != 'emscripten' and sys_platform != 'win32'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/1c/03/e834bcd866f2f8a49a85eaff47340affa3bfa391ee9912a952a1faa68c7b/secretstorage-3.5.0.tar.gz", hash = "sha256:f04b8e4689cbce351744d5537bf6b1329c6fc68f91fa666f60a380edddcd11be", size = 19884, upload-time = "2025-11-23T19:02:53.191Z" }
 wheels = [

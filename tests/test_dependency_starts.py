@@ -50,7 +50,11 @@ def runtime_access(state: str, *, active_revision_uid: str | None = "revision") 
     return SimpleNamespace(
         resource_release_uid=RELEASE_UID,
         release_kind="fastapi",
-        runtime_access=SimpleNamespace(state=state, can_request=False, retry_after_ms=3000),
+        runtime_access=SimpleNamespace(
+            state=state, can_request=False, retry_after_ms=3000, notice=None
+        ),
+        # mainsequence-metatable 0.1.64 reads the deployment's phase beside its admission.
+        runtime_presence=SimpleNamespace(phase=state, detail="The deployment is not serving."),
         routing=SimpleNamespace(state="not_routable", active_revision_uid=active_revision_uid),
         access=None,
     )

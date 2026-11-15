@@ -249,12 +249,15 @@ class Harness:
         if prices is not None:
             self.prices = prices
         self.captures = 0
+        self.allocated: list[Any] = []
+        self.allocation_failure: Exception | None = None
         self.sleeps: list[float] = []
         self.deps = ExecutionDependencies(
             client=self.client,
             ledger=self.ledger,
             price_reader=lambda symbols: {s: self.prices[s] for s in symbols if s in self.prices},
             capture_holdings=self._capture,
+            allocate_holdings=self._allocate,
             now=lambda: NOW,
             sleep=self.sleeps.append,
             settle_timeout_seconds=2.0,
@@ -263,7 +266,16 @@ class Harness:
 
     def _capture(self):
         self.captures += 1
-        return SimpleNamespace(holdings_set_uid=f"set-{self.captures}")
+        return SimpleNamespace(
+            holdings_set_uid=f"set-{self.captures}",
+            time_index=NOW + dt.timedelta(seconds=self.captures),
+            equity=1_000_000.0,
+        )
+
+    def _allocate(self, capture):
+        if self.allocation_failure is not None:
+            raise self.allocation_failure
+        self.allocated.append(capture.holdings_set_uid)
 
 
 def leg(client_order_id, identifier, symbol, side, quantity) -> OrderLegSpec:
@@ -320,6 +332,10 @@ def test_submit_and_sync_round_trip_on_a_paper_account(registration) -> None:
     assert harness.ledger.cash_ensured == 1
     # A holdings snapshot follows the fill, once.
     assert harness.captures == 1 and result.holdings_set_uid == "set-1"
+    # That snapshot is sized and allocated to the account's funds, and answered with its time.
+    assert harness.allocated == ["set-1"]
+    assert result.holdings_time == NOW + dt.timedelta(seconds=1)
+    assert result.as_payload()["holdings_time"] == result.holdings_time
     assert json.dumps(batch.metadata_json)  # JSON-safe
     assert [o["client_order_id"] for o in batch.metadata_json["orders"]] == ["c-buy", "c-sell"]
 
@@ -337,10 +353,14 @@ def test_submit_and_sync_round_trip_on_a_paper_account(registration) -> None:
         "c-buy:fill",
     }
     assert harness.captures == 2 and synced.holdings_set_uid == "set-2"
+    assert harness.allocated == ["set-1", "set-2"]
 
     again = sync_order_batch(ACCOUNT_UID, "HUNCH_BATCH__1", deps=harness.deps)
     assert again.status == "filled" and harness.captures == 2
     assert again.holdings_set_uid == "set-2"
+    # No new fill: nothing is captured or allocated, and the stored snapshot time is answered.
+    assert harness.allocated == ["set-1", "set-2"]
+    assert again.holdings_time == NOW + dt.timedelta(seconds=2)
 
     rows, total = list_account_orders(ACCOUNT_UID, batch_id="HUNCH_BATCH__1", ledger=harness.ledger)
     assert total == 2 and {row["status"] for row in rows} == {"filled"}
@@ -350,6 +370,21 @@ def test_submit_and_sync_round_trip_on_a_paper_account(registration) -> None:
     assert list_account_orders(
         OTHER_ACCOUNT_UID, batch_id="HUNCH_BATCH__1", ledger=harness.ledger
     ) == ([], 0)
+
+
+def test_an_allocation_that_fails_after_fills_is_a_warning(registration) -> None:
+    harness = Harness()
+    harness.client.fill_on_lookup["c-sell"] = 401.0
+    harness.allocation_failure = RuntimeError("Markets detail naming PositionSet 1234")
+
+    result = submit_order_batch(
+        ACCOUNT_UID, submission(leg("c-sell", MSFT, "MSFT", "sell", 2)), deps=harness.deps
+    )
+
+    # The orders and the snapshot stand; only the allocation is reported as missing.
+    assert result.accepted and result.holdings_set_uid == "set-1"
+    [warning] = [text for text in result.warnings if "allocated" in text]
+    assert "sync the account" in warning and "1234" not in warning
 
 
 def test_resubmitting_a_batch_never_places_an_order_twice(registration) -> None:

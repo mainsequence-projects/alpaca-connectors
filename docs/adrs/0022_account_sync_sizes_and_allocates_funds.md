@@ -2,7 +2,9 @@
 
 ## Status
 
-Proposed on 2026-11-15, for the owner's review. Nothing is implemented.
+Proposed on 2026-11-15, for the owner's review. Implemented on 2026-11-15 on ms-markets
+3.7.0. It has not been run against a Markets API (see
+[Implementation Notes](#implementation-notes)).
 
 Rewritten the same day on ms-markets ADR 0054, which withdrew the unit account targets this
 ADR was first drafted on. The first draft had the connector write the account target in
@@ -44,9 +46,13 @@ What the connector already has for sizing:
 
 - **Prices:** `alpaca_latest_trade_prices` reads latest trades from Alpaca's data API.
 - **Rounding rule:** each asset's `fractionable` flag (`AlpacaAssetDetails`).
-- **Portfolio weights:** `AlpacaPortfolioWeightsStorage`, indexed by `time_index`.
+- **Portfolio weights:** `AlpacaPortfolioWeightsStorage`, indexed by `time_index`,
+  `portfolio_identifier` and `asset_identifier`.
 - **Holdings in units:** the snapshot it publishes is already a positive `quantity` and a
   `direction` per asset, with cash as a `USD` holding.
+- **The account's equity:** the capture's Alpaca read (`read_alpaca_account`) already returns
+  the Alpaca account, which carries `equity`. `AccountHoldingsCaptureResult` does not pass it
+  on yet.
 
 Two things the connector does not own:
 
@@ -62,6 +68,14 @@ Two things the connector does not own:
 Raise the floor to `ms-markets>=3.7.0,<4`, relock and re-export `requirements.txt`. The Markets
 API of the Environment must serve 3.7 before this ships.
 
+The lock is at 3.4.0, so the upgrade crosses 3.5, 3.6 and 3.7. The whole suite runs after the
+relock, not only the new tests.
+
+The connector reaches the three new Markets calls (the target read, the plan and the
+allocation) through wrappers in `alpaca_connectors.markets_api`, beside `register_account`, on
+the same client (`use_markets_api().client`). The Markets rule in `AGENTS.md` and
+`docs/operations/markets-api-boundary.md` name them.
+
 ### 2. The sync gains two steps after the capture
 
 `sync_account` runs, in order:
@@ -72,19 +86,37 @@ API of the Environment must serve 3.7 before this ships.
 | `size_targets` | Read the account's `PositionSet` in force at `T` and size each of its exposures into units |
 | `allocate_funds` | Plan with those units, then allocate with the plan's digest |
 
-An account with no `PositionSet` at or before `T` ends after `capture_holdings`, with the two
-new steps marked skipped. That is today's behavior.
+The two new steps are marked skipped, and the sync ends after `capture_holdings` as it does
+today, when:
+
+- the account has no target; or
+- the capture published no snapshot. That happens when the account holds nothing, not even
+  cash, so there is nothing to allocate.
 
 ### 3. What the sync reads at time `T`
 
-Everything is selected by `time_index <= T`, where `T` is the holdings snapshot's time:
+`T` is the holdings snapshot's time:
 
-- **Target:** the account's `PositionSet` with the latest `position_set_time <= T`.
-- **Weights:** for each `portfolio_uid` in that `PositionSet`, the latest
+- **Target:** the account's latest `PositionSet`. The Markets API reads the latest target or
+  the one at an exact time; it has no read of "the latest at or before `T`". `T` is the time
+  of the capture, so the latest target is the one in force. ms-markets refuses a target
+  written after `T` (`target_after_snapshot`), and the step fails with that error.
+- **Weights:** for each portfolio of that `PositionSet`, the latest
   `AlpacaPortfolioWeightsStorage` rows with `time_index <= T`, as the portfolio published them.
 - **Prices:** Alpaca's latest trade for every asset the sizing needs.
 - **Account value:** the `equity` Alpaca reports for the account in the same read as the
-  holdings ([decision 4](#4-the-sizing-rule)).
+  holdings ([decision 4](#4-the-sizing-rule)). The capture returns it with the snapshot, so
+  the sizing never reads Alpaca a second time for it.
+
+The target and the weights do not share keys, so the sizing resolves three of them:
+
+| From | To | Used for |
+| --- | --- | --- |
+| The target row's `portfolio_uid` | The portfolio's `unique_identifier` | Reading the weights, keyed by `portfolio_identifier` |
+| A weight's `asset_identifier` | The asset's `uid` | `sized_targets`, which name an `asset_uid` |
+| A weight's `asset_identifier` | The Alpaca symbol | Reading the latest trade |
+
+Each is one set-based read through `alpaca_connectors.markets_api`, never one call per row.
 
 The connector never writes a `PositionSet`. It sizes at every sync, with that sync's prices,
 because ms-markets stores no units for a target: the sized units of a sync are valid for that
@@ -118,13 +150,16 @@ of 1.
 
 - A negative weight gives a short: a positive `quantity` with `direction: -1`.
 - An asset that rounds to zero has no position.
-- A portfolio with no weights at or before `T` is sized to nothing: an empty `positions`
-  list. Its fund still gets its holdings set.
+- A portfolio with no weights at or before `T` fails the step. Sizing it to nothing would
+  record a target of zero for its fund, and the deltas would say to sell everything the fund
+  holds. That is wrong for a portfolio whose weights this connector does not have, and the
+  connector cannot tell that case from a portfolio that has not published yet.
 - An asset with no price fails the step. Nothing is allocated with part of a target.
 
 Alpaca offers stocks and ETFs here, so there is no contract multiplier. The rule lives in
-`alpaca_connectors.account` beside the holdings capture and is the only place that prices a
-target.
+`alpaca_connectors.holdings` beside the holdings capture and is the only place that prices a
+target. It is a pure function of the exposure rows, the equity, the weights, the prices and
+the `fractionable` flags, so it is tested without Alpaca or Markets.
 
 The result is one `sized_targets` entry per exposure, in the shape ms-markets takes:
 
@@ -226,22 +261,65 @@ The connector sends those four positions. ms-markets records:
 
 ## Implementation Plan
 
-1. Raise the ms-markets floor, relock, re-export.
-2. Add the sizing rule and its tests: a share of Alpaca's equity and an amount, fractionable and
+Steps 1 and 2 need no ms-markets 3.7 and can start before it is published.
+
+1. Add the sizing rule and its tests: a share of Alpaca's equity and an amount, fractionable and
    whole-share rounding, shorts, a missing price, an asset that rounds to zero, a portfolio
    with no weights.
-3. Add the `PositionSet` read at `T` and the weights read at `T`.
-4. Add the plan and allocate calls and the refusal mapping.
+2. Return Alpaca's equity from the holdings capture.
+3. Raise the ms-markets floor, relock, re-export, and run the whole suite.
+4. Add the target read, the plan and the allocate wrappers to `alpaca_connectors.markets_api`,
+   the three key lookups, the weights read at `T` and the refusal mapping.
 5. Extend the sync operation's steps and result, and `OrderBatchResult`.
 6. Call the same steps from `_persist`.
-7. Update `docs/account/registration.md`, `docs/api.md`, the account workflow skill and the
-   capability catalog.
+7. Update `docs/account/registration.md`, `docs/api.md`, the account workflow skill, the
+   capability catalog, `docs/operations/markets-api-boundary.md` and the Markets rule in
+   `AGENTS.md`.
 
 No revision is needed: the operation's `steps` and `result` are JSON.
+
+## Implementation Notes
+
+- **The lock is on ms-markets 3.7.1.** `etfhextractor` pins ms-markets exactly (tag `v0.5.3`
+  pins 3.4.0), so `[tool.uv] override-dependencies` in `pyproject.toml` overrides that pin.
+  `etfhextractor` was not tested on 3.7 by its own suite; this project's suite passes with
+  it. The override goes when `etfhextractor` is released on 3.7.
+- **A newer MetaTables client came with it.** ms-markets 3.7.0 needs
+  `mainsequence-metatable>=0.1.64`; the lock moved from 0.1.63 to 0.1.65.
+- **Tests replace Markets with fakes.** The suite runs with ms-markets 3.7.1 installed, and the
+  request the connector builds is validated by its request models.
+- **Where the code is.** The sizing rule is `alpaca_connectors.holdings.sizing`. The target
+  read, the lookups, the plan and the allocation are `alpaca_connectors.holdings.allocation`.
+  The three Markets calls are in `alpaca_connectors.markets_api`.
+- **The steps are written once.** The sync runs inside one request, so the operation is
+  recorded when it starts and when it ends, not at each step. A failed operation names its
+  step in `current_step`.
+- **The policy.** The plan runs the default policy. The allocation sends the policy the plan
+  answered, with its version, so a policy that changed in between is refused.
+- **Error codes of the sizing.** `account_equity_missing`, `portfolio_weights_missing`,
+  `asset_unresolved` (an asset with no Alpaca details), `asset_price_missing` and
+  `invalid_account_target`. No message names an asset, a portfolio or an amount.
+- **The Agent.** The Agent's `capture_holdings` and the capture routes still publish the
+  snapshot only. The account workflow skill and the capability catalog did not change.
+- **Asset details are read by column.** The sizing selects only `symbol` and `fractionable`
+  from the Alpaca details table. On the local SQLite runtime older rows hold their
+  `attributes` list as text, and reading whole rows failed validation.
+- **A short position.** ms-markets fills a claim on its own side even when the account holds
+  the asset on the other side (its ADR 0053, rule 4). An account short 2 of an asset a fund
+  targets long shows +2 on the fund's line and -4 on the direct line. The connector publishes
+  the short as a positive quantity with direction -1 and changes nothing in those lines.
+- **The order path.** The snapshot's time is `holdings_time` on the batch answer and in the
+  batch metadata.
 
 ## Not Verified
 
 - How the connector reads the weights of a portfolio it does not compute itself.
 - That the API workload's identity may read the target and call the plan and allocate routes
   on the Markets API. The owner states it may; it was not exercised.
-- ms-markets 3.7 is not released. Nothing here was run against a Markets API on 3.7.
+- The order path's sizing and allocation after fills. The live end-to-end test
+  (`tests/test_live_account_lifecycle.py`) passed against a local Markets API on 3.7.1 and
+  SQLite on 2026-11-15: the capture, the sizing and the allocation ran for real. The market
+  was closed, so orders were queued and cancelled and no fill was allocated.
+- Nothing here was run on PostgreSQL or against a hosted Markets API.
+- What else changes for this connector between ms-markets 3.4 and 3.7, beyond the target and
+  the allocation.

@@ -40,8 +40,15 @@ def get_holdings_snapshot(account_uid: str, holdings_set_uid: str):
     return get_account_holdings_snapshot(account_uid, holdings_set_uid)
 
 
-def capture_holdings(account_uid: str):
+def capture_snapshot(account_uid: str):
+    """The capture with Alpaca's reported equity, for the sync that sizes the target (ADR 0022)."""
     return asdict(capture_alpaca_account_holdings(account_uid))
+
+
+def capture_holdings(account_uid: str):
+    captured = capture_snapshot(account_uid)
+    captured.pop("equity", None)
+    return captured
 
 
 def preflight_holdings(account_uid: str):
@@ -50,6 +57,7 @@ def preflight_holdings(account_uid: str):
 
 __all__ = [
     "capture_holdings",
+    "capture_snapshot",
     "get_holdings_snapshot",
     "list_holdings",
     "preflight_holdings",

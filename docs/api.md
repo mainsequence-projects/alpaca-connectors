@@ -144,7 +144,7 @@ A submission names the batch and its orders:
 Alpaca asset behind it, under Alpaca's current symbol. Only market day orders are accepted (`422`
 otherwise). Every answer has the same shape: `batch_id`, `account_uid`, the batch `status`,
 `accepted`, an optional `message`, `warnings`, the `holdings_set_uid` published after the latest
-fills, and `orders`, one per request leg, with `client_order_id`, `broker_order_id`, `status`
+fills with its `holdings_time`, and `orders`, one per request leg, with `client_order_id`, `broker_order_id`, `status`
 (`submitted`, `partially_filled`, `filled`, `cancelled`, `rejected`, `expired`, `failed`),
 `venue_status` (Alpaca's own), `filled_quantity`, `average_fill_price`, `submitted_at`,
 `updated_at` and `message`.
@@ -299,13 +299,25 @@ Every venue connector answers an application's request for an account's holdings
 reads the venue with the account's stored keys and publishes one `AccountHoldingsSet` into
 ms-markets, and the application reads the snapshot from ms-markets, not from this answer.
 
+When the account has a target in ms-markets, the sync also sizes it and allocates the snapshot to
+the account's funds ([ADR 0022](adrs/0022_account_sync_sizes_and_allocates_funds.md)):
+
+| Step | What it does |
+| --- | --- |
+| `capture_holdings` | Reads Alpaca and publishes the holdings snapshot at time `T` |
+| `size_targets` | Reads the account's latest target and turns each exposure into units: a share of NAV is taken from Alpaca's reported equity, split by the portfolio's latest weights at or before `T`, and divided by Alpaca's latest trade. A whole share is rounded half up unless the asset is fractionable |
+| `allocate_funds` | Plans the snapshot against those units, then allocates with the plan's digest. ms-markets records each owner's target, what it was assigned and the delta |
+
+The connector writes no target and trades no delta. An account with no target, and a capture
+that published no snapshot, end after `capture_holdings` with the two other steps `skipped`.
+
 ```text
 POST /v1/accounts/{account_uid}/actions/sync
 GET  /v1/operations/{operation_uid}
 ```
 
-`account_uid` is the ms-markets `Account` uid; the POST takes no body. It runs the holdings
-capture inside the request and answers `200` with a terminal
+`account_uid` is the ms-markets `Account` uid; the POST takes no body. It runs the three steps
+inside the request and answers `200` with a terminal
 `ObservableOperation[AccountSyncRequest, AccountSyncResult]`, `action: "account_sync"`:
 
 ```json
@@ -314,19 +326,41 @@ capture inside the request and answers `200` with a terminal
   "action": "account_sync",
   "status": "succeeded",
   "current_step": null,
-  "steps": [{"key": "capture_holdings", "label": "Read the Alpaca account and publish its holdings", "status": "succeeded", "...": "..."}],
+  "steps": [
+    {"key": "capture_holdings", "label": "Read the Alpaca account and publish its holdings", "status": "succeeded", "...": "..."},
+    {"key": "size_targets", "label": "Size the account's target into units", "status": "succeeded", "...": "..."},
+    {"key": "allocate_funds", "label": "Allocate the holdings to the account's funds", "status": "succeeded", "...": "..."}
+  ],
   "request": {"account_uid": "..."},
   "result": {
     "account_uid": "...",
     "holdings_set_uid": "...",
     "time_index": "2026-11-09T15:30:00Z",
     "holdings_rows": 3,
+    "position_set_uid": "...",
+    "allocation_applied": true,
+    "lines": [
+      {"owner": "fund", "target_portfolio_uid": "...", "asset_uid": "...", "asset_identifier": "...", "target": 1200.0, "assigned": 1000.0, "delta": 200.0}
+    ],
     "extra": {"unresolved_symbols": []}
   },
   "error": null
 }
 ```
 
+- `position_set_uid` is the target the snapshot was allocated against, or null when the account
+  has none. `allocation_applied` is false when the same allocation was already written or the
+  steps were skipped. `lines` repeats what ms-markets recorded, with `delta = target - assigned`;
+  read them again with `GET /api/v1/account/{account_uid}/virtual-fund-allocations/` on the
+  Markets API.
+- A step that fails after the capture leaves the snapshot published. The operation is `failed`
+  with `current_step` naming the step, and the next sync captures again. Its codes are
+  `account_equity_missing`, `portfolio_weights_missing` (a portfolio of the target has no
+  weights in this connector at `T`), `asset_unresolved`, `asset_price_missing`,
+  `invalid_account_target`, and the Markets refusals `not_found`, `target_after_snapshot`,
+  `invalid_sized_targets`, `plan_changed`, `allocation_exists`, `policy_version_mismatch` and
+  `portfolio_retired`. `target_after_snapshot`, `plan_changed` and `policy_version_mismatch`
+  are `retryable`. No message names an asset, a portfolio or an amount.
 - A capture that fails is still `200`, with `status: "failed"`, `result: null` and
   `error: {code, message, retryable}`: the code and message the account routes would answer
   (`alpaca_credentials_rejected`, `credential_key_unavailable`, `account_credentials_missing`,
