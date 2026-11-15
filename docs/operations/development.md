@@ -31,7 +31,9 @@ system credential store, not in the CodeRepository `.env`. MetaTables schema com
 
 Python 3.13 is required. `pyproject.toml` declares compatible ranges and intentionally does not pin
 exact dependency versions; `uv.lock` is the reproducible resolution. The one exception is the
-`etfhextractor` Git source, which `[tool.uv.sources]` pins to its release tag (`v0.5.3`).
+`etfhextractor` Git source, which `[tool.uv.sources]` pins to its release tag (`v0.5.3`). That
+release pins ms-markets 3.4.0 exactly, so `[tool.uv] override-dependencies` overrides its pin until
+`etfhextractor` is released on ms-markets 3.7.
 
 Install Playwright support when a provider extraction path requires it:
 
@@ -69,6 +71,82 @@ ALPACA_CONNECTORS_TEST_POSTGRES_URL=postgresql://postgres:alpaca@127.0.0.1:5448/
 The project requires MetaTables 0.1.65 or later, which types JSON parameters as `json`
 (MetaTables#111). On an earlier client these tests fail with the hosted error,
 `cannot adapt type 'dict' using placeholder '%s'`: a list was bound as a PostgreSQL array.
+
+## Live End-To-End Test
+
+`tests/test_live_account_lifecycle.py` runs the whole account life cycle on a real Alpaca paper
+account and a local stack ([ADR 0023](../adrs/0023_account_sync_sizes_and_allocates_funds.md)).
+It is skipped unless `ALPACA_E2E=1`:
+
+```bash
+ALPACA_E2E=1 .venv/bin/python -m pytest tests/test_live_account_lifecycle.py -x -v
+```
+
+| Stage | What it checks |
+| --- | --- |
+| Register | The account is created with the paper keys of `.env`; no key value comes back |
+| Sync, no target | Only the capture runs; the two other steps are skipped |
+| Two fixed-weight portfolios | AAPL and NVDA, and JPM and NVDA, published as weights rows |
+| Exposure | A share of NAV in the first portfolio and an amount in the second |
+| Sync | Each exposure is sized into units; an account holding only cash has full deltas |
+| Rebalance | The deltas are traded; the fills are allocated and NVDA is split between the funds. With the market closed the orders are queued, checked as accepted and cancelled |
+| Change and repeat | A portfolio with no weights fails the sizing; new weights and a lower exposure are sized again and traded |
+| Tear down | The target is cleared and the account is deleted; positions the test bought are left |
+
+It needs, on this machine:
+
+- the local MetaTables runtime (`metatables serve --local`) with both migrations applied;
+- the Markets API on ms-markets 3.7 or later, started from an ms-markets checkout against that
+  runtime, with `MARKETS_API_URL` set for this API and for the test;
+- this API at `http://127.0.0.1:8321` (`ALPACA_E2E_API_URL` names another address);
+- a signed-in `mainsequence` CLI, for the Bearer token;
+- `ALPACA_PAPER_API_KEY` and `ALPACA_PAPER_SECRET_KEY` in `.env`, which Git ignores.
+
+A branch with no registered Environment cannot read the `ALPACA_CONNECTORS_DATA_KEY` Secret. For
+such a branch, start the API with a local keyring instead: put one in `.env` as
+`ALPACA_E2E_LOCAL_KEYRING` (`metatables.encryption.Keyring.new().render()`) and hand it to
+MetaTables before uvicorn starts, without `--reload`:
+
+```bash
+set -a; source .env; set +a
+MAINSEQUENCE_AUTH_MODE=jwt MARKETS_API_URL=http://127.0.0.1:8322 PYTHONPATH=. .venv/bin/python -c '
+import os, sys
+from metatables import configure_local_client
+from metatables.encryption import set_keyring_source
+configure_local_client()
+ring = os.environ["ALPACA_E2E_LOCAL_KEYRING"]
+set_keyring_source(lambda name: ring)
+from uvicorn.main import main
+main(sys.argv[1:], prog_name="uvicorn")
+' api.app.main:app --host 127.0.0.1 --port 8321
+```
+
+What it does about the market and about leftovers:
+
+- **Market closed.** Orders are queued for the next session, checked as accepted and cancelled
+  again; the checks that need fills are left out.
+- **Orders it queued.** The API places orders at Alpaca before it records the batch, so the
+  test always cancels its own open orders at Alpaca, whether or not a check failed.
+- **An earlier run.** It removes the account an interrupted run left and clears that account's
+  target in Markets, which outlives the connector's registration.
+
+Results on the local SQLite runtime with ms-markets 3.7.1, on 2026-11-15 with the market closed:
+
+- **All ten stages pass.** Orders were queued, checked as accepted and cancelled; no order
+  filled, so the allocation after fills is still not exercised.
+- **ms-markets 3.7.0 could not record an order batch on SQLite**
+  ([MainSequenceMarkets#73](https://github.com/mainsequence-projects/MainSequenceMarkets/issues/73));
+  3.7.1 fixes it.
+- **A short position.** A fund that targets an asset long is assigned units even when the
+  account is short that asset; the direct line takes the difference. That is ms-markets'
+  documented rule (its ADR 0053, rule 4), so the test checks only that an asset's lines add up
+  to what the account holds.
+- **An order Alpaca refuses** is recorded as `rejected` with Alpaca's reason and reported as a
+  warning, not a failure. The paper account is short AAPL, so Alpaca refuses a buy larger than
+  the short.
+
+It leaves the three registered assets, the three `ALPACA_E2E_*` portfolios, their calendar and
+their weights rows in place; they are reused by the next run.
 
 ## Exercise The Backend
 

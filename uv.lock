@@ -7,6 +7,9 @@ resolution-markers = [
     "sys_platform != 'emscripten' and sys_platform != 'win32'",
 ]
 
+[manifest]
+overrides = [{ name = "ms-markets", specifier = ">=3.7.0,<4" }]
+
 [[package]]
 name = "alembic"
 version = "1.18.4"
@@ -58,7 +61,7 @@ requires-dist = [
     { name = "mainsequence-metatable", specifier = ">=0.1.65,<0.2" },
     { name = "mkdocs", specifier = ">=1.6.1" },
     { name = "mkdocs-material", specifier = ">=9.7.6" },
-    { name = "ms-markets", specifier = ">=3.4.0,<4" },
+    { name = "ms-markets", specifier = ">=3.7.0,<4" },
     { name = "ms-tau-sdk", specifier = ">=2.0.26,<3" },
     { name = "playwright" },
     { name = "uvicorn", specifier = ">=0.52.4,<0.53" },
@@ -1095,7 +1098,7 @@ wheels = [
 
 [[package]]
 name = "ms-markets"
-version = "3.4.0"
+version = "3.7.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "alembic" },
@@ -1115,9 +1118,9 @@ dependencies = [
     { name = "sqlalchemy" },
     { name = "uvicorn" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/bb/ac/1bc2786c72fdca479b46c0ad4ea704e203fa233956f3c42a6d20f6592655/ms_markets-3.4.0.tar.gz", hash = "sha256:22c90526884f4e0d62da0efc1045f5ee5c85621993c40c52d32e99e5ff938322", size = 2704236, upload-time = "2026-11-12T17:32:22.383Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/70/73/6fd4cd6dab32598c5db81ccebfe4646108e13966fc949df4973cfd7ab2a8/ms_markets-3.7.1.tar.gz", hash = "sha256:8b63d96927896643e7bd654bb88f91c560f45988b60ce4b1727b7199cf2c1e0a", size = 2752870, upload-time = "2026-11-15T21:44:41.004Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/1b/5c/58b5416e7148b22f98a6e6b69d365afee89800229ef97ccfd2378bac7a72/ms_markets-3.4.0-py3-none-any.whl", hash = "sha256:c92cc42af37a03c3eb512b51b064ba96fda239c1b9cbdaf903b45d3867492594", size = 865669, upload-time = "2026-11-12T17:32:19.967Z" },
+    { url = "https://files.pythonhosted.org/packages/24/ca/6d002cbedecda43678b241fa70a40e812d2b4c43bb4ff0c7f5e8a0da30b5/ms_markets-3.7.1-py3-none-any.whl", hash = "sha256:acf3b6c8680b53f6392382c71b4159660a57b17554d6a13c29fb16754fdd83cd", size = 874272, upload-time = "2026-11-15T21:44:39.446Z" },
 ]
 
 [[package]]

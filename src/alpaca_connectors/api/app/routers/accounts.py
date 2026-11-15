@@ -336,8 +336,11 @@ def account_refresh(account_uid: str) -> AccountResponse:
     summary="Sync an account's holdings into ms-markets",
     description=(
         "Read the Alpaca account with its stored keys and publish one AccountHoldingsSet into "
-        "ms-markets, then answer the terminal operation: succeeded with the snapshot it "
-        "published, or failed with a public error. Read the snapshot from ms-markets; read the "
+        "ms-markets. When the account has a target there, size each exposure into units with "
+        "Alpaca's equity, the portfolio weights and the latest trades, and allocate the snapshot "
+        "to the account's funds; ms-markets records each owner's target, assigned units and "
+        "delta. Then answer the terminal operation: succeeded with the snapshot and its lines, "
+        "or failed at a step with a public error. Read the snapshot from ms-markets; read the "
         "operation again at GET /v1/operations/{operation_uid}. An unknown account, or one the "
         "acting owner may not reach (ADR 0019), is refused with 404 and runs nothing."
     ),

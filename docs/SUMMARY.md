@@ -45,6 +45,7 @@
   - [0020 Dependencies That Are Starting](adrs/0020_dependencies_that_are_starting.md)
   - [0021 A Daily Dispatcher For Stored Bar Configurations](adrs/0021_daily_bars_dispatcher.md)
   - [0022 Configurations Never Block An Owner's Removal](adrs/0022_configurations_never_block_an_owners_removal.md)
+  - [0023 The Account Sync Sizes And Allocates The Account's Funds](adrs/0023_account_sync_sizes_and_allocates_funds.md)
 - Implementation Records
   - [SDK 8 And ms-markets Migration](implementation_tasks/0001_ms_markets_storage_first_migration.md)
   - [Alpaca Account Storage](implementation_tasks/0002_alpaca_account_module.md)

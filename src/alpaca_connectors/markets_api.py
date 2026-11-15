@@ -4,8 +4,10 @@ Markets registries (assets, categories and their memberships, accounts, holdings
 are reached with ``msm.api`` row calls, which run on the Markets API once the process selected the
 remote row backend (``alpaca_connectors.runtime.use_markets_api``; ms-markets ADR 0047). These
 helpers keep those reads set-based: a request carries at most ``MARKETS_BATCH_SIZE`` keys, and a
-collection is read in pages of that size, never one call per row. Account registration is the one
-composite route: ``register_account`` (ms-markets ADR 0051).
+collection is read in pages of that size, never one call per row. Four composite routes go through
+the same client: ``register_account`` (ms-markets ADR 0051) and, for the sync that sizes and
+allocates an account's target (ADR 0023, ms-markets ADR 0054), ``account_target_positions``,
+``plan_account_virtual_funds`` and ``allocate_account_virtual_funds``.
 """
 
 from __future__ import annotations
@@ -96,13 +98,75 @@ def register_account(request: Mapping[str, Any]) -> Any:
     return use_markets_api().client.register_account(request)
 
 
+def account_target_positions(account_uid: Any) -> Any:
+    """The account's latest target (``getAccountTargetPositions``): its exposure rows.
+
+    A portfolio row states a share of NAV or an amount and carries the portfolio's
+    ``unique_identifier``; an account with no target, or a cleared one, answers no position.
+    """
+    from alpaca_connectors.runtime import use_markets_api
+
+    return use_markets_api().client.account_target_positions(account_uid)
+
+
+def plan_account_virtual_funds(
+    account_uid: Any,
+    *,
+    position_set_uid: Any,
+    valuation_time: Any,
+    sized_targets: Sequence[Mapping[str, Any]],
+) -> Any:
+    """Plan the allocation of the holdings snapshot at ``valuation_time``; writes nothing.
+
+    ``sized_targets`` gives every exposure of the ``PositionSet`` in units. No price is sent. The
+    default policy runs, and the answer names the version it ran with.
+    """
+    from alpaca_connectors.runtime import use_markets_api
+
+    return use_markets_api().client.plan_account_virtual_funds(
+        account_uid,
+        position_set_uid=position_set_uid,
+        valuation_time=valuation_time,
+        sized_targets=list(sized_targets),
+    )
+
+
+def allocate_account_virtual_funds(
+    account_uid: Any,
+    *,
+    position_set_uid: Any,
+    valuation_time: Any,
+    sized_targets: Sequence[Mapping[str, Any]],
+    policy: Any,
+    plan_digest: str,
+) -> Any:
+    """Write the allocation a plan described (``allocateAccountVirtualFunds``).
+
+    ``policy`` and ``plan_digest`` are the plan's, so Markets refuses the write when the target,
+    its sizing, the holdings or the policy changed since that plan.
+    """
+    from alpaca_connectors.runtime import use_markets_api
+
+    return use_markets_api().client.allocate_account_virtual_funds(
+        account_uid,
+        position_set_uid=position_set_uid,
+        valuation_time=valuation_time,
+        sized_targets=list(sized_targets),
+        policy=policy,
+        plan_digest=plan_digest,
+    )
+
+
 __all__ = [
     "MARKETS_BATCH_SIZE",
+    "account_target_positions",
+    "allocate_account_virtual_funds",
     "assets_by_identifier",
     "assets_by_uid",
     "batches",
     "category_member_asset_uids",
     "openfigi_details_by_asset_uid",
+    "plan_account_virtual_funds",
     "read_all_pages",
     "read_in_batches",
     "register_account",

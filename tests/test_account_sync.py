@@ -2,7 +2,7 @@
 
 The API is called through the SDK's real local request identity. The operation rows go through
 the real `alpaca_connectors.operations.account_sync` functions into an in-memory stand-in for the
-MetaTable; only the holdings capture is replaced.
+MetaTable; the holdings capture, the target sizing and the allocation are replaced.
 """
 
 from __future__ import annotations
@@ -32,6 +32,8 @@ from alpaca_connectors.account.credentials import AlpacaCredentialsRejectedError
 from alpaca_connectors.account.ownership import AccountOwner
 from alpaca_connectors.api.app.main import app
 from alpaca_connectors.api.app.schemas import AccountSyncOperationResponse
+from alpaca_connectors.holdings.allocation import FundAllocationResult, SizedAccountTarget
+from alpaca_connectors.holdings.sizing import FundAllocationError
 from alpaca_connectors.operations import account_sync
 from alpaca_connectors.operations.account_sync import (
     AccountSyncOperation,
@@ -49,7 +51,27 @@ CAPTURED = {
     "time_index": SNAPSHOT_TIME,
     "holdings_rows": 3,
     "unresolved_symbols": [],
+    "equity": 1_000_000.0,
 }
+POSITION_SET_UID = "77777777-7777-4777-8777-777777777777"
+SIZED = SizedAccountTarget(
+    position_set_uid=POSITION_SET_UID,
+    valuation_time=SNAPSHOT_TIME,
+    sized_targets=[{"target_type": "portfolio", "target_uid": "portfolio-uid", "positions": []}],
+)
+LINE = {
+    "owner": "fund",
+    "target_portfolio_uid": "portfolio-uid",
+    "asset_uid": "asset-uid",
+    "asset_identifier": "ALPACA::A",
+    "target": 1200.0,
+    "assigned": 1000.0,
+    "delta": 200.0,
+}
+ALLOCATED = FundAllocationResult(
+    position_set_uid=POSITION_SET_UID, allocation_applied=True, lines=[LINE]
+)
+SERVICE = "alpaca_connectors.api.app.services.account_sync"
 
 
 class OperationRows:
@@ -90,26 +112,37 @@ def client(local_caller) -> TestClient:
     return TestClient(app, headers=local_caller.headers)
 
 
-def _sync(client: TestClient, *, captured: Any = CAPTURED, registered: Any = None, **kwargs):
-    capture = (
-        patch(
-            "alpaca_connectors.api.app.services.account_sync.capture_holdings",
-            side_effect=captured,
-        )
-        if isinstance(captured, Exception)
-        else patch(
-            "alpaca_connectors.api.app.services.account_sync.capture_holdings",
-            return_value=captured,
-        )
-    )
+def _replaced(name: str, outcome: Any):
+    """Replace one step of the sync by its answer, or by the exception it raises."""
+    if isinstance(outcome, Exception):
+        return patch(f"{SERVICE}.{name}", side_effect=outcome)
+    return patch(f"{SERVICE}.{name}", return_value=outcome)
+
+
+def _sync(
+    client: TestClient,
+    *,
+    captured: Any = CAPTURED,
+    sized: Any = None,
+    allocated: Any = ALLOCATED,
+    registered: Any = None,
+    steps: dict[str, Any] | None = None,
+    **kwargs,
+):
+    """Run one sync. By default the account has no target, so only the capture runs."""
     with (
         patch(
             "alpaca_connectors.api.app.routers.accounts.get_account",
             return_value=registration(None) if registered is None else registered,
         ),
-        capture as capture_holdings,
+        _replaced("capture_holdings", captured) as capture_holdings,
+        _replaced("size_account_target", sized) as size,
+        _replaced("allocate_sized_target", allocated) as allocate,
+        patch(f"{SERVICE}.registered_account_price_reader", return_value="price-reader"),
     ):
         response = client.post(f"/v1/accounts/{ACCOUNT_UID}/actions/sync", **kwargs)
+    if steps is not None:
+        steps.update(size=size, allocate=allocate)
     return response, capture_holdings
 
 
@@ -135,10 +168,18 @@ def test_a_sync_publishes_one_snapshot_and_answers_succeeded(client, rows) -> No
         "holdings_set_uid": HOLDINGS_SET_UID,
         "time_index": SNAPSHOT_TIME,
         "holdings_rows": 3,
+        "position_set_uid": None,
+        "allocation_applied": False,
+        "lines": [],
         "extra": {"unresolved_symbols": []},
     }
-    [step] = operation.steps
-    assert (step.key, step.status) == ("capture_holdings", "succeeded")
+    # An account with no target ends after the capture, as before ADR 0023.
+    assert [(step.key, step.status) for step in operation.steps] == [
+        ("capture_holdings", "succeeded"),
+        ("size_targets", "skipped"),
+        ("allocate_funds", "skipped"),
+    ]
+    assert "equity" not in response.text
     assert operation.current_step is None
     assert operation.completed_at is not None
     assert list(rows.rows) == [operation.operation_uid]
@@ -179,12 +220,83 @@ def test_a_capture_that_fails_answers_a_failed_operation(client, rows) -> None:
     assert operation.result is None
     assert operation.error.code == "alpaca_credentials_rejected"
     assert operation.error.retryable is False
-    [step] = operation.steps
-    assert (step.status, step.message) == ("failed", operation.error.message)
+    capture, size, allocate = operation.steps
+    assert (capture.status, capture.message) == ("failed", operation.error.message)
+    assert (size.status, allocate.status) == ("skipped", "skipped")
     assert operation.current_step == "capture_holdings"
 
     again = client.get(f"/v1/operations/{operation.operation_uid}")
     assert again.json() == response.json()
+
+
+# ------------------------------------------------------------------------------------------------
+# Sizing and allocation (ADR 0023)
+# ------------------------------------------------------------------------------------------------
+def test_a_sync_sizes_the_target_and_allocates_the_snapshot(client, rows) -> None:
+    steps: dict[str, Any] = {}
+    response, _ = _sync(client, sized=SIZED, steps=steps)
+
+    operation = AccountSyncOperationResponse.model_validate(response.json())
+    assert operation.status == "succeeded"
+    assert [(step.key, step.status) for step in operation.steps] == [
+        ("capture_holdings", "succeeded"),
+        ("size_targets", "succeeded"),
+        ("allocate_funds", "succeeded"),
+    ]
+    # The target is sized at the snapshot's time, with the equity of the same Alpaca read.
+    steps["size"].assert_called_once_with(
+        ACCOUNT_UID,
+        valuation_time=SNAPSHOT_TIME,
+        equity=1_000_000.0,
+        price_reader="price-reader",
+    )
+    steps["allocate"].assert_called_once_with(ACCOUNT_UID, SIZED)
+    assert operation.result.position_set_uid == POSITION_SET_UID
+    assert operation.result.allocation_applied is True
+    assert operation.result.lines == [LINE]
+
+
+def test_a_capture_that_published_no_snapshot_allocates_nothing(client, rows) -> None:
+    steps: dict[str, Any] = {}
+    empty = {**CAPTURED, "holdings_set_uid": None, "holdings_rows": 0}
+    response, _ = _sync(client, captured=empty, sized=SIZED, steps=steps)
+
+    operation = AccountSyncOperationResponse.model_validate(response.json())
+    assert operation.status == "succeeded"
+    assert [step.status for step in operation.steps] == ["succeeded", "skipped", "skipped"]
+    steps["size"].assert_not_called()
+    steps["allocate"].assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("failure", "step", "statuses", "retryable"),
+    [
+        (
+            {"sized": FundAllocationError("asset_price_missing", "No latest trade.")},
+            "size_targets",
+            ["succeeded", "failed", "skipped"],
+            False,
+        ),
+        (
+            {"sized": SIZED, "allocated": FundAllocationError("plan_changed", "Sync again.")},
+            "allocate_funds",
+            ["succeeded", "succeeded", "failed"],
+            True,
+        ),
+    ],
+)
+def test_a_failure_after_the_capture_fails_at_its_step(
+    client, rows, failure, step, statuses, retryable
+) -> None:
+    response, capture = _sync(client, **failure)
+
+    operation = AccountSyncOperationResponse.model_validate(response.json())
+    # The snapshot was published before the step failed, and it stays.
+    capture.assert_called_once_with(ACCOUNT_UID)
+    assert (operation.status, operation.current_step, operation.result) == ("failed", step, None)
+    assert [item.status for item in operation.steps] == statuses
+    assert operation.error.code == failure.get("allocated", failure["sized"]).code
+    assert operation.error.retryable is retryable
 
 
 def test_an_unexpected_failure_is_sanitized(client, rows) -> None:

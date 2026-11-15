@@ -393,7 +393,12 @@ class AccountSyncRequest(BaseModel):
 
 
 class AccountSyncResult(BaseModel):
-    """The `AccountHoldingsSet` a sync published; callers read the snapshot from ms-markets."""
+    """The `AccountHoldingsSet` a sync published and its allocation to the account's funds.
+
+    Callers read the snapshot, the fund holdings and the lines from ms-markets. `lines` repeats
+    what ms-markets recorded for this snapshot: per owner and asset, the sized `target`, what was
+    `assigned` and `delta = target - assigned` (ADR 0023).
+    """
 
     model_config = ConfigDict(extra="forbid")
 
@@ -401,6 +406,11 @@ class AccountSyncResult(BaseModel):
     holdings_set_uid: str | None
     time_index: dt.datetime
     holdings_rows: int
+    # The account target in force for this snapshot; null when the account has none.
+    position_set_uid: str | None = None
+    # True when this sync wrote the allocation; false when it was already applied or skipped.
+    allocation_applied: bool = False
+    lines: list[dict[str, Any]] = Field(default_factory=list)
     # What this venue adds, here `unresolved_symbols`; callers never depend on it.
     extra: dict[str, Any] = Field(default_factory=dict)
 
@@ -503,6 +513,13 @@ class OrderBatchResponse(BaseModel):
     warnings: list[str] = Field(default_factory=list)
     holdings_set_uid: str | None = Field(
         default=None, description="The holdings snapshot published after the latest fills."
+    )
+    holdings_time: dt.datetime | None = Field(
+        default=None,
+        description=(
+            "The time of that snapshot. Its allocation to the account's funds is read from "
+            "Markets by this time."
+        ),
     )
     orders: list[OrderStateResponse]
 
