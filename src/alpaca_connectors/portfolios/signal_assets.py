@@ -170,6 +170,23 @@ def assets_for_signals(signal_uids: Sequence[str]) -> list[str]:
     ]
 
 
+def forget_signal_assets(signal_uid: str) -> None:
+    """Delete one signal's rows, once nothing names its portfolio any more (issue #33)."""
+    from msm.repositories.base import compile_markets_statement, execute_markets_operation
+    from sqlalchemy import delete
+
+    normalized = str(signal_uid).strip()
+    if not normalized:
+        raise ValueError("signal_uid must not be empty.")
+    runtime = _start_runtime()
+    operation = compile_markets_statement(
+        delete(SignalAssetTable).where(SignalAssetTable.signal_uid == normalized),
+        context=runtime.context,
+        operation="delete",
+    )
+    execute_markets_operation(operation, context=runtime.context)
+
+
 def project_signal_asset_models() -> list[type[MarketsBase]]:
     return [SignalAssetTable]
 
@@ -177,6 +194,7 @@ def project_signal_asset_models() -> list[type[MarketsBase]]:
 __all__ = [
     "SignalAssetTable",
     "assets_for_signals",
+    "forget_signal_assets",
     "project_signal_asset_models",
     "record_signal_assets",
 ]

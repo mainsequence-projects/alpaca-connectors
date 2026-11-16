@@ -36,6 +36,7 @@ from alpaca_connectors.portfolios import (
 )
 from alpaca_connectors.portfolios.provided_weights import (
     create_provided_weights_portfolio,
+    delete_provided_weights_portfolio,
     give_portfolio_weights,
     provided_signal_uid,
     require_portfolio_owner,
@@ -376,11 +377,17 @@ def delete_configuration(
     *,
     owner: Callable[[], AccountOwner],
 ) -> dict[str, Any]:
-    """Delete the configuration row only; its JobRuns and published data remain."""
+    """Delete a portfolio configuration; its JobRuns and published data remain.
+
+    A provided-weights portfolio is ended first: its owner's call retires its ms-markets
+    `Portfolio` and the answer says so under ``portfolio`` (issue #33). An ETF portfolio's
+    configuration row is deleted alone, as before.
+    """
     row = get_portfolio_configuration(configuration_uid)
     if row is None:
         raise LookupError(f"Portfolio configuration {configuration_uid!s} does not exist.")
-    _require_owner(row, owner)
+    if row.is_provided:
+        return delete_provided_weights_portfolio(row.uid, owner=owner()).summary()
     return {
         "configuration_uid": str(row.uid),
         "deleted": True,

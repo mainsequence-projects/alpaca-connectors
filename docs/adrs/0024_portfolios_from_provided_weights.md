@@ -13,6 +13,12 @@ Implemented on 2026-11-16 at the owner's request, with open question 2 as planne
 configuration needs no ownership of its account). It has not been run against a Markets API (see
 [Implementation Notes](#implementation-notes)).
 
+Amended on 2026-11-16 for
+[issue #33](https://github.com/mainsequence-projects/alpaca-connectors/issues/33): the first
+implementation's `DELETE` removed only the configuration row and left the `Portfolio` live, which
+the routes table below already said it would retire. It now retires it
+([decision 4](#4-the-routes), [Ending a portfolio](#ending-a-portfolio)).
+
 The owner decided two points on 2026-11-16:
 
 - **Who may do it:** the creator owns the portfolio (decision 6).
@@ -143,7 +149,7 @@ All under the existing `/v1/portfolio-configurations` group. One observation is
 | `POST /v1/portfolio-configurations/{uid}/weights` | give it new weights: `observations` (one or more) |
 | `GET /v1/portfolio-configurations/{uid}/weights` | the stored observations, newest first, as the ETF signal history reads them |
 | `PATCH /v1/portfolio-configurations/{uid}` | as today; pause and resume through `scheduled` |
-| `DELETE /v1/portfolio-configurations/{uid}` | as today; retire it |
+| `DELETE /v1/portfolio-configurations/{uid}` | end it: retire its `Portfolio`, then delete the configuration (owner only) |
 | `POST /v1/portfolio-configurations/{uid}/actions/run` | as today |
 
 - **Create** creates the inline bars configuration when one is given, stores the row, publishes
@@ -165,11 +171,40 @@ All under the existing `/v1/portfolio-configurations` group. One observation is
 - **Responses** add `weights_source` to every portfolio configuration. On a provided-weights row
   the detail's `linked_signal` is null and a `provided_weights` block gives the signal UID, the
   first and last observation times and the asset count.
-- **Errors.** `portfolio_owned_by_another` (403), `observation_not_after_last` (409),
+- **Errors.** `portfolio_owned_by_another` (403), `observation_not_after_last` and
+  `portfolio_in_account_target` (409),
   `unknown_asset`, `asset_not_alpaca`, `invalid_observation` (a naive time, a weight that is not
   a finite number, or an empty set with nothing to close) and `empty_observations` (422). The
   connector maps the signal's exceptions to these codes; since their messages name assets and
   weights, no answer carries them, and no error names an asset, a weight or an owner.
+
+### Ending a portfolio
+
+`DELETE` on a provided-weights portfolio ends it as ms-markets' portfolio lifecycle defines it
+(ms-markets ADR 0049):
+
+1. **Retire the `Portfolio`** through `MarketsClient.retire_portfolio`, a `markets_api` composite.
+   Markets refuses it while an account's current target names the portfolio; the call then
+   answers `409 portfolio_in_account_target`, names no account, and changes nothing.
+2. **Forget the signal's assets** in the signal-asset table, which nothing reads once the
+   configuration is gone.
+3. **Delete the configuration row.**
+
+The answer is `{configuration_uid, deleted: true, portfolio: {uid, unique_identifier, state,
+retired_at}}`, with `state` `retired`, or `absent` for a configuration whose `Portfolio` no longer
+exists. The `Portfolio`, its series, its catalog registration and every account's history stay:
+retiring deletes nothing. A retired portfolio cannot be named by a new target, gets no virtual-fund
+holdings, leaves discovery, and its updaters write nothing after `retired_at`. Retiring a retired
+portfolio does nothing, so a call that failed after the retirement is safe to repeat, and the
+portfolio is already inert meanwhile.
+
+The `Portfolio` is not deleted. This connector's portfolio instances reference its
+`unique_identifier` with `RESTRICT` (revision 0020), so ms-markets cannot delete it until the
+connector deletes its own rows; deleting those first, and then finding that an account's history
+references the portfolio, would leave a retired portfolio without its series. That needs a typed
+delete preflight from ms-markets ([open question 4](#open-questions)).
+
+ETF portfolios keep their behaviour: `DELETE` removes the configuration row alone.
 
 ### 5. Bars: a `portfolios` asset source
 
@@ -473,6 +508,13 @@ What the code does where the plan left room, and what is not verified:
      includes them).
    - Not a blocker for this plan: without the index, the costs above grow with the tables, which
      hold about 5,000 signal rows in Production today.
+4. **Delete a portfolio no account ever referenced?** `DELETE` retires
+   ([Ending a portfolio](#ending-a-portfolio)). Deleting the `Portfolio` and its series as well,
+   when nothing references it, needs a typed delete preflight from ms-markets, then this
+   connector deleting its own instance rows and catalog registration
+   (`PortfolioDatasets.unregister`), then the Markets delete.
+5. **ETF portfolios.** Should their `DELETE` retire their `Portfolio` too? They have no owner, and
+   any caller may delete them today.
 
 ## Consequences
 

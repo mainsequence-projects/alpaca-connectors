@@ -326,6 +326,11 @@ GET  /v1/portfolio-configurations/{configuration_uid}/weights
   weights, changes, pauses or deletes it; anyone else gets `403 portfolio_owned_by_another`. Reads
   and runs stay open. ETF portfolios have no owner. Responses carry `weights_source`, never the
   owner.
+- **Deleting ends it.** `DELETE` retires the ms-markets `Portfolio` (ms-markets ADR 0049), then
+  deletes the configuration, and answers `portfolio: {uid, unique_identifier, state: "retired",
+  retired_at}`. While an account's current target names the portfolio it answers
+  `409 portfolio_in_account_target` and changes nothing. The `Portfolio`, its series and account
+  history stay; a retired portfolio is no longer offered as a target and is no longer computed.
 - **The detail** of a provided-weights portfolio has `linked_signal: null` and a
   `provided_weights` block: the signal UID, its first and last observation times and its asset
   count.

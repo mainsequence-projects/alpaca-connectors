@@ -4,10 +4,11 @@ Markets registries (assets, categories and their memberships, accounts, holdings
 are reached with ``msm.api`` row calls, which run on the Markets API once the process selected the
 remote row backend (``alpaca_connectors.runtime.use_markets_api``; ms-markets ADR 0047). These
 helpers keep those reads set-based: a request carries at most ``MARKETS_BATCH_SIZE`` keys, and a
-collection is read in pages of that size, never one call per row. Four composite routes go through
-the same client: ``register_account`` (ms-markets ADR 0051) and, for the sync that sizes and
+collection is read in pages of that size, never one call per row. Five composite routes go through
+the same client: ``register_account`` (ms-markets ADR 0051); for the sync that sizes and
 allocates an account's target (ADR 0023, ms-markets ADR 0054), ``account_target_positions``,
-``plan_account_virtual_funds`` and ``allocate_account_virtual_funds``.
+``plan_account_virtual_funds`` and ``allocate_account_virtual_funds``; and ``retire_portfolio``
+(ms-markets ADR 0049), which ends a provided-weights portfolio its owner deletes (ADR 0024).
 """
 
 from __future__ import annotations
@@ -157,6 +158,17 @@ def allocate_account_virtual_funds(
     )
 
 
+def retire_portfolio(portfolio_uid: Any) -> Any:
+    """Retire a portfolio from now on (``retirePortfolio``, ms-markets ADR 0049).
+
+    Nothing is deleted; retiring a retired portfolio returns it unchanged. Markets refuses it with
+    ``MarketsConflictError`` while an account's current target names the portfolio.
+    """
+    from alpaca_connectors.runtime import use_markets_api
+
+    return use_markets_api().client.retire_portfolio(portfolio_uid)
+
+
 __all__ = [
     "MARKETS_BATCH_SIZE",
     "account_target_positions",
@@ -170,4 +182,5 @@ __all__ = [
     "read_all_pages",
     "read_in_batches",
     "register_account",
+    "retire_portfolio",
 ]
