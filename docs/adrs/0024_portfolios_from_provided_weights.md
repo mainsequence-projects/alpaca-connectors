@@ -197,8 +197,12 @@ about 500 rows a day. Its only index is the contract's unique
 `(time_index, signal_uid, asset_identifier)`, which leads with time, so a filter by `signal_uid`
 cannot use it. "Every asset this signal ever published" read from that table
 (`ApplicationWeights.get_asset_list()`, a `DISTINCT ON (signal_uid, asset_identifier)` over the
-rows) scans the whole table at every bars run, and grows without bound. The resolution never
-reads it. Instead:
+rows) scans the whole table at every bars run, and grows without bound. No index fixes this on
+Production's PostgreSQL 14 and TimescaleDB 2.10: they cannot skip to the last row of each
+`(signal_uid, asset_identifier)` pair, so even an index that leads with `signal_uid` walks the
+signal's whole history (measured for MainSequenceMarkets#77; see
+[open question 3](#open-questions)). "Ever published" is a set the time series cannot answer
+cheaply, so the resolution never reads it from there. Instead:
 
 - **A signal-asset table.** `alpaca_connectors__signal_asset` holds one row per signal and asset
   it ever published: `signal_uid`, `asset_identifier`, `first_published_at`, with the primary key
@@ -373,15 +377,52 @@ After the ms-markets release and the open questions:
    in ADR 0022's sense. Today naming any bars configuration needs nothing, and this plan keeps
    that.
 
-3. **An ms-markets index.** `ApplicationWeights.publish` reads each asset's last row with the same
-   `DISTINCT ON` over `AlpacaSignalWeightsStorage`, so every publication scans the table too. The
-   connector cannot fix that without departing from the `SignalWeightsTS` contract. Asked of
-   ms-markets on 2026-11-16 at the owner's request:
-   [MainSequenceMarkets#77](https://github.com/mainsequence-projects/MainSequenceMarkets/issues/77)
-   proposes `(signal_uid, asset_identifier, time_index)` on `SignalWeightsTS` and
-   `(portfolio_identifier, asset_identifier, time_index)` on `PortfolioWeightsTS`, which the
-   account sync reads. Not a blocker: this plan works without it, and a release with it needs
-   a revision here for the instances.
+3. **An ms-markets index.** Asked of ms-markets on 2026-11-16 at the owner's request
+   ([MainSequenceMarkets#77](https://github.com/mainsequence-projects/MainSequenceMarkets/issues/77)).
+   The ms-markets session measured it the same day on Production's versions with 5,000,000
+   synthetic rows. The issue as filed is wrong in three places:
+   - the index it proposes, `(series, asset_identifier, time_index)`, nearly doubles index
+     storage (+595 MB on a 641 MB table) and only halves the last-row read;
+   - with any index, that read stays bounded by the series' history, not by its number of assets;
+   - a live portfolio's latest weights at or before `T` already cost 4 pages. Only a series that
+     stopped publishing is a full scan.
+
+   The index worth having is `(signal_uid, time_index DESC)` on `SignalWeightsTS` and
+   `(portfolio_identifier, time_index DESC)` on `PortfolioWeightsTS`: +36 MB, and a stopped
+   series' "last time at or before `T`" goes from 565,693 pages to 143. For this plan it matters
+   in three places, none of them the bars resolution:
+   - **The nightly portfolio runs.** Each run's seed read of its signal's and portfolio's update
+     statistics is a whole-table `DISTINCT ON` today, so N provided-weights portfolios cost N
+     scans of each table a night. With the index, each run costs its own series' history, which
+     for a provided-weights portfolio is small.
+   - **`ApplicationWeights.publish`.** The same: today a whole-table read per call; with the
+     index, the signal's own history. The full fix is ms-markets': `publish` needs only the rows
+     at the signal's last time (every observation is the whole set, zeros included), which is two
+     indexed lookups at any table size.
+   - **The account sync on a paused portfolio.** A paused provided-weights portfolio still in an
+     account target is a series that stopped, which is the full-scan case.
+   - **The portfolio run's signal bounds.** `resolve_portfolio_configuration` reads the signal's
+     first and last observation (`read_signal_observation_bounds`, `min` and `max` of
+     `time_index` for one `signal_uid`). Through the time-leading index, the `max` is cheap for a
+     live signal, but the `min` walks forward from the table's oldest rows until it meets the
+     signal. For a provided-weights portfolio created long after the table's first rows, that is
+     close to a full scan on every run. The `(signal_uid, time_index DESC)` index answers both
+     ends directly.
+
+   The ms-markets analysis, posted on the issue the same day, confirms this and leaves two points
+   open: `get_asset_list` ("every asset ever published") needs its own decision in ms-markets,
+   and whether MetaTables accepts an extra index on these contracts is not verified. So:
+
+   - **The signal-asset table stays.** It is this connector's answer to "ever published" until
+     ms-markets decides one. If ms-markets later serves that set from an indexed read, the bars
+     resolution can switch to it and the table can be dropped by a later revision.
+   - **The index waits for the contract.** This connector does not add it to its own instances
+     ahead of ms-markets, because whether MetaTables accepts it is not known. When a release
+     adds it to the contracts, one revision here adds it to this connector's instances of those
+     contracts (signal weights, portfolio weights, and the two portfolio tables if ms-markets
+     includes them).
+   - Not a blocker for this plan: without the index, the costs above grow with the tables, which
+     hold about 5,000 signal rows in Production today.
 
 ## Consequences
 
