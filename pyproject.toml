@@ -92,15 +92,9 @@ ignore = ["E203", "E501"]
 # Treat these as your own packages so they sort as "first-party".
 known-first-party = ["mainsequence","metatables","alpaca_connectors"]
 
-[tool.uv]
-# etfhextractor pins ms-markets exactly (v0.5.3 pins 3.4.0). This project needs 3.8 (ADR 0024's
-# ApplicationWeights), so the pin is overridden here. Remove the override once etfhextractor is
-# released on 3.8.
-override-dependencies = ["ms-markets>=3.8.0,<4"]
-
 [tool.uv.sources]
 # The ETF library is released only as Git tags; consumers pin the tag of the release they tested.
-etfhextractor = { git = "https://github.com/mainsequence-projects/etfholdingextractor", tag = "v0.5.3" }
+etfhextractor = { git = "https://github.com/mainsequence-projects/etfholdingextractor", tag = "v0.5.5" }
 
 [dependency-groups]
 dev = [
