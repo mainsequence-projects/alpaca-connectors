@@ -77,8 +77,8 @@ instructions are `.tau/SYSTEM.md`; its tools and skills are described in
 
 - maintain reusable definitions with `alpaca-connectors market-data bar-configuration` CRUD
 - each definition selects one registered account, one migrated frequency/feed/adjustment profile,
-  and exactly one asset source: explicit `assets`, an active `universe`, or recent
-  `account_holdings`
+  and exactly one asset source: explicit `assets`, an active `universe`, recent
+  `account_holdings`, or `portfolios` (every asset of the live portfolios that name it, ADR 0024)
 - for account holdings, the configured Account UID resolves the newest stored holdings set inside
   the inclusive trailing 30-day window; the resolver never captures holdings as a side effect
 - run `alpaca-connectors market-data update --configuration-uid <CONFIGURATION_UID>` for a dry-run

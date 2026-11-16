@@ -67,11 +67,11 @@ before its work finds the Markets API starting as well.
 | Universes | Create/list/get/update registered `AssetUniverse` rows; list linked category Assets at `GET /v1/universes/{universe_uid}/assets`; run, activate, deactivate, and confirmed delete actions under `/v1/universes` |
 | Market Data | configuration CRUD and resolve/update actions under `/v1/market-data/bar-configurations`; dataset list/get and bounded observations under `/v1/market-data/datasets` |
 | ETF Signals | signal configuration CRUD under `/v1/signal-jobs`; run, pause, resume, reconcile, and JobRun-history actions on the shared signal Job |
-| ETF Portfolios | configuration CRUD under `/v1/portfolio-configurations`; reusable calendar-event policies under `/v1/portfolio-rebalance-configurations`; run and JobRun-history actions on the shared portfolio Job |
+| ETF Portfolios | configuration CRUD under `/v1/portfolio-configurations`; portfolios from weights an application provides (`/provided-weights`, `/{uid}/weights`); reusable calendar-event policies under `/v1/portfolio-rebalance-configurations`; run and JobRun-history actions on the shared portfolio Job |
 | Operations | poll an accepted Alpaca bars, ETF signal, or ETF portfolio JobRun under `GET /v1/operations/job-runs/{job_run_uid}`; read an account sync again at `GET /v1/operations/{operation_uid}` |
 
 Market-data writes are configuration-oriented. Create one stored definition with exactly one
-source (`assets`, `universe`, or `account_holdings`), review it with the `resolve` action, and run it
+source (`assets`, `universe`, `account_holdings`, or `portfolios`), review it with the `resolve` action, and run it
 with the `update` action. Neither request accepts a dataset UID. The response reports the derived
 output MetaTable only as diagnostics.
 
@@ -291,6 +291,52 @@ response records the exact observation count, date window, 252-period annualizat
 risk-free-rate assumption. Alpha and beta are not reported because this workflow has no configured
 benchmark. If the requested window is shorter than the stored history, the response marks it as
 truncated rather than presenting the statistics as since-inception results.
+
+### Portfolios From Provided Weights
+
+An application can build a portfolio from weights it chooses
+([ADR 0024](adrs/0024_portfolios_from_provided_weights.md)). The portfolio is one more row of the
+same configuration table, with `weights_source: "provided"` and no Signal Configuration, and runs
+on the same Job, dispatcher, series and catalog as an ETF portfolio. Its signal is ms-markets'
+`ApplicationWeights` with this connector's namespace and the configuration UID as key, so its
+`signal_uid` never changes.
+
+```text
+POST /v1/portfolio-configurations/provided-weights
+POST /v1/portfolio-configurations/{configuration_uid}/weights
+GET  /v1/portfolio-configurations/{configuration_uid}/weights
+```
+
+- **Create** takes `name`, `description?`, either `bars_configuration_uid` or `bars_configuration`
+  (`name`, `account_uid`, `frequency_id`, `feed`, `adjustment`, `scheduled?`: a new `portfolios`
+  bars configuration, whose account the caller must be allowed to configure), the
+  `rebalance_configuration_uid`, the valuation and fee settings, `scheduled?`, and `observations`.
+  It answers the configuration, the `Portfolio` (`portfolio_uid`, `portfolio_unique_identifier`
+  `ALPACA_PORTFOLIO__<uid hex>`), whether it created the bars configuration, and the weights it
+  published. A refused create leaves no row.
+- **An observation** is `{observed_at, weights: {<ALPACA::uuid>: <weight>}}`. `observed_at` needs a
+  timezone. Each observation is the whole set: an asset the previous one held and this one leaves
+  out is written at `0`. Weights are stored as given, negatives included. Several observations in
+  one call start or extend a history; an observation at or before the last stored one is refused
+  (`409 observation_not_after_last`), because published observations are never restated.
+- **Assets** must be registered Alpaca assets: `422 unknown_asset` or `422 asset_not_alpaca`
+  otherwise. Other refusals are `422 invalid_observation` and `422 empty_observations`. No error
+  names an asset, a weight or an owner.
+- **The owner.** The acting owner at creation owns the portfolio. Only that owner gives it
+  weights, changes, pauses or deletes it; anyone else gets `403 portfolio_owned_by_another`. Reads
+  and runs stay open. ETF portfolios have no owner. Responses carry `weights_source`, never the
+  owner.
+- **The detail** of a provided-weights portfolio has `linked_signal: null` and a
+  `provided_weights` block: the signal UID, its first and last observation times and its asset
+  count.
+
+A `portfolios` bars configuration fetches every asset ever published by the live portfolios that
+name it: a deleted portfolio or one whose `Portfolio` is retired drops out, a paused one still
+counts. The list is derived at every resolution from the portfolio configurations and the
+signal-asset table (`alpaca_connectors__signal_asset`), never from the signal weights series; the
+`resolve` action shows it. Bars run at 00:00 UTC and portfolios at 02:00 UTC, so weights given
+during a day get their bars before the next scheduled run. Run the bars update first when running
+a portfolio at once after adding an asset.
 
 ## Account Sync
 

@@ -66,12 +66,14 @@ Use that page first when the question is about:
 - Storage-first: schema lives on the storage class, not the DataNode config; tables must be
   migrated and the runtime attached (`start_markets_engine()`) before writes.
 - Bar updates are configuration-first: users maintain UUID-keyed `AlpacaBarsConfiguration` rows
-  with `assets`, `universe`, or recent `account_holdings` sources. The output MetaTable is resolved
-  from frequency/feed/adjustment and is never a write input.
+  with `assets`, `universe`, recent `account_holdings`, or `portfolios` sources. The output
+  MetaTable is resolved from frequency/feed/adjustment and is never a write input.
 - Portfolio construction uses the portfolio runtime (`start_portfolio_markets_engine()`), the
   connector-owned Universe-backed `AlpacaETFHoldingsSignal`, and
   persistent `msm_portfolios.InterpolatedPrices` over the registered Alpaca bars table. Durable
-  Portfolio Configurations reference existing Signal, Bars, and Rebalance Configurations. The
+  Portfolio Configurations reference existing Signal, Bars, and Rebalance Configurations, or, for
+  a portfolio whose weights an application provides, an `ApplicationWeights` signal instead of a
+  Signal Configuration (ADR 0024). The
   signal and portfolio Jobs declared in `.mainsequence/workflows/alpaca-connectors-api.yaml` run
   every configuration and own schedule and compute; a configuration only chooses whether the
   daily scheduled run includes it (ADR 0013).

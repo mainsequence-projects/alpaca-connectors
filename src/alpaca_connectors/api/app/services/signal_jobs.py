@@ -118,6 +118,11 @@ def get_configuration_observations(
         signal_uid=signal_uid_for_configuration(row),
         observation_limit=limit,
     )
+    return observations_response(row.uid, matrix)
+
+
+def observations_response(configuration_uid: Any, matrix: Any) -> SignalObservationsResponse:
+    """A signal observation matrix as the API answers it, for any configuration that has one."""
     assets = [
         SignalObservationAssetResponse(
             asset_identifier=asset.asset_identifier,
@@ -128,7 +133,7 @@ def get_configuration_observations(
         for asset in matrix.assets
     ]
     return SignalObservationsResponse(
-        configuration_uid=str(row.uid),
+        configuration_uid=str(configuration_uid),
         signal_uid=matrix.signal_uid,
         observation_count=len(matrix.time_indexes),
         asset_count=len(assets),

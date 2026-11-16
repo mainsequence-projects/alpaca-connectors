@@ -768,11 +768,12 @@ def manage_etf_portfolio(arguments: Mapping[str, Any]) -> Any:
         return update_configuration(
             configuration_uid,
             _request_model(arguments, PortfolioConfigurationUpdateRequest),
+            owner=_acting_owner,
         )
     if operation == "run":
         return run_configuration(configuration_uid)
     _confirm_delete(arguments, configuration_uid)
-    return delete_configuration(configuration_uid)
+    return delete_configuration(configuration_uid, owner=_acting_owner)
 
 
 def get_job_run_status(arguments: Mapping[str, Any]) -> Any:
@@ -1149,7 +1150,7 @@ PROJECT_AGENT_TOOLS: tuple[ProjectAgentTool, ...] = (
                     "scheduled": {"type": "boolean"},
                     "asset_source": {
                         "type": "string",
-                        "enum": ["assets", "universe", "account_holdings"],
+                        "enum": ["assets", "universe", "account_holdings", "portfolios"],
                     },
                 },
             ),

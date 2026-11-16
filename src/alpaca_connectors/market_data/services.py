@@ -268,12 +268,17 @@ def build_market_data_update(
 ) -> tuple[Any, dict[str, Any]]:
     """Resolve one stored configuration into an updater without resolving Secrets.
 
-    The resolver performs governed reads only. In particular it does not contact Alpaca and an
-    ``account_holdings`` source never captures a new snapshot.
+    The resolver performs governed reads only. In particular it does not contact Alpaca, an
+    ``account_holdings`` source never captures a new snapshot, and a ``portfolios`` source reads
+    no time series (ADR 0024).
     """
     from alpaca_connectors.account.services import get_account_registration
     from alpaca_connectors.holdings import resolve_recent_account_holdings_assets
-    from alpaca_connectors.market_data.alpaca_bars import AlpacaStockBarsConfig, AlpacaStockBarsNode
+    from alpaca_connectors.market_data.alpaca_bars import (
+        AlpacaStockBarsConfig,
+        AlpacaStockBarsNode,
+        AlpacaStockBarsPortfoliosConfig,
+    )
     from alpaca_connectors.market_data.configurations import get_bar_configuration
     from alpaca_connectors.market_data.storage import storage_for
     from alpaca_connectors.runtime import account_runtime_models, start_markets_engine
@@ -316,6 +321,14 @@ def build_market_data_update(
         )
         asset_uids = _asset_uids_from_identifiers(identifiers)
         runtime_config_values["asset_category_unique_identifier"] = category_identifier
+    elif configuration.asset_source == "portfolios":
+        from alpaca_connectors.portfolios.bars_scope import resolve_portfolio_bars_scope
+
+        portfolio_scope = resolve_portfolio_bars_scope(configuration.uid)
+        identifiers = list(portfolio_scope.asset_identifiers)
+        asset_uids = _asset_uids_from_identifiers(identifiers) if identifiers else []
+        source_snapshot = portfolio_scope.snapshot()
+        runtime_config_values["bars_configuration_uid"] = configuration.uid
     else:
         account_scope = resolve_recent_account_holdings_assets(configuration.account_uid)
         identifiers = account_scope.asset_identifiers
@@ -329,7 +342,12 @@ def build_market_data_update(
     if not identifiers:
         raise ValueError("The stored bar configuration resolves to no assets.")
 
-    config = AlpacaStockBarsConfig(**runtime_config_values)
+    config_class = (
+        AlpacaStockBarsPortfoliosConfig
+        if configuration.asset_source == "portfolios"
+        else AlpacaStockBarsConfig
+    )
+    config = config_class(**runtime_config_values)
     node = AlpacaStockBarsNode(
         config=config,
         resolved_asset_identifiers=identifiers,

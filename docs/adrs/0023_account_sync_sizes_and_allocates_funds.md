@@ -13,6 +13,10 @@ exposure, and the connector sizes it at every sync.
 
 The decision marked (owner) was made by the owner on 2026-11-15.
 
+Amended on 2026-11-16 by [ADR 0024](0024_portfolios_from_provided_weights.md): a provided-weights
+portfolio publishes its weights like any other, so `portfolio_weights_missing` is left for a
+portfolio that has not run yet.
+
 ## Context
 
 ms-markets 3.7 fixes who owns what (ms-markets ADR 0054):

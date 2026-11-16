@@ -1,10 +1,17 @@
-"""Durable analytical ETF portfolio and rebalance configuration API."""
+"""Durable analytical portfolio and rebalance configuration API.
+
+ETF portfolios follow an ETF signal; provided-weights portfolios follow weights the calling
+application gives (ADR 0024) and are changed only by their owner.
+"""
 
 from __future__ import annotations
+
+from typing import Literal
 
 from fastapi import APIRouter, Body, Query
 
 from ..errors import api_http_error, not_found
+from ..identity import acting_owner
 from ..schemas import (
     PortfolioConfigurationCreateRequest,
     PortfolioConfigurationDetailResponse,
@@ -15,18 +22,26 @@ from ..schemas import (
     PortfolioRebalanceConfigurationCreateRequest,
     PortfolioRebalanceConfigurationResponse,
     PortfolioRebalanceConfigurationUpdateRequest,
+    PortfolioWeightsRequest,
+    ProvidedWeightsPortfolioCreateRequest,
+    ProvidedWeightsPortfolioCreateResponse,
+    PublishedWeightsResponse,
     ResourceCollection,
     ResourceDiscoveryResponse,
+    SignalObservationsResponse,
 )
 from ..services.common import resource_discovery, validate_ordering, validate_page_window
 from ..services.portfolio_configurations import (
     configuration_runs,
+    configuration_weights,
     create_configuration,
+    create_provided_configuration,
     create_rebalance,
     delete_configuration,
     delete_rebalance,
     get_configuration_detail,
     get_rebalance,
+    give_weights,
     list_configurations,
     list_rebalances,
     run_configuration,
@@ -44,6 +59,7 @@ def portfolio_configurations_list(
     search: str | None = None,
     signal_configuration_uid: str | None = None,
     bars_configuration_uid: str | None = None,
+    weights_source: Literal["etf_signal", "provided"] | None = None,
     ordering: str = "name",
 ) -> ResourceCollection:
     validate_page_window(limit=limit, offset=offset)
@@ -55,6 +71,7 @@ def portfolio_configurations_list(
             search=search,
             signal_configuration_uid=signal_configuration_uid,
             bars_configuration_uid=bars_configuration_uid,
+            weights_source=weights_source,
             ordering=ordering,
         )
     except Exception as exc:
@@ -72,7 +89,7 @@ def portfolio_configurations_discovery() -> ResourceDiscoveryResponse:
         item_label="portfolio configuration",
         identity_fields=["uid"],
         searchable_fields=["name", "description"],
-        filterable_fields=["signal_configuration_uid", "bars_configuration_uid"],
+        filterable_fields=["signal_configuration_uid", "bars_configuration_uid", "weights_source"],
         orderable_fields=["name", "updated_at"],
         columns=[
             {"id": "name", "header": "Portfolio", "sortable_key": "name", "hideable": False},
@@ -99,6 +116,51 @@ def portfolio_configuration_create(
 ) -> PortfolioConfigurationResponse:
     try:
         return create_configuration(request)
+    except Exception as exc:
+        raise api_http_error(exc) from exc
+
+
+@router.post(
+    "/v1/portfolio-configurations/provided-weights",
+    response_model=ProvidedWeightsPortfolioCreateResponse,
+    status_code=201,
+)
+def provided_weights_portfolio_create(
+    request: ProvidedWeightsPortfolioCreateRequest = Body(...),
+) -> ProvidedWeightsPortfolioCreateResponse:
+    """Create a portfolio from weights the caller provides; the caller's acting owner owns it."""
+    try:
+        return create_provided_configuration(request, owner=acting_owner())
+    except Exception as exc:
+        raise api_http_error(exc) from exc
+
+
+@router.post(
+    "/v1/portfolio-configurations/{configuration_uid}/weights",
+    response_model=PublishedWeightsResponse,
+    status_code=201,
+)
+def provided_weights_give(
+    configuration_uid: str,
+    request: PortfolioWeightsRequest = Body(...),
+) -> PublishedWeightsResponse:
+    """Give the portfolio new weights; only its owner may."""
+    try:
+        return give_weights(configuration_uid, request, owner=acting_owner())
+    except Exception as exc:
+        raise api_http_error(exc) from exc
+
+
+@router.get(
+    "/v1/portfolio-configurations/{configuration_uid}/weights",
+    response_model=SignalObservationsResponse,
+)
+def provided_weights_read(
+    configuration_uid: str,
+    limit: int = Query(default=100, ge=1, le=100),
+) -> SignalObservationsResponse:
+    try:
+        return configuration_weights(configuration_uid, limit=limit)
     except Exception as exc:
         raise api_http_error(exc) from exc
 
@@ -132,7 +194,7 @@ def portfolio_configuration_update(
     request: PortfolioConfigurationUpdateRequest = Body(...),
 ) -> PortfolioConfigurationResponse:
     try:
-        return update_configuration(configuration_uid, request)
+        return update_configuration(configuration_uid, request, owner=acting_owner)
     except Exception as exc:
         raise api_http_error(exc) from exc
 
@@ -140,7 +202,7 @@ def portfolio_configuration_update(
 @router.delete("/v1/portfolio-configurations/{configuration_uid}", response_model=dict)
 def portfolio_configuration_delete(configuration_uid: str) -> dict:
     try:
-        return delete_configuration(configuration_uid)
+        return delete_configuration(configuration_uid, owner=acting_owner)
     except Exception as exc:
         raise api_http_error(exc) from exc
 

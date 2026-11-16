@@ -34,8 +34,8 @@ from sqlalchemy.types import Uuid
 from alpaca_connectors.metatables import AlpacaMarketsMetaTableMixin, ProjectStorageNameMixin
 from alpaca_connectors.universes.registry import AssetUniverseTable
 
-AssetSource = Literal["assets", "universe", "account_holdings"]
-ASSET_SOURCES: tuple[AssetSource, ...] = ("assets", "universe", "account_holdings")
+AssetSource = Literal["assets", "universe", "account_holdings", "portfolios"]
+ASSET_SOURCES: tuple[AssetSource, ...] = ("assets", "universe", "account_holdings", "portfolios")
 UTC = dt.timezone.utc
 _UNSET = object()
 
@@ -56,15 +56,15 @@ class AlpacaBarsConfigurationTable(
     __metatable_description__ = (
         "One row per stored stock price-update configuration. Saved settings for downloading "
         "stock prices (OHLCV bars) from Alpaca: the registered Alpaca brokerage account whose "
-        "keys to use, how to choose the assets to price (an explicit list, an asset universe or "
-        "the account's recent holdings) and the bar frequency, data feed and corporate-action "
+        "keys to use, how to choose the assets to price (an explicit list, an asset universe, "
+        "the account's recent holdings, or every asset the portfolios that name it hold) and the bar frequency, data feed and corporate-action "
         "adjustment; created by operators of the Alpaca Connectors application."
     )
     __metatable_labels__ = ["equities", "prices", "configuration", "alpaca"]
     __table_args__ = markets_table_args(
         "AlpacaBarsConfiguration",
         CheckConstraint(
-            "asset_source IN ('assets', 'universe', 'account_holdings')",
+            "asset_source IN ('assets', 'universe', 'account_holdings', 'portfolios')",
             name="ck_alpaca_bars_configuration_asset_source",
         ),
         CheckConstraint(
@@ -132,8 +132,9 @@ class AlpacaBarsConfigurationTable(
             "label": "Asset source",
             "description": (
                 "How the assets to price are chosen: assets for an explicit list, universe for "
-                "an asset universe's current members, or account_holdings for the account's "
-                "latest holdings from the past 30 days."
+                "an asset universe's current members, account_holdings for the account's "
+                "latest holdings from the past 30 days, or portfolios for every asset ever "
+                "published by the live portfolios that name this configuration."
             ),
         },
     )
@@ -323,7 +324,7 @@ def validate_configuration_scope(
         if normalized_universe_uid is None or normalized_asset_uids:
             raise ValueError("universe source requires universe_uid and forbids asset_uids.")
     elif normalized_asset_uids or normalized_universe_uid is not None:
-        raise ValueError("account_holdings source forbids asset_uids and universe_uid.")
+        raise ValueError(f"{normalized_source} source forbids asset_uids and universe_uid.")
     return normalized_source, normalized_asset_uids, normalized_universe_uid  # type: ignore[return-value]
 
 

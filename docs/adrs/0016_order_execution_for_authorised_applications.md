@@ -7,6 +7,9 @@ Accepted on 2026-10-26. Supersedes the "no trading, ordering" rule that `AGENTS.
 stated for this repository: the API now places orders. The Alpaca Agent still does not; that part
 of ADR 0015 stands.
 
+Amended on 2026-11-16 by [ADR 0024](0024_portfolios_from_provided_weights.md): a provided-weights
+portfolio has an owner, and only it changes the portfolio.
+
 ## Context
 
 Until now the connector was read-only toward Alpaca: it registered accounts, captured holdings and

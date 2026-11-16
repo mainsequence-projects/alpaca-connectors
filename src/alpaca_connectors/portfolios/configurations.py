@@ -40,6 +40,8 @@ from alpaca_connectors.metatables import AlpacaMarketsMetaTableMixin, ProjectSto
 RebalanceStrategy = Literal["calendar_event_signal"]
 RebalanceEvent = Literal["market_open", "market_close"]
 RebalanceCadence = Literal["every_session", "weekly"]
+WeightsSource = Literal["etf_signal", "provided"]
+WEIGHTS_SOURCES: tuple[WeightsSource, ...] = ("etf_signal", "provided")
 REBALANCE_STRATEGIES: tuple[RebalanceStrategy, ...] = ("calendar_event_signal",)
 REBALANCE_EVENTS: tuple[RebalanceEvent, ...] = ("market_open", "market_close")
 REBALANCE_CADENCES: tuple[RebalanceCadence, ...] = ("every_session", "weekly")
@@ -223,11 +225,12 @@ class AlpacaETFPortfolioConfigurationTable(
     __project_storage_concept__ = "etf_portfolio_configuration"
     __markets_base_identifier__ = "AlpacaETFPortfolioConfiguration"
     __metatable_description__ = (
-        "One row per analytical ETF-tracking portfolio. Saved settings for a simulated "
-        "portfolio that follows an ETF's holdings weights and is valued with Alpaca stock "
-        "prices: its ETF weight signal, price-update configuration and rebalance rule, its "
-        "valuation and trading-fee settings, and whether the scheduled portfolio update "
-        "includes it; created by operators of the Alpaca Connectors application."
+        "One row per analytical portfolio valued with Alpaca stock prices. Saved settings for a "
+        "simulated portfolio that follows either an ETF's holdings weights or weights an "
+        "application provides: where its weights come from, its price-update configuration and "
+        "rebalance rule, its valuation and trading-fee settings, who owns a provided-weights "
+        "portfolio, and whether the scheduled portfolio update includes it; created by operators "
+        "and applications of the Alpaca Connectors application."
     )
     __metatable_labels__ = ["etfs", "portfolios", "configuration", "alpaca"]
     __table_args__ = markets_table_args(
@@ -256,6 +259,25 @@ class AlpacaETFPortfolioConfigurationTable(
         CheckConstraint(
             "valuation_maximum_staleness_seconds > 0",
             name="ck_etf_portfolio_valuation_maximum_staleness",
+        ),
+        # ADR 0024, revision 0025.
+        CheckConstraint(
+            "weights_source IN ('etf_signal', 'provided')",
+            name="ck_portfolio_weights_source",
+        ),
+        CheckConstraint(
+            "(weights_source = 'etf_signal' AND signal_configuration_uid IS NOT NULL) OR "
+            "(weights_source = 'provided' AND signal_configuration_uid IS NULL)",
+            name="ck_portfolio_weights_source_signal",
+        ),
+        CheckConstraint(
+            "(owner_gateway_uid IS NULL AND owner_user_uid IS NULL) OR "
+            "(owner_gateway_uid IS NOT NULL AND owner_user_uid IS NOT NULL)",
+            name="ck_portfolio_owner_pair",
+        ),
+        CheckConstraint(
+            "weights_source <> 'provided' OR owner_gateway_uid IS NOT NULL",
+            name="ck_portfolio_provided_owner",
         ),
         Index(None, "name"),
         Index(None, "signal_configuration_uid"),
@@ -290,16 +312,19 @@ class AlpacaETFPortfolioConfigurationTable(
             "description": "Free-text description of the portfolio; null when none was given.",
         },
     )
-    signal_configuration_uid: Mapped[uuid.UUID] = mapped_column(
+    signal_configuration_uid: Mapped[uuid.UUID | None] = mapped_column(
         Uuid(as_uuid=True),
         ForeignKey(
             f"{SIGNAL_JOB_CONFIGURATION_TABLE_NAME}.uid",
             ondelete="RESTRICT",
         ),
-        nullable=False,
+        nullable=True,
         info={
             "label": "Signal UID",
-            "description": "UID of the ETF weight signal whose target weights the portfolio follows.",
+            "description": (
+                "UID of the ETF weight signal whose target weights the portfolio follows; null "
+                "for a portfolio whose weights an application provides."
+            ),
         },
     )
     bars_configuration_uid: Mapped[uuid.UUID] = mapped_column(
@@ -443,6 +468,44 @@ class AlpacaETFPortfolioConfigurationTable(
             "description": "Whether the scheduled portfolio update includes this configuration.",
         },
     )
+    weights_source: Mapped[str] = mapped_column(
+        String(16),
+        nullable=False,
+        default="etf_signal",
+        # Revision 0025. The server default stays: a release that predates the column inserts
+        # ETF rows without it.
+        server_default="etf_signal",
+        info={
+            "label": "Weights source",
+            "description": (
+                "Where the portfolio's target weights come from: etf_signal for an ETF weight "
+                "signal, or provided for weights an application gives."
+            ),
+        },
+    )
+    owner_gateway_uid: Mapped[str | None] = mapped_column(
+        String(64),
+        nullable=True,
+        info={
+            "label": "Owner gateway",
+            "description": (
+                "Gateway half of the owner of a provided-weights portfolio: the owner's own user "
+                "UID for a Main Sequence user, or the gateway application's workload user UID for "
+                "an external person; null for an ETF portfolio."
+            ),
+        },
+    )
+    owner_user_uid: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+        info={
+            "label": "Owner",
+            "description": (
+                "Person half of the owner of a provided-weights portfolio: a Main Sequence user "
+                "UID, or the gateway's own id for an external person; null for an ETF portfolio."
+            ),
+        },
+    )
 
 
 class PortfolioRebalanceConfiguration(MarketsMetaTableRow):
@@ -481,7 +544,8 @@ class AlpacaETFPortfolioConfiguration(MarketsMetaTableRow):
 
     name: str
     description: str | None
-    signal_configuration_uid: uuid.UUID
+    weights_source: WeightsSource = "etf_signal"
+    signal_configuration_uid: uuid.UUID | None
     bars_configuration_uid: uuid.UUID
     rebalance_configuration_uid: uuid.UUID
     portfolio_uid: uuid.UUID | None
@@ -492,8 +556,14 @@ class AlpacaETFPortfolioConfiguration(MarketsMetaTableRow):
     valuation_maximum_staleness_seconds: int
     fail_on_missing_prices: bool
     commission_fee: float
+    owner_gateway_uid: str | None = None
+    owner_user_uid: str | None = None
     created_at: dt.datetime
     updated_at: dt.datetime
+
+    @property
+    def is_provided(self) -> bool:
+        return self.weights_source == "provided"
 
 
 def _name(value: str, *, label: str) -> str:
@@ -774,16 +844,19 @@ def delete_rebalance_configuration(configuration_uid: uuid.UUID | str) -> dict[s
 
 def validate_portfolio_references(
     *,
-    signal_configuration_uid: uuid.UUID,
+    signal_configuration_uid: uuid.UUID | None,
     bars_configuration_uid: uuid.UUID,
     rebalance_configuration_uid: uuid.UUID,
 ) -> tuple[Any, Any, PortfolioRebalanceConfiguration]:
+    """Resolve the linked configurations; a provided-weights portfolio has no signal one."""
     from alpaca_connectors.market_data import get_bar_configuration
     from alpaca_connectors.operations import get_signal_job_configuration
 
-    signal = get_signal_job_configuration(signal_configuration_uid)
-    if signal is None:
-        raise LookupError(f"Signal configuration {signal_configuration_uid!s} does not exist.")
+    signal = None
+    if signal_configuration_uid is not None:
+        signal = get_signal_job_configuration(signal_configuration_uid)
+        if signal is None:
+            raise LookupError(f"Signal configuration {signal_configuration_uid!s} does not exist.")
     bars = get_bar_configuration(bars_configuration_uid)
     if bars is None:
         raise LookupError(f"Bars configuration {bars_configuration_uid!s} does not exist.")
@@ -798,12 +871,22 @@ def validate_portfolio_references(
     return signal, bars, rebalance
 
 
+def normalize_weights_source(value: str) -> WeightsSource:
+    normalized = str(value or "").strip().lower()
+    if normalized not in WEIGHTS_SOURCES:
+        raise ValueError("weights_source must be etf_signal or provided.")
+    return normalized  # type: ignore[return-value]
+
+
 def create_portfolio_configuration_row(
     *,
     name: str,
-    signal_configuration_uid: uuid.UUID | str,
     bars_configuration_uid: uuid.UUID | str,
     rebalance_configuration_uid: uuid.UUID | str,
+    signal_configuration_uid: uuid.UUID | str | None = None,
+    weights_source: str = "etf_signal",
+    owner_gateway_uid: str | None = None,
+    owner_user_uid: str | None = None,
     description: str | None = None,
     upsample_frequency_id: str = "1d",
     intraday_bar_interpolation_rule: str = "ffill",
@@ -814,11 +897,27 @@ def create_portfolio_configuration_row(
     scheduled: bool = True,
     uid: uuid.UUID | str | None = None,
 ) -> AlpacaETFPortfolioConfiguration:
-    """Store one portfolio configuration; it touches no platform Job."""
+    """Store one portfolio configuration; it touches no platform Job.
+
+    An ``etf_signal`` portfolio names its Signal Configuration. A ``provided`` one names none and
+    records its owner (ADR 0024).
+    """
     from msm.bootstrap import resolve_runtime
     from msm.repositories.crud import create_model
 
-    signal_uid = uuid.UUID(str(signal_configuration_uid))
+    source = normalize_weights_source(weights_source)
+    if source == "etf_signal":
+        if signal_configuration_uid is None:
+            raise ValueError("An ETF portfolio requires signal_configuration_uid.")
+        if owner_gateway_uid is not None or owner_user_uid is not None:
+            raise ValueError("An ETF portfolio has no owner.")
+        signal_uid: uuid.UUID | None = uuid.UUID(str(signal_configuration_uid))
+    else:
+        if signal_configuration_uid is not None:
+            raise ValueError("A provided-weights portfolio has no signal configuration.")
+        if not owner_gateway_uid or not owner_user_uid:
+            raise ValueError("A provided-weights portfolio requires its owner.")
+        signal_uid = None
     bars_uid = uuid.UUID(str(bars_configuration_uid))
     rebalance_uid = uuid.UUID(str(rebalance_configuration_uid))
     if commission_fee < 0:
@@ -834,7 +933,10 @@ def create_portfolio_configuration_row(
         "uid": uuid.UUID(str(uid)) if uid is not None else new_markets_uid(),
         "name": _name(name, label="Portfolio configuration name"),
         "description": _description(description),
+        "weights_source": source,
         "signal_configuration_uid": signal_uid,
+        "owner_gateway_uid": owner_gateway_uid if source == "provided" else None,
+        "owner_user_uid": owner_user_uid if source == "provided" else None,
         "bars_configuration_uid": bars_uid,
         "rebalance_configuration_uid": rebalance_uid,
         "portfolio_uid": None,
@@ -890,6 +992,7 @@ def list_portfolio_configurations(
     search: str | None = None,
     signal_configuration_uid: uuid.UUID | str | None = None,
     bars_configuration_uid: uuid.UUID | str | None = None,
+    weights_source: str | None = None,
     ordering: str = "name",
 ) -> tuple[list[AlpacaETFPortfolioConfiguration], int]:
     from msm.bootstrap import resolve_runtime
@@ -911,6 +1014,11 @@ def list_portfolio_configurations(
         statement = statement.where(
             AlpacaETFPortfolioConfigurationTable.bars_configuration_uid
             == uuid.UUID(str(bars_configuration_uid))
+        )
+    if weights_source is not None:
+        statement = statement.where(
+            AlpacaETFPortfolioConfigurationTable.weights_source
+            == normalize_weights_source(weights_source)
         )
     if search:
         pattern = f"%{search.strip()}%"
@@ -1007,7 +1115,12 @@ def update_portfolio_configuration(
             configuration_uid,
             values={"scheduled": bool(scheduled)},
         )
-    signal_uid = uuid.UUID(str(signal_configuration_uid or current.signal_configuration_uid))
+    if current.is_provided:
+        if signal_configuration_uid is not None:
+            raise ValueError("A provided-weights portfolio has no signal configuration.")
+        signal_uid: uuid.UUID | None = None
+    else:
+        signal_uid = uuid.UUID(str(signal_configuration_uid or current.signal_configuration_uid))
     bars_uid = uuid.UUID(str(bars_configuration_uid or current.bars_configuration_uid))
     rebalance_uid = uuid.UUID(
         str(rebalance_configuration_uid or current.rebalance_configuration_uid)
@@ -1089,7 +1202,13 @@ def delete_portfolio_configuration_row(configuration_uid: uuid.UUID | str) -> di
 
 
 def project_portfolio_configuration_models() -> list[type[MarketsBase]]:
-    return [PortfolioRebalanceConfigurationTable, AlpacaETFPortfolioConfigurationTable]
+    from alpaca_connectors.portfolios.signal_assets import SignalAssetTable
+
+    return [
+        PortfolioRebalanceConfigurationTable,
+        AlpacaETFPortfolioConfigurationTable,
+        SignalAssetTable,
+    ]
 
 
 __all__ = [
@@ -1101,6 +1220,7 @@ __all__ = [
     "REBALANCE_CADENCES",
     "REBALANCE_EVENTS",
     "REBALANCE_STRATEGIES",
+    "WEIGHTS_SOURCES",
     "create_portfolio_configuration_row",
     "create_rebalance_configuration",
     "delete_portfolio_configuration_row",
@@ -1112,6 +1232,7 @@ __all__ = [
     "normalize_rebalance_cadence",
     "normalize_rebalance_event",
     "normalize_rebalance_strategy",
+    "normalize_weights_source",
     "project_portfolio_configuration_models",
     "rebalance_configurations_by_uids",
     "scheduled_portfolio_configurations",
