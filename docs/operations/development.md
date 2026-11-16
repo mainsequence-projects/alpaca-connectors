@@ -31,9 +31,14 @@ system credential store, not in the CodeRepository `.env`. MetaTables schema com
 
 Python 3.13 is required. `pyproject.toml` declares compatible ranges and intentionally does not pin
 exact dependency versions; `uv.lock` is the reproducible resolution. The one exception is the
-`etfhextractor` Git source, which `[tool.uv.sources]` pins to its release tag (`v0.5.3`). That
-release pins ms-markets 3.4.0 exactly, so `[tool.uv] override-dependencies` overrides its pin until
-`etfhextractor` is released on ms-markets 3.7.
+`etfhextractor` Git source, which `[tool.uv.sources]` pins to its release tag (`v0.5.5`); since
+0.5.5 it declares ms-markets as a range (`>=3.4.1,<4`), not an exact version.
+
+The release image is built from `requirements.txt` alone with plain pip (`pip wheel --requirement`
+then `pip check`), which ignores `[tool.uv] override-dependencies`. Never use an override to get
+past a dependency's pin, and regenerate `requirements.txt`
+(`uv export --locked --no-dev --no-hashes --format requirements-txt -o requirements.txt`) with every
+`uv.lock` change, or the release build fails.
 
 Install Playwright support when a provider extraction path requires it:
 
