@@ -508,6 +508,13 @@ What the code does where the plan left room, and what is not verified:
      includes them).
    - Not a blocker for this plan: without the index, the costs above grow with the tables, which
      hold about 5,000 signal rows in Production today.
+
+   **Amended 2026-11-16: ms-markets 3.8.1 adds the index.** `SignalWeightsStorage` gains
+   `(signal_uid, time_index)` and `PortfolioWeightsStorage` `(portfolio_identifier, time_index)`,
+   and the instances built from them declare the same. Revision 0026 adds both to this
+   connector's two weights instances; the two portfolio tables got none. The signal-asset table
+   stays: ms-markets keeps the last-row-per-asset read open on #77, and "ever published" is still
+   undecided there.
 4. **Delete a portfolio no account ever referenced?** `DELETE` retires
    ([Ending a portfolio](#ending-a-portfolio)). Deleting the `Portfolio` and its series as well,
    when nothing references it, needs a typed delete preflight from ms-markets, then this
