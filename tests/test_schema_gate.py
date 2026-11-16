@@ -87,13 +87,16 @@ def test_a_behind_markets_deployment_blocks_the_run_even_when_ours_is_current(
 
 
 def test_the_markets_release_is_read_from_the_markets_api_health_route() -> None:
+    from alpaca_connectors.dependencies import JOB_WAKE_SECONDS
     from alpaca_connectors.migrations.schema_gate import markets_api_version
 
     client = MagicMock()
     client.request.return_value = {"status": "ok", "service": "markets", "version": "3.0.0"}
-    with patch("msm.client.MarketsClient.from_environment", return_value=client):
+    with patch("alpaca_connectors.dependencies.markets_client", return_value=client) as found:
         assert markets_api_version() == "3.0.0"
 
+    # A Job waits out a Markets API that is waking (ADR 0020, decision 5).
+    found.assert_called_once_with(discovery_timeout=JOB_WAKE_SECONDS)
     client.request.assert_called_once_with("GET", "/health")
 
 

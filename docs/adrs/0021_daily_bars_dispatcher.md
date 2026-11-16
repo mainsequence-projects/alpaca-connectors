@@ -148,10 +148,21 @@ since the previous run, so the updates find no new bars.
   `0 0 * * *` UTC crontab and `["--scheduled"]`. The same file with `runner` on
   `alpaca-etf-signal` is refused with `unknown_resource`, and with `runner` on the dispatcher
   itself with `self_reference`, which is why the dispatcher lives beside the bars Job.
+- **Hosted rollout (merge `f95537f`, 2026-11-12).**
+  - Migration run `734fcdb8` logged `Running upgrade 0023 -> 0024` at 19:33 UTC and succeeded.
+  - The push created `Alpaca Bars Update Dispatcher` (`7c12c856`) on `f95537f` with a ready image,
+    the `0 0 * * *` UTC crontab, `scheduled_command_args: ["--scheduled"]`, 0.25 CPU, 0.5 GiB,
+    3600 s and no spot.
+- **First scheduled run failed.** Run `71a2f694` (2026-11-13 00:00 UTC) ended in its schema gate
+  with `The Markets API did not become available within 30 s (last state: waking)`, as every ADR
+  0013 dispatcher run had since 2026-11-09. It started no bars run.
+  [ADR 0020](0020_dependencies_that_are_starting.md) decision 5 makes the gate wait up to 300 s.
+- **Markets API release.** On 2026-11-13 the hosted Markets API reported ms-markets 3.3.0, and this
+  image runs 3.4.0. Until the Markets deployment rolls out 3.4.0 or later, a run that gets past the
+  wait still skips in its gate.
 - **Not verified:**
   - `validate-workflow` on a running platform: the local backend was stopped;
-  - the push that creates the dispatcher, and revision 0024 applied by the migration Job;
-  - its first scheduled run, and `run-job` called from inside a Job runtime, which is also open for
-    the ADR 0013 dispatchers;
+  - a scheduled run with the longer wait, and `run-job` called from inside a Job runtime, which is
+    also open for the ADR 0013 dispatchers;
   - that the hosted runtime passes run arguments to the script
     ([Run arguments](../operations/jobs.md#run-arguments)).
