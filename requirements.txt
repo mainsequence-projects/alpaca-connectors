@@ -77,7 +77,7 @@ cryptography==50.0.2
     #   secretstorage
 empyrical-reloaded==0.5.12
     # via alpaca-connectors
-etfhextractor @ git+https://github.com/mainsequence-projects/etfholdingextractor@5baf4c9c90f5e2fd8be92fa8c21fb8edfa5798f3
+etfhextractor @ git+https://github.com/mainsequence-projects/etfholdingextractor@5c618bbd3eb543f091659c56804d38e7d3e004c6
     # via alpaca-connectors
 exchange-calendars==4.13.2
     # via pandas-market-calendars
@@ -227,7 +227,7 @@ more-itertools==11.1.0
     # via
     #   jaraco-classes
     #   jaraco-functools
-ms-markets==3.8.0
+ms-markets==3.8.1
     # via
     #   alpaca-connectors
     #   etfhextractor

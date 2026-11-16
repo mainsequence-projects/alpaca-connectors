@@ -31,7 +31,7 @@ system credential store, not in the CodeRepository `.env`. MetaTables schema com
 
 Python 3.13 is required. `pyproject.toml` declares compatible ranges and intentionally does not pin
 exact dependency versions; `uv.lock` is the reproducible resolution. The one exception is the
-`etfhextractor` Git source, which `[tool.uv.sources]` pins to its release tag (`v0.5.5`); since
+`etfhextractor` Git source, which `[tool.uv.sources]` pins to its release tag (`v0.5.6`); since
 0.5.5 it declares ms-markets as a range (`>=3.4.1,<4`), not an exact version.
 
 The release image is built from `requirements.txt` alone with plain pip (`pip wheel --requirement`
