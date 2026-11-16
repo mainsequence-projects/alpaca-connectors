@@ -15,6 +15,9 @@ release that is asleep, and polls until it serves or its own limit (30 s) ends.
   Markets API. Without a caller deadline it waits for ms-markets' own limit.
 - ``is_dependency_starting`` tells a start from a failure. The API answers a start as
   ``503 dependency_starting`` with ``Retry-After`` (``alpaca_connectors.api.app.errors``).
+- A Job has no caller to answer, so it waits out a start instead: the schema gate, the first
+  thing each scheduled launcher does, finds both releases waiting up to ``JOB_WAKE_SECONDS``
+  (ADR 0020, decision 5). A release asleep since the previous night takes longer than 30 s.
 """
 
 from __future__ import annotations
@@ -34,6 +37,9 @@ logger = logging.getLogger(__name__)
 STARTING_RETRY_SECONDS = 5
 # Kept from the caller's deadline, so the answer reaches the caller before it gives up.
 ANSWER_MARGIN_SECONDS = 1.0
+# How long a Job waits for each release that is waking (ADR 0020, decision 5). The libraries' own
+# 30 s ended every scheduled dispatcher run while the Markets API was still waking.
+JOB_WAKE_SECONDS = 300.0
 # How ms-markets (`msm.client.discovery`) and MetaTables (`metatables.endpoint`) end the message of
 # a discovery that gave up while the platform still reported the release as starting.
 _STILL_WAKING = "last state: waking"
@@ -163,6 +169,20 @@ class MarketsApiBackend(LazyRemoteBackend):
         return discovery.result()
 
 
+def markets_client(*, discovery_timeout: float) -> Any:
+    """A Markets API client whose discovery waits up to ``discovery_timeout`` for a waking release.
+
+    It resolves the endpoint as ms-markets' ``MarketsClient.from_environment`` does (the
+    ``MARKETS_API_URL`` and ``MARKETS_API_RELEASE_UID`` overrides, else discovery in the caller's
+    Environment), which always waits ms-markets' own limit.
+    """
+    from msm.client import MarketsClient
+    from msm.client.discovery import resolve_markets_api_endpoint
+
+    endpoint = resolve_markets_api_endpoint(timeout=discovery_timeout)
+    return MarketsClient(endpoint.url, headers=endpoint.headers)
+
+
 def prewarm_dependencies() -> None:
     """Start finding the Markets API without waiting for it, on a hosted release only.
 
@@ -184,10 +204,12 @@ def prewarm_dependencies() -> None:
 
 __all__ = [
     "ANSWER_MARGIN_SECONDS",
+    "JOB_WAKE_SECONDS",
     "STARTING_RETRY_SECONDS",
     "DependencyStarting",
     "MarketsApiBackend",
     "caller_remaining_seconds",
     "is_dependency_starting",
+    "markets_client",
     "prewarm_dependencies",
 ]

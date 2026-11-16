@@ -21,7 +21,11 @@ The dispatchers run after the US equity close and after the 00:00 UTC
 use 0.25 CPU, 0.5 GiB and 3600 seconds, and every push promotes their image. No `execution.steps`
 entry references them, so a push may promote their image before the migration Job finishes; the
 schema gate in each entry point turns a run in that window into a clean skip
-([ADR 0012](../adrs/0012_deployment_workflow_migrations_and_schema_gated_jobs.md)).
+([ADR 0012](../adrs/0012_deployment_workflow_migrations_and_schema_gated_jobs.md)). The gate is
+also a run's first call to the Markets and MetaTables APIs, which are usually asleep at these hours.
+It waits up to 300 s for each to wake. ms-markets' own 30 s failed every dispatcher run from
+2026-11-09 to 2026-11-13
+([ADR 0020](../adrs/0020_dependencies_that_are_starting.md), decision 5).
 
 How they run:
 

@@ -14,6 +14,10 @@ read (it holds no role on ``mainsequence.markets``, ms-markets ADR 0047): the ga
 until the Markets API reports, on its ``/health`` route, at least the ms-markets release this image
 runs. The Markets deployment rolls its API out only after its ``migrate-markets`` Job applied that
 release's revisions.
+
+The gate is a scheduled run's first call to the Markets and MetaTables APIs, which scale to zero.
+It waits up to ``JOB_WAKE_SECONDS`` for each to wake (ADR 0020, decision 5); later calls in the run
+find them serving.
 """
 
 from __future__ import annotations
@@ -21,6 +25,8 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from typing import Any
+
+from alpaca_connectors.dependencies import JOB_WAKE_SECONDS
 
 # Providers this application's migration Job applies. ms-markets 2.1.1: only the ms-markets
 # deployment's `migrate-markets` Job migrates the ms-markets schema.
@@ -130,11 +136,14 @@ def _is_behind(script: Any, applied: tuple[str, ...], code_head: str) -> bool:
     return True
 
 
-def markets_api_version() -> str:
-    """The ms-markets release the Environment's Markets API reports on ``GET /health``."""
-    from msm.client import MarketsClient
+def markets_api_version(*, discovery_timeout: float = JOB_WAKE_SECONDS) -> str:
+    """The ms-markets release the Environment's Markets API reports on ``GET /health``.
 
-    health = MarketsClient.from_environment().request("GET", "/health")
+    Finding the Markets API wakes it; this waits up to ``discovery_timeout`` while it does.
+    """
+    from alpaca_connectors.dependencies import markets_client
+
+    health = markets_client(discovery_timeout=discovery_timeout).request("GET", "/health")
     version = str((health or {}).get("version") or "").strip()
     if not version:
         raise RuntimeError("The Markets API health response carries no version.")
@@ -171,26 +180,31 @@ def schema_state(
     *,
     read_applied: Callable[[Any], tuple[str, ...]] = applied_revisions,
     read_markets: Callable[[], ProviderSchemaState] | None = markets_api_state,
+    wake_seconds: float = JOB_WAKE_SECONDS,
 ) -> SchemaState:
     """Compare each provider's applied revisions with the head revision this image ships.
 
     The Markets deployment comes first: ``read_markets`` (``None`` skips it) compares the
-    release the Markets API reports with the one this image runs.
+    release the Markets API reports with the one this image runs. MetaTables discovery inside
+    this call waits up to ``wake_seconds`` for a waking MetaTables API.
     """
-    states = [] if read_markets is None else [read_markets()]
-    for reference in providers:
-        migration = load_provider(reference)
-        script = script_directory(migration)
-        code_head = code_head_revision(script)
-        applied = tuple(read_applied(migration))
-        states.append(
-            ProviderSchemaState(
-                provider=reference,
-                applied=applied,
-                code_head=code_head,
-                behind=_is_behind(script, applied, code_head),
+    from metatables.endpoint import api_endpoint_scope
+
+    with api_endpoint_scope(discovery_timeout=wake_seconds):
+        states = [] if read_markets is None else [read_markets()]
+        for reference in providers:
+            migration = load_provider(reference)
+            script = script_directory(migration)
+            code_head = code_head_revision(script)
+            applied = tuple(read_applied(migration))
+            states.append(
+                ProviderSchemaState(
+                    provider=reference,
+                    applied=applied,
+                    code_head=code_head,
+                    behind=_is_behind(script, applied, code_head),
+                )
             )
-        )
     return SchemaState(providers=tuple(states))
 
 

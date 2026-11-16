@@ -284,6 +284,92 @@ def test_a_row_call_while_the_markets_api_wakes_is_a_start(monkeypatch) -> None:
     assert is_dependency_starting(raised.value)
 
 
+# --- A Job waits out a start (decision 5) ------------------------------------------------------
+
+
+def markets_api_that_wakes_after(monkeypatch: pytest.MonkeyPatch, seconds: float) -> FakeClock:
+    """The platform answers ``waking`` until ``seconds`` pass on the discovery's clock, then ready.
+
+    That is how every scheduled dispatcher run of 2026-11-12 and 2026-11-13 met the Markets API.
+    """
+    from msm.client import discovery
+
+    from mainsequence.client import ResourceRelease
+
+    clock = FakeClock()
+    ready = SimpleNamespace(
+        resource_release_uid=RELEASE_UID,
+        release_kind="fastapi",
+        runtime_access=SimpleNamespace(state="ready", can_request=True, retry_after_ms=None),
+        routing=SimpleNamespace(state="routable", active_revision_uid="revision"),
+        access={"mode": "token", "rpc_url": "https://markets.example.test", "token": "token"},
+    )
+    monkeypatch.setattr(discovery, "time", clock.module())
+    monkeypatch.delenv("MARKETS_API_URL", raising=False)
+    monkeypatch.setenv("MARKETS_API_RELEASE_UID", RELEASE_UID)
+    monkeypatch.setattr(
+        ResourceRelease,
+        "resolve_runtime_access",
+        lambda self, **kwargs: ready if clock.now >= seconds else runtime_access("waking"),
+    )
+    return clock
+
+
+def test_ms_markets_own_limit_gives_up_on_a_markets_api_asleep_overnight(monkeypatch) -> None:
+    from msm.client import MarketsClient
+
+    markets_api_that_wakes_after(monkeypatch, 60)
+
+    with pytest.raises(Exception, match="within 30 s") as raised:
+        MarketsClient.from_environment()
+    assert is_dependency_starting(raised.value)
+
+
+def test_a_job_waits_out_a_markets_api_asleep_overnight(monkeypatch) -> None:
+    clock = markets_api_that_wakes_after(monkeypatch, 60)
+
+    client = dependencies.markets_client(discovery_timeout=dependencies.JOB_WAKE_SECONDS)
+
+    assert client.base_url == "https://markets.example.test"
+    assert 60 <= clock.now < dependencies.JOB_WAKE_SECONDS
+
+
+def test_a_job_still_fails_on_a_markets_api_that_never_wakes(monkeypatch) -> None:
+    clock = markets_api_that_wakes_after(monkeypatch, float("inf"))
+
+    with pytest.raises(Exception, match="within 300 s") as raised:
+        dependencies.markets_client(discovery_timeout=dependencies.JOB_WAKE_SECONDS)
+    assert is_dependency_starting(raised.value)
+    assert clock.now == dependencies.JOB_WAKE_SECONDS
+
+
+def test_the_schema_gate_waits_out_both_releases_for_a_job(monkeypatch) -> None:
+    from alpaca_connectors.migrations import schema_gate
+    from metatables import endpoint
+
+    markets_waits: list[float] = []
+    metatables_waits: list[float] = []
+
+    def markets_client(*, discovery_timeout: float):
+        markets_waits.append(discovery_timeout)
+        version = schema_gate.required_markets_version()
+        return SimpleNamespace(request=lambda method, path: {"version": version})
+
+    def read_applied(migration) -> tuple[str, ...]:
+        metatables_waits.append(endpoint.discovery_budget())
+        return (schema_gate.code_head_revision(schema_gate.script_directory(migration)),)
+
+    monkeypatch.setattr(dependencies, "markets_client", markets_client)
+
+    state = schema_gate.schema_state(read_applied=read_applied)
+
+    assert not state.behind
+    assert markets_waits == [dependencies.JOB_WAKE_SECONDS]
+    assert metatables_waits == [dependencies.JOB_WAKE_SECONDS]
+    # The longer wait ends with the gate; nothing else in the process inherits it.
+    assert endpoint.discovery_budget() == endpoint.DISCOVERY_TIMEOUT
+
+
 # --- Starting the Markets API with the API -----------------------------------------------------
 
 
