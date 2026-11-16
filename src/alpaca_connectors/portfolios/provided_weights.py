@@ -305,6 +305,88 @@ def _publish_validated(
     )
 
 
+@dataclass(frozen=True, slots=True)
+class ProvidedPortfolioRemoval:
+    configuration_uid: str
+    portfolio_uid: str | None
+    portfolio_unique_identifier: str
+    portfolio_state: str
+    retired_at: dt.datetime | None
+
+    def summary(self) -> dict[str, Any]:
+        return {
+            "configuration_uid": self.configuration_uid,
+            "deleted": True,
+            "portfolio": {
+                "uid": self.portfolio_uid,
+                "unique_identifier": self.portfolio_unique_identifier,
+                "state": self.portfolio_state,
+                "retired_at": self.retired_at,
+            },
+        }
+
+
+def delete_provided_weights_portfolio(
+    configuration_uid: Any,
+    *,
+    owner: AccountOwner,
+) -> ProvidedPortfolioRemoval:
+    """End a provided-weights portfolio: retire its `Portfolio`, then delete its configuration.
+
+    Retiring comes first (ms-markets ADR 0049): a portfolio an account's current target names is
+    refused with ``409 portfolio_in_account_target`` and nothing changes. Then the signal's rows in
+    the signal-asset table and the configuration row are deleted. The `Portfolio`, its series and
+    account history stay. Retiring a retired portfolio does nothing, so a retry after a partial
+    failure is safe, and a retired portfolio's updaters write nothing meanwhile (issue #33).
+    """
+    from msm.api.remote import MarketsConflictError
+
+    from alpaca_connectors.markets_api import retire_portfolio
+    from alpaca_connectors.portfolios.configurations import (
+        delete_portfolio_configuration_row,
+        get_portfolio_configuration,
+    )
+    from alpaca_connectors.portfolios.signal_assets import forget_signal_assets
+
+    configuration = get_portfolio_configuration(configuration_uid)
+    if configuration is None:
+        raise LookupError(f"Portfolio configuration {configuration_uid!s} does not exist.")
+    if not configuration.is_provided:
+        raise ProvidedWeightsError(
+            "not_a_provided_weights_portfolio",
+            "Only a provided-weights portfolio is retired by this call.",
+            status_code=409,
+        )
+    require_portfolio_owner(configuration, owner)
+    portfolio_uid = (
+        str(configuration.portfolio_uid) if configuration.portfolio_uid is not None else None
+    )
+    retired_at = None
+    state = "absent"
+    if portfolio_uid is not None:
+        try:
+            portfolio = retire_portfolio(portfolio_uid)
+        except MarketsConflictError as exc:
+            # Never names the accounts: they are the account owners' business (ADR 0019).
+            raise ProvidedWeightsError(
+                "portfolio_in_account_target",
+                "An account's current target names this portfolio. Remove it from that target, "
+                "then delete the portfolio.",
+                status_code=409,
+            ) from exc
+        retired_at = getattr(portfolio, "retired_at", None)
+        state = "retired"
+    forget_signal_assets(provided_signal_uid(configuration.uid))
+    delete_portfolio_configuration_row(configuration.uid)
+    return ProvidedPortfolioRemoval(
+        configuration_uid=str(configuration.uid),
+        portfolio_uid=portfolio_uid,
+        portfolio_unique_identifier=provided_portfolio_unique_identifier(configuration.uid),
+        portfolio_state=state,
+        retired_at=retired_at,
+    )
+
+
 def give_portfolio_weights(
     configuration_uid: Any,
     observations: Sequence[Mapping[str, Any]],
@@ -445,7 +527,9 @@ __all__ = [
     "ProvidedPortfolioCreation",
     "ProvidedWeightsError",
     "PublishedWeights",
+    "ProvidedPortfolioRemoval",
     "create_provided_weights_portfolio",
+    "delete_provided_weights_portfolio",
     "ensure_provided_signal_metadata",
     "give_portfolio_weights",
     "is_owner",
