@@ -42,8 +42,11 @@ class AlpacaStockBarsConfig(AssetIndexedUpdaterConfiguration):
     config carries only the fields that select the table meaning and the source identity. For an
     explicit-asset source, the inherited ``asset_list`` is hashed. For a universe, its stable
     category identifier is hashed. For account holdings, the Account UID is hashed while the
-    newest eligible snapshot is resolved dynamically. Storage identity lives on the selected
-    storage class.
+    newest eligible snapshot is resolved dynamically. A ``portfolios`` source uses the subclass
+    ``AlpacaStockBarsPortfoliosConfig``, which hashes its bars configuration UID while the assets
+    of its live portfolios are resolved dynamically (ADR 0024); it is a subclass so that this
+    class keeps its fields, and every existing configuration keeps its update hash. Storage
+    identity lives on the selected storage class.
     """
 
     frequency_id: str = Field(
@@ -58,7 +61,7 @@ class AlpacaStockBarsConfig(AssetIndexedUpdaterConfiguration):
         ...,
         description="Alpaca adjustment mode, for example raw, split, dividend, or all.",
     )
-    asset_source: Literal["assets", "universe", "account_holdings"] = Field(
+    asset_source: Literal["assets", "universe", "account_holdings", "portfolios"] = Field(
         ...,
         description="Asset resolution strategy for this updater identity.",
     )
@@ -101,12 +104,36 @@ class AlpacaStockBarsConfig(AssetIndexedUpdaterConfiguration):
                     "universe source requires asset_category_unique_identifier and forbids "
                     "asset_list and account_uid."
                 )
+        elif self.asset_source == "portfolios":
+            if (
+                not isinstance(self, AlpacaStockBarsPortfoliosConfig)
+                or self.asset_list
+                or self.asset_category_unique_identifier
+                or self.account_uid
+            ):
+                raise ValueError(
+                    "portfolios source requires AlpacaStockBarsPortfoliosConfig and forbids "
+                    "asset_list, asset_category_unique_identifier and account_uid."
+                )
         elif not self.account_uid or self.asset_list or self.asset_category_unique_identifier:
             raise ValueError(
                 "account_holdings source requires account_uid and forbids asset_list and "
                 "asset_category_unique_identifier."
             )
         return self
+
+
+class AlpacaStockBarsPortfoliosConfig(AlpacaStockBarsConfig):
+    """A ``portfolios`` source: the bars configuration UID is its hashed scope (ADR 0024)."""
+
+    asset_source: Literal["portfolios"] = Field(
+        default="portfolios",
+        description="Every asset ever published by the live portfolios that name the configuration.",
+    )
+    bars_configuration_uid: uuid.UUID = Field(
+        ...,
+        description="Bars configuration UID used only as the dynamic portfolios source identity.",
+    )
 
 
 class AlpacaStockBarsNode(AssetIndexedUpdater):
@@ -178,6 +205,11 @@ class AlpacaStockBarsNode(AssetIndexedUpdater):
             return self.validate_asset_list(
                 asset_unique_identifiers_for_category(config.asset_category_unique_identifier)
             )
+        if isinstance(config, AlpacaStockBarsPortfoliosConfig):
+            from alpaca_connectors.portfolios.bars_scope import resolve_portfolio_bars_scope
+
+            scope = resolve_portfolio_bars_scope(config.bars_configuration_uid)
+            return self.validate_asset_list(list(scope.asset_identifiers))
         from alpaca_connectors.holdings import resolve_recent_account_holdings_assets
 
         resolved = resolve_recent_account_holdings_assets(config.account_uid)

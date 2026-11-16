@@ -1,4 +1,8 @@
-"""Resolve and run durable ETF portfolio configurations."""
+"""Resolve and run durable portfolio configurations.
+
+An ETF portfolio follows its Signal Configuration's ETF signal; a provided-weights portfolio
+follows its own ``ApplicationWeights`` signal (ADR 0024). Everything after the signal is shared.
+"""
 
 from __future__ import annotations
 
@@ -41,7 +45,12 @@ class ResolvedPortfolioConfiguration:
     def summary(self) -> dict[str, Any]:
         return {
             "configuration_uid": str(self.configuration.uid),
-            "signal_configuration_uid": str(self.signal_configuration.uid),
+            "weights_source": self.configuration.weights_source,
+            "signal_configuration_uid": (
+                str(self.signal_configuration.uid)
+                if self.signal_configuration is not None
+                else None
+            ),
             "bars_configuration_uid": str(self.bars_configuration.uid),
             "rebalance_configuration_uid": str(self.rebalance_configuration.uid),
             "signal_uid": self.signal_uid,
@@ -98,8 +107,23 @@ class PortfolioExecutionGraph:
     portfolio_row: Any
 
 
-def portfolio_unique_identifier(configuration_uid: Any) -> str:
+def portfolio_unique_identifier(
+    configuration_uid: Any, *, weights_source: str = "etf_signal"
+) -> str:
+    """The `Portfolio` unique identifier of a configuration (ADR 0024, decision 3)."""
+    if weights_source == "provided":
+        from alpaca_connectors.portfolios.provided_weights import (
+            provided_portfolio_unique_identifier,
+        )
+
+        return provided_portfolio_unique_identifier(configuration_uid)
     return f"ALPACA_ETF_PORTFOLIO__{str(configuration_uid).replace('-', '').upper()}"
+
+
+def configuration_portfolio_identifier(configuration: AlpacaETFPortfolioConfiguration) -> str:
+    return portfolio_unique_identifier(
+        configuration.uid, weights_source=configuration.weights_source
+    )
 
 
 def resolve_portfolio_configuration(
@@ -118,7 +142,12 @@ def resolve_portfolio_configuration(
             rebalance_configuration_uid=configuration.rebalance_configuration_uid,
         )
     )
-    signal_uid = signal_uid_for_configuration(signal_configuration)
+    if configuration.is_provided:
+        from alpaca_connectors.portfolios.provided_weights import provided_signal_uid
+
+        signal_uid = provided_signal_uid(configuration.uid)
+    else:
+        signal_uid = signal_uid_for_configuration(signal_configuration)
     latest = read_signal_observation_matrix(signal_uid=signal_uid, observation_limit=1)
     bounds = read_signal_observation_bounds(signal_uid=signal_uid)
     if (
@@ -128,10 +157,22 @@ def resolve_portfolio_configuration(
         or bounds.last_observation_at is None
     ):
         raise ValueError(
-            f"Signal {signal_uid} has no published observations. Run its Signal Job before "
-            "running this portfolio."
+            f"Signal {signal_uid} has no published observations. "
+            + (
+                "Give the portfolio weights before running it."
+                if configuration.is_provided
+                else "Run its Signal Job before running this portfolio."
+            )
         )
     asset_identifiers = tuple(sorted({asset.asset_identifier for asset in latest.assets}))
+    if configuration.is_provided:
+        # Every asset the portfolio ever held, so a history it started with is priced too; read
+        # from the signal-asset table, not the signal weights series (ADR 0024).
+        from alpaca_connectors.portfolios.signal_assets import assets_for_signals
+
+        asset_identifiers = tuple(
+            sorted(set(asset_identifiers) | set(assets_for_signals([signal_uid])))
+        )
     source_uid = resolve_alpaca_bars_time_index_meta_table_uid(
         frequency_id=bars_configuration.frequency_id,
         feed=bars_configuration.feed,
@@ -193,10 +234,19 @@ def build_portfolio_graph(resolved: ResolvedPortfolioConfiguration) -> Portfolio
     rebalance = resolved.rebalance_configuration
     if rebalance.strategy != "calendar_event_signal":
         raise ValueError("Portfolio execution requires CalendarEventSignal.")
-    signal = build_alpaca_etf_holdings_signal(
-        universe_uid=str(resolved.signal_configuration.universe_uid),
-        account_uid=str(resolved.signal_configuration.account_uid),
-    ).set_runtime_asset_list(list(resolved.asset_identifiers))
+    if configuration.is_provided:
+        from alpaca_connectors.portfolios.provided_weights import provided_weights_signal
+
+        signal = provided_weights_signal(configuration.uid)
+        # `ApplicationWeights.get_asset_list()` reads the whole signal weights table; the resolved
+        # scope is the same set, from the signal-asset table. The class path, and so the UID, stay.
+        recorded_assets = list(resolved.asset_identifiers)
+        signal.get_asset_list = lambda: list(recorded_assets)
+    else:
+        signal = build_alpaca_etf_holdings_signal(
+            universe_uid=str(resolved.signal_configuration.universe_uid),
+            account_uid=str(resolved.signal_configuration.account_uid),
+        ).set_runtime_asset_list(list(resolved.asset_identifiers))
     if signal.signal_uid != resolved.signal_uid:
         raise RuntimeError("Resolved Signal identity changed while building the portfolio graph.")
     valuation_source = build_alpaca_interpolated_prices(
@@ -224,11 +274,27 @@ def build_portfolio_graph(resolved: ResolvedPortfolioConfiguration) -> Portfolio
         ),
         output_table=AlpacaPortfolioCalendarEventsStorage,
     )
-    description = configuration.description or (
-        "Analytical ETF portfolio using already-published observed holdings weights and "
-        "persistent interpolated Alpaca bars. Signal timestamps are observation times and do "
-        "not guarantee the weights' exact economic effective time."
-    )
+    if configuration.is_provided:
+        description = configuration.description or (
+            "Analytical portfolio following weights its owner application provides, valued "
+            "with persistent interpolated Alpaca bars."
+        )
+        signal_name = f"{configuration.name} provided weights"
+        signal_description = (
+            "Weights an application provides. Each observation is the whole set; an asset it "
+            "leaves out is held at zero."
+        )
+    else:
+        description = configuration.description or (
+            "Analytical ETF portfolio using already-published observed holdings weights and "
+            "persistent interpolated Alpaca bars. Signal timestamps are observation times and do "
+            "not guarantee the weights' exact economic effective time."
+        )
+        signal_name = str(resolved.signal_configuration.name)
+        signal_description = (
+            "Observed ETF component weights. Observation timestamps do not guarantee "
+            "exact economic effective times."
+        )
     portfolio_configuration = PortfolioConfiguration(
         portfolio_build_configuration=PortfolioBuildConfiguration(
             valuation_source_instance=valuation_source,
@@ -259,11 +325,8 @@ def build_portfolio_graph(resolved: ResolvedPortfolioConfiguration) -> Portfolio
             portfolio_name=configuration.name,
             front_end_details=FrontEndDetails(
                 description=description,
-                signal_name=str(resolved.signal_configuration.name),
-                signal_description=(
-                    "Observed ETF component weights. Observation timestamps do not guarantee "
-                    "exact economic effective times."
-                ),
+                signal_name=signal_name,
+                signal_description=signal_description,
                 rebalance_strategy_name="CalendarEventSignal",
                 rebalance_strategy_description=(
                     "Select the latest signal observed at or before the configured persisted "
@@ -272,7 +335,7 @@ def build_portfolio_graph(resolved: ResolvedPortfolioConfiguration) -> Portfolio
             ),
         ),
     )
-    unique_identifier = portfolio_unique_identifier(configuration.uid)
+    unique_identifier = configuration_portfolio_identifier(configuration)
     portfolio_row = Portfolio.upsert(
         unique_identifier=unique_identifier,
         calendar_uid=calendar_row.uid,
@@ -308,8 +371,9 @@ def build_portfolio_graph(resolved: ResolvedPortfolioConfiguration) -> Portfolio
 def execute_portfolio_configuration(configuration_uid: Any) -> PortfolioExecutionResult:
     """Run stored inputs through the released temporal execution stages.
 
-    The linked Signal Job remains the signal producer. This execution updates every other
-    dependency explicitly so it does not trigger another ETF extraction as a side effect.
+    The linked Signal Job, or the weights calls of a provided-weights portfolio, remain the
+    signal producer. This execution updates every other dependency explicitly so it does not
+    trigger another ETF extraction as a side effect.
     """
     from alpaca_connectors.runtime import start_portfolio_job_engine
 
@@ -377,6 +441,7 @@ __all__ = [
     "PortfolioPreflight",
     "ResolvedPortfolioConfiguration",
     "build_portfolio_graph",
+    "configuration_portfolio_identifier",
     "execute_portfolio_configuration",
     "portfolio_unique_identifier",
     "preflight_portfolio_configuration",

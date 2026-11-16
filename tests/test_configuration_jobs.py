@@ -782,10 +782,20 @@ def test_update_requests_reject_job_settings_naming_the_workflow_file(
 
 
 def test_portfolio_patch_sets_only_the_scheduled_flag(api_client) -> None:
-    with patch(
-        "alpaca_connectors.api.app.services.portfolio_configurations.update_portfolio_configuration",
-        side_effect=LookupError("stop"),
-    ) as update:
+    from types import SimpleNamespace
+
+    services = "alpaca_connectors.api.app.services.portfolio_configurations"
+    with (
+        # An ETF portfolio has no owner, so the PATCH checks none (ADR 0024).
+        patch(
+            f"{services}.get_portfolio_configuration",
+            return_value=SimpleNamespace(is_provided=False),
+        ),
+        patch(
+            f"{services}.update_portfolio_configuration",
+            side_effect=LookupError("stop"),
+        ) as update,
+    ):
         response = api_client.patch(f"/v1/portfolio-configurations/{A}", json={"scheduled": False})
 
     assert response.status_code == 404

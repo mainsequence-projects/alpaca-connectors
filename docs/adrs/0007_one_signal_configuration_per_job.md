@@ -14,6 +14,9 @@ creation sequence, the `job_uid` link and the `JOB_RUN_UID` resolution below no 
 selects its configuration with `--configuration-uid`, and `enabled` is the configuration's scheduled
 flag. The signal identity and runtime-account decisions remain.
 
+Amended on 2026-11-16 by [ADR 0024](0024_portfolios_from_provided_weights.md): a provided-weights
+signal has no Signal Configuration and no Signal Job.
+
 ## Context
 
 Each Universe-backed ETF signal needs its own schedule, compute request, Alpaca account, and

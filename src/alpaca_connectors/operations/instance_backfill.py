@@ -65,8 +65,15 @@ def _scope() -> dict[str, Any]:
     from alpaca_connectors.portfolios.execution import portfolio_unique_identifier
 
     identifiers = sorted(
-        portfolio_unique_identifier(row["uid"])
-        for row in _own_rows(select(AlpacaETFPortfolioConfigurationTable.uid))
+        portfolio_unique_identifier(
+            row["uid"], weights_source=row.get("weights_source") or "etf_signal"
+        )
+        for row in _own_rows(
+            select(
+                AlpacaETFPortfolioConfigurationTable.uid,
+                AlpacaETFPortfolioConfigurationTable.weights_source,
+            )
+        )
     )
     # A configuration that never ran has no Portfolio row and no rows to move.
     portfolios = Portfolio.filter(unique_identifier__in=identifiers, limit=max(len(identifiers), 1))

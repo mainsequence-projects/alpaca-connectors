@@ -559,6 +559,11 @@ def test_run_publishes_the_prepared_universe_through_the_signal() -> None:
             return_value=signal,
         ) as build_signal,
         patch("alpaca_connectors.portfolios.datasets.register_signal_dataset") as register_signal,
+        patch(
+            "alpaca_connectors.universes.services.asset_identifiers_for_universe_plan",
+            return_value=["ALPACA::known-before"],
+        ),
+        patch("alpaca_connectors.portfolios.signal_assets.record_signal_assets") as record_assets,
     ):
         result = run_asset_universe(
             "universe-uid",
@@ -579,6 +584,11 @@ def test_run_publishes_the_prepared_universe_through_the_signal() -> None:
     signal.run.assert_called_once_with()
     # The signal is bound to this application's signal-weights instance in the Markets catalog.
     register_signal.assert_called_once_with("signal-uid")
+    # The signal's assets are recorded before it publishes, and again with the assets the run
+    # registered (ADR 0024).
+    assert [call.args[0] for call in record_assets.call_args_list] == ["signal-uid", "signal-uid"]
+    assert list(record_assets.call_args_list[0].args[1]) == ["ALPACA::known-before"]
+    assert list(record_assets.call_args_list[1].args[1]) == ["ALPACA::asset-uuid"]
     assert result.signal_uid == "signal-uid"
     assert result.signal_weight_row_count == 1
 

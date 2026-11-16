@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import logging
 import uuid
 from dataclasses import dataclass, replace
 from typing import Any
@@ -17,6 +18,8 @@ from alpaca_connectors.assets import (
 from alpaca_connectors.universes.etf_holdings import build_holdings_asset_category_plan
 from alpaca_connectors.universes.materialized import require_asset_universe_links
 from alpaca_connectors.universes.sources import UniverseSource, get_universe_source
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -312,6 +315,12 @@ def run_asset_universe(
         account_uid=str(account_uid),
         prepared_plan=plan,
     )
+    # Record the signal's assets before it publishes, so a `portfolios` bars configuration never
+    # misses a held asset (ADR 0024). Assets the run registers have no identifier yet; they are
+    # recorded from the materialization below.
+    from alpaca_connectors.portfolios.signal_assets import record_signal_assets
+
+    record_signal_assets(signal.signal_uid, asset_identifiers_for_universe_plan(plan))
     error_on_last_update, frame = signal.run()
     if error_on_last_update:
         raise RuntimeError(
@@ -327,6 +336,16 @@ def run_asset_universe(
     from alpaca_connectors.portfolios.datasets import register_signal_dataset
 
     register_signal_dataset(signal.signal_uid)
+    # The signal has published; recording the assets the run registered must not fail the run.
+    # The next run records them again, since every run publishes the whole extraction.
+    try:
+        record_signal_assets(signal.signal_uid, result.asset_identifiers_by_symbol.values())
+    except Exception:
+        logger.warning(
+            "Could not record the assets a signal run registered; the next run records them.",
+            extra={"signal_uid": signal.signal_uid},
+            exc_info=True,
+        )
     return replace(
         result,
         signal_uid=signal.signal_uid,

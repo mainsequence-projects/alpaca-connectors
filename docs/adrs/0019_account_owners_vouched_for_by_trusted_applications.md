@@ -34,6 +34,9 @@ issue #25:
 - an external person's claim of an account without an owner is refused while enabled
   configurations run with its keys (section 5).
 
+Amended on 2026-11-16 by [ADR 0024](0024_portfolios_from_provided_weights.md): the acting owner also
+owns the provided-weights portfolios it creates.
+
 ## Terms
 
 | Term | Meaning |

@@ -21,6 +21,7 @@ from alpaca_connectors.execution.orders import PreTradeCheckError
 from alpaca_connectors.holdings.allocation import RETRYABLE_REFUSALS
 from alpaca_connectors.holdings.sizing import FundAllocationError
 from alpaca_connectors.platform_secrets import PlatformSecretAccessError
+from alpaca_connectors.portfolios.provided_weights import ProvidedWeightsError
 from metatables import EncryptionError
 
 logger = logging.getLogger(__name__)
@@ -139,6 +140,9 @@ def api_http_error(exc: Exception) -> HTTPException:
                 "checks": [check.as_payload() for check in exc.checks],
             },
         )
+    if isinstance(exc, ProvidedWeightsError):
+        # Provided weights (ADR 0024): the message names no asset, weight or owner.
+        return api_error(status_code=exc.status_code, code=exc.code, message=str(exc))
     if isinstance(exc, FundAllocationError):
         # A sync that could not size or allocate the target (ADR 0023), in the connector's words.
         return api_error(

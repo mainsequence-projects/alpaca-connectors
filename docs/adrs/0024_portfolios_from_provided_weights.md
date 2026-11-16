@@ -4,11 +4,14 @@
 
 Proposed on 2026-11-16 for
 [issue #30](https://github.com/mainsequence-projects/alpaca-connectors/issues/30), for the owner's
-review. Nothing is implemented. ms-markets 3.8.0, released on 2026-11-16, ships the signal it
-needs (`ApplicationWeights`,
+review. ms-markets 3.8.0, released on 2026-11-16, ships the signal it needs
+(`ApplicationWeights`,
 [MainSequenceMarkets#75](https://github.com/mainsequence-projects/MainSequenceMarkets/issues/75)),
-and this plan is written against that release. Implementation waits for the owner's answers under
-[Open Questions](#open-questions).
+and this plan is written against that release.
+
+Implemented on 2026-11-16 at the owner's request, with open question 2 as planned (naming a bars
+configuration needs no ownership of its account). It has not been run against a Markets API (see
+[Implementation Notes](#implementation-notes)).
 
 The owner decided two points on 2026-11-16:
 
@@ -367,6 +370,53 @@ After the ms-markets release and the open questions:
    queries whatever the number of portfolios and observations, and never reads the signal weights
    table; a publication that fails after the signal-asset write leaves the table a superset; the sync sizes a
    provided-weights portfolio.
+
+## Implementation Notes
+
+What the code does where the plan left room, and what is not verified:
+
+- **The signal UID without an updater.** Building `ApplicationWeights` binds its output table to
+  the backend catalog. Listings and the bars resolution only need the UID, a hash of the class
+  path and the configuration, so `provided_signal_uid` hashes that payload with ms-markets'
+  `compute_signal_uid`. A test checks it equals the UID of an `ApplicationWeights` instance.
+- **Existing bars configurations keep their update hash.** MetaTables hashes every declared
+  field of an updater configuration, `None` included, so a new field on `AlpacaStockBarsConfig`
+  would give every existing bars configuration a new updater identity. The `portfolios` scope is
+  carried by a subclass, `AlpacaStockBarsPortfoliosConfig`, whose class path and
+  `bars_configuration_uid` enter its own hash only. Tests pin the hashes of the three earlier
+  sources.
+- **The ETF Signal Job records its assets twice.** Before the run it records the assets the
+  prepared plan already identifies; assets the run registers have no identifier until then, so
+  it records the materialization's assets after the run and its catalog registration as well. A
+  failure of that second write is logged and does not fail a run that has published; the next
+  run, which publishes the whole extraction again, records them.
+- **The publish check reads only the last time.** The check before publishing reads
+  `max(time_index)` for the signal, never the `min` that walks the table from its oldest rows.
+  When ms-markets refuses a publication, the stored last time, read again, decides whether it was
+  a time conflict (another call published first); the wording of its message is never read.
+- **A run's assets come from the signal-asset table.** A provided-weights run prices every asset
+  its signal ever published, so a history the portfolio started with is valued, including assets
+  the history dropped. The same set answers the signal's `get_asset_list()` for the run, instead
+  of `ApplicationWeights`' read of the whole signal weights table; the class, and so the UID, are
+  unchanged.
+- **A failed create** deletes the rows it stored on any failure after the row exists, not only a
+  refused publication. If the `Portfolio` upsert fails after the publication, the published
+  observations stay under a signal no configuration names.
+- **Error codes** add `invalid_bars_configuration` (neither or both bars fields) and
+  `not_a_provided_weights_portfolio` (weights for an ETF portfolio, `409`).
+- **Responses never carry the owner pair.** It can name a gateway's person (ADR 0019).
+- **PATCH and DELETE** read the row first; the acting owner is resolved only for a
+  provided-weights row, so ETF portfolios behave as before.
+- **The Agent** has no new tool. Its portfolio management tool passes the acting owner, and its
+  bar-configuration listing accepts `portfolios` as a source filter.
+- **Revision `0025`** fills `first_published_at` with each pair's earliest `time_index`.
+- **Code.** `alpaca_connectors.portfolios.provided_weights` (signal, observations, publish,
+  create, owner), `.signal_assets` (the table and its two reads), `.bars_scope` (the resolution);
+  `market_data.services.build_market_data_update` (the `portfolios` branch);
+  `api.app.services.portfolio_configurations` and its router (the three routes);
+  `tests/test_provided_weights.py`.
+- **Not verified:** a run against a Markets API and a hosted database, the migration Job's
+  registration of `alpaca_connectors__signal_asset`, and the backfill on Production data.
 
 ## Open Questions
 

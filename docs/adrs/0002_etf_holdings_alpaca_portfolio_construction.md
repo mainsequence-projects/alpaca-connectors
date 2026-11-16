@@ -8,6 +8,9 @@ Superseded in part by
 graph remain accepted; signal ownership follows ADR 0006, while durable portfolio configuration,
 Job ownership, and the supported backtest policy follow ADR 0008.
 
+Amended on 2026-11-16 by [ADR 0024](0024_portfolios_from_provided_weights.md): a portfolio's weights
+may also be provided by an application.
+
 ## Context
 
 The project already owns Alpaca-backed public-equity asset registration, ETF holdings-category

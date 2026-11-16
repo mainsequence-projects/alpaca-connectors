@@ -271,11 +271,43 @@ def read_signal_observation_bounds(*, signal_uid: str) -> SignalObservationBound
     )
 
 
+def read_signal_last_observation_at(*, signal_uid: str) -> dt.datetime | None:
+    """Return one signal's last stored observation time, or None before its first.
+
+    Only the ``max``: through the contract's time-leading index it reads from the newest rows
+    backwards, while a ``min`` walks from the table's oldest rows (ADR 0024).
+    """
+    from msm.api.base import operation_result_rows
+    from msm.repositories.base import compile_markets_statement, execute_markets_operation
+    from sqlalchemy import func, select
+
+    from alpaca_connectors.instances import AlpacaSignalWeightsStorage as SignalWeightsStorage
+    from alpaca_connectors.runtime import start_markets_engine
+
+    normalized_signal_uid = _normalize_signal_uid(signal_uid)
+    runtime = start_markets_engine()
+    query_context = replace(
+        runtime.context,
+        limits={"max_rows": 1, "statement_timeout_ms": SIGNAL_OBSERVATION_QUERY_TIMEOUT_MS},
+    )
+    operation = compile_markets_statement(
+        select(func.max(SignalWeightsStorage.time_index).label("last_observation_at")).where(
+            SignalWeightsStorage.signal_uid == normalized_signal_uid
+        ),
+        context=query_context,
+        operation="select",
+    )
+    rows = operation_result_rows(execute_markets_operation(operation, context=query_context))
+    last = (rows[0] if rows else {}).get("last_observation_at")
+    return None if last is None else _normalize_time_index(last)
+
+
 __all__ = [
     "MAX_SIGNAL_OBSERVATIONS",
     "SignalObservationBounds",
     "SignalObservationAsset",
     "SignalObservationMatrix",
+    "read_signal_last_observation_at",
     "read_signal_observation_bounds",
     "read_signal_observation_matrix",
 ]

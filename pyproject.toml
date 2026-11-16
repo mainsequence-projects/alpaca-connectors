@@ -11,7 +11,7 @@ license-files = ["LICENSE"]
 requires-python = ">=3.13,<3.14"
 dependencies = [
     # Keep compatible ranges here and let uv.lock capture the reproducible environment.
-    "ms-markets>=3.7.0,<4",
+    "ms-markets>=3.8.0,<4",
     "mainsequence[mcp]>=9.0.38,<10",
     "mainsequence-metatable>=0.1.65,<0.2",
     # 0.45.0 is the first release whose asset model knows the TXSE exchange.
@@ -93,9 +93,10 @@ ignore = ["E203", "E501"]
 known-first-party = ["mainsequence","metatables","alpaca_connectors"]
 
 [tool.uv]
-# etfhextractor pins ms-markets exactly (v0.5.3 pins 3.4.0). This project needs 3.7 (ADR 0023), so
-# the pin is overridden here. Remove the override once etfhextractor is released on 3.7.
-override-dependencies = ["ms-markets>=3.7.0,<4"]
+# etfhextractor pins ms-markets exactly (v0.5.3 pins 3.4.0). This project needs 3.8 (ADR 0024's
+# ApplicationWeights), so the pin is overridden here. Remove the override once etfhextractor is
+# released on 3.8.
+override-dependencies = ["ms-markets>=3.8.0,<4"]
 
 [tool.uv.sources]
 # The ETF library is released only as Git tags; consumers pin the tag of the release they tested.

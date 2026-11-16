@@ -116,6 +116,21 @@ alpaca-connectors market-data bar-configuration create \
   --adjustment all
 ```
 
+A `portfolios` source needs no asset list or universe either. It fetches every asset ever
+published by the live portfolios that name the configuration (deleted and retired portfolios
+excluded), read from the signal-asset table rather than the signal weights series
+([ADR 0024](../adrs/0024_portfolios_from_provided_weights.md)):
+
+```bash
+alpaca-connectors market-data bar-configuration create \
+  --name "Daily portfolio assets" \
+  --account-uid <account-uid> \
+  --asset-source portfolios \
+  --frequency 1d \
+  --feed sip \
+  --adjustment all
+```
+
 List, inspect, update, and delete stored definitions with the other `market-data
 bar-configuration` subcommands.
 

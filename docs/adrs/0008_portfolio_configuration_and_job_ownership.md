@@ -13,6 +13,9 @@ Configuration, because `mainsequence` 9.0.2 removed runtime Job creation. Config
 below disagree, ADR 0013 applies; the calculation-ownership decisions remain, with schedule and
 compute owned by the workflow declaration.
 
+Amended on 2026-11-16 by [ADR 0024](0024_portfolios_from_provided_weights.md): a portfolio
+configuration references either an ETF Signal Configuration or provided weights (`weights_source`).
+
 ## Context
 
 The project needs a durable definition for an analytical ETF portfolio assembled from an existing

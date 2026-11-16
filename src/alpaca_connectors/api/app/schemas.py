@@ -628,7 +628,7 @@ class BarConfigurationCreateRequest(BaseModel):
         ),
     )
     account_uid: str
-    asset_source: Literal["assets", "universe", "account_holdings"]
+    asset_source: Literal["assets", "universe", "account_holdings", "portfolios"]
     asset_uids: list[str] = Field(default_factory=list)
     universe_uid: str | None = None
     frequency_id: str
@@ -641,8 +641,10 @@ class BarConfigurationCreateRequest(BaseModel):
             raise ValueError("assets source requires asset_uids and forbids universe_uid.")
         if self.asset_source == "universe" and (not self.universe_uid or self.asset_uids):
             raise ValueError("universe source requires universe_uid and forbids asset_uids.")
-        if self.asset_source == "account_holdings" and (self.asset_uids or self.universe_uid):
-            raise ValueError("account_holdings source forbids asset_uids and universe_uid.")
+        if self.asset_source in {"account_holdings", "portfolios"} and (
+            self.asset_uids or self.universe_uid
+        ):
+            raise ValueError(f"{self.asset_source} source forbids asset_uids and universe_uid.")
         return self
 
 
@@ -657,7 +659,7 @@ class BarConfigurationUpdateRequest(BaseModel):
         description="Include the configuration in the daily bars update.",
     )
     account_uid: str | None = None
-    asset_source: Literal["assets", "universe", "account_holdings"] | None = None
+    asset_source: Literal["assets", "universe", "account_holdings", "portfolios"] | None = None
     asset_uids: list[str] | None = None
     universe_uid: str | None = None
     frequency_id: str | None = None
@@ -692,7 +694,7 @@ class BarConfigurationResponse(BaseModel):
     enabled: bool
     scheduled: bool
     account_uid: str
-    asset_source: Literal["assets", "universe", "account_holdings"]
+    asset_source: Literal["assets", "universe", "account_holdings", "portfolios"]
     asset_uids: list[str]
     universe_uid: str | None
     frequency_id: str
@@ -708,7 +710,7 @@ class BarConfigurationResolutionResponse(BaseModel):
     configuration: BarConfigurationResponse
     dataset: dict[str, Any]
     account_uid: str
-    asset_source: Literal["assets", "universe", "account_holdings"]
+    asset_source: Literal["assets", "universe", "account_holdings", "portfolios"]
     asset_count: int
     asset_uids: list[str]
     asset_identifiers: list[str]
@@ -972,6 +974,77 @@ class PortfolioConfigurationCreateRequest(_ConfigurationRequest):
     scheduled: bool = True
 
 
+class WeightsObservationRequest(BaseModel):
+    """One observation: the whole set of weights at one time (ADR 0024)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    observed_at: dt.datetime = Field(description="Time of the observation, with a timezone.")
+    weights: dict[str, float] = Field(
+        description=(
+            "Weight per asset unique identifier (ALPACA::<uuid>), stored as given. An asset the "
+            "previous observation held and this one leaves out is held at zero."
+        ),
+    )
+
+
+class InlinePortfolioBarsConfigurationRequest(BaseModel):
+    """A new `portfolios` bars configuration created with the portfolio (ADR 0024)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1, max_length=255)
+    description: str | None = None
+    account_uid: str = Field(min_length=1)
+    frequency_id: str = "1d"
+    feed: str = "sip"
+    adjustment: str = "all"
+    scheduled: bool = True
+
+
+class ProvidedWeightsPortfolioCreateRequest(_ConfigurationRequest):
+    """Create a portfolio whose weights the calling application provides (ADR 0024)."""
+
+    name: str = Field(min_length=1, max_length=255)
+    description: str | None = None
+    bars_configuration_uid: str | None = Field(default=None, min_length=1)
+    bars_configuration: InlinePortfolioBarsConfigurationRequest | None = None
+    rebalance_configuration_uid: str = Field(min_length=1)
+    upsample_frequency_id: Literal["1d"] = "1d"
+    intraday_bar_interpolation_rule: Literal["ffill"] = "ffill"
+    valuation_column: str = Field(default="close", min_length=1, max_length=64)
+    valuation_maximum_staleness_seconds: int = Field(default=86_400, gt=0)
+    fail_on_missing_prices: bool = True
+    commission_fee: float = Field(default=0.00018, ge=0)
+    scheduled: bool = True
+    observations: list[WeightsObservationRequest] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def one_bars_configuration(self) -> "ProvidedWeightsPortfolioCreateRequest":
+        if (self.bars_configuration_uid is None) == (self.bars_configuration is None):
+            raise ValueError("Give either bars_configuration_uid or bars_configuration.")
+        return self
+
+
+class PortfolioWeightsRequest(BaseModel):
+    """New weights for a provided-weights portfolio: one observation or several."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    observations: list[WeightsObservationRequest] = Field(min_length=1)
+
+
+class PublishedWeightsResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    configuration_uid: str
+    signal_uid: str
+    observation_count: int = Field(ge=1)
+    asset_count: int = Field(ge=0)
+    first_observed_at: dt.datetime
+    last_observed_at: dt.datetime
+
+
 class PortfolioConfigurationUpdateRequest(_ConfigurationRequest):
     name: str | None = Field(default=None, min_length=1, max_length=255)
     description: str | None = None
@@ -1001,7 +1074,8 @@ class PortfolioConfigurationResponse(BaseModel):
     uid: str
     name: str
     description: str | None
-    signal_configuration_uid: str
+    weights_source: Literal["etf_signal", "provided"] = "etf_signal"
+    signal_configuration_uid: str | None
     signal_uid: str
     bars_configuration_uid: str
     rebalance_configuration_uid: str
@@ -1043,7 +1117,7 @@ class PortfolioLinkedBarsResponse(BaseModel):
     scheduled: bool
     account_name: str
     account_environment: Literal["paper", "live"]
-    asset_source: Literal["assets", "universe", "account_holdings"]
+    asset_source: Literal["assets", "universe", "account_holdings", "portfolios"]
     asset_source_name: str
     asset_count: int | None = Field(default=None, ge=0)
     frequency_id: str
@@ -1123,10 +1197,37 @@ class CanonicalPortfolioDetailResponse(BaseModel):
     observations: list[PortfolioValueObservationResponse]
 
 
-class PortfolioConfigurationDetailResponse(PortfolioConfigurationResponse):
-    """Resolved detail projection used only after one portfolio is selected."""
+class ProvidedWeightsPortfolioCreateResponse(BaseModel):
+    """The created portfolio, its `Portfolio` row and the weights it was given."""
 
-    linked_signal: PortfolioLinkedSignalResponse
+    model_config = ConfigDict(extra="forbid")
+
+    configuration: PortfolioConfigurationResponse
+    portfolio_uid: str
+    portfolio_unique_identifier: str
+    bars_configuration_created: bool
+    weights: PublishedWeightsResponse
+
+
+class PortfolioProvidedWeightsResponse(BaseModel):
+    """The signal of a provided-weights portfolio, on its detail."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    signal_uid: str
+    first_observation_at: dt.datetime | None
+    last_observation_at: dt.datetime | None
+    asset_count: int = Field(ge=0)
+
+
+class PortfolioConfigurationDetailResponse(PortfolioConfigurationResponse):
+    """Resolved detail projection used only after one portfolio is selected.
+
+    An ETF portfolio has ``linked_signal``; a provided-weights one has ``provided_weights``.
+    """
+
+    linked_signal: PortfolioLinkedSignalResponse | None
+    provided_weights: PortfolioProvidedWeightsResponse | None = None
     linked_bars: PortfolioLinkedBarsResponse
     linked_rebalance: PortfolioLinkedRebalanceResponse
     canonical_portfolio: CanonicalPortfolioDetailResponse

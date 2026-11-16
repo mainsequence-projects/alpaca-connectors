@@ -4,6 +4,10 @@
 
 Accepted
 
+Amended on 2026-11-16 by [ADR 0024](0024_portfolios_from_provided_weights.md): a second kind of
+signal, ms-markets' `ApplicationWeights`, has no Signal Configuration; the ETF signal also records
+the assets it publishes.
+
 ## Context
 
 The generic `etfhextractor.ETFHoldingsSignal` owns a ticker/URL extraction workflow. It cannot own
