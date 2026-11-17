@@ -62,7 +62,8 @@ No workload needs a role on `mainsequence.markets` once step 9 is done.
 
 The owner also creates the namespace `alpaca-connectors-markets`
 ([ADR 0025](../adrs/0025_markets_reads_the_instances_through_a_second_namespace.md)) and grants
-`alpaca-connectors-migrate` `editor` on it: the migration adds every Markets contract instance
+`alpaca-connectors-migrate` `editor` on it, directly or through its Team (step 5 has the
+command): the migration adds every Markets contract instance
 to it, which needs `tables.create` there. The person who runs step 4 needs the same role. No
 other workload of this application needs a role on it, since each already reaches the instances
 through `alpaca-connectors`.
@@ -112,8 +113,18 @@ namespaces: `alpaca-connectors` and `alpaca-connectors-markets`
 0.1.66 or later). The code declares the second one, and the next `upgrade head` adds the
 memberships with no revision.
 
-The owner of `alpaca-connectors-markets` grants the Markets workload `data_viewer` on that
-namespace, once per Environment. The dataset catalog verifies and reads the instances with it
+The owner of `alpaca-connectors-markets`, or an Organization admin, grants the Markets workload
+`data_viewer` on that namespace, once per Environment:
+
+```bash
+alpaca-connectors instances grant-markets-access --markets-workload-uid <uid>             # dry run
+alpaca-connectors instances grant-markets-access --markets-workload-uid <uid> --execute
+```
+
+The command creates the namespace when it is missing, so the person who runs it owns it. With
+`--editor-team-uid <uid>` it also grants that Team `editor` there, which the migration Job needs
+to add the instances; run it before the push. Its report lists the instances that are not in the
+namespace yet. The dataset catalog verifies and reads the instances with it
 (ms-markets ADR 0047, decision 5), and an instance added later is covered. Never grant the
 Markets workload a role on `alpaca-connectors`, and never one on `alpaca_connectors__acct_alpaca`:
 that table holds the application-encrypted account keys and is not `include`d by Markets.

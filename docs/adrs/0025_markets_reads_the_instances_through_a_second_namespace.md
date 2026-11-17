@@ -2,9 +2,10 @@
 
 ## Status
 
-Decided by the owner and implemented on 2026-11-17, on MetaTables 0.1.67. It has not been run
-against a hosted MetaTables API: the hosted API must serve MetaTables 0.1.66 or later first (see
-[Rollout](#rollout)).
+Decided by the owner and implemented on 2026-11-17, on MetaTables 0.1.67 and ms-markets 3.8.2.
+Rolled out in Production the same day: the migration Job added the seven instances to
+`alpaca-connectors-markets` and moved the thirteen project tables out of `mainsequence.markets`,
+and the owner ran `alpaca-connectors instances grant-markets-access` (see [Rollout](#rollout)).
 
 Amends [ADR 0024](0024_portfolios_from_provided_weights.md), whose registration failed in
 Production for the reason below (alpaca-connectors#37).
@@ -53,13 +54,15 @@ In each Environment, in this order:
 
 1. The hosted MetaTables API serves 0.1.66 or later, and the Markets API runs ms-markets
    3.8.2 or later.
-2. The owner creates `alpaca-connectors-markets`, grants the migration Job `editor` on it, and
-   grants the Markets workload `data_viewer` on it
+2. The owner runs `alpaca-connectors instances grant-markets-access`, which creates
+   `alpaca-connectors-markets`, grants the Markets workload `data_viewer` on it and grants the
+   migration Job's Team `editor` on it
    ([runbook, steps 1 and 5](../operations/markets-api-boundary.md)).
-3. The project tables still registered in `mainsequence.markets` are moved first
-   ([runbook, step 7](../operations/markets-api-boundary.md)). The migration now removes a
-   declared namespace the code no longer lists, and the migration Job holds no role on
-   `mainsequence.markets`, so its finalization is refused until a person has moved them.
+3. The project tables still registered in `mainsequence.markets` leave it. The migration removes
+   a declared namespace the code no longer lists, which needs `tables.create` on
+   `mainsequence.markets`. Where the migration Job holds it, as in Production through its Team,
+   the Job moves them itself; elsewhere a person moves them first
+   ([runbook, step 7](../operations/markets-api-boundary.md)), or the finalization is refused.
 4. This release is pushed. The migration Job adds the seven memberships; a person runs
    `alpaca-connectors portfolio prepare-interpolated-prices` for the interpolated-price tables.
 

@@ -55,6 +55,9 @@ from .holdings_category import configure_get_parser as configure_universe_get_pa
 from .holdings_category import configure_list_parser as configure_universe_list_parser
 from .holdings_category import configure_run_parser as configure_universe_run_parser
 from .instances import configure_backfill_parser as configure_instances_backfill_parser
+from .instances import (
+    configure_grant_markets_access_parser as configure_instances_grant_markets_access_parser,
+)
 from .instances import configure_rollback_parser as configure_instances_rollback_parser
 from .portfolios import (
     configure_action_parser as configure_portfolio_action_parser,
@@ -222,6 +225,12 @@ def build_parser() -> argparse.ArgumentParser:
         instances_commands.add_parser(
             "rollback",
             help="Undo the backfill: copy the instances' rows back and unregister them.",
+        )
+    )
+    configure_instances_grant_markets_access_parser(
+        instances_commands.add_parser(
+            "grant-markets-access",
+            help="Once per Environment: let the Markets workload read the contract instances.",
         )
     )
 
