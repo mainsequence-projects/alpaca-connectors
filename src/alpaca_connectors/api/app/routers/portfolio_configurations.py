@@ -1,7 +1,8 @@
 """Durable analytical portfolio and rebalance configuration API.
 
 ETF portfolios follow an ETF signal; provided-weights portfolios follow weights the calling
-application gives (ADR 0024) and are changed only by their owner.
+application gives (ADR 0024) and are changed only by their owner. Only provided-weights
+portfolios are created; ETF portfolios are read, run and deleted until none is left (ADR 0027).
 """
 
 from __future__ import annotations
@@ -13,7 +14,6 @@ from fastapi import APIRouter, Body, Query
 from ..errors import api_http_error, not_found
 from ..identity import acting_owner
 from ..schemas import (
-    PortfolioConfigurationCreateRequest,
     PortfolioConfigurationDetailResponse,
     PortfolioConfigurationResponse,
     PortfolioConfigurationUpdateRequest,
@@ -34,7 +34,6 @@ from ..services.common import resource_discovery, validate_ordering, validate_pa
 from ..services.portfolio_configurations import (
     configuration_runs,
     configuration_weights,
-    create_configuration,
     create_provided_configuration,
     create_rebalance,
     delete_configuration,
@@ -104,20 +103,6 @@ def portfolio_configurations_discovery() -> ResourceDiscoveryResponse:
             {"id": "updated_at", "header": "Updated", "data_type": "datetime"},
         ],
     )
-
-
-@router.post(
-    "/v1/portfolio-configurations",
-    response_model=PortfolioConfigurationResponse,
-    status_code=201,
-)
-def portfolio_configuration_create(
-    request: PortfolioConfigurationCreateRequest = Body(...),
-) -> PortfolioConfigurationResponse:
-    try:
-        return create_configuration(request)
-    except Exception as exc:
-        raise api_http_error(exc) from exc
 
 
 @router.post(

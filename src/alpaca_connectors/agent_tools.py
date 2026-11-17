@@ -20,18 +20,14 @@ from alpaca_connectors.api.app.schemas import (
     AccountSecretNameRegistrationRequest,
     AccountSecretNameUpdateRequest,
     AssetRegistrationRequest,
-    AssetUniverseCreateRequest,
     AssetUniverseUpdateRequest,
     BarConfigurationCreateRequest,
     BarConfigurationResolveRequest,
     BarConfigurationUpdateRequest,
-    PortfolioConfigurationCreateRequest,
     PortfolioConfigurationUpdateRequest,
     PortfolioRebalanceConfigurationCreateRequest,
     PortfolioRebalanceConfigurationUpdateRequest,
-    SignalJobConfigurationCreateRequest,
     SignalJobConfigurationUpdateRequest,
-    UniverseSourceCreateRequest,
     UniverseSourceUpdateRequest,
 )
 
@@ -450,13 +446,12 @@ def query_universes(arguments: Mapping[str, Any]) -> Any:
 
 
 def manage_universe(arguments: Mapping[str, Any]) -> Any:
+    """Change, run or delete an existing Universe or source; none is created (ADR 0027)."""
     from alpaca_connectors.api.app.services.universe_sources import (
-        create_source,
         delete_source,
         update_source,
     )
     from alpaca_connectors.api.app.services.universes import (
-        create_universe,
         delete_universe,
         run_universe,
         universe_delete_blockers,
@@ -467,8 +462,6 @@ def manage_universe(arguments: Mapping[str, Any]) -> Any:
         arguments,
         {
             "activate",
-            "create",
-            "create_source",
             "deactivate",
             "delete",
             "delete_source",
@@ -477,10 +470,6 @@ def manage_universe(arguments: Mapping[str, Any]) -> Any:
             "update_source",
         },
     )
-    if operation == "create":
-        return create_universe(_request_model(arguments, AssetUniverseCreateRequest))
-    if operation == "create_source":
-        return create_source(_request_model(arguments, UniverseSourceCreateRequest))
     if operation == "update_source":
         return update_source(
             _required_text(arguments, "source_uid"),
@@ -641,19 +630,14 @@ def query_etf_signals(arguments: Mapping[str, Any]) -> Any:
 
 
 def manage_etf_signal(arguments: Mapping[str, Any]) -> Any:
+    """Change, run or delete an existing ETF signal; none is created (ADR 0027)."""
     from alpaca_connectors.api.app.services.signal_jobs import (
-        create_configuration,
         delete_configuration,
         run_configuration,
         update_configuration,
     )
 
-    operation = _operation(arguments, {"create", "delete", "run", "update"})
-    if operation == "create":
-        return create_configuration(
-            _request_model(arguments, SignalJobConfigurationCreateRequest),
-            owner=_acting_owner(),
-        )
+    operation = _operation(arguments, {"delete", "run", "update"})
     configuration_uid = _required_text(arguments, "configuration_uid")
     if operation == "update":
         return update_configuration(
@@ -753,16 +737,14 @@ def query_etf_portfolios(arguments: Mapping[str, Any]) -> Any:
 
 
 def manage_etf_portfolio(arguments: Mapping[str, Any]) -> Any:
+    """Change, run or end an existing portfolio; none is created here (ADR 0024, ADR 0027)."""
     from alpaca_connectors.api.app.services.portfolio_configurations import (
-        create_configuration,
         delete_configuration,
         run_configuration,
         update_configuration,
     )
 
-    operation = _operation(arguments, {"create", "delete", "run", "update"})
-    if operation == "create":
-        return create_configuration(_request_model(arguments, PortfolioConfigurationCreateRequest))
+    operation = _operation(arguments, {"delete", "run", "update"})
     configuration_uid = _required_text(arguments, "configuration_uid")
     if operation == "update":
         return update_configuration(
@@ -1063,18 +1045,12 @@ PROJECT_AGENT_TOOLS: tuple[ProjectAgentTool, ...] = (
         name="alpaca_manage_universe",
         label="Manage Alpaca Universe",
         description=(
-            "Create, update, activate, deactivate, delete, or extract one registered Universe, "
-            "and manage its explicit extraction sources. Component extraction registers missing "
-            "assets in bulk and publishes one weight observation."
+            "Update, activate, deactivate, delete, or extract one registered Universe, and update "
+            "or delete its extraction source. No Universe or source is created any more: the "
+            "existing ones are kept running until they are deleted. Component extraction "
+            "registers missing assets in bulk and publishes one weight observation."
         ),
         parameters=_operations(
-            _operation_case(
-                "create",
-                properties={
-                    "request": _request(AssetUniverseCreateRequest, "New Universe definition.")
-                },
-                required=("request",),
-            ),
             _operation_case(
                 "update",
                 properties={
@@ -1104,13 +1080,6 @@ PROJECT_AGENT_TOOLS: tuple[ProjectAgentTool, ...] = (
                 "delete",
                 properties={"universe_uid": _uid("Universe"), "confirmation": _confirmation()},
                 required=("universe_uid", "confirmation"),
-            ),
-            _operation_case(
-                "create_source",
-                properties={
-                    "request": _request(UniverseSourceCreateRequest, "New extraction source.")
-                },
-                required=("request",),
             ),
             _operation_case(
                 "update_source",
@@ -1282,22 +1251,11 @@ PROJECT_AGENT_TOOLS: tuple[ProjectAgentTool, ...] = (
         name="alpaca_manage_etf_signal",
         label="Manage ETF Weight Signal",
         description=(
-            "Create, update, delete, or run a Universe-backed ETF signal configuration. The "
-            "shared signal Job declared in the workflow runs it; `scheduled` includes it in that "
-            "Job's daily scheduled run. An Account that has an owner is configured only for that "
-            "owner."
+            "Update, delete, or run an existing Universe-backed ETF signal configuration; none is "
+            "created any more. The shared signal Job declared in the workflow runs it. An Account "
+            "that has an owner is configured only for that owner."
         ),
         parameters=_operations(
-            _operation_case(
-                "create",
-                properties={
-                    "request": _request(
-                        SignalJobConfigurationCreateRequest,
-                        "ETF signal configuration.",
-                    )
-                },
-                required=("request",),
-            ),
             _operation_case(
                 "update",
                 properties={
@@ -1426,21 +1384,13 @@ PROJECT_AGENT_TOOLS: tuple[ProjectAgentTool, ...] = (
         name="alpaca_manage_etf_portfolio",
         label="Manage ETF Portfolio",
         description=(
-            "Create, update, delete, or run an analytical ETF portfolio configuration. The "
-            "shared portfolio Job declared in the workflow runs it; `scheduled` includes it in "
-            "that Job's daily scheduled run."
+            "Update, delete, or run an existing analytical portfolio configuration; none is "
+            "created here. The shared portfolio Job declared in the workflow runs it; "
+            "`scheduled` includes it in that Job's daily scheduled run. Deleting it retires its "
+            "portfolio first, which is refused while an account's target names it. A portfolio "
+            "built from provided weights is changed or deleted only for its owner."
         ),
         parameters=_operations(
-            _operation_case(
-                "create",
-                properties={
-                    "request": _request(
-                        PortfolioConfigurationCreateRequest,
-                        "ETF portfolio, data, and rebalance configuration.",
-                    )
-                },
-                required=("request",),
-            ),
             _operation_case(
                 "update",
                 properties={

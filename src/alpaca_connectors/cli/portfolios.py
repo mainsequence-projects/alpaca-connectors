@@ -1,8 +1,9 @@
-"""CLI for durable ETF portfolio and rebalance configurations.
+"""CLI for durable portfolio and rebalance configurations.
 
 Every portfolio configuration runs on the portfolio Job declared in the repository workflow
 (ADR 0013). A configuration holds no schedule or compute: `--no-scheduled` leaves it out of that
-Job's scheduled run.
+Job's scheduled run. Portfolios are created only by the applications that give them weights
+(ADR 0024); no ETF portfolio is created any more (ADR 0027).
 """
 
 from __future__ import annotations
@@ -44,30 +45,6 @@ def configure_list_parser(parser: argparse.ArgumentParser) -> None:
 def configure_get_parser(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("configuration_uid")
     parser.set_defaults(handler=run_get_command)
-
-
-def configure_create_parser(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--name", required=True)
-    parser.add_argument("--description")
-    parser.add_argument("--signal-configuration-uid", required=True)
-    parser.add_argument("--bars-configuration-uid", required=True)
-    parser.add_argument("--rebalance-configuration-uid", required=True)
-    parser.add_argument("--valuation-column", default="close")
-    parser.add_argument("--commission-fee", type=float, default=0.00018)
-    parser.add_argument(
-        "--valuation-maximum-staleness-seconds",
-        type=int,
-        default=86_400,
-        help=(
-            "Maximum age of a price selected at a real valuation timestamp; this never "
-            "creates or extends timestamps."
-        ),
-    )
-    parser.add_argument(
-        "--fail-on-missing-prices", action=argparse.BooleanOptionalAction, default=True
-    )
-    _add_scheduled_argument(parser, create=True)
-    parser.set_defaults(handler=run_create_command)
 
 
 def configure_update_parser(parser: argparse.ArgumentParser) -> None:
@@ -193,25 +170,6 @@ def run_get_command(args: argparse.Namespace) -> int:
     return 0
 
 
-def run_create_command(args: argparse.Namespace) -> int:
-    from alpaca_connectors.portfolios import create_portfolio_configuration_row
-
-    row = create_portfolio_configuration_row(
-        name=args.name,
-        description=args.description,
-        signal_configuration_uid=args.signal_configuration_uid,
-        bars_configuration_uid=args.bars_configuration_uid,
-        rebalance_configuration_uid=args.rebalance_configuration_uid,
-        valuation_column=args.valuation_column,
-        commission_fee=args.commission_fee,
-        valuation_maximum_staleness_seconds=args.valuation_maximum_staleness_seconds,
-        fail_on_missing_prices=args.fail_on_missing_prices,
-        scheduled=args.scheduled,
-    )
-    _print(row)
-    return 0
-
-
 def run_update_command(args: argparse.Namespace) -> int:
     from alpaca_connectors.portfolios import update_portfolio_configuration
 
@@ -238,9 +196,14 @@ def run_update_command(args: argparse.Namespace) -> int:
 
 
 def run_delete_command(args: argparse.Namespace) -> int:
-    from alpaca_connectors.portfolios import (
-        delete_portfolio_configuration_row,
-        get_portfolio_configuration,
+    """End a portfolio as the API does: retire its `Portfolio`, then delete the configuration.
+
+    The operator acts for no owner, so a provided-weights portfolio is ended too (ADR 0027).
+    """
+    from alpaca_connectors.portfolios import get_portfolio_configuration
+    from alpaca_connectors.portfolios.provided_weights import (
+        ProvidedWeightsError,
+        end_portfolio_configuration,
     )
 
     row = get_portfolio_configuration(args.configuration_uid)
@@ -252,19 +215,18 @@ def run_delete_command(args: argparse.Namespace) -> int:
                 "allowed": True,
                 "configuration_uid": str(row.uid),
                 "detail": (
-                    "Only the configuration will be deleted; portfolio data and the shared "
-                    "Job's runs are retained."
+                    "The portfolio will be retired, then its configuration deleted; this is "
+                    "refused while an account's target names the portfolio. Its series, account "
+                    "history and the shared Job's runs are retained."
                 ),
             }
         )
         return 0
-    _print(
-        {
-            "configuration_uid": str(row.uid),
-            "deleted": True,
-            "storage_result": delete_portfolio_configuration_row(row.uid),
-        }
-    )
+    try:
+        removal = end_portfolio_configuration(row)
+    except ProvidedWeightsError as exc:
+        raise ValueError(str(exc)) from exc
+    _print(removal.summary())
     return 0
 
 
@@ -387,7 +349,6 @@ def run_rebalance_delete_command(args: argparse.Namespace) -> int:
 
 __all__ = [
     "configure_action_parser",
-    "configure_create_parser",
     "configure_delete_parser",
     "configure_get_parser",
     "configure_list_parser",

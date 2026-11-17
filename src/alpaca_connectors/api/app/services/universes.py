@@ -7,7 +7,6 @@ from alpaca_connectors.operations.signal_job_configurations import (
     signal_job_configurations_for_universe,
 )
 from alpaca_connectors.universes import (
-    create_asset_universe_configuration,
     delete_asset_universe,
     get_asset_universe_view,
     list_asset_universes,
@@ -17,7 +16,6 @@ from alpaca_connectors.universes import (
 )
 
 from ..schemas import (
-    AssetUniverseCreateRequest,
     AssetUniverseResponse,
     AssetUniverseUpdateRequest,
 )
@@ -61,11 +59,6 @@ def list_universe_assets(
         ordering=ordering,
         category_uid=str(universe.asset_category_uid),
     )
-
-
-def create_universe(request: AssetUniverseCreateRequest) -> AssetUniverseResponse:
-    item = create_asset_universe_configuration(**request.model_dump())
-    return AssetUniverseResponse.model_validate(item)
 
 
 def preview_universe_run(universe_uid: str, *, account_uid: str, timeout: float) -> dict:
@@ -159,7 +152,6 @@ def universe_delete_blockers(universe_uid: str) -> list[str]:
 
 
 __all__ = [
-    "create_universe",
     "delete_universe",
     "get_universe",
     "list_universe_assets",

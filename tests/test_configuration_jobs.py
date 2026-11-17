@@ -16,7 +16,7 @@ import pytest
 import sqlalchemy as sa
 import yaml
 
-from alpaca_connectors.operations import configuration_jobs
+from alpaca_connectors.operations import configuration_jobs, signal_job_configurations
 from alpaca_connectors.operations.configuration_jobs import (
     ALPACA_ETF_PORTFOLIO_DISPATCHER_EXECUTION_PATH,
     ALPACA_ETF_PORTFOLIO_EXECUTION_PATH,
@@ -164,11 +164,19 @@ def _configuration(monkeypatch, *, kind="signal", uid=A):
         universe_uid=uuid.uuid4(),
         account_uid=uuid.uuid4(),
     )
-    getter = "get_signal_job_configuration" if kind == "signal" else "get_portfolio_configuration"
-    monkeypatch.setattr(configuration_jobs, getter, lambda value: configuration)
+    if kind == "signal":
+        monkeypatch.setattr(
+            signal_job_configurations,
+            "get_signal_job_configuration",
+            lambda value: configuration,
+        )
+    else:
+        monkeypatch.setattr(
+            configuration_jobs, "get_portfolio_configuration", lambda value: configuration
+        )
     validated: list[dict] = []
     monkeypatch.setattr(
-        configuration_jobs,
+        signal_job_configurations,
         "validate_signal_job_references",
         lambda **values: validated.append(values),
     )
@@ -238,7 +246,9 @@ def test_launch_refuses_without_a_ready_job_or_while_a_run_is_active(platform, m
 
 
 def test_launch_of_a_missing_configuration_is_not_found(platform, monkeypatch) -> None:
-    monkeypatch.setattr(configuration_jobs, "get_signal_job_configuration", lambda value: None)
+    monkeypatch.setattr(
+        signal_job_configurations, "get_signal_job_configuration", lambda value: None
+    )
     monkeypatch.setattr(configuration_jobs, "get_portfolio_configuration", lambda value: None)
 
     with pytest.raises(LookupError, match="Signal configuration"):
@@ -345,7 +355,7 @@ def test_scheduled_run_starts_one_run_per_scheduled_configuration(platform, monk
     platform.jobs = [job]
     platform.runs = [_run("b-running", B, status="PENDING"), _run("a-done", A)]
     monkeypatch.setattr(
-        configuration_jobs,
+        signal_job_configurations,
         "scheduled_signal_configurations",
         lambda: [SimpleNamespace(uid=uuid.UUID(value)) for value in (A, B, C)],
     )
@@ -383,7 +393,7 @@ def test_scheduled_portfolio_run_skips_a_blocked_preflight(platform, monkeypatch
 
 
 def test_scheduled_run_needs_the_declared_job(platform, monkeypatch) -> None:
-    monkeypatch.setattr(configuration_jobs, "scheduled_signal_configurations", lambda: [])
+    monkeypatch.setattr(signal_job_configurations, "scheduled_signal_configurations", lambda: [])
 
     with pytest.raises(ValueError, match=WORKFLOW_PATH):
         configuration_jobs.dispatch_scheduled_configurations("signal")
@@ -727,36 +737,27 @@ def test_portfolio_responses_report_the_declared_job(monkeypatch) -> None:
     assert response.latest_run_status is None
 
 
+PROVIDED_WEIGHTS_BODY = {
+    "name": "x",
+    "bars_configuration_uid": B,
+    "rebalance_configuration_uid": C,
+    "observations": [{"observed_at": "2026-11-16T14:00:00+00:00", "weights": {"ALPACA::x": 1}}],
+}
+
+
 @pytest.mark.parametrize(
-    ("path", "body", "field"),
+    ("body", "field"),
     [
-        (
-            "/v1/signal-jobs",
-            {"name": "x", "universe_uid": A, "account_uid": B, "schedule_type": "interval"},
-            "schedule_type",
-        ),
-        (
-            "/v1/signal-jobs",
-            {"name": "x", "universe_uid": A, "account_uid": B, "spot": False},
-            "spot",
-        ),
-        (
-            "/v1/portfolio-configurations",
-            {
-                "name": "x",
-                "signal_configuration_uid": A,
-                "bars_configuration_uid": B,
-                "rebalance_configuration_uid": C,
-                "job": {"schedule_type": "interval"},
-            },
-            "job",
-        ),
+        ({**PROVIDED_WEIGHTS_BODY, "schedule_type": "interval"}, "schedule_type"),
+        ({**PROVIDED_WEIGHTS_BODY, "spot": False}, "spot"),
+        ({**PROVIDED_WEIGHTS_BODY, "job": {"schedule_type": "interval"}}, "job"),
     ],
 )
 def test_create_requests_reject_job_settings_naming_the_workflow_file(
-    path, body, field, api_client
+    body, field, api_client
 ) -> None:
-    response = api_client.post(path, json=body)
+    # The only create left is a provided-weights portfolio's (ADR 0024, ADR 0027).
+    response = api_client.post("/v1/portfolio-configurations/provided-weights", json=body)
 
     assert response.status_code == 422
     (error,) = response.json()["detail"]
@@ -940,7 +941,8 @@ def test_workflow_declares_one_job_and_one_dispatcher_per_kind_outside_the_steps
     ]
     api_entries = resources["alpaca"]["access"]["resources"]
 
-    for kind, expression in (("signal", "30 0 * * *"), ("portfolio", "0 2 * * *")):
+    # The ETF signal dispatcher has no schedule any more (ADR 0027): no new ETF observation.
+    for kind, expression in (("signal", None), ("portfolio", "0 2 * * *")):
         spec = JOB_SPECS[kind]
         resource = resources[spec.workflow_key]
         dispatcher = resources[spec.dispatcher_workflow_key]
@@ -981,10 +983,14 @@ def test_workflow_declares_one_job_and_one_dispatcher_per_kind_outside_the_steps
         )
         assert resource["access"] == {"branches": metatables, **secrets}
         # The dispatcher holds the schedule and may only run (and see) the kind's Job.
-        assert dispatcher["spec"]["task_schedule"] == {
-            "schedule": {"type": "crontab", "expression": expression, "timezone": "UTC"}
-        }
-        assert dispatcher["spec"]["scheduled_command_args"] == ["--scheduled"]
+        if expression is None:
+            assert dispatcher["spec"]["task_schedule"] is None
+            assert dispatcher["spec"]["scheduled_command_args"] == []
+        else:
+            assert dispatcher["spec"]["task_schedule"] == {
+                "schedule": {"type": "crontab", "expression": expression, "timezone": "UTC"}
+            }
+            assert dispatcher["spec"]["scheduled_command_args"] == ["--scheduled"]
         assert dispatcher["access"] == {
             "branches": metatables,
             "resources": [{"key": spec.workflow_key, "policy": "runner"}],

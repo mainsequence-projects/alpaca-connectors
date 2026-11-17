@@ -105,10 +105,10 @@ def response() -> PortfolioConfigurationResponse:
 
 
 def create_request() -> dict:
+    """A provided-weights portfolio, the only kind created (ADR 0024, ADR 0027)."""
     return {
         "name": "Daily IVV analytical portfolio",
-        "description": "NYSE-close ETF portfolio backtest.",
-        "signal_configuration_uid": SIGNAL_CONFIGURATION_UID,
+        "description": "NYSE-close portfolio backtest.",
         "bars_configuration_uid": BARS_CONFIGURATION_UID,
         "rebalance_configuration_uid": REBALANCE_CONFIGURATION_UID,
         "upsample_frequency_id": "1d",
@@ -118,6 +118,9 @@ def create_request() -> dict:
         "fail_on_missing_prices": True,
         "commission_fee": 0.00018,
         "scheduled": False,
+        "observations": [
+            {"observed_at": "2026-11-16T14:00:00+00:00", "weights": {"ALPACA::x": 1.0}}
+        ],
     }
 
 
@@ -299,25 +302,17 @@ def test_portfolio_discovery_columns_are_renderable(api_client) -> None:
             assert column.get("value_path") or column.get("data_type")
 
 
-def test_portfolio_create_sends_only_the_scheduled_flag_and_rejects_environment(api_client) -> None:
-    with patch(
-        "alpaca_connectors.api.app.routers.portfolio_configurations.create_configuration",
-        return_value=response(),
-    ) as create:
-        result = api_client.post("/v1/portfolio-configurations", json=create_request())
-
-    assert result.status_code == 201
-    assert result.json()["job"]["schedule_expression"] == "0 2 * * *"
-    assert "schedule_type" not in {
-        key: value for key, value in result.json().items() if key != "job"
-    }
-    request = create.call_args.args[0]
-    assert request.signal_configuration_uid == SIGNAL_CONFIGURATION_UID
-    assert request.scheduled is False
+def test_only_provided_weights_portfolios_are_created(api_client) -> None:
+    # ADR 0027: no ETF portfolio is created; it cannot name a signal configuration either.
+    etf = {**create_request(), "signal_configuration_uid": SIGNAL_CONFIGURATION_UID}
+    del etf["observations"]
+    assert api_client.post("/v1/portfolio-configurations", json=etf).status_code == 405
+    provided = "/v1/portfolio-configurations/provided-weights"
+    assert api_client.post(provided, json=etf).status_code == 422
 
     invalid = create_request()
     invalid["environment_uid"] = "77777777-7777-4777-8777-777777777777"
-    assert api_client.post("/v1/portfolio-configurations", json=invalid).status_code == 422
+    assert api_client.post(provided, json=invalid).status_code == 422
 
 
 def test_portfolio_create_rejects_unimplemented_rebalance_and_interpolation(api_client) -> None:
@@ -327,10 +322,9 @@ def test_portfolio_create_rejects_unimplemented_rebalance_and_interpolation(api_
     invalid_interpolation["intraday_bar_interpolation_rule"] = "linear"
 
     client = api_client
-    assert client.post("/v1/portfolio-configurations", json=invalid_strategy).status_code == 422
-    assert (
-        client.post("/v1/portfolio-configurations", json=invalid_interpolation).status_code == 422
-    )
+    provided = "/v1/portfolio-configurations/provided-weights"
+    assert client.post(provided, json=invalid_strategy).status_code == 422
+    assert client.post(provided, json=invalid_interpolation).status_code == 422
 
 
 def test_portfolio_run_returns_jobrun_status_url_without_arguments(api_client) -> None:

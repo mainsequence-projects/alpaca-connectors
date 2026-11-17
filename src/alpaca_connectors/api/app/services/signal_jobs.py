@@ -11,7 +11,6 @@ from typing import Any
 from alpaca_connectors.account.ownership import AccountOwner
 from alpaca_connectors.operations import (
     configuration_job_state,
-    create_signal_job_configuration,
     delete_signal_job_configuration,
     get_signal_job_configuration,
     launch_signal_job,
@@ -25,7 +24,6 @@ from alpaca_connectors.operations import (
 )
 
 from ..schemas import (
-    SignalJobConfigurationCreateRequest,
     SignalJobConfigurationResponse,
     SignalJobConfigurationUpdateRequest,
     SignalJobRunAcceptedResponse,
@@ -156,17 +154,6 @@ def _require_owner_of_configured_account(
     require_owner_may_configure_account(str(account_uid), owner)
 
 
-def create_configuration(
-    request: SignalJobConfigurationCreateRequest,
-    *,
-    owner: AccountOwner,
-) -> SignalJobConfigurationResponse:
-    """Create a configuration; an account another owner holds is refused (ADR 0022)."""
-    require_owner_may_configure_account(str(request.account_uid), owner)
-    row = create_signal_job_configuration(**request.model_dump())
-    return _responses([row])[0]
-
-
 def update_configuration(
     configuration_uid: str,
     request: SignalJobConfigurationUpdateRequest,
@@ -228,7 +215,6 @@ def configuration_runs(configuration_uid: str, *, limit: int) -> list[SignalJobR
 
 __all__ = [
     "configuration_runs",
-    "create_configuration",
     "delete_configuration",
     "get_configuration",
     "get_configuration_observations",

@@ -360,7 +360,7 @@ def test_workflow_declares_the_bars_dispatcher_beside_the_bars_job() -> None:
     assert not job["spec"].get("scheduled_command_args")
 
 
-def test_bars_dispatch_runs_after_utc_midnight_and_before_the_signal_and_portfolio() -> None:
+def test_bars_dispatch_runs_after_utc_midnight_and_before_the_portfolio() -> None:
     bars = yaml.safe_load((PROJECT_ROOT / ALPACA_BARS_WORKFLOW_PATH).read_text())
     api = yaml.safe_load(
         (PROJECT_ROOT / ".mainsequence/workflows/alpaca-connectors-api.yaml").read_text()
@@ -370,8 +370,8 @@ def test_bars_dispatch_runs_after_utc_midnight_and_before_the_signal_and_portfol
     # The daily updater takes only bars that start before the current UTC midnight, so 00:00 UTC
     # is the first run that includes the session closed at 20:00 or 21:00 UTC.
     assert _crontab_time(by_key["alpaca-bars-update-dispatcher"]) == (0, 0)
-    assert (
-        _crontab_time(by_key["alpaca-bars-update-dispatcher"])
-        < _crontab_time(by_key["alpaca-etf-signal-dispatcher"])
-        < _crontab_time(by_key["alpaca-etf-portfolio-dispatcher"])
+    assert _crontab_time(by_key["alpaca-bars-update-dispatcher"]) < _crontab_time(
+        by_key["alpaca-etf-portfolio-dispatcher"]
     )
+    # No new ETF observation is taken (ADR 0027): the signal dispatcher has no schedule.
+    assert by_key["alpaca-etf-signal-dispatcher"]["spec"]["task_schedule"] is None

@@ -731,7 +731,7 @@ def test_another_caller_cannot_give_weights_pause_or_delete(api_client, local_ca
         patch(f"{SERVICES}.get_portfolio_configuration", return_value=owned),
         patch.object(provided_weights, "publish_provided_weights") as publish,
         patch(f"{SERVICES}.update_portfolio_configuration") as update,
-        patch(f"{SERVICES}.delete_portfolio_configuration_row") as delete,
+        patch(f"{SERVICES}.end_portfolio_configuration") as delete,
     ):
         other = local_caller.other_headers
         responses = [

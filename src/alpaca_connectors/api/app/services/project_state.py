@@ -7,10 +7,6 @@ from dataclasses import asdict
 from alpaca_connectors.account.services import list_account_registrations
 from alpaca_connectors.market_data import list_market_data_datasets
 from alpaca_connectors.market_data.storage import ALPACA_STOCK_BARS_STORAGE_BY_TRIPLE
-from alpaca_connectors.universes import (
-    SUPPORTED_COMPONENT_PROVIDERS,
-    list_universe_sources,
-)
 
 from ..schemas import ProjectConfigurationResponse
 from ..site_agent import resolve_site_agent
@@ -19,6 +15,7 @@ from ..site_agent import resolve_site_agent
 def get_project_configuration(
     *, request_user_uid: str | None = None
 ) -> ProjectConfigurationResponse:
+    from alpaca_connectors.universes import SUPPORTED_COMPONENT_PROVIDERS, list_universe_sources
     from mainsequence.code_repository_context import get_code_repository_context
 
     _, account_count = list_account_registrations(limit=1)

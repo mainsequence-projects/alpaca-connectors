@@ -1,4 +1,8 @@
-"""User-maintained universe-source API."""
+"""User-maintained universe-source API.
+
+No source is created any more (ADR 0027): the existing ones are read, changed and deleted until
+none is left.
+"""
 
 from __future__ import annotations
 
@@ -11,7 +15,6 @@ from ..schemas import (
     ResourceCollection,
     ResourceDiscoveryResponse,
     UniverseSourceActionRequest,
-    UniverseSourceCreateRequest,
     UniverseSourcePreviewResponse,
     UniverseSourceResponse,
     UniverseSourceUpdateRequest,
@@ -22,7 +25,6 @@ from ..services.common import (
     validate_page_window,
 )
 from ..services.universe_sources import (
-    create_source,
     delete_source,
     get_source,
     list_sources,
@@ -80,14 +82,6 @@ def sources_discovery() -> ResourceDiscoveryResponse:
         ],
         actions=[],
     )
-
-
-@router.post("", response_model=UniverseSourceResponse, status_code=201)
-def source_create(request: UniverseSourceCreateRequest = Body(...)) -> UniverseSourceResponse:
-    try:
-        return create_source(request)
-    except Exception as exc:
-        raise api_http_error(exc) from exc
 
 
 @router.get("/{source_uid}", response_model=UniverseSourceResponse)

@@ -208,38 +208,20 @@ class CliTests(unittest.TestCase):
         )
         self.assertIn("Dry run only", stdout.getvalue())
 
-    def test_universe_source_create_calls_shared_crud(self) -> None:
-        source = SimpleNamespace(
-            model_dump=lambda mode=None: {
-                "uid": "source-uid",
-                "name": "S&P 500",
-                "symbol": "IVV",
-                "source_url": "https://example.com/ivv",
-                "enabled": True,
-            }
-        )
-        with patch(
-            "alpaca_connectors.universes.create_universe_source", return_value=source
-        ) as create:
-            exit_code = main(
-                [
-                    "universe-source",
-                    "create",
-                    "--name",
-                    "S&P 500",
-                    "--symbol",
-                    "ivv",
-                    "--url",
-                    "https://example.com/ivv",
-                ]
-            )
-        self.assertEqual(exit_code, 0)
-        create.assert_called_once_with(
-            name="S&P 500",
-            symbol="ivv",
-            source_url="https://example.com/ivv",
-            enabled=True,
-        )
+    def test_no_command_creates_an_etf_object(self) -> None:
+        # ADR 0027: what exists is read, run and deleted until each Environment is drained.
+        for command in (
+            ["universe-source", "create", "--name", "S", "--symbol", "IVV", "--url", "https://x"],
+            ["universe-source", "seed-defaults"],
+            ["signal", "create", "--name", "S", "--universe-uid", "u", "--account-uid", "a"],
+            ["portfolio", "create", "--name", "P", "--signal-configuration-uid", "s"],
+        ):
+            with (
+                self.subTest(command=command[:2]),
+                contextlib.redirect_stderr(io.StringIO()),
+                self.assertRaises(SystemExit),
+            ):
+                main(command)
 
     def test_asset_universe_delete_is_a_dry_run_by_default(self) -> None:
         universe = {
@@ -353,60 +335,8 @@ class CliTests(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         update.assert_called_once_with("configuration-uid", scheduled=False)
 
-    def test_signal_create_stores_only_the_configuration_and_scheduled_flag(self) -> None:
-        row = SimpleNamespace(
-            model_dump=lambda mode=None: {"uid": "configuration-uid", "enabled": False}
-        )
-        stdout = io.StringIO()
-        with (
-            patch(
-                "alpaca_connectors.operations.create_signal_job_configuration",
-                return_value=row,
-            ) as create,
-            patch(
-                "alpaca_connectors.operations.signal_uid_for_configuration",
-                return_value="signal-uid",
-            ),
-            contextlib.redirect_stdout(stdout),
-        ):
-            exit_code = main(
-                [
-                    "signal",
-                    "create",
-                    "--name",
-                    "Daily IVV observation",
-                    "--universe-uid",
-                    "universe-uid",
-                    "--account-uid",
-                    "account-uid",
-                    "--no-scheduled",
-                ]
-            )
-
-        self.assertEqual(exit_code, 0)
-        create.assert_called_once_with(
-            name="Daily IVV observation",
-            description=None,
-            universe_uid="universe-uid",
-            account_uid="account-uid",
-            scheduled=False,
-        )
-        self.assertEqual(
-            json.loads(stdout.getvalue()),
-            {"uid": "configuration-uid", "scheduled": False, "signal_uid": "signal-uid"},
-        )
-
-    def test_signal_create_rejects_job_settings_and_an_environment_selector(self) -> None:
-        base = [
-            "signal",
-            "create",
-            "--name",
-            "Daily IVV observation",
-            "--universe-uid",
-            "universe-uid",
-            "--account-uid",
-            "account-uid",
-        ]
+    def test_signal_update_rejects_job_settings_and_an_environment_selector(self) -> None:
+        base = ["signal", "update", "configuration-uid", "--name", "Daily IVV observation"]
         for extra in (
             ["--environment-uid", "environment-uid"],
             ["--schedule-type", "interval"],
@@ -424,6 +354,60 @@ class CliTests(unittest.TestCase):
 
         self.assertEqual(exit_code, 0)
         update.assert_called_once_with("configuration-uid", scheduled=False)
+
+    def test_portfolio_delete_retires_the_portfolio_then_deletes_the_configuration(self) -> None:
+        row = SimpleNamespace(uid="configuration-uid")
+        removal = SimpleNamespace(
+            summary=lambda: {
+                "configuration_uid": "configuration-uid",
+                "deleted": True,
+                "portfolio": {"uid": "portfolio-uid", "state": "retired"},
+            }
+        )
+        stdout = io.StringIO()
+        with (
+            patch("alpaca_connectors.portfolios.get_portfolio_configuration", return_value=row),
+            patch(
+                "alpaca_connectors.portfolios.provided_weights.end_portfolio_configuration",
+                return_value=removal,
+            ) as end,
+            contextlib.redirect_stdout(stdout),
+        ):
+            self.assertEqual(main(["portfolio", "delete", "configuration-uid"]), 0)
+            end.assert_not_called()
+            self.assertIn("will be retired", json.loads(stdout.getvalue())["detail"])
+            stdout.truncate(0)
+            stdout.seek(0)
+
+            self.assertEqual(main(["portfolio", "delete", "configuration-uid", "--execute"]), 0)
+
+        end.assert_called_once_with(row)
+        self.assertEqual(json.loads(stdout.getvalue())["portfolio"]["state"], "retired")
+
+    def test_portfolio_delete_reports_a_portfolio_an_account_targets(self) -> None:
+        from alpaca_connectors.portfolios.provided_weights import ProvidedWeightsError
+
+        refusal = ProvidedWeightsError(
+            "portfolio_in_account_target", "An account's current target names it.", status_code=409
+        )
+        stderr = io.StringIO()
+        with (
+            patch(
+                "alpaca_connectors.portfolios.get_portfolio_configuration",
+                return_value=SimpleNamespace(uid="configuration-uid"),
+            ),
+            patch(
+                "alpaca_connectors.portfolios.provided_weights.end_portfolio_configuration",
+                side_effect=refusal,
+            ),
+            contextlib.redirect_stderr(stderr),
+        ):
+            exit_code = main(["portfolio", "delete", "configuration-uid", "--execute"])
+
+        self.assertEqual(exit_code, 2)
+        error = json.loads(stderr.getvalue())["error"]
+        self.assertEqual(error["code"], "action_blocked")
+        self.assertIn("current target", error["message"])
 
     def test_portfolio_prepare_interpolated_prices_uses_migration_preflight(self) -> None:
         result = {

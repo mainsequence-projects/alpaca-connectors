@@ -48,7 +48,6 @@ ANOTHER_USER = AccountOwner.main_sequence_user("99999999-9999-4999-8999-99999999
 ACCOUNT_UID = "account-uid"
 SIGNAL_SERVICES = "alpaca_connectors.api.app.services.signal_jobs"
 BAR_SERVICES = "alpaca_connectors.api.app.services.bar_configurations"
-SIGNAL_BODY = {"name": "Signal", "universe_uid": "universe-uid", "account_uid": ACCOUNT_UID}
 BAR_BODY = {
     "name": "Daily bars",
     "account_uid": ACCOUNT_UID,
@@ -191,11 +190,14 @@ def test_a_claim_of_an_account_in_use_answers_409_naming_nothing(vouching) -> No
 # Configurations on an owned account
 # ------------------------------------------------------------------------------------------------
 def _configuration_calls(client, headers) -> dict[str, int]:
-    """Each write that makes a configuration run with ``account-uid``'s keys."""
+    """Each write that makes a configuration run with ``account-uid``'s keys.
+
+    No signal configuration is created any more (ADR 0027); the existing ones are still changed
+    and resumed only for the account's owner.
+    """
     signal = "/v1/signal-jobs"
     bars = "/v1/market-data/bar-configurations"
     return {
-        "signal create": client.post(signal, json=SIGNAL_BODY, headers=headers).status_code,
         "signal update": client.patch(
             f"{signal}/signal-uid", json={"name": "Renamed"}, headers=headers
         ).status_code,
@@ -219,7 +221,6 @@ def _configured_account(owner: AccountOwner | None):
         ),
         patch(f"{SIGNAL_SERVICES}.get_signal_job_configuration", return_value=configured),
         patch(f"{BAR_SERVICES}.get_bar_configuration", return_value=configured),
-        patch(f"{SIGNAL_SERVICES}.create_signal_job_configuration", side_effect=Reached()),
         patch(f"{SIGNAL_SERVICES}.update_signal_job_configuration", side_effect=Reached()),
         patch(f"{SIGNAL_SERVICES}.resume_signal_job_configuration", side_effect=Reached()),
         patch(f"{BAR_SERVICES}.create_bar_configuration", side_effect=Reached()),
@@ -258,7 +259,7 @@ def test_an_owner_refusal_names_the_code_not_the_owner(vouching) -> None:
     read, *_ = _configured_account(PERSON)
     with read:
         answer = vouching.client.post(
-            "/v1/signal-jobs", json=SIGNAL_BODY, headers=vouching.headers()
+            "/v1/market-data/bar-configurations", json=BAR_BODY, headers=vouching.headers()
         )
     assert answer.json()["detail"]["code"] == "account_owned_by_another"
     assert GATEWAY_UID not in answer.text
@@ -332,13 +333,11 @@ def test_the_agent_configures_and_removes_for_the_person_it_works_for() -> None:
     person = AccountOwner.main_sequence_user("person-uid")
     with (
         patch("alpaca_connectors.agent_tools._acting_user_uid", return_value="person-uid"),
-        patch(f"{SIGNAL_SERVICES}.create_configuration") as create_signal,
         patch(f"{SIGNAL_SERVICES}.update_configuration") as update_signal,
         patch(f"{BAR_SERVICES}.create_configuration") as create_bars,
         patch(f"{BAR_SERVICES}.update_configuration") as update_bars,
         patch("alpaca_connectors.api.app.services.accounts.remove_account") as remove,
     ):
-        agent_tools.manage_etf_signal({"operation": "create", "request": SIGNAL_BODY})
         agent_tools.manage_etf_signal(
             {"operation": "update", "configuration_uid": "s", "request": {"scheduled": True}}
         )
@@ -353,7 +352,7 @@ def test_the_agent_configures_and_removes_for_the_person_it_works_for() -> None:
                 "confirmation": "DELETE account-uid",
             }
         )
-    for call in (create_signal, update_signal, create_bars, update_bars):
+    for call in (update_signal, create_bars, update_bars):
         assert call.call_args.kwargs["owner"] == person
     # Configurations no longer refuse the Agent's removal; the service disables them.
     remove.assert_called_once_with(ACCOUNT_UID)

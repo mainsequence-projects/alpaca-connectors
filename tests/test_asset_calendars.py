@@ -14,6 +14,7 @@ from alpaca_connectors.assets.alpaca_asset_details import (
     build_alpaca_unique_identifier,
     trading_calendar_from_alpaca_class,
 )
+from alpaca_connectors.assets.calendars import ensure_trading_calendar
 from alpaca_connectors.operations import asset_calendars
 
 AAPL_ID = uuid.UUID("11111111-1111-4111-8111-111111111111")
@@ -61,7 +62,7 @@ def _run(*, execute: bool, unlinked: list[str], link_results: dict[str, dict]):
             _details((AAPL_ID, "us_equity"), (SPY_ID, "us_equity"), (BTC_ID, "crypto")),
         ),
         patch("msm.api.assets.AssetCalendar", asset_calendar),
-        patch("etfhextractor.calendars.ensure_trading_calendar", ensure_calendar),
+        patch("alpaca_connectors.assets.calendars.ensure_trading_calendar", ensure_calendar),
         patch.object(asset_calendars, "_UNLINKED_PAGE", 2),
     ):
         report = asset_calendars.link_alpaca_asset_calendars(execute=execute)
@@ -119,3 +120,65 @@ def test_execute_writes_nothing_when_every_asset_has_a_calendar() -> None:
         "CRYPTO_24_7": {"assets": 1, "unlinked": 0, "linked": 0},
         "NYSE": {"assets": 2, "unlinked": 0, "linked": 0},
     }
+
+
+def _stored_calendars(*stored: str) -> Mock:
+    calendar = Mock()
+    calendar.filter.side_effect = lambda *, unique_identifier, limit: [
+        SimpleNamespace(unique_identifier=unique_identifier)
+        for key in stored
+        if key == unique_identifier
+    ][:limit]
+    calendar.create_from_pandas_calendar.side_effect = lambda source, key, **kwargs: (
+        SimpleNamespace(unique_identifier=key, source=source, **kwargs)
+    )
+    return calendar
+
+
+def test_a_stored_calendar_is_read_once_and_never_written_again() -> None:
+    calendar = _stored_calendars("NYSE")
+    with patch("msm.api.calendars.Calendar", calendar):
+        row = ensure_trading_calendar("NYSE")
+
+    assert row.unique_identifier == "NYSE"
+    calendar.filter.assert_called_once_with(unique_identifier="NYSE", limit=1)
+    calendar.create_from_pandas_calendar.assert_not_called()
+
+
+def test_a_missing_exchange_calendar_is_stored_from_the_library_calendar_of_its_name() -> None:
+    from msm.api.calendars import CalendarType
+
+    calendar = _stored_calendars()
+    with patch("msm.api.calendars.Calendar", calendar):
+        ensure_trading_calendar("NYSE")
+
+    calendar.create_from_pandas_calendar.assert_called_once_with(
+        "NYSE",
+        "NYSE",
+        display_name="NYSE trading sessions",
+        calendar_type=CalendarType.TRADING,
+    )
+
+
+@pytest.mark.parametrize("key", ["CRYPTO_24_7", "24/7"])
+def test_a_missing_always_open_calendar_is_stored_from_the_library_24_7_calendar(key) -> None:
+    from msm.api.calendars import CalendarType
+
+    calendar = _stored_calendars()
+    with patch("msm.api.calendars.Calendar", calendar):
+        ensure_trading_calendar(key)
+
+    calendar.create_from_pandas_calendar.assert_called_once_with(
+        "24/7",
+        key,
+        display_name=f"{key} always-open sessions",
+        calendar_type=CalendarType.TRADING,
+    )
+
+
+def test_every_class_calendar_the_connector_names_is_one_the_library_can_store() -> None:
+    import pandas_market_calendars
+
+    for key in set(TRADING_CALENDAR_BY_ALPACA_CLASS.values()):
+        source = "24/7" if key == "CRYPTO_24_7" else key
+        assert pandas_market_calendars.get_calendar(source).name

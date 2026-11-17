@@ -1,6 +1,8 @@
 """Universe-backed Alpaca ETF signal configuration API.
 
-Every configuration runs on the signal Job declared in the repository workflow (ADR 0013).
+Every configuration runs on the signal Job declared in the repository workflow (ADR 0013). No
+configuration is created any more (ADR 0027): the existing ones are read, run, paused and deleted
+until none is left.
 """
 
 from __future__ import annotations
@@ -12,7 +14,6 @@ from ..identity import acting_owner
 from ..schemas import (
     ResourceCollection,
     ResourceDiscoveryResponse,
-    SignalJobConfigurationCreateRequest,
     SignalJobConfigurationResponse,
     SignalJobConfigurationUpdateRequest,
     SignalJobRunAcceptedResponse,
@@ -22,7 +23,6 @@ from ..schemas import (
 from ..services.common import resource_discovery, validate_ordering, validate_page_window
 from ..services.signal_jobs import (
     configuration_runs,
-    create_configuration,
     delete_configuration,
     get_configuration,
     get_configuration_observations,
@@ -84,16 +84,6 @@ def signal_jobs_discovery() -> ResourceDiscoveryResponse:
             {"id": "scheduled", "header": "Scheduled Run", "data_type": "boolean"},
         ],
     )
-
-
-@router.post("", response_model=SignalJobConfigurationResponse, status_code=201)
-def signal_job_create(
-    request: SignalJobConfigurationCreateRequest = Body(...),
-) -> SignalJobConfigurationResponse:
-    try:
-        return create_configuration(request, owner=acting_owner())
-    except Exception as exc:
-        raise api_http_error(exc) from exc
 
 
 @router.get("/{configuration_uid}", response_model=SignalJobConfigurationResponse)

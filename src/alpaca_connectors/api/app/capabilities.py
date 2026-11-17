@@ -60,23 +60,26 @@ CAPABILITIES: tuple[Capability, ...] = (
     Capability(
         key="universes",
         name="Universes",
-        purpose="Build reusable collections of registered assets from supported inputs.",
+        purpose=(
+            "Keep the existing ETF holdings universes running until they are deleted; no new "
+            "source or universe is registered (ADR 0027)."
+        ),
         contents=(
-            "explicit extraction-source configurations",
+            "existing extraction-source configurations",
             "registered Asset Universe identity",
             "linked AssetCategory materialization targets",
             "provider-derived constituents",
-            "asset registration coverage",
         ),
         actions=(
-            "manage sources",
+            "review or change sources",
             "preview extraction",
-            "register an Asset Universe",
             "validate membership",
             "run",
             "activate, deactivate, or delete a registered universe",
+            "delete a source",
         ),
         surfaces=("cli", "api", "python"),
+        availability="partial",
     ),
     Capability(
         key="market_data",
@@ -144,17 +147,16 @@ CAPABILITIES: tuple[Capability, ...] = (
         purpose="Construct analytical portfolios from resolved weights and market data.",
         contents=(
             "portfolio identity",
-            "component weights",
+            "weights an application provides",
             "market-data binding",
             "interpolated prices",
             "signals and calculation results",
-            "Universe-backed signal and portfolio configurations",
+            "the remaining Universe-backed signal and portfolio configurations",
         ),
         actions=(
-            "manage signal and portfolio configurations",
-            "schedule or run signal observation",
-            "plan construction",
-            "build",
+            "create a portfolio from provided weights and give it new weights",
+            "review, run, pause, or end a portfolio configuration",
+            "review, run, or delete the remaining signal configurations",
             "run calculation",
         ),
         surfaces=("cli", "api", "python"),

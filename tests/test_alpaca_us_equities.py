@@ -137,7 +137,7 @@ class AlpacaAssetRegistrationTests(unittest.TestCase):
                 side_effect=lambda rows: markets_calls.append(("asset-snapshots", list(rows))),
             ),
             patch(
-                "etfhextractor.calendars.ensure_trading_calendar",
+                "alpaca_connectors.assets.calendars.ensure_trading_calendar",
                 side_effect=lambda key: markets_calls.append(("calendar", [key])),
             ),
         ):
@@ -503,7 +503,7 @@ class AlpacaAssetRegistrationTests(unittest.TestCase):
             ) as alpaca_details_upsert,
             patch("msm.api.assets.OpenFigiDetails.upsert") as figi_details_upsert,
             patch("msm.api.assets.AssetSnapshots.publish") as snapshots_publish,
-            patch("etfhextractor.calendars.ensure_trading_calendar") as ensure_calendar,
+            patch("alpaca_connectors.assets.calendars.ensure_trading_calendar") as ensure_calendar,
         ):
             asset_uid = _register_alpaca_asset(asset_record, match)
 

@@ -22,11 +22,6 @@ from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from alpaca_connectors.operations.signal_job_configurations import (
-    get_signal_job_configuration,
-    scheduled_signal_configurations,
-    validate_signal_job_references,
-)
 from alpaca_connectors.portfolios.configurations import (
     get_portfolio_configuration,
     scheduled_portfolio_configurations,
@@ -118,6 +113,13 @@ class ConfigurationJobState:
     job: Any | None
     latest_runs: dict[str, ConfigurationJobRun]
     dispatcher: Any | None = None
+
+
+def _signal_configurations() -> Any:
+    """The ETF signal configurations, loaded only for the signal kind (ADR 0027)."""
+    from alpaca_connectors.operations import signal_job_configurations
+
+    return signal_job_configurations
 
 
 def _canonical_uid(value: Any, *, label: str) -> str:
@@ -286,7 +288,7 @@ def list_configuration_runs(
 
 
 def list_signal_job_runs(configuration_uid: Any, *, limit: int = 25) -> list[ConfigurationJobRun]:
-    configuration = get_signal_job_configuration(configuration_uid)
+    configuration = _signal_configurations().get_signal_job_configuration(configuration_uid)
     if configuration is None:
         raise LookupError(f"Signal configuration {configuration_uid!s} does not exist.")
     return list_configuration_runs(configuration, kind="signal", limit=limit)
@@ -344,10 +346,11 @@ def launch_configuration_job(
 
 def launch_signal_job(configuration_uid: Any) -> ConfigurationJobSubmission:
     """Start one signal run, whether or not the scheduled run includes the configuration."""
-    configuration = get_signal_job_configuration(configuration_uid)
+    signals = _signal_configurations()
+    configuration = signals.get_signal_job_configuration(configuration_uid)
     if configuration is None:
         raise LookupError(f"Signal configuration {configuration_uid!s} does not exist.")
-    validate_signal_job_references(
+    signals.validate_signal_job_references(
         universe_uid=configuration.universe_uid,
         account_uid=configuration.account_uid,
     )
@@ -390,7 +393,7 @@ def dispatch_scheduled_configurations(kind: ConfigurationKind) -> dict[str, Any]
     """
     job = require_configuration_job(kind)
     configurations = (
-        scheduled_signal_configurations()
+        _signal_configurations().scheduled_signal_configurations()
         if kind == "signal"
         else scheduled_portfolio_configurations()
     )

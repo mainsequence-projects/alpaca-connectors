@@ -971,7 +971,7 @@ def ensure_trading_calendars(alpaca_assets: Iterable[AlpacaAssetRecord]) -> list
     calendar that is not stored. One ``Calendar.filter`` per distinct calendar, and one
     ``Calendar.create_from_pandas_calendar`` for a missing one. Returns the calendars.
     """
-    from etfhextractor.calendars import ensure_trading_calendar
+    from alpaca_connectors.assets.calendars import ensure_trading_calendar
 
     calendars = sorted({_trading_calendar(asset) for asset in alpaca_assets})
     for calendar_identifier in calendars:

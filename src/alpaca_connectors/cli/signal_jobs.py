@@ -2,7 +2,8 @@
 
 Every configuration runs on the signal Job declared in the repository workflow (ADR 0013). A
 configuration holds no schedule or compute: `--no-scheduled` leaves it out of that Job's scheduled
-run.
+run. No configuration is created any more (ADR 0027): the existing ones are read, run, paused and
+deleted until none is left.
 """
 
 from __future__ import annotations
@@ -45,28 +46,19 @@ def configure_get_parser(parser: argparse.ArgumentParser) -> None:
     parser.set_defaults(handler=run_get_command)
 
 
-def _add_configuration_values(parser: argparse.ArgumentParser, *, required: bool) -> None:
-    parser.add_argument("--name", required=required)
+def configure_update_parser(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("configuration_uid")
+    parser.add_argument("--name")
     parser.add_argument("--description")
-    parser.add_argument("--universe-uid", required=required)
-    parser.add_argument("--account-uid", required=required)
+    parser.add_argument("--universe-uid")
+    parser.add_argument("--account-uid")
     # Schedule and compute belong to the signal Job in the workflow file (ADR 0013).
     parser.add_argument(
         "--scheduled",
         action=argparse.BooleanOptionalAction,
-        default=True if required else None,
+        default=None,
         help="Include the configuration in the signal Job's scheduled run.",
     )
-
-
-def configure_create_parser(parser: argparse.ArgumentParser) -> None:
-    _add_configuration_values(parser, required=True)
-    parser.set_defaults(handler=run_create_command)
-
-
-def configure_update_parser(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("configuration_uid")
-    _add_configuration_values(parser, required=False)
     parser.set_defaults(handler=run_update_command)
 
 
@@ -87,7 +79,7 @@ def configure_runs_parser(parser: argparse.ArgumentParser) -> None:
     parser.set_defaults(handler=run_runs_command)
 
 
-def _configuration_values(args: argparse.Namespace, *, exclude_none: bool) -> dict[str, Any]:
+def _configuration_values(args: argparse.Namespace) -> dict[str, Any]:
     values = {
         "name": args.name,
         "description": args.description,
@@ -95,11 +87,7 @@ def _configuration_values(args: argparse.Namespace, *, exclude_none: bool) -> di
         "account_uid": args.account_uid,
         "scheduled": args.scheduled,
     }
-    return (
-        {key: value for key, value in values.items() if value is not None}
-        if exclude_none
-        else values
-    )
+    return {key: value for key, value in values.items() if value is not None}
 
 
 def run_list_command(args: argparse.Namespace) -> int:
@@ -131,18 +119,10 @@ def run_get_command(args: argparse.Namespace) -> int:
     return 0
 
 
-def run_create_command(args: argparse.Namespace) -> int:
-    from alpaca_connectors.operations import create_signal_job_configuration
-
-    item = create_signal_job_configuration(**_configuration_values(args, exclude_none=False))
-    _print(_configuration_payload(item))
-    return 0
-
-
 def run_update_command(args: argparse.Namespace) -> int:
     from alpaca_connectors.operations import update_signal_job_configuration
 
-    values = _configuration_values(args, exclude_none=True)
+    values = _configuration_values(args)
     if not values:
         raise SystemExit("At least one signal configuration field must be provided.")
     item = update_signal_job_configuration(args.configuration_uid, **values)
@@ -213,7 +193,6 @@ def run_runs_command(args: argparse.Namespace) -> int:
 
 __all__ = [
     "configure_action_parser",
-    "configure_create_parser",
     "configure_delete_parser",
     "configure_get_parser",
     "configure_list_parser",

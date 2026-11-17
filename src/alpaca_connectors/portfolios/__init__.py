@@ -1,10 +1,11 @@
-"""Portfolio construction helpers for Alpaca-backed market data."""
+"""Portfolio construction helpers for Alpaca-backed market data.
 
-from alpaca_connectors.portfolios.alpaca_etf_signal import (
-    AlpacaETFHoldingsSignal,
-    AlpacaETFHoldingsSignalConfig,
-    build_alpaca_etf_holdings_signal,
-)
+The ETF signal and ETF portfolio modules load only when one of their names is used (ADR 0027), so
+importing this package, the provided-weights portfolios included, never loads the ETF extractor.
+"""
+
+from importlib import import_module
+
 from alpaca_connectors.portfolios.configurations import (
     DEFAULT_PORTFOLIO_CALENDAR_IDENTIFIER,
     REBALANCE_CADENCES,
@@ -31,18 +32,6 @@ from alpaca_connectors.portfolios.configurations import (
     update_rebalance_configuration,
     validate_portfolio_references,
 )
-from alpaca_connectors.portfolios.etf_tracking import (
-    AlpacaEtfPortfolioBuild,
-    AlpacaEtfPortfolioPlan,
-    AlpacaEtfTrackingPortfolioConfig,
-    ResolvedEtfUniverse,
-    alpaca_interpolated_prices_storage_model,
-    build_alpaca_etf_tracking_portfolio,
-    build_alpaca_etf_tracking_portfolio_unique_identifier,
-    build_alpaca_interpolated_prices,
-    plan_alpaca_etf_tracking_portfolio,
-    resolve_alpaca_bars_time_index_meta_table_uid,
-)
 from alpaca_connectors.portfolios.execution import (
     PortfolioExecutionGraph,
     PortfolioExecutionResult,
@@ -53,6 +42,11 @@ from alpaca_connectors.portfolios.execution import (
     portfolio_unique_identifier,
     preflight_portfolio_configuration,
     resolve_portfolio_configuration,
+)
+from alpaca_connectors.portfolios.interpolated_prices import (
+    alpaca_interpolated_prices_storage_model,
+    build_alpaca_interpolated_prices,
+    resolve_alpaca_bars_time_index_meta_table_uid,
 )
 from alpaca_connectors.portfolios.portfolio_history import (
     MAX_PORTFOLIO_OBSERVATIONS,
@@ -68,6 +62,36 @@ from alpaca_connectors.portfolios.signal_history import (
     SignalObservationMatrix,
     read_signal_observation_matrix,
 )
+
+_LAZY_IMPORTS = {
+    name: f"alpaca_connectors.portfolios.{module}"
+    for module, names in {
+        "alpaca_etf_signal": (
+            "AlpacaETFHoldingsSignal",
+            "AlpacaETFHoldingsSignalConfig",
+            "build_alpaca_etf_holdings_signal",
+        ),
+        "etf_tracking": (
+            "AlpacaEtfPortfolioBuild",
+            "AlpacaEtfPortfolioPlan",
+            "AlpacaEtfTrackingPortfolioConfig",
+            "ResolvedEtfUniverse",
+            "build_alpaca_etf_tracking_portfolio",
+            "build_alpaca_etf_tracking_portfolio_unique_identifier",
+            "plan_alpaca_etf_tracking_portfolio",
+        ),
+    }.items()
+    for name in names
+}
+
+
+def __getattr__(name: str):
+    if name in _LAZY_IMPORTS:
+        value = getattr(import_module(_LAZY_IMPORTS[name]), name)
+        globals()[name] = value
+        return value
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 __all__ = [
     "AlpacaETFHoldingsSignal",

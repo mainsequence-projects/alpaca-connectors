@@ -306,7 +306,7 @@ def _publish_validated(
 
 
 @dataclass(frozen=True, slots=True)
-class ProvidedPortfolioRemoval:
+class PortfolioRemoval:
     configuration_uid: str
     portfolio_uid: str | None
     portfolio_unique_identifier: str
@@ -326,38 +326,27 @@ class ProvidedPortfolioRemoval:
         }
 
 
-def delete_provided_weights_portfolio(
-    configuration_uid: Any,
-    *,
-    owner: AccountOwner,
-) -> ProvidedPortfolioRemoval:
-    """End a provided-weights portfolio: retire its `Portfolio`, then delete its configuration.
+def end_portfolio_configuration(
+    configuration: AlpacaETFPortfolioConfiguration,
+) -> PortfolioRemoval:
+    """End a portfolio: retire its `Portfolio`, then delete its configuration.
 
-    Retiring comes first (ms-markets ADR 0049): a portfolio an account's current target names is
-    refused with ``409 portfolio_in_account_target`` and nothing changes. Then the signal's rows in
-    the signal-asset table and the configuration row are deleted. The `Portfolio`, its series and
-    account history stay. Retiring a retired portfolio does nothing, so a retry after a partial
-    failure is safe, and a retired portfolio's updaters write nothing meanwhile (issue #33).
+    Every delete ends a portfolio this way, whatever its weights source (ADR 0027): retiring comes
+    first (ms-markets ADR 0049), so a portfolio an account's current target names is refused with
+    ``409 portfolio_in_account_target`` and nothing changes. A configuration whose `Portfolio` was
+    never created, such as an ETF portfolio before its first run, answers ``absent``. A
+    provided-weights portfolio's rows in the signal-asset table go with it; an ETF signal's stay
+    with its Signal Configuration. The `Portfolio`, its series and account history stay. Retiring
+    a retired portfolio does nothing, so a retry after a partial failure is safe, and a retired
+    portfolio's updaters write nothing meanwhile (issue #33). It checks no owner: its callers do.
     """
     from msm.api.remote import MarketsConflictError
 
     from alpaca_connectors.markets_api import retire_portfolio
-    from alpaca_connectors.portfolios.configurations import (
-        delete_portfolio_configuration_row,
-        get_portfolio_configuration,
-    )
+    from alpaca_connectors.portfolios.configurations import delete_portfolio_configuration_row
+    from alpaca_connectors.portfolios.execution import configuration_portfolio_identifier
     from alpaca_connectors.portfolios.signal_assets import forget_signal_assets
 
-    configuration = get_portfolio_configuration(configuration_uid)
-    if configuration is None:
-        raise LookupError(f"Portfolio configuration {configuration_uid!s} does not exist.")
-    if not configuration.is_provided:
-        raise ProvidedWeightsError(
-            "not_a_provided_weights_portfolio",
-            "Only a provided-weights portfolio is retired by this call.",
-            status_code=409,
-        )
-    require_portfolio_owner(configuration, owner)
     portfolio_uid = (
         str(configuration.portfolio_uid) if configuration.portfolio_uid is not None else None
     )
@@ -376,15 +365,41 @@ def delete_provided_weights_portfolio(
             ) from exc
         retired_at = getattr(portfolio, "retired_at", None)
         state = "retired"
-    forget_signal_assets(provided_signal_uid(configuration.uid))
+    if configuration.is_provided:
+        forget_signal_assets(provided_signal_uid(configuration.uid))
     delete_portfolio_configuration_row(configuration.uid)
-    return ProvidedPortfolioRemoval(
+    return PortfolioRemoval(
         configuration_uid=str(configuration.uid),
         portfolio_uid=portfolio_uid,
-        portfolio_unique_identifier=provided_portfolio_unique_identifier(configuration.uid),
+        portfolio_unique_identifier=configuration_portfolio_identifier(configuration),
         portfolio_state=state,
         retired_at=retired_at,
     )
+
+
+def delete_provided_weights_portfolio(
+    configuration_uid: Any,
+    *,
+    owner: AccountOwner,
+) -> PortfolioRemoval:
+    """End a provided-weights portfolio for its owner (ADR 0024, decision 6).
+
+    Anyone but its owner is refused before anything changes; then
+    ``end_portfolio_configuration`` retires its `Portfolio` and deletes its configuration.
+    """
+    from alpaca_connectors.portfolios.configurations import get_portfolio_configuration
+
+    configuration = get_portfolio_configuration(configuration_uid)
+    if configuration is None:
+        raise LookupError(f"Portfolio configuration {configuration_uid!s} does not exist.")
+    if not configuration.is_provided:
+        raise ProvidedWeightsError(
+            "not_a_provided_weights_portfolio",
+            "Only a provided-weights portfolio is retired by this call.",
+            status_code=409,
+        )
+    require_portfolio_owner(configuration, owner)
+    return end_portfolio_configuration(configuration)
 
 
 def give_portfolio_weights(
@@ -404,9 +419,9 @@ def give_portfolio_weights(
 
 
 def _upsert_portfolio_row(configuration: AlpacaETFPortfolioConfiguration) -> Any:
-    from etfhextractor.calendars import ensure_trading_calendar
     from msm.api.portfolios import Portfolio
 
+    from alpaca_connectors.assets.calendars import ensure_trading_calendar
     from alpaca_connectors.portfolios.configurations import get_rebalance_configuration
 
     rebalance = get_rebalance_configuration(configuration.rebalance_configuration_uid)
@@ -514,12 +529,13 @@ def create_provided_weights_portfolio(
 __all__ = [
     "PROVIDED_PORTFOLIO_PREFIX",
     "PortfolioOwnedByAnotherError",
+    "PortfolioRemoval",
     "ProvidedPortfolioCreation",
     "ProvidedWeightsError",
     "PublishedWeights",
-    "ProvidedPortfolioRemoval",
     "create_provided_weights_portfolio",
     "delete_provided_weights_portfolio",
+    "end_portfolio_configuration",
     "ensure_provided_signal_metadata",
     "give_portfolio_weights",
     "is_owner",

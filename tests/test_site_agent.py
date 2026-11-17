@@ -197,7 +197,7 @@ def project_reads(monkeypatch: pytest.MonkeyPatch) -> None:
     """The configuration's MetaTables reads and branch context, without a backend."""
 
     monkeypatch.setattr(project_state, "list_account_registrations", lambda limit: ([], 2))
-    monkeypatch.setattr(project_state, "list_universe_sources", lambda limit: ([], 1))
+    monkeypatch.setattr("alpaca_connectors.universes.list_universe_sources", lambda limit: ([], 1))
     monkeypatch.setattr(project_state, "list_market_data_datasets", lambda: [])
     context = SimpleNamespace(
         organization_environment_uid=ENVIRONMENT_UID,

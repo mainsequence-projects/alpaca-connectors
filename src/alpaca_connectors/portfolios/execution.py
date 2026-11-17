@@ -11,9 +11,7 @@ import uuid
 from dataclasses import dataclass
 from typing import Any
 
-from etfhextractor.calendars import ensure_trading_calendar
-
-from alpaca_connectors.portfolios.alpaca_etf_signal import build_alpaca_etf_holdings_signal
+from alpaca_connectors.assets.calendars import ensure_trading_calendar
 from alpaca_connectors.portfolios.configurations import (
     AlpacaETFPortfolioConfiguration,
     PortfolioRebalanceConfiguration,
@@ -21,7 +19,7 @@ from alpaca_connectors.portfolios.configurations import (
     update_portfolio_configuration_row,
     validate_portfolio_references,
 )
-from alpaca_connectors.portfolios.etf_tracking import (
+from alpaca_connectors.portfolios.interpolated_prices import (
     build_alpaca_interpolated_prices,
     resolve_alpaca_bars_time_index_meta_table_uid,
 )
@@ -130,8 +128,6 @@ def resolve_portfolio_configuration(
     configuration_uid: Any,
 ) -> ResolvedPortfolioConfiguration:
     """Resolve stored calculation inputs and require an existing signal observation."""
-    from alpaca_connectors.operations import signal_uid_for_configuration
-
     configuration = get_portfolio_configuration(configuration_uid)
     if configuration is None:
         raise LookupError(f"Portfolio configuration {configuration_uid!s} does not exist.")
@@ -147,6 +143,8 @@ def resolve_portfolio_configuration(
 
         signal_uid = provided_signal_uid(configuration.uid)
     else:
+        from alpaca_connectors.operations import signal_uid_for_configuration
+
         signal_uid = signal_uid_for_configuration(signal_configuration)
     latest = read_signal_observation_matrix(signal_uid=signal_uid, observation_limit=1)
     bounds = read_signal_observation_bounds(signal_uid=signal_uid)
@@ -243,6 +241,10 @@ def build_portfolio_graph(resolved: ResolvedPortfolioConfiguration) -> Portfolio
         recorded_assets = list(resolved.asset_identifiers)
         signal.get_asset_list = lambda: list(recorded_assets)
     else:
+        from alpaca_connectors.portfolios.alpaca_etf_signal import (
+            build_alpaca_etf_holdings_signal,
+        )
+
         signal = build_alpaca_etf_holdings_signal(
             universe_uid=str(resolved.signal_configuration.universe_uid),
             account_uid=str(resolved.signal_configuration.account_uid),

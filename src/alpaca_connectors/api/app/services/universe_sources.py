@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from alpaca_connectors.universes import (
-    create_universe_source,
     delete_universe_source,
     get_universe_source,
     list_universe_sources,
@@ -12,7 +11,6 @@ from alpaca_connectors.universes import (
 )
 
 from ..schemas import (
-    UniverseSourceCreateRequest,
     UniverseSourcePreviewResponse,
     UniverseSourceResponse,
     UniverseSourceUpdateRequest,
@@ -31,10 +29,6 @@ def list_sources(
         ordering=ordering,
     )
     return collection_response(items=items, total=total, limit=limit, offset=offset)
-
-
-def create_source(request: UniverseSourceCreateRequest) -> UniverseSourceResponse:
-    return UniverseSourceResponse.model_validate(create_universe_source(**request.model_dump()))
 
 
 def get_source(source_uid: str) -> UniverseSourceResponse | None:
@@ -68,7 +62,6 @@ def preview_source(source_uid: str, *, timeout: float) -> UniverseSourcePreviewR
 
 
 __all__ = [
-    "create_source",
     "delete_source",
     "get_source",
     "list_sources",

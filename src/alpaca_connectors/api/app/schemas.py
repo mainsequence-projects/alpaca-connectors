@@ -524,15 +524,6 @@ class OrderBatchResponse(BaseModel):
     orders: list[OrderStateResponse]
 
 
-class UniverseSourceCreateRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    name: str = Field(min_length=1, max_length=255)
-    symbol: str = Field(min_length=1, max_length=32)
-    source_url: str = Field(min_length=1, max_length=2048)
-    enabled: bool = True
-
-
 class UniverseSourceUpdateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -582,14 +573,6 @@ class AssetUniverseUpdateRequest(BaseModel):
         if all(getattr(self, field_name) is None for field_name in self.__class__.model_fields):
             raise ValueError("At least one universe display field must be provided.")
         return self
-
-
-class AssetUniverseCreateRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    name: str = Field(min_length=1, max_length=255)
-    symbol: str = Field(min_length=1, max_length=32)
-    source_url: str = Field(min_length=1, max_length=2048)
 
 
 class AssetCategorySummaryResponse(BaseModel):
@@ -769,16 +752,6 @@ class _ConfigurationRequest(BaseModel):
         return data
 
 
-class SignalJobConfigurationCreateRequest(_ConfigurationRequest):
-    """Create one durable signal configuration; the shared signal Job runs it."""
-
-    name: str = Field(min_length=1, max_length=255)
-    description: str | None = None
-    universe_uid: str = Field(min_length=1)
-    account_uid: str = Field(min_length=1)
-    scheduled: bool = True
-
-
 class SignalJobConfigurationUpdateRequest(_ConfigurationRequest):
     name: str | None = Field(default=None, min_length=1, max_length=255)
     description: str | None = None
@@ -948,30 +921,6 @@ class PortfolioRebalanceConfigurationResponse(BaseModel):
     rebalance_weekday: int
     created_at: dt.datetime
     updated_at: dt.datetime
-
-
-class PortfolioConfigurationCreateRequest(_ConfigurationRequest):
-    """Create one durable portfolio configuration; the shared portfolio Job runs it."""
-
-    name: str = Field(min_length=1, max_length=255)
-    description: str | None = None
-    signal_configuration_uid: str = Field(min_length=1)
-    bars_configuration_uid: str = Field(min_length=1)
-    rebalance_configuration_uid: str = Field(min_length=1)
-    upsample_frequency_id: Literal["1d"] = "1d"
-    intraday_bar_interpolation_rule: Literal["ffill"] = "ffill"
-    valuation_column: str = Field(default="close", min_length=1, max_length=64)
-    valuation_maximum_staleness_seconds: int = Field(
-        default=86_400,
-        gt=0,
-        description=(
-            "Maximum age of the latest price that may be selected at a real valuation "
-            "timestamp. This does not create or extend timestamps."
-        ),
-    )
-    fail_on_missing_prices: bool = True
-    commission_fee: float = Field(default=0.00018, ge=0)
-    scheduled: bool = True
 
 
 class WeightsObservationRequest(BaseModel):

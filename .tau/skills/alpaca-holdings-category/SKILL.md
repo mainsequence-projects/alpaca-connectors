@@ -1,6 +1,6 @@
 ---
 name: alpaca-holdings-category
-description: Manage ETF sources and Universes, preview and extract components in bulk, and inspect linked category members through Alpaca MCP tools.
+description: Inspect, extract and remove the remaining ETF sources and Universes, and read linked category members through Alpaca MCP tools.
 ---
 
 # ETF Universes And Components
@@ -14,7 +14,8 @@ No shell or direct MetaTable-write fallback exists.
 
 - A user-maintained source describes an ETF target: name, symbol, URL and enabled state.
 - A registered Universe links a source and an AssetCategory through durable foreign keys.
-  Creation performs no extraction or ETF seed-ticker registration.
+- No source or Universe is created any more: the existing ones are read, extracted and deleted
+  until none is left. If asked to create one, say so plainly.
 - The category holds current registered component Assets, not source identity/configuration.
 - An Alpaca `account_uid` is extraction input only, opening the account's stored keys and registering
   missing constituents. Never assign an Account to a Universe.
@@ -28,10 +29,8 @@ No shell or direct MetaTable-write fallback exists.
 `preview_source`, and `preview_extraction`. Collection limits are 1–100 and offsets are
 multiples of the fixed limit. Source preview is read-only; it creates/infers no Universe.
 
-`alpaca_manage_universe` supports `create_source`, `update_source`, `delete_source`,
-and Universe `create`, `update`, `activate`, `deactivate`, `delete`. Universe creation
-accepts explicit name, symbol and source URL; the service stores its required links. Use the
-person's selected provider URL, not an invented seed.
+`alpaca_manage_universe` supports `update_source`, `delete_source`, and Universe `update`,
+`activate`, `deactivate`, `extract_components` and `delete`.
 
 Examples are arguments to `alpaca__call_tool`; replace UID placeholders with returned UIDs:
 

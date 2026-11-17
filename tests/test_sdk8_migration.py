@@ -17,6 +17,8 @@ from alpaca_connectors.portfolios.etf_tracking import (
     AlpacaEtfTrackingPortfolioConfig,
     ResolvedEtfUniverse,
     build_alpaca_etf_tracking_portfolio,
+)
+from alpaca_connectors.portfolios.interpolated_prices import (
     build_alpaca_interpolated_prices,
     resolve_alpaca_bars_time_index_meta_table_uid,
 )

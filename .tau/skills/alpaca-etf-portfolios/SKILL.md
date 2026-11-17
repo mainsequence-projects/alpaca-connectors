@@ -1,6 +1,6 @@
 ---
 name: alpaca-etf-portfolios
-description: Manage calendar-event rebalancing and analytical ETF portfolios from stored signals and bars, then inspect runs, performance and statistics through Alpaca MCP tools.
+description: Manage calendar-event rebalancing and the existing analytical portfolios built from stored signals and bars, then run, inspect, pause or end them through Alpaca MCP tools.
 ---
 
 # Analytical ETF Portfolios
@@ -29,9 +29,11 @@ a requested NYSE regular-session closing rebalance:
 
 ## Portfolio Configuration
 
-Select discovered UIDs of one signal configuration, one bars configuration and one stored
-rebalance configuration. Inspect enabled state, scope and price/signal coverage.
-`alpaca_manage_etf_portfolio` supports `create`, `update`, `run`, `delete`.
+No ETF portfolio is created any more, and you create no portfolio: an application creates a
+portfolio from the weights it provides, and the existing ETF portfolios run until they are
+deleted. If asked to build one, say so plainly.
+`alpaca_manage_etf_portfolio` supports `update`, `run`, `delete`. A portfolio built from provided
+weights is changed or deleted only for its owner.
 The shared workflow Job owns UTC scheduling and compute; `scheduled` only controls inclusion.
 It does not define the portfolio's market rebalance time.
 
@@ -44,11 +46,11 @@ Never invent dataset/Signal UIDs, synthesize midnight prices or silently weaken 
   processing, not a guarantee of valid output. Do not toggle it to conceal a failure.
 - `commission_fee` is a fraction: `0.00018` = `0.018%` = `1.8` basis points, not `1.8%`.
   Convert the person's percentage or basis points before submitting.
-- Use validated phase-1 values and the requested staleness policy. This example is illustrative,
-  not permission to override user choices. Replace UID placeholders with returned identifiers.
+- Use validated phase-1 values and the requested staleness policy. Pausing is an `update` with
+  `scheduled: false`; replace the UID placeholder with a returned identifier.
 
 ```json
-{"tool":"alpaca_manage_etf_portfolio","arguments":{"operation":"create","request":{"name":"Observed ETF analytical portfolio","signal_configuration_uid":"SIGNAL_CONFIGURATION_UID","bars_configuration_uid":"BARS_CONFIGURATION_UID","rebalance_configuration_uid":"REBALANCE_CONFIGURATION_UID","upsample_frequency_id":"1d","intraday_bar_interpolation_rule":"ffill","valuation_column":"close","valuation_maximum_staleness_seconds":86400,"fail_on_missing_prices":true,"commission_fee":0.00018,"scheduled":true}}}
+{"tool":"alpaca_manage_etf_portfolio","arguments":{"operation":"update","configuration_uid":"CONFIGURATION_UID","request":{"scheduled":false}}}
 ```
 
 ## Submit And Verify
@@ -72,5 +74,6 @@ or mistake historical success for the latest run's status.
 
 Portfolio/rebalance list limits are 1–100 and offsets are multiples of the fixed limit.
 Detail observation limits are 1–5000; run-history limits are 1–100.
-Deletion requires the person's exact `DELETE <uid>` confirmation and respects reference blockers.
-Deleting configuration retains published portfolio data.
+Deletion requires the person's exact `DELETE <uid>` confirmation. It retires the portfolio, then
+deletes its configuration; it is refused while an account's target names the portfolio, so that
+account's owner changes the target first. Retiring keeps the portfolio's series and history.

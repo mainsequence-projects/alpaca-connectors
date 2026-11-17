@@ -1,4 +1,8 @@
-"""CLI for durable universe extraction sources."""
+"""CLI for durable universe extraction sources.
+
+No source is created any more (ADR 0027): the existing ones are read, changed and deleted until
+none is left.
+"""
 
 from __future__ import annotations
 
@@ -26,14 +30,6 @@ def configure_get_parser(parser: argparse.ArgumentParser) -> None:
     parser.set_defaults(handler=run_get_command)
 
 
-def configure_create_parser(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--name", required=True)
-    parser.add_argument("--symbol", required=True)
-    parser.add_argument("--url", required=True)
-    parser.add_argument("--enabled", action=argparse.BooleanOptionalAction, default=True)
-    parser.set_defaults(handler=run_create_command)
-
-
 def configure_update_parser(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("source_uid")
     parser.add_argument("--name")
@@ -53,10 +49,6 @@ def configure_preview_parser(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("source_uid")
     parser.add_argument("--timeout", type=float, default=30.0)
     parser.set_defaults(handler=run_preview_command)
-
-
-def configure_seed_parser(parser: argparse.ArgumentParser) -> None:
-    parser.set_defaults(handler=run_seed_command)
 
 
 def run_list_command(args: argparse.Namespace) -> int:
@@ -80,20 +72,6 @@ def run_get_command(args: argparse.Namespace) -> int:
     if item is None:
         raise SystemExit(f"Universe source {args.source_uid} does not exist.")
     _print(item)
-    return 0
-
-
-def run_create_command(args: argparse.Namespace) -> int:
-    from alpaca_connectors.universes import create_universe_source
-
-    _print(
-        create_universe_source(
-            name=args.name,
-            symbol=args.symbol,
-            source_url=args.url,
-            enabled=args.enabled,
-        )
-    )
     return 0
 
 
@@ -140,20 +118,10 @@ def run_preview_command(args: argparse.Namespace) -> int:
     return 0
 
 
-def run_seed_command(_args: argparse.Namespace) -> int:
-    from alpaca_connectors.universes import seed_default_universe_sources
-
-    rows = seed_default_universe_sources()
-    _print({"items": [row.model_dump(mode="json") for row in rows], "total": len(rows)})
-    return 0
-
-
 __all__ = [
-    "configure_create_parser",
     "configure_delete_parser",
     "configure_get_parser",
     "configure_list_parser",
     "configure_preview_parser",
-    "configure_seed_parser",
     "configure_update_parser",
 ]

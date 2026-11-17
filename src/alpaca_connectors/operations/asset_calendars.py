@@ -95,7 +95,7 @@ def link_alpaca_asset_calendars(*, execute: bool = False) -> dict[str, Any]:
     if not execute:
         return {"execute": False, "calendars": calendars, "succeeded": True}
 
-    from etfhextractor.calendars import ensure_trading_calendar
+    from alpaca_connectors.assets.calendars import ensure_trading_calendar
 
     for calendar, targets in targets_by_calendar.items():
         if not targets:

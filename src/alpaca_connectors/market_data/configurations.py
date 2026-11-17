@@ -32,10 +32,12 @@ from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.types import Uuid
 
 from alpaca_connectors.metatables import AlpacaMarketsMetaTableMixin, ProjectStorageNameMixin
-from alpaca_connectors.universes.registry import AssetUniverseTable
 
 AssetSource = Literal["assets", "universe", "account_holdings", "portfolios"]
 ASSET_SOURCES: tuple[AssetSource, ...] = ("assets", "universe", "account_holdings", "portfolios")
+# The Asset Universe table, named so the bars configurations never import the Universe package
+# (ADR 0027); the migration provider's metadata holds the table itself.
+ASSET_UNIVERSE_TABLE_NAME = "alpaca_connectors__asset_universe"
 UTC = dt.timezone.utc
 _UNSET = object()
 
@@ -140,7 +142,7 @@ class AlpacaBarsConfigurationTable(
     )
     universe_uid: Mapped[uuid.UUID | None] = mapped_column(
         Uuid(as_uuid=True),
-        ForeignKey(f"{AssetUniverseTable.__table__.fullname}.uid", ondelete="RESTRICT"),
+        ForeignKey(f"{ASSET_UNIVERSE_TABLE_NAME}.uid", ondelete="RESTRICT"),
         nullable=True,
         info={
             "label": "Universe UID",

@@ -184,7 +184,10 @@ resources:
 # The kinds' daily scheduled runs (ADR 0013). Each dispatcher's scheduled run (`--scheduled`) reads
 # the scheduled configurations and starts one run of its kind's Job per configuration, through
 # `runner` on that Job (operations/configuration_jobs.py). A push re-applies the declared schedule.
-# Both run after the US equity close.
+# The portfolio dispatcher runs after the US equity close. The ETF signal dispatcher has no schedule
+# any more (ADR 0027): no new ETF observation is taken, and `task_schedule: null` with the empty
+# `scheduled_command_args` removes the schedule earlier pushes set. Its Job stays declared, so the
+# remaining signal configurations still run on demand until each Environment is drained.
 - key: alpaca-etf-signal-dispatcher
   kind: job
   access:
@@ -204,12 +207,8 @@ resources:
     memory_request: '0.5'
     max_runtime_seconds: 3600
     spot: false
-    task_schedule:
-      schedule:
-        type: crontab
-        expression: '30 0 * * *'
-        timezone: UTC
-    scheduled_command_args: ['--scheduled']
+    task_schedule: null
+    scheduled_command_args: []
     automatic_redeployment:
       enabled: true
       tag_regex: null

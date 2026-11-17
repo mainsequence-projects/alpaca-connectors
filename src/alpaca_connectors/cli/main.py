@@ -63,9 +63,6 @@ from .portfolios import (
     configure_action_parser as configure_portfolio_action_parser,
 )
 from .portfolios import (
-    configure_create_parser as configure_portfolio_create_parser,
-)
-from .portfolios import (
     configure_delete_parser as configure_portfolio_delete_parser,
 )
 from .portfolios import (
@@ -92,9 +89,6 @@ from .signal_jobs import (
     configure_action_parser as configure_signal_action_parser,
 )
 from .signal_jobs import (
-    configure_create_parser as configure_signal_create_parser,
-)
-from .signal_jobs import (
     configure_delete_parser as configure_signal_delete_parser,
 )
 from .signal_jobs import configure_get_parser as configure_signal_get_parser
@@ -112,9 +106,6 @@ from .signal_jobs import (
 )
 from .signal_jobs import run_run_command as run_signal_run_command
 from .universe_source import (
-    configure_create_parser as configure_source_create_parser,
-)
-from .universe_source import (
     configure_delete_parser as configure_source_delete_parser,
 )
 from .universe_source import (
@@ -125,9 +116,6 @@ from .universe_source import (
 )
 from .universe_source import (
     configure_preview_parser as configure_source_preview_parser,
-)
-from .universe_source import (
-    configure_seed_parser as configure_source_seed_parser,
 )
 from .universe_source import (
     configure_update_parser as configure_source_update_parser,
@@ -247,16 +235,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     source_parser = top_level.add_parser(
         "universe-source",
-        help="Durable user-maintained universe extraction sources.",
+        help="Review, change and remove the remaining universe extraction sources.",
     )
     source_commands = source_parser.add_subparsers(dest="universe_source_command")
     configure_source_list_parser(source_commands.add_parser("list"))
     configure_source_get_parser(source_commands.add_parser("get"))
-    configure_source_create_parser(source_commands.add_parser("create"))
     configure_source_update_parser(source_commands.add_parser("update"))
     configure_source_delete_parser(source_commands.add_parser("delete"))
     configure_source_preview_parser(source_commands.add_parser("preview"))
-    configure_source_seed_parser(source_commands.add_parser("seed-defaults"))
 
     universe_parser = top_level.add_parser(
         "universe",
@@ -275,12 +261,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     signal_parser = top_level.add_parser(
         "signal",
-        help="Create and run Universe-backed ETF signal configurations on the signal Job.",
+        help="Review, run and remove the remaining ETF signal configurations.",
     )
     signal_commands = signal_parser.add_subparsers(dest="signal_command")
     configure_signal_list_parser(signal_commands.add_parser("list"))
     configure_signal_get_parser(signal_commands.add_parser("get"))
-    configure_signal_create_parser(signal_commands.add_parser("create"))
     configure_signal_update_parser(signal_commands.add_parser("update"))
     configure_signal_delete_parser(signal_commands.add_parser("delete"))
     configure_signal_action_parser(signal_commands.add_parser("run"), run_signal_run_command)
@@ -294,12 +279,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     portfolio_parser = top_level.add_parser(
         "portfolio",
-        help="Create and run analytical ETF portfolio configurations on the portfolio Job.",
+        help="Review, run and end analytical portfolio configurations on the portfolio Job.",
     )
     portfolio_commands = portfolio_parser.add_subparsers(dest="portfolio_command")
     configure_portfolio_list_parser(portfolio_commands.add_parser("list"))
     configure_portfolio_get_parser(portfolio_commands.add_parser("get"))
-    configure_portfolio_create_parser(portfolio_commands.add_parser("create"))
     configure_portfolio_update_parser(portfolio_commands.add_parser("update"))
     configure_portfolio_delete_parser(portfolio_commands.add_parser("delete"))
     configure_portfolio_action_parser(portfolio_commands.add_parser("run"))

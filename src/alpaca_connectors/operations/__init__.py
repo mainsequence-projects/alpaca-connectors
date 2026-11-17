@@ -1,4 +1,10 @@
-"""Durable operational records for user-visible project workflows."""
+"""Durable operational records for user-visible project workflows.
+
+The ETF signal modules load only when one of their names is used (ADR 0027), so the account sync
+and the other operations never load them.
+"""
+
+from importlib import import_module
 
 from .account_sync import (
     ACCOUNT_SYNC_ACTION,
@@ -45,30 +51,47 @@ from .configuration_jobs import (
     list_portfolio_job_runs,
     list_signal_job_runs,
 )
-from .signal_job_configurations import (
-    AlpacaETFSignalJobConfiguration,
-    AlpacaETFSignalJobConfigurationTable,
-    get_signal_job_configuration,
-    list_signal_job_configurations,
-    project_signal_job_models,
-    signal_job_configurations_by_uids,
-    signal_job_configurations_for_account,
-    signal_job_configurations_for_universe,
-)
-from .signal_jobs import (
-    create_signal_job_configuration,
-    delete_signal_job_configuration,
-    execute_signal_configuration,
-    pause_signal_job_configuration,
-    reconcile_signal_job_configuration,
-    resume_signal_job_configuration,
-    signal_uid_for_configuration,
-    update_signal_job_configuration,
-)
+
+_LAZY_IMPORTS = {
+    name: f"alpaca_connectors.operations.{module}"
+    for module, names in {
+        "signal_job_configurations": (
+            "AlpacaETFSignalJobConfiguration",
+            "AlpacaETFSignalJobConfigurationTable",
+            "get_signal_job_configuration",
+            "list_signal_job_configurations",
+            "project_signal_job_models",
+            "signal_job_configurations_by_uids",
+            "signal_job_configurations_for_account",
+            "signal_job_configurations_for_universe",
+        ),
+        "signal_jobs": (
+            "create_signal_job_configuration",
+            "delete_signal_job_configuration",
+            "execute_signal_configuration",
+            "pause_signal_job_configuration",
+            "reconcile_signal_job_configuration",
+            "resume_signal_job_configuration",
+            "signal_uid_for_configuration",
+            "update_signal_job_configuration",
+        ),
+    }.items()
+    for name in names
+}
+
+
+def __getattr__(name: str):
+    if name in _LAZY_IMPORTS:
+        value = getattr(import_module(_LAZY_IMPORTS[name]), name)
+        globals()[name] = value
+        return value
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def project_operation_models() -> list[type]:
     """All project-owned operational/control-plane MetaTables."""
+    from .signal_job_configurations import project_signal_job_models
+
     return [
         *project_asset_registration_operation_models(),
         *project_account_sync_operation_models(),

@@ -1,4 +1,8 @@
-"""Registered Asset Universe API."""
+"""Registered Asset Universe API.
+
+No Universe is registered any more (ADR 0027): the existing ones are read, run, deactivated and
+deleted until none is left.
+"""
 
 from __future__ import annotations
 
@@ -9,7 +13,6 @@ from msm.api.http import BulkActionPreflightResponse
 
 from ..errors import api_http_error, not_found
 from ..schemas import (
-    AssetUniverseCreateRequest,
     AssetUniverseResponse,
     AssetUniverseUpdateRequest,
     BulkActionRequest,
@@ -25,7 +28,6 @@ from ..services.common import (
     validate_page_window,
 )
 from ..services.universes import (
-    create_universe,
     delete_universe,
     get_universe,
     list_universe_assets,
@@ -50,16 +52,6 @@ def universes_list(
     validate_ordering(ordering, allowed_fields={"display_name", "symbol", "updated_at"})
     try:
         return list_universes(limit=limit, offset=offset, search=search, ordering=ordering)
-    except Exception as exc:
-        raise api_http_error(exc) from exc
-
-
-@router.post("", response_model=AssetUniverseResponse, status_code=201)
-def universe_create(
-    request: AssetUniverseCreateRequest = Body(...),
-) -> AssetUniverseResponse:
-    try:
-        return create_universe(request)
     except Exception as exc:
         raise api_http_error(exc) from exc
 

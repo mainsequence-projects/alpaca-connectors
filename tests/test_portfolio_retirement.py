@@ -1,4 +1,8 @@
-"""Deleting a provided-weights portfolio retires its ms-markets Portfolio (issue #33)."""
+"""Deleting a portfolio retires its ms-markets Portfolio (issue #33, ADR 0027).
+
+A provided-weights portfolio is ended only by its owner; an ETF portfolio, which has none, by any
+caller, and the CLI ends either for the operator.
+"""
 
 from __future__ import annotations
 
@@ -17,6 +21,7 @@ from alpaca_connectors.portfolios.provided_weights import (
     PortfolioOwnedByAnotherError,
     ProvidedWeightsError,
     delete_provided_weights_portfolio,
+    end_portfolio_configuration,
     provided_signal_uid,
 )
 
@@ -231,23 +236,110 @@ def test_delete_route_answers_409_while_an_account_targets_it(api_client, local_
     calls.delete.assert_not_called()
 
 
-def test_delete_route_keeps_etf_portfolios_as_they_were(api_client) -> None:
-    etf = configuration(
+def etf_configuration(**overrides) -> AlpacaETFPortfolioConfiguration:
+    return configuration(
         weights_source="etf_signal",
         signal_configuration_uid=uuid.uuid4(),
         owner_gateway_uid=None,
         owner_user_uid=None,
+        **overrides,
     )
+
+
+def test_an_etf_portfolio_is_retired_too_and_its_signal_keeps_its_assets() -> None:
+    calls, patches = _removal(etf_configuration())
+    with patches[0], patches[1], patches[2], patches[3]:
+        removal = end_portfolio_configuration(etf_configuration())
+
+    # ADR 0027: every delete retires; the ETF signal outlives the portfolio, so its assets stay.
+    assert calls.mock_calls == [call.retire(str(PORTFOLIO_UID)), call.delete(CONFIGURATION_UID)]
+    assert removal.summary()["portfolio"] == {
+        "uid": str(PORTFOLIO_UID),
+        "unique_identifier": "ALPACA_ETF_PORTFOLIO__11111111111141118111111111111111",
+        "state": "retired",
+        "retired_at": RETIRED_AT,
+    }
+
+
+def test_an_etf_portfolio_that_never_ran_is_absent() -> None:
+    calls, patches = _removal(etf_configuration(portfolio_uid=None))
+    with patches[0], patches[1], patches[2], patches[3]:
+        removal = end_portfolio_configuration(etf_configuration(portfolio_uid=None))
+
+    calls.retire.assert_not_called()
+    calls.delete.assert_called_once_with(CONFIGURATION_UID)
+    assert removal.summary()["portfolio"]["state"] == "absent"
+
+
+def test_an_etf_portfolio_an_account_targets_is_refused_and_nothing_changes() -> None:
+    refusal = MarketsConflictError("named by account targets")
+    calls, patches = _removal(etf_configuration(), retire=refusal)
+    with (
+        patches[0],
+        patches[1],
+        patches[2],
+        patches[3],
+        pytest.raises(ProvidedWeightsError) as raised,
+    ):
+        end_portfolio_configuration(etf_configuration())
+
+    assert (raised.value.code, raised.value.status_code) == ("portfolio_in_account_target", 409)
+    calls.delete.assert_not_called()
+
+
+def test_delete_route_retires_an_etf_portfolio_for_any_caller(api_client) -> None:
+    etf = etf_configuration()
+    calls, patches = _removal(etf)
     with (
         patch(f"{SERVICES}.get_portfolio_configuration", return_value=etf),
-        patch(f"{SERVICES}.delete_portfolio_configuration_row", return_value={"ok": 1}) as delete,
-        patch.object(provided_weights, "delete_provided_weights_portfolio") as provided,
-        patch("alpaca_connectors.markets_api.retire_portfolio") as retire,
+        patches[0],
+        patches[1],
+        patches[2],
+        patches[3],
+        patch.object(provided_weights, "require_portfolio_owner") as owner_check,
     ):
         response = api_client.delete(f"/v1/portfolio-configurations/{CONFIGURATION_UID}")
 
-    assert response.status_code == 200
-    assert "portfolio" not in response.json()
-    delete.assert_called_once_with(CONFIGURATION_UID)
-    provided.assert_not_called()
-    retire.assert_not_called()
+    assert response.status_code == 200, response.text
+    assert response.json()["portfolio"]["state"] == "retired"
+    calls.retire.assert_called_once_with(str(PORTFOLIO_UID))
+    calls.delete.assert_called_once_with(CONFIGURATION_UID)
+    calls.forget.assert_not_called()
+    # An ETF portfolio has no owner (ADR 0024, decision 6).
+    owner_check.assert_not_called()
+
+
+def test_delete_route_answers_409_for_an_etf_portfolio_an_account_targets(api_client) -> None:
+    etf = etf_configuration()
+    calls, patches = _removal(etf, retire=MarketsConflictError("named by account targets"))
+    with (
+        patch(f"{SERVICES}.get_portfolio_configuration", return_value=etf),
+        patches[0],
+        patches[1],
+        patches[2],
+        patches[3],
+    ):
+        response = api_client.delete(f"/v1/portfolio-configurations/{CONFIGURATION_UID}")
+
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "portfolio_in_account_target"
+    calls.delete.assert_not_called()
+
+
+def test_the_agent_ends_a_portfolio_through_the_same_delete() -> None:
+    from alpaca_connectors import agent_tools
+
+    with (
+        patch("alpaca_connectors.agent_tools._acting_user_uid", return_value="person-uid"),
+        patch(f"{SERVICES}.delete_configuration", return_value={"deleted": True}) as delete,
+    ):
+        agent_tools.manage_etf_portfolio(
+            {
+                "operation": "delete",
+                "configuration_uid": str(CONFIGURATION_UID),
+                "confirmation": f"DELETE {CONFIGURATION_UID}",
+            }
+        )
+
+    delete.assert_called_once()
+    assert delete.call_args.args == (str(CONFIGURATION_UID),)

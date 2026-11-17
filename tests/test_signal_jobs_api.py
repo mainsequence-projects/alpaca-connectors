@@ -54,16 +54,6 @@ def response() -> SignalJobConfigurationResponse:
     )
 
 
-def create_request() -> dict:
-    return {
-        "name": "Daily IVV observation",
-        "description": None,
-        "universe_uid": UNIVERSE_UID,
-        "account_uid": ACCOUNT_UID,
-        "scheduled": True,
-    }
-
-
 def test_signal_discovery_columns_match_the_local_renderer_contract(api_client) -> None:
     result = api_client.get("/v1/signal-jobs/discovery")
 
@@ -84,22 +74,27 @@ def test_signal_discovery_columns_match_the_local_renderer_contract(api_client) 
     assert result.json()["list"]["controls"]["ordering"] == ["name", "updated_at"]
 
 
-def test_signal_create_forwards_configuration_without_an_environment_selector(api_client) -> None:
-    with patch(
-        "alpaca_connectors.api.app.routers.signal_jobs.create_configuration",
-        return_value=response(),
-    ) as create:
-        result = api_client.post("/v1/signal-jobs", json=create_request())
+def test_no_signal_configuration_is_created(api_client) -> None:
+    # ADR 0027: the existing ones are read, run, paused and deleted until none is left.
+    body = {"name": "Daily IVV observation", "universe_uid": UNIVERSE_UID}
+    assert api_client.post("/v1/signal-jobs", json=body).status_code == 405
 
-    assert result.status_code == 201
+
+def test_signal_update_forwards_configuration_without_an_environment_selector(api_client) -> None:
+    with patch(
+        "alpaca_connectors.api.app.routers.signal_jobs.update_configuration",
+        return_value=response(),
+    ) as update:
+        result = api_client.patch(
+            f"/v1/signal-jobs/{CONFIGURATION_UID}", json={"account_uid": ACCOUNT_UID}
+        )
+
+    assert result.status_code == 200
     assert result.json()["job_uid"] == JOB_UID
-    assert result.json()["job"]["schedule_expression"] == "30 0 * * *"
     assert result.json()["signal_uid"] == "signal-uid"
     assert "environment_uid" not in result.json()
-    request = create.call_args.args[0]
-    assert request.universe_uid == UNIVERSE_UID
+    request = update.call_args.args[1]
     assert request.account_uid == ACCOUNT_UID
-    assert request.scheduled is True
 
 
 def test_signal_list_filters_on_the_scheduled_flag(api_client) -> None:
@@ -118,11 +113,10 @@ def test_signal_list_filters_on_the_scheduled_flag(api_client) -> None:
     assert api_client.get("/v1/signal-jobs?ordering=lifecycle_state").status_code == 400
 
 
-def test_signal_create_rejects_a_caller_supplied_environment(api_client) -> None:
-    request = create_request()
-    request["environment_uid"] = ENVIRONMENT_UID
-
-    result = api_client.post("/v1/signal-jobs", json=request)
+def test_signal_update_rejects_a_caller_supplied_environment(api_client) -> None:
+    result = api_client.patch(
+        f"/v1/signal-jobs/{CONFIGURATION_UID}", json={"environment_uid": ENVIRONMENT_UID}
+    )
 
     assert result.status_code == 422
 

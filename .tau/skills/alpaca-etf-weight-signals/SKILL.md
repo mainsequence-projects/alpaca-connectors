@@ -1,6 +1,6 @@
 ---
 name: alpaca-etf-weight-signals
-description: Maintain Universe-backed ETF weight signal configurations, submit their workflow Job and inspect observations and runs through Alpaca MCP tools.
+description: Inspect, run and remove the remaining Universe-backed ETF weight signal configurations, and read their observations and runs through Alpaca MCP tools.
 ---
 
 # ETF Weight Signals
@@ -24,19 +24,17 @@ backdate, skip unchanged frames or claim point-in-time-perfect economic ETF weig
 
 ## Configure
 
-`alpaca_query_etf_signals` supports `list`, `get`, `observations`, and `runs`.
-Select a registered Universe and Account through their query tools, then use
-`alpaca_manage_etf_signal` operation `create`. Examples are arguments to
-`alpaca__call_tool`; replace UID placeholders with returned UIDs:
+No ETF signal is created any more, and no scheduled run takes new observations: the existing
+configurations are read, run on demand and deleted until none is left. If asked to create one,
+say so plainly.
 
-```json
-{"tool":"alpaca_manage_etf_signal","arguments":{"operation":"create","request":{"name":"Observed ETF weights","universe_uid":"UNIVERSE_UID","account_uid":"ACCOUNT_UID","scheduled":true}}}
-```
+`alpaca_query_etf_signals` supports `list`, `get`, `observations`, and `runs`;
+`alpaca_manage_etf_signal` supports `update`, `run` and `delete`. Examples are arguments to
+`alpaca__call_tool`; replace UID placeholders with returned UIDs.
 
-Verify identity, lifecycle and linked Job. The shared workflow Job owns UTC schedule and compute;
-`scheduled` only controls inclusion in its scheduled run. Never send cron/compute fields or
-expose an Organization Environment selector. Read the returned Job's schedule, not a guessed time.
-A null Job and provisioning state means unavailable: report it, never create a replacement.
+Verify identity, lifecycle and linked Job. The shared workflow Job owns compute; never send
+cron/compute fields or expose an Organization Environment selector. A null Job and provisioning
+state means unavailable: report it, never create a replacement.
 
 ## Run And Inspect
 

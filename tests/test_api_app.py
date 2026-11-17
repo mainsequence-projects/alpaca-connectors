@@ -887,33 +887,20 @@ class ApiAppTests(unittest.TestCase):
         delete_action = payload["bulk_actions"][-1]
         self.assertEqual(delete_action["confirmation"]["word"], "DELETE")
 
-    def test_universe_create_stores_an_empty_configured_universe(self) -> None:
-        universe = _asset_universe_response(
-            uid="universe-dia",
-            source_uid="source-dia",
-            asset_category_uid="category-dia",
-            display_name="Dow Jones ETF holdings",
-            symbol="DIA",
+    def test_no_route_creates_an_etf_object(self) -> None:
+        # ADR 0027: the existing Universe Sources, Universes, signal configurations and ETF
+        # portfolios are read, run and deleted until each Environment is drained.
+        for path in (
+            "/v1/universe-sources",
+            "/v1/universes",
+            "/v1/signal-jobs",
+            "/v1/portfolio-configurations",
+        ):
+            self.assertTrue(_matches_registered_route("GET", path), path)
+            self.assertFalse(_matches_registered_route("POST", path), path)
+        self.assertTrue(
+            _matches_registered_route("POST", "/v1/portfolio-configurations/provided-weights")
         )
-        with patch(
-            "alpaca_connectors.api.app.routers.universes.create_universe",
-            return_value=universe,
-        ) as create:
-            response = self.client.post(
-                "/v1/universes",
-                json={
-                    "name": "Dow Jones ETF holdings",
-                    "symbol": "DIA",
-                    "source_url": "https://example.com/dia",
-                },
-            )
-
-        self.assertEqual(response.status_code, 201)
-        self.assertEqual(response.json()["uid"], "universe-dia")
-        self.assertEqual(response.json()["source_uid"], "source-dia")
-        self.assertEqual(response.json()["asset_category_uid"], "category-dia")
-        self.assertEqual(response.json()["asset_count"], 0)
-        create.assert_called_once()
 
     def test_universe_run_executes_selected_universe(self) -> None:
         universe = _asset_universe_response()

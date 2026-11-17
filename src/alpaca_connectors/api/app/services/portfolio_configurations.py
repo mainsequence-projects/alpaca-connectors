@@ -2,7 +2,7 @@
 
 Every configuration runs on the portfolio Job declared in the repository workflow (ADR 0013). A
 provided-weights portfolio (ADR 0024) is changed, paused, given weights or deleted only by its
-owner; ETF portfolios keep their rules.
+owner; ETF portfolios keep their rules, and none is created any more (ADR 0027).
 """
 
 from __future__ import annotations
@@ -21,9 +21,7 @@ from alpaca_connectors.operations import (
 )
 from alpaca_connectors.portfolios import (
     PortfolioRebalanceConfiguration,
-    create_portfolio_configuration_row,
     create_rebalance_configuration,
-    delete_portfolio_configuration_row,
     delete_rebalance_configuration,
     get_portfolio_configuration,
     get_rebalance_configuration,
@@ -36,14 +34,13 @@ from alpaca_connectors.portfolios import (
 )
 from alpaca_connectors.portfolios.provided_weights import (
     create_provided_weights_portfolio,
-    delete_provided_weights_portfolio,
+    end_portfolio_configuration,
     give_portfolio_weights,
     provided_signal_uid,
     require_portfolio_owner,
 )
 
 from ..schemas import (
-    PortfolioConfigurationCreateRequest,
     PortfolioConfigurationDetailResponse,
     PortfolioConfigurationResponse,
     PortfolioConfigurationUpdateRequest,
@@ -341,14 +338,6 @@ def get_configuration_detail(
     )
 
 
-def create_configuration(
-    request: PortfolioConfigurationCreateRequest,
-) -> PortfolioConfigurationResponse:
-    """Store the configuration only; the shared portfolio Job runs it."""
-    row = create_portfolio_configuration_row(**request.model_dump())
-    return _responses([row])[0]
-
-
 def _require_owner(row: Any, owner: Callable[[], AccountOwner]) -> None:
     """Only a provided-weights portfolio has an owner; the acting owner is read only for it."""
     if row.is_provided:
@@ -377,22 +366,17 @@ def delete_configuration(
     *,
     owner: Callable[[], AccountOwner],
 ) -> dict[str, Any]:
-    """Delete a portfolio configuration; its JobRuns and published data remain.
+    """End a portfolio: retire its ms-markets `Portfolio`, then delete its configuration.
 
-    A provided-weights portfolio is ended first: its owner's call retires its ms-markets
-    `Portfolio` and the answer says so under ``portfolio`` (issue #33). An ETF portfolio's
-    configuration row is deleted alone, as before.
+    Every portfolio ends this way, and the answer says what became of its `Portfolio` under
+    ``portfolio`` (issue #33, ADR 0027); its JobRuns and published data remain. Only a
+    provided-weights portfolio's owner may end it.
     """
     row = get_portfolio_configuration(configuration_uid)
     if row is None:
         raise LookupError(f"Portfolio configuration {configuration_uid!s} does not exist.")
-    if row.is_provided:
-        return delete_provided_weights_portfolio(row.uid, owner=owner()).summary()
-    return {
-        "configuration_uid": str(row.uid),
-        "deleted": True,
-        "storage_result": delete_portfolio_configuration_row(row.uid),
-    }
+    _require_owner(row, owner)
+    return end_portfolio_configuration(row).summary()
 
 
 def create_provided_configuration(
@@ -533,7 +517,6 @@ def delete_rebalance(configuration_uid: str) -> dict[str, Any]:
 __all__ = [
     "configuration_runs",
     "configuration_weights",
-    "create_configuration",
     "create_provided_configuration",
     "create_rebalance",
     "delete_configuration",
