@@ -33,14 +33,14 @@ BACKEND_ROW_TYPES = {
     "AccountSyncOperation",
     "AlpacaAssetDetails",
     "AlpacaBarsConfiguration",
-    "AlpacaETFSignalJobConfiguration",
+    "AlpacaPortfolioConfiguration",
     "Asset",
     "AssetCategory",
     "AssetCategoryMembership",
     "AssetRegistrationOperation",
     "AssetType",
     "OpenFigiDetails",
-    "UniverseSource",
+    "PortfolioRebalanceConfiguration",
 }
 
 

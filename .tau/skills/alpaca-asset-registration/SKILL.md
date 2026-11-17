@@ -28,7 +28,7 @@ Examples below are arguments to `alpaca__call_tool`; replace UID placeholders wi
 
 - Require a registered `account_uid`; its stored keys, opened only by the API, give provider
   credentials at runtime. Never request or accept API-key values.
-- Require explicit symbols. Asset registration never expands ETF seeds or extracts components.
+- Require explicit symbols. Asset registration never expands a fund into its holdings.
 - Treat Alpaca's immutable asset UUID as authoritative:
   `Asset.unique_identifier = ALPACA::<alpaca_asset_uuid>`.
 - Require one connector-owned `AlpacaAssetDetails` row for each Alpaca Asset.

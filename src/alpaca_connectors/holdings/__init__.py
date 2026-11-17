@@ -1,7 +1,6 @@
 """Public Holdings capability.
 
-Account holdings are persisted by account registration. Provider-derived fund
-holdings are consumed by Universes and Portfolios and are not persisted here.
+Account holdings are persisted by account registration and every holdings sync.
 """
 
 from .account import (

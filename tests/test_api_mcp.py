@@ -20,9 +20,7 @@ SKILLS_ROOT = Path(__file__).resolve().parents[1] / ".tau/skills"
 SKILL_NAMES = {
     "alpaca-account-workflow",
     "alpaca-asset-registration",
-    "alpaca-etf-portfolios",
-    "alpaca-etf-weight-signals",
-    "alpaca-holdings-category",
+    "alpaca-portfolios",
     "alpaca-stock-bars",
 }
 
@@ -130,14 +128,14 @@ def test_modern_mcp_discovery_advertises_the_skills_extension(local_caller, mcp_
     assert "io.modelcontextprotocol/skills" in result["capabilities"]["extensions"]
 
 
-def test_mcp_publishes_only_six_business_skills_with_exact_source_bytes(
+def test_mcp_publishes_only_four_business_skills_with_exact_source_bytes(
     local_caller, mcp_client
 ) -> None:
     response = rpc(mcp_client, "skills/list", {}, local_caller.headers)
     assert response.status_code == 200
     skills = response.json()["result"]["skills"]
     assert {skill["frontmatter"]["name"] for skill in skills} == SKILL_NAMES
-    assert len(skills) == 6
+    assert len(skills) == 4
     resources = rpc(mcp_client, "resources/list", {}, local_caller.headers).json()["result"]
     assert {resource["uri"] for resource in resources["resources"]} == {
         f"skill://{name}/SKILL.md" for name in SKILL_NAMES

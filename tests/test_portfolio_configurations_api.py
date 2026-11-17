@@ -16,7 +16,7 @@ from alpaca_connectors.api.app.services import configuration_jobs as job_shaping
 from alpaca_connectors.api.app.services import portfolio_configurations as portfolio_service
 from alpaca_connectors.operations import ConfigurationJobState
 from alpaca_connectors.portfolios import (
-    AlpacaETFPortfolioConfiguration,
+    AlpacaPortfolioConfiguration,
     PortfolioRebalanceConfiguration,
 )
 from alpaca_connectors.portfolios.portfolio_history import (
@@ -65,9 +65,8 @@ def response() -> PortfolioConfigurationResponse:
     now = dt.datetime(2026, 9, 5, 10, tzinfo=dt.UTC)
     return PortfolioConfigurationResponse(
         uid=CONFIGURATION_UID,
-        name="Daily IVV analytical portfolio",
-        description="NYSE-close ETF portfolio backtest.",
-        signal_configuration_uid=SIGNAL_CONFIGURATION_UID,
+        name="Daily analytical portfolio",
+        description="NYSE-close portfolio backtest.",
         signal_uid="signal-uid",
         bars_configuration_uid=BARS_CONFIGURATION_UID,
         rebalance_configuration_uid=REBALANCE_CONFIGURATION_UID,
@@ -156,7 +155,7 @@ def rebalance_row() -> PortfolioRebalanceConfiguration:
         {
             "uid": uuid.UUID(REBALANCE_CONFIGURATION_UID),
             "name": "NYSE close",
-            "description": "Use the latest observed ETF weight frame at each NYSE close.",
+            "description": "Use the latest weights observed at each NYSE close.",
             "strategy": "calendar_event_signal",
             "calendar_identifier": "NYSE",
             "session_label": "regular",
@@ -170,14 +169,15 @@ def rebalance_row() -> PortfolioRebalanceConfiguration:
     )
 
 
-def portfolio_row() -> AlpacaETFPortfolioConfiguration:
+def portfolio_row() -> AlpacaPortfolioConfiguration:
     now = dt.datetime(2026, 9, 5, 12, tzinfo=dt.UTC)
-    return AlpacaETFPortfolioConfiguration.model_validate(
+    return AlpacaPortfolioConfiguration.model_validate(
         {
             "uid": uuid.UUID(CONFIGURATION_UID),
-            "name": "Daily IVV analytical portfolio",
-            "description": "NYSE-close ETF portfolio backtest.",
-            "signal_configuration_uid": uuid.UUID(SIGNAL_CONFIGURATION_UID),
+            "name": "Daily analytical portfolio",
+            "description": "NYSE-close portfolio backtest.",
+            "owner_gateway_uid": "owner-uid",
+            "owner_user_uid": "owner-uid",
             "bars_configuration_uid": uuid.UUID(BARS_CONFIGURATION_UID),
             "rebalance_configuration_uid": uuid.UUID(REBALANCE_CONFIGURATION_UID),
             "portfolio_uid": None,
@@ -196,7 +196,6 @@ def portfolio_row() -> AlpacaETFPortfolioConfiguration:
 
 def test_portfolio_response_resolves_linked_metatables_with_bulk_uid_queries() -> None:
     row = portfolio_row()
-    signal = SimpleNamespace(uid=uuid.UUID(SIGNAL_CONFIGURATION_UID))
     rebalance = rebalance_row()
 
     with (
@@ -207,19 +206,9 @@ def test_portfolio_response_resolves_linked_metatables_with_bulk_uid_queries() -
         ) as job_state,
         patch.object(
             portfolio_service,
-            "signal_job_configurations_by_uids",
-            return_value={SIGNAL_CONFIGURATION_UID: signal},
-        ) as signals_by_uids,
-        patch.object(
-            portfolio_service,
             "rebalance_configurations_by_uids",
             return_value={REBALANCE_CONFIGURATION_UID: rebalance},
         ) as rebalances_by_uids,
-        patch.object(
-            portfolio_service,
-            "signal_uid_for_configuration",
-            return_value="signal-uid",
-        ),
     ):
         result = portfolio_service._responses([row])
 
@@ -227,7 +216,6 @@ def test_portfolio_response_resolves_linked_metatables_with_bulk_uid_queries() -
     assert result[0].rebalance_strategy == "calendar_event_signal"
     assert (result[0].job_uid, result[0].job, result[0].scheduled) == (None, None, True)
     job_state.assert_called_once_with("portfolio", [row.uid])
-    signals_by_uids.assert_called_once_with([SIGNAL_CONFIGURATION_UID])
     rebalances_by_uids.assert_called_once_with([REBALANCE_CONFIGURATION_UID])
 
 
@@ -303,12 +291,13 @@ def test_portfolio_discovery_columns_are_renderable(api_client) -> None:
 
 
 def test_only_provided_weights_portfolios_are_created(api_client) -> None:
-    # ADR 0027: no ETF portfolio is created; it cannot name a signal configuration either.
-    etf = {**create_request(), "signal_configuration_uid": SIGNAL_CONFIGURATION_UID}
-    del etf["observations"]
-    assert api_client.post("/v1/portfolio-configurations", json=etf).status_code == 405
+    # ADR 0027: a portfolio is created only from provided weights, and names no signal
+    # configuration.
+    signal_based = {**create_request(), "signal_configuration_uid": SIGNAL_CONFIGURATION_UID}
+    del signal_based["observations"]
+    assert api_client.post("/v1/portfolio-configurations", json=signal_based).status_code == 405
     provided = "/v1/portfolio-configurations/provided-weights"
-    assert api_client.post(provided, json=etf).status_code == 422
+    assert api_client.post(provided, json=signal_based).status_code == 422
 
     invalid = create_request()
     invalid["environment_uid"] = "77777777-7777-4777-8777-777777777777"
@@ -348,23 +337,14 @@ def test_portfolio_run_returns_jobrun_status_url_without_arguments(api_client) -
 
 def test_portfolio_detail_resolves_business_labels_and_value_history() -> None:
     now = dt.datetime(2026, 9, 5, 12, tzinfo=dt.UTC)
-    signal = SimpleNamespace(
-        uid=uuid.UUID(SIGNAL_CONFIGURATION_UID),
-        name="Daily IVV observation",
-        description="Observe current IVV weights.",
-        scheduled=True,
-        universe_uid=uuid.UUID("77777777-7777-4777-8777-777777777777"),
-        account_uid=uuid.UUID("88888888-8888-4888-8888-888888888888"),
-    )
     bars = SimpleNamespace(
         uid=uuid.UUID(BARS_CONFIGURATION_UID),
-        name="Daily IVV bars",
+        name="Daily portfolio bars",
         description="Daily SIP adjusted prices.",
         enabled=True,
         scheduled=False,
-        account_uid=signal.account_uid,
-        asset_source="universe",
-        universe_uid=signal.universe_uid,
+        account_uid=uuid.UUID("88888888-8888-4888-8888-888888888888"),
+        asset_source="portfolios",
         asset_uids=[],
         frequency_id="1d",
         feed="sip",
@@ -372,7 +352,7 @@ def test_portfolio_detail_resolves_business_labels_and_value_history() -> None:
     )
     history = PortfolioHistory(
         materialized=True,
-        portfolio_identifier="ALPACA_ETF_PORTFOLIO__111",
+        portfolio_identifier="ALPACA_PORTFOLIO__111",
         description="Canonical portfolio metadata.",
         calendar_name="US equities",
         calendar_type="exchange",
@@ -397,11 +377,7 @@ def test_portfolio_detail_resolves_business_labels_and_value_history() -> None:
         ),
     )
     account = {"account_name": "Paper account", "is_paper": True}
-    universe = {
-        "display_name": "S&P 500 holdings",
-        "symbol": "IVV",
-        "asset_count": 504,
-    }
+    bounds = SimpleNamespace(first_observation_at=now, last_observation_at=now)
 
     with (
         patch.object(
@@ -410,17 +386,19 @@ def test_portfolio_detail_resolves_business_labels_and_value_history() -> None:
         patch.object(portfolio_service, "_responses", return_value=[response()]),
         patch.object(
             portfolio_service,
-            "signal_job_configurations_by_uids",
-            return_value={SIGNAL_CONFIGURATION_UID: signal},
-        ),
-        patch.object(
-            portfolio_service,
             "get_rebalance_configuration",
             return_value=rebalance_row(),
         ),
         patch("alpaca_connectors.market_data.get_bar_configuration", return_value=bars),
         patch("alpaca_connectors.account.services.get_account_registration", return_value=account),
-        patch("alpaca_connectors.universes.get_asset_universe_view", return_value=universe),
+        patch(
+            "alpaca_connectors.portfolios.signal_history.read_signal_observation_bounds",
+            return_value=bounds,
+        ),
+        patch(
+            "alpaca_connectors.portfolios.signal_assets.assets_for_signals",
+            return_value=["ALPACA::a", "ALPACA::b"],
+        ),
         patch.object(portfolio_service, "read_portfolio_history", return_value=history),
     ):
         detail = portfolio_service.get_configuration_detail(
@@ -429,11 +407,12 @@ def test_portfolio_detail_resolves_business_labels_and_value_history() -> None:
         )
 
     assert isinstance(detail, PortfolioConfigurationDetailResponse)
-    assert detail.linked_signal.name == "Daily IVV observation"
-    assert detail.linked_signal.scheduled is True
-    assert detail.linked_signal.universe_name == "S&P 500 holdings"
-    assert detail.linked_bars.asset_source_name == "S&P 500 holdings (IVV)"
-    assert detail.linked_bars.asset_count == 504
+    assert detail.provided_weights.signal_uid == "signal-uid"
+    assert detail.provided_weights.asset_count == 2
+    assert detail.linked_bars.asset_source_name == (
+        "Every asset of the live portfolios that use these prices"
+    )
+    assert detail.linked_bars.asset_count is None
     # An unscheduled bars configuration stays linked, and the detail shows it is not updated daily.
     assert detail.linked_bars.scheduled is False
     assert detail.linked_rebalance.name == "NYSE close"
@@ -445,25 +424,22 @@ def test_portfolio_detail_route_loads_latest_100_observations(api_client) -> Non
     detail = PortfolioConfigurationDetailResponse.model_validate(
         {
             **response().model_dump(mode="json"),
-            "linked_signal": {
-                "name": "Daily IVV observation",
-                "description": None,
-                "scheduled": True,
-                "universe_name": "S&P 500 holdings",
-                "universe_symbol": "IVV",
-                "account_name": "Paper account",
-                "account_environment": "paper",
+            "provided_weights": {
+                "signal_uid": "signal-uid",
+                "first_observation_at": None,
+                "last_observation_at": None,
+                "asset_count": 0,
             },
             "linked_bars": {
-                "name": "Daily IVV bars",
+                "name": "Daily portfolio bars",
                 "description": None,
                 "enabled": True,
                 "scheduled": True,
                 "account_name": "Paper account",
                 "account_environment": "paper",
-                "asset_source": "universe",
-                "asset_source_name": "S&P 500 holdings (IVV)",
-                "asset_count": 504,
+                "asset_source": "portfolios",
+                "asset_source_name": "Every asset of the live portfolios that use these prices",
+                "asset_count": None,
                 "frequency_id": "1d",
                 "feed": "sip",
                 "adjustment": "all",
@@ -527,5 +503,6 @@ def test_portfolio_detail_route_loads_latest_100_observations(api_client) -> Non
         )
 
     assert result.status_code == 200
-    assert result.json()["linked_signal"]["name"] == "Daily IVV observation"
+    assert result.json()["provided_weights"]["signal_uid"] == "signal-uid"
+    assert "linked_signal" not in result.json()
     get_detail.assert_called_once_with(CONFIGURATION_UID, observation_limit=100)

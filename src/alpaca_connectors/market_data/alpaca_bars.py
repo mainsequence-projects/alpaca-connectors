@@ -12,10 +12,7 @@ from msm.time_index.assets import (
 )
 from pydantic import Field, field_validator, model_validator
 
-from alpaca_connectors.assets.resolution import (
-    asset_unique_identifiers_for_category,
-    ticker_and_optional_figi_by_unique_identifiers,
-)
+from alpaca_connectors.assets.resolution import ticker_and_optional_figi_by_unique_identifiers
 
 from .alpaca_bars_support import (
     DEFAULT_BAR_SYMBOL_BATCH_SIZE,
@@ -40,9 +37,8 @@ class AlpacaStockBarsConfig(AssetIndexedUpdaterConfiguration):
     Storage-first: the published column schema, table identifier, and ``asset_identifier``
     foreign key live on the storage class (``alpaca_connectors.market_data.storage``), NOT here. This
     config carries only the fields that select the table meaning and the source identity. For an
-    explicit-asset source, the inherited ``asset_list`` is hashed. For a universe, its stable
-    category identifier is hashed. For account holdings, the Account UID is hashed while the
-    newest eligible snapshot is resolved dynamically. A ``portfolios`` source uses the subclass
+    explicit-asset source, the inherited ``asset_list`` is hashed. For account holdings, the
+    Account UID is hashed while the newest eligible snapshot is resolved dynamically. A ``portfolios`` source uses the subclass
     ``AlpacaStockBarsPortfoliosConfig``, which hashes its bars configuration UID while the assets
     of its live portfolios are resolved dynamically (ADR 0024); it is a subclass so that this
     class keeps its fields, and every existing configuration keeps its update hash. Storage
@@ -61,13 +57,15 @@ class AlpacaStockBarsConfig(AssetIndexedUpdaterConfiguration):
         ...,
         description="Alpaca adjustment mode, for example raw, split, dividend, or all.",
     )
-    asset_source: Literal["assets", "universe", "account_holdings", "portfolios"] = Field(
+    asset_source: Literal["assets", "account_holdings", "portfolios"] = Field(
         ...,
         description="Asset resolution strategy for this updater identity.",
     )
-    asset_category_unique_identifier: str | None = Field(
+    # Retired with the category source (ADR 0027) and always null. Every declared field enters
+    # the update hash, so removing it would give every bars configuration a new updater identity.
+    asset_category_unique_identifier: None = Field(
         default=None,
-        description="Optional AssetCategory unique_identifier used to resolve the updater universe.",
+        description="Retired; always null.",
     )
     account_uid: uuid.UUID | None = Field(
         default=None,
@@ -94,32 +92,20 @@ class AlpacaStockBarsConfig(AssetIndexedUpdaterConfiguration):
         if self.asset_source == "assets":
             if not self.asset_list:
                 raise ValueError("assets source requires a non-empty asset_list.")
-            if self.asset_category_unique_identifier or self.account_uid:
-                raise ValueError(
-                    "assets source forbids asset_category_unique_identifier and account_uid."
-                )
-        elif self.asset_source == "universe":
-            if not self.asset_category_unique_identifier or self.asset_list or self.account_uid:
-                raise ValueError(
-                    "universe source requires asset_category_unique_identifier and forbids "
-                    "asset_list and account_uid."
-                )
+            if self.account_uid:
+                raise ValueError("assets source forbids account_uid.")
         elif self.asset_source == "portfolios":
             if (
                 not isinstance(self, AlpacaStockBarsPortfoliosConfig)
                 or self.asset_list
-                or self.asset_category_unique_identifier
                 or self.account_uid
             ):
                 raise ValueError(
                     "portfolios source requires AlpacaStockBarsPortfoliosConfig and forbids "
-                    "asset_list, asset_category_unique_identifier and account_uid."
+                    "asset_list and account_uid."
                 )
-        elif not self.account_uid or self.asset_list or self.asset_category_unique_identifier:
-            raise ValueError(
-                "account_holdings source requires account_uid and forbids asset_list and "
-                "asset_category_unique_identifier."
-            )
+        elif not self.account_uid or self.asset_list:
+            raise ValueError("account_holdings source requires account_uid and forbids asset_list.")
         return self
 
 
@@ -141,7 +127,7 @@ class AlpacaStockBarsNode(AssetIndexedUpdater):
 
     Subclasses ``AssetIndexedUpdater`` (not ``AssetTimestampedUpdater``) because it *fetches*
     from Alpaca during ``update()`` rather than receiving pre-built frames. The base supplies the
-    universe scoping and per-asset incremental ``update_statistics`` that the old node hand-rolled.
+    asset scoping and per-asset incremental ``update_statistics`` that the old node hand-rolled.
     """
 
     # Same value the base already defines; kept explicit so the 2018 first-run floor is obvious.
@@ -195,16 +181,12 @@ class AlpacaStockBarsNode(AssetIndexedUpdater):
         return {}
 
     def get_asset_list(self) -> list[str]:
-        """Resolve the updater universe to a list of asset unique identifiers (strings)."""
+        """Resolve the updater's assets to a list of asset unique identifiers (strings)."""
         config = self.config
         if self._resolved_asset_identifiers is not None:
             return self.validate_asset_list(self._resolved_asset_identifiers)
         if config.asset_source == "assets":
             return self.validate_asset_list(list(config.asset_list or []))
-        if config.asset_source == "universe":
-            return self.validate_asset_list(
-                asset_unique_identifiers_for_category(config.asset_category_unique_identifier)
-            )
         if isinstance(config, AlpacaStockBarsPortfoliosConfig):
             from alpaca_connectors.portfolios.bars_scope import resolve_portfolio_bars_scope
 

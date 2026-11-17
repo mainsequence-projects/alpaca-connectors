@@ -47,7 +47,7 @@ WHEN = dt.datetime(2026, 11, 12, 15, 30, tzinfo=dt.UTC)
 OWNER = AccountOwner.main_sequence_user("33333333-3333-4333-8333-333333333333")
 ASSET_TYPE_CONFLICT = (
     "Existing assets keep their asset_type; change it through the asset routes or send the "
-    f"stored type: {AAPL!r} is 'etf', not 'equity'."
+    f"stored type: {AAPL!r} is 'crypto', not 'equity'."
 )
 
 
@@ -405,7 +405,7 @@ def test_an_asset_of_another_type_is_a_readable_conflict_that_writes_nothing(own
     assert "different asset type" in message
     assert "Nothing was written" in message
     # Markets' detail stays the cause; the answer names no stored asset or type.
-    assert AAPL not in message and "etf" not in message
+    assert AAPL not in message and "crypto" not in message
     assert own_tables.writes == []
 
 

@@ -14,10 +14,9 @@ import pytest
 
 from alpaca_connectors.operations import instance_backfill
 
-PORTFOLIO = "ALPACA_ETF_PORTFOLIO__ABC"
+PORTFOLIO = "ALPACA_PORTFOLIO__ABC"
 PORTFOLIO_UID = "11111111-1111-4111-8111-111111111111"
 CURRENT_SIGNAL = "signal-current"
-OTHER_SIGNAL = "signal-other"
 
 
 class Markets:
@@ -103,7 +102,6 @@ def markets(monkeypatch):
                         uid=PORTFOLIO_UID, unique_identifier=PORTFOLIO, signal_uid=CURRENT_SIGNAL
                     )
                 ],
-                "signal_uids": [OTHER_SIGNAL],
                 "calendar_identifiers": ["XNYS"],
                 "account_identifiers": ["PA1__ALPACA_PAPER"],
             },
@@ -128,24 +126,18 @@ def test_dry_run_counts_every_move_and_changes_nothing_in_markets(markets) -> No
     report = instance_backfill.backfill_instances(register_catalog=True)
 
     assert report["dry_run"] is True
-    assert [result["status"] for result in report["results"]] == ["planned"] * 5
+    assert [result["status"] for result in report["results"]] == ["planned"] * 4
     assert _catalog(fake) == []
 
 
-def test_move_copies_signals_first_then_each_portfolio_then_registers_last(markets) -> None:
+def test_move_copies_the_tables_first_then_each_portfolio_then_registers_last(markets) -> None:
     fake = markets()
 
     report = instance_backfill.backfill_instances(execute=True, register_catalog=True)
 
     assert report["succeeded"] is True
-    # Signal and table moves (move order 0) run before portfolio moves (move order 1).
+    # Table moves (move order 0) run before portfolio moves (move order 1).
     assert _copies(fake) == [
-        (
-            "ms_markets__signalweightsts",
-            "alpaca_connectors__signalweightsts__main",
-            "signal_uid",
-            [OTHER_SIGNAL],
-        ),
         (
             "ms_markets__portfoliocalendareventsts",
             "alpaca_connectors__portfoliocalendareventsts__main",
@@ -190,13 +182,7 @@ def test_move_copies_signals_first_then_each_portfolio_then_registers_last(marke
             [PORTFOLIO],
         ),
     ]
-    register_signal, register = [call for kind, call in fake.calls if kind != "copy"]
-    assert register_signal == (
-        {
-            "signal_uid": OTHER_SIGNAL,
-            "signal_meta_table_uid": "uid:alpaca_connectors__signalweightsts__main",
-        },
-    )
+    (register,) = [call for kind, call in fake.calls if kind != "copy"]
     assert register == (
         {
             "portfolio_uid": PORTFOLIO_UID,
@@ -224,8 +210,8 @@ def test_an_incomplete_portfolio_copy_leaves_the_catalog_untouched(markets) -> N
     statuses = {result["label"]: result["status"] for result in report["results"]}
     assert statuses[PORTFOLIO] == "incomplete"
     assert report["succeeded"] is False
-    # The separately moved signal is still bound; the portfolio's catalog row is not written.
-    assert _catalog(fake) == ["register_signal"]
+    # The portfolio's catalog row is not written.
+    assert _catalog(fake) == []
 
 
 def test_rollback_copies_the_instances_back_and_unregisters_portfolios_first(markets) -> None:
@@ -242,28 +228,26 @@ def test_rollback_copies_the_instances_back_and_unregisters_portfolios_first(mar
         [CURRENT_SIGNAL],
     )
     assert all(target.startswith("ms_markets__") for _, target, _, _ in copies)
-    # The portfolio's catalog row goes without touching signal bindings; each move then unbinds
-    # only the signals it moved: the portfolio its current signal, the signal move the other.
+    # The portfolio's catalog row goes without touching signal bindings; the move then unbinds
+    # only the signal it moved, the portfolio's current signal.
     catalog = [(kind, call) for kind, call in fake.calls if kind != "copy"]
     assert catalog == [
         ("unregister", {"portfolio_uid": PORTFOLIO_UID, "unbind_signal": False}),
         ("unregister_signal", {"signal_uid": CURRENT_SIGNAL}),
-        ("unregister_signal", {"signal_uid": OTHER_SIGNAL}),
     ]
 
 
 def test_a_signal_without_metadata_refuses_the_move_before_any_catalog_call(markets) -> None:
-    fake = markets(signals_without_metadata=(OTHER_SIGNAL,))
+    fake = markets(signals_without_metadata=(CURRENT_SIGNAL,))
 
     report = instance_backfill.backfill_instances(execute=True, register_catalog=True)
 
     statuses = {result["kind"]: result["status"] for result in report["results"]}
-    assert statuses["signal"] == "failed"
+    assert statuses["portfolio"] == "failed"
     assert "SignalMetadata" in next(
-        result["detail"] for result in report["results"] if result["kind"] == "signal"
+        result["detail"] for result in report["results"] if result["kind"] == "portfolio"
     )
-    # The portfolio, whose current signal has metadata, still registers.
-    assert _catalog(fake) == ["register"]
+    assert _catalog(fake) == []
 
 
 def test_batch_size_sets_the_keys_read_per_request(markets) -> None:
@@ -284,7 +268,6 @@ def test_msm_series_callable_returns_the_registering_moves(markets) -> None:
     ]
 
     assert [type(move).__name__ for move in moves] == [
-        "SignalSeriesMove",
         "PortfolioSeriesMove",
         "TableSeriesMove",
         "TableSeriesMove",

@@ -5,8 +5,8 @@ over a time series and none per portfolio:
 
 1. the portfolio configurations that name the bars configuration (indexed on
    ``bars_configuration_uid``), reading only the columns it needs;
-2. their `Portfolio` rows by uid in one batched Markets read, for ``retired_at``, and the ETF
-   rows' Signal Configurations in one query; signal UIDs are then computed in memory;
+2. their `Portfolio` rows by uid in one batched Markets read, for ``retired_at``; signal UIDs are
+   then computed in memory from the configuration UIDs;
 3. every asset those signals ever published, from the signal-asset table by primary key.
 
 A deleted configuration has no row. A configuration whose `Portfolio` is retired at or before
@@ -48,20 +48,17 @@ def _naming_configurations(bars_configuration_uid: uuid.UUID) -> list[dict[str, 
     from sqlalchemy import select
 
     from alpaca_connectors.portfolios.configurations import (
-        AlpacaETFPortfolioConfigurationTable,
+        AlpacaPortfolioConfigurationTable,
         _start_runtime,
     )
 
-    table = AlpacaETFPortfolioConfigurationTable
+    table = AlpacaPortfolioConfigurationTable
     _start_runtime()
-    runtime = resolve_runtime(models=[table], row_model_name="AlpacaETFPortfolioConfiguration")
+    runtime = resolve_runtime(models=[table], row_model_name="AlpacaPortfolioConfiguration")
     operation = compile_markets_statement(
-        select(
-            table.uid,
-            table.weights_source,
-            table.signal_configuration_uid,
-            table.portfolio_uid,
-        ).where(table.bars_configuration_uid == bars_configuration_uid),
+        select(table.uid, table.portfolio_uid).where(
+            table.bars_configuration_uid == bars_configuration_uid
+        ),
         context=runtime.context,
         operation="select",
     )
@@ -98,10 +95,6 @@ def resolve_portfolio_bars_scope(
     at: dt.datetime | None = None,
 ) -> PortfolioBarsScope:
     """Every asset ever published by the live portfolios that name this bars configuration."""
-    from alpaca_connectors.operations import (
-        signal_job_configurations_by_uids,
-        signal_uid_for_configuration,
-    )
     from alpaca_connectors.portfolios.provided_weights import provided_signal_uid
     from alpaca_connectors.portfolios.signal_assets import assets_for_signals
 
@@ -120,25 +113,7 @@ def resolve_portfolio_bars_scope(
             retired_configurations.append(str(row["uid"]))
         else:
             live.append(row)
-    etf_signal_configurations = signal_job_configurations_by_uids(
-        sorted(
-            {
-                str(row["signal_configuration_uid"])
-                for row in live
-                if row.get("weights_source", "etf_signal") == "etf_signal"
-                and row.get("signal_configuration_uid") is not None
-            }
-        )
-    )
-    signal_uids: set[str] = set()
-    for row in live:
-        if row.get("weights_source") == "provided":
-            signal_uids.add(provided_signal_uid(row["uid"]))
-            continue
-        signal_configuration = etf_signal_configurations.get(str(row["signal_configuration_uid"]))
-        if signal_configuration is not None:
-            signal_uids.add(signal_uid_for_configuration(signal_configuration))
-    ordered_signals = tuple(sorted(signal_uids))
+    ordered_signals = tuple(sorted({provided_signal_uid(row["uid"]) for row in live}))
     return PortfolioBarsScope(
         bars_configuration_uid=str(normalized_uid),
         configuration_uids=tuple(sorted(str(row["uid"]) for row in live)),

@@ -78,7 +78,7 @@ def application_tools(tmp_path):
     }
 
 
-def test_tau_discovers_and_verifies_all_six_published_skills(
+def test_tau_discovers_and_verifies_all_four_published_skills(
     local_caller, alpaca_mcp_http, tmp_path
 ):
     tools = application_tools(tmp_path)
@@ -97,7 +97,7 @@ def test_tau_discovers_and_verifies_all_six_published_skills(
         listing = await tools["alpaca__list_resources"].execute_fn("list-skills", {})
         assert listing.details["is_error"] is False
         assert set(listing.details["skills"]) == SKILL_URIS
-        assert len(listing.details["skills"]) == 6
+        assert len(listing.details["skills"]) == 4
         assert listing.details["resources"] == []
 
         for uri in sorted(SKILL_URIS):

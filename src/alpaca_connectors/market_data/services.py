@@ -232,25 +232,6 @@ def _asset_identifiers_from_uids(asset_uids: list[str]) -> list[str]:
     return [assets[str(asset_uid)].unique_identifier for asset_uid in asset_uids]
 
 
-def _asset_identifiers_from_universe_uid(
-    universe_uid: str,
-) -> tuple[list[str], str, str]:
-    from alpaca_connectors.assets.resolution import asset_unique_identifiers_for_category
-    from alpaca_connectors.universes import require_asset_universe_links
-
-    universe, _source, category = require_asset_universe_links(universe_uid)
-    if not universe.is_active:
-        raise ValueError(
-            f"Asset Universe {universe_uid!s} is inactive and cannot be used for market-data "
-            "updates."
-        )
-    return (
-        asset_unique_identifiers_for_category(category.unique_identifier),
-        category.unique_identifier,
-        str(category.uid),
-    )
-
-
 def _asset_uids_from_identifiers(asset_identifiers: list[str]) -> list[str]:
     from alpaca_connectors.assets.resolution import assets_by_unique_identifiers
 
@@ -303,8 +284,6 @@ def build_market_data_update(
     storage = storage_for(*triple)
     dataset = _dataset_from_storage(triple, storage)
     source_snapshot: dict[str, Any] | None = None
-    category_identifier: str | None = None
-    asset_category_uid: str | None = None
     runtime_config_values: dict[str, Any] = {
         "frequency_id": configuration.frequency_id,
         "feed": configuration.feed,
@@ -315,12 +294,6 @@ def build_market_data_update(
         asset_uids = [str(asset_uid) for asset_uid in configuration.asset_uids]
         identifiers = _asset_identifiers_from_uids(asset_uids)
         runtime_config_values["asset_list"] = identifiers
-    elif configuration.asset_source == "universe":
-        identifiers, category_identifier, asset_category_uid = _asset_identifiers_from_universe_uid(
-            str(configuration.universe_uid)
-        )
-        asset_uids = _asset_uids_from_identifiers(identifiers)
-        runtime_config_values["asset_category_unique_identifier"] = category_identifier
     elif configuration.asset_source == "portfolios":
         from alpaca_connectors.portfolios.bars_scope import resolve_portfolio_bars_scope
 
@@ -361,11 +334,6 @@ def build_market_data_update(
         "asset_count": len(identifiers),
         "asset_uids": asset_uids,
         "asset_identifiers": identifiers,
-        "universe_uid": (
-            str(configuration.universe_uid) if configuration.universe_uid is not None else None
-        ),
-        "asset_category_unique_identifier": category_identifier,
-        "asset_category_uid": asset_category_uid,
         "source_snapshot": source_snapshot,
         "update_hash": node.update_hash,
         "hash_namespace": hash_namespace,

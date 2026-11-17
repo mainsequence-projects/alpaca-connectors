@@ -15,18 +15,15 @@ from ..site_agent import resolve_site_agent
 def get_project_configuration(
     *, request_user_uid: str | None = None
 ) -> ProjectConfigurationResponse:
-    from alpaca_connectors.universes import SUPPORTED_COMPONENT_PROVIDERS, list_universe_sources
     from mainsequence.code_repository_context import get_code_repository_context
 
     _, account_count = list_account_registrations(limit=1)
-    _, source_count = list_universe_sources(limit=1)
     datasets = list_market_data_datasets()
     context = get_code_repository_context()
     branch = context.code_repository_branch
     # The site opens its conversation with this pair, so both come from the one Agent lookup.
     agent = resolve_site_agent()
     return ProjectConfigurationResponse(
-        supported_component_providers=list(SUPPORTED_COMPONENT_PROVIDERS),
         migrated_market_data_profiles=[
             "/".join(triple) for triple in sorted(ALPACA_STOCK_BARS_STORAGE_BY_TRIPLE)
         ],
@@ -42,7 +39,6 @@ def get_project_configuration(
         request_user_uid=request_user_uid,
         registered_account_count=account_count,
         has_registered_account=account_count > 0,
-        universe_source_count=source_count,
         market_data_dataset_count=len(datasets),
         market_data_datasets=[asdict(dataset) for dataset in datasets],
     )

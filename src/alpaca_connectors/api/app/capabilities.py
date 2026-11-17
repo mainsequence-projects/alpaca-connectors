@@ -39,7 +39,7 @@ CAPABILITIES: tuple[Capability, ...] = (
             "provider configuration",
             "supported capability catalog",
         ),
-        actions=("inspect health", "inspect configured provider and universe metadata"),
+        actions=("inspect health", "inspect configured provider metadata"),
         surfaces=("api",),
         availability="available",
     ),
@@ -56,30 +56,6 @@ CAPABILITIES: tuple[Capability, ...] = (
         ),
         actions=("discover", "resolve", "plan registration", "register"),
         surfaces=("cli", "api", "python"),
-    ),
-    Capability(
-        key="universes",
-        name="Universes",
-        purpose=(
-            "Keep the existing ETF holdings universes running until they are deleted; no new "
-            "source or universe is registered (ADR 0027)."
-        ),
-        contents=(
-            "existing extraction-source configurations",
-            "registered Asset Universe identity",
-            "linked AssetCategory materialization targets",
-            "provider-derived constituents",
-        ),
-        actions=(
-            "review or change sources",
-            "preview extraction",
-            "validate membership",
-            "run",
-            "activate, deactivate, or delete a registered universe",
-            "delete a source",
-        ),
-        surfaces=("cli", "api", "python"),
-        availability="partial",
     ),
     Capability(
         key="market_data",
@@ -118,7 +94,6 @@ CAPABILITIES: tuple[Capability, ...] = (
         contents=(
             "dated account positions",
             "cash position",
-            "externally extracted symbols and weights",
             "registered asset references",
         ),
         actions=("capture account snapshot", "list", "inspect immutable snapshot"),
@@ -151,12 +126,11 @@ CAPABILITIES: tuple[Capability, ...] = (
             "market-data binding",
             "interpolated prices",
             "signals and calculation results",
-            "the remaining Universe-backed signal and portfolio configurations",
+            "portfolio and rebalance configurations",
         ),
         actions=(
             "create a portfolio from provided weights and give it new weights",
             "review, run, pause, or end a portfolio configuration",
-            "review, run, or delete the remaining signal configurations",
             "run calculation",
         ),
         surfaces=("cli", "api", "python"),
@@ -172,7 +146,7 @@ CAPABILITIES: tuple[Capability, ...] = (
             "validation blockers",
             "runtime results",
             "on-demand bars JobRuns",
-            "scheduled ETF signal and portfolio JobRuns",
+            "scheduled portfolio JobRuns",
             "account sync operations",
         ),
         actions=("inspect plan", "submit supported action", "inspect JobRun", "inspect operation"),

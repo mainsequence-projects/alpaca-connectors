@@ -21,8 +21,6 @@ PHYSICAL_TABLES = {
     ),
     "AlpacaAccountDetails": ("alpaca_connectors__acct_alpaca", "AlpacaAccountDetails"),
     "AccountKeyRequestTable": ("alpaca_connectors__account_key_request", "AccountKeyRequest"),
-    "UniverseSourceTable": ("alpaca_connectors__universe_source", "UniverseSource"),
-    "AssetUniverseTable": ("alpaca_connectors__asset_universe", "AssetUniverse"),
     "AlpacaBarsConfigurationTable": (
         "alpaca_connectors__bars_configuration",
         "AlpacaBarsConfiguration",
@@ -39,17 +37,13 @@ PHYSICAL_TABLES = {
         "alpaca_connectors__account_sync_operation",
         "AccountSyncOperation",
     ),
-    "AlpacaETFSignalJobConfigurationTable": (
-        "alpaca_connectors__etf_signal_job_configuration",
-        "AlpacaETFSignalJobConfiguration",
-    ),
     "PortfolioRebalanceConfigurationTable": (
         "alpaca_connectors__portfolio_rebalance_configuration",
         "PortfolioRebalanceConfiguration",
     ),
-    "AlpacaETFPortfolioConfigurationTable": (
-        "alpaca_connectors__etf_portfolio_configuration",
-        "AlpacaETFPortfolioConfiguration",
+    "AlpacaPortfolioConfigurationTable": (
+        "alpaca_connectors__portfolio_configuration",
+        "AlpacaPortfolioConfiguration",
     ),
 }
 
@@ -81,15 +75,10 @@ def test_project_row_classes_stay_on_the_local_runtime() -> None:
     from alpaca_connectors.market_data.configurations import AlpacaBarsConfiguration
     from alpaca_connectors.operations.account_sync import AccountSyncOperation
     from alpaca_connectors.operations.asset_registration import AssetRegistrationOperation
-    from alpaca_connectors.operations.signal_job_configurations import (
-        AlpacaETFSignalJobConfiguration,
-    )
     from alpaca_connectors.portfolios.configurations import (
-        AlpacaETFPortfolioConfiguration,
+        AlpacaPortfolioConfiguration,
         PortfolioRebalanceConfiguration,
     )
-    from alpaca_connectors.universes.registry import AssetUniverse
-    from alpaca_connectors.universes.sources import UniverseSource
 
     for row in (
         AccountKeyRequest,
@@ -97,10 +86,7 @@ def test_project_row_classes_stay_on_the_local_runtime() -> None:
         AlpacaAssetDetails,
         AlpacaBarsConfiguration,
         AssetRegistrationOperation,
-        AlpacaETFSignalJobConfiguration,
-        AlpacaETFPortfolioConfiguration,
+        AlpacaPortfolioConfiguration,
         PortfolioRebalanceConfiguration,
-        AssetUniverse,
-        UniverseSource,
     ):
         assert not is_markets_owned(row), row.__name__

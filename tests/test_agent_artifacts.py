@@ -112,7 +112,7 @@ class AgentArtifactsTests(unittest.TestCase):
     def test_business_skills_have_one_copy_in_the_published_tau_skills(self) -> None:
         from alpaca_connectors.api.app.mcp_server import MCP_SKILLS_DIRECTORY
 
-        # The API publishes the whole folder, so it holds exactly the six skills, each directly
+        # The API publishes the whole folder, so it holds exactly the four skills, each directly
         # under it (no group folder), which keeps their `skill://<name>/SKILL.md` URIs.
         self.assertEqual(REPO_ROOT / MCP_SKILLS_DIRECTORY, TAU_SKILLS_ROOT)
         self.assertEqual(
@@ -121,7 +121,7 @@ class AgentArtifactsTests(unittest.TestCase):
         )
         self.assertFalse((REPO_ROOT / ".agents" / "skills" / "mcp_tools").exists())
         paths = project_skill_paths()
-        self.assertEqual(len(paths), 6)
+        self.assertEqual(len(paths), 4)
         for path in paths:
             skill = REPO_ROOT / path
             self.assertEqual(skill.parent.parent, TAU_SKILLS_ROOT)
@@ -228,10 +228,8 @@ class AgentArtifactsTests(unittest.TestCase):
                 ],
                 "resources": [
                     {"key": "alpaca-connectors-agent", "policy": "user"},
-                    {"key": "alpaca-etf-signal", "policy": "runner"},
-                    {"key": "alpaca-etf-portfolio", "policy": "runner"},
-                    {"key": "alpaca-etf-signal-dispatcher", "policy": "viewer"},
-                    {"key": "alpaca-etf-portfolio-dispatcher", "policy": "viewer"},
+                    {"key": "alpaca-portfolio", "policy": "runner"},
+                    {"key": "alpaca-portfolio-dispatcher", "policy": "viewer"},
                 ],
                 "secrets": [{"name": "ALPACA_CONNECTORS_DATA_KEY", "policy": "value_reader"}],
             },

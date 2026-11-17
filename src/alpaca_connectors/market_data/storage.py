@@ -73,8 +73,8 @@ def _daily_bar_column_info(*, price_basis: str, volume_basis: str) -> dict[str, 
         "asset_identifier": {
             "label": "Asset identifier",
             "description": (
-                "Main Sequence unique identifier of the stock or ETF, ALPACA:: followed by its "
-                "Alpaca asset UUID."
+                "Main Sequence unique identifier of the stock or exchange-traded fund, ALPACA:: "
+                "followed by its Alpaca asset UUID."
             ),
         },
         "open": {"label": "Open", "description": price("Opening price of the day")},
@@ -120,8 +120,8 @@ class AlpacaStockBars1dSipAllStorage(AlpacaMarketsTimeIndexMetaTableMixin, Marke
     }
     __metatable_description__ = (
         "One row per asset per US trading day. Daily stock prices (OHLCV bars) of US stocks "
-        "and ETFs, adjusted for splits, dividends and other corporate actions, from Alpaca's "
-        "consolidated SIP market-data feed for the assets the stored price-update "
+        "and exchange-traded funds, adjusted for splits, dividends and other corporate actions, "
+        "from Alpaca's consolidated SIP market-data feed for the assets the stored price-update "
         "configurations select. A day's bar is written by the first update that runs after the "
         "following 00:00 UTC."
     )
@@ -177,9 +177,9 @@ class AlpacaStockBars1dIexRawStorage(AlpacaMarketsTimeIndexMetaTableMixin, Marke
     }
     __metatable_description__ = (
         "One row per asset per US trading day. Daily stock prices (OHLCV bars) of US stocks "
-        "and ETFs, not adjusted for corporate actions, from Alpaca's IEX market-data feed, "
-        "which covers trades on the IEX exchange only, for the assets the stored price-update "
-        "configurations select. A day's bar is written by the first update that runs after the "
+        "and exchange-traded funds, not adjusted for corporate actions, from Alpaca's IEX "
+        "market-data feed, which covers trades on the IEX exchange only, for the assets the "
+        "stored price-update configurations select. A day's bar is written by the first update that runs after the "
         "following 00:00 UTC."
     )
     __metatable_labels__ = _BAR_LABELS

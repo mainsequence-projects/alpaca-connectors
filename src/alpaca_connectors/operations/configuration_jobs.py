@@ -1,7 +1,7 @@
-"""Workflow-declared signal and portfolio Jobs for ETF configurations (ADR 0013).
+"""Workflow-declared Jobs for portfolio configurations (ADR 0013).
 
 `.mainsequence/workflows/alpaca-connectors-api.yaml` declares one Job per configuration kind and
-one dispatcher Job per kind. A run of the kind's Job carries ``--configuration-uid <uid>`` and
+one dispatcher Job per kind; portfolios are the one kind left (ADR 0027). A run of the kind's Job carries ``--configuration-uid <uid>`` and
 executes that configuration; the API, the CLI and the dispatcher start such runs. The dispatcher
 holds the daily schedule: its scheduled run carries ``--scheduled`` and starts one
 ``--configuration-uid`` run for every scheduled configuration, so each configuration run is its own
@@ -27,17 +27,13 @@ from alpaca_connectors.portfolios.configurations import (
     scheduled_portfolio_configurations,
 )
 
-ConfigurationKind = Literal["signal", "portfolio"]
+ConfigurationKind = Literal["portfolio"]
 
 WORKFLOW_PATH = ".mainsequence/workflows/alpaca-connectors-api.yaml"
-SIGNAL_JOB_NAME = "Alpaca ETF Signal"
-PORTFOLIO_JOB_NAME = "Alpaca ETF Portfolio"
-ALPACA_ETF_SIGNAL_EXECUTION_PATH = "src/jobs/run_alpaca_etf_signal.py"
-ALPACA_ETF_PORTFOLIO_EXECUTION_PATH = "src/jobs/run_alpaca_etf_portfolio.py"
-SIGNAL_DISPATCHER_JOB_NAME = "Alpaca ETF Signal Dispatcher"
-PORTFOLIO_DISPATCHER_JOB_NAME = "Alpaca ETF Portfolio Dispatcher"
-ALPACA_ETF_SIGNAL_DISPATCHER_EXECUTION_PATH = "src/jobs/dispatch_alpaca_etf_signal.py"
-ALPACA_ETF_PORTFOLIO_DISPATCHER_EXECUTION_PATH = "src/jobs/dispatch_alpaca_etf_portfolio.py"
+PORTFOLIO_JOB_NAME = "Alpaca Portfolio"
+ALPACA_PORTFOLIO_EXECUTION_PATH = "src/jobs/run_alpaca_portfolio.py"
+PORTFOLIO_DISPATCHER_JOB_NAME = "Alpaca Portfolio Dispatcher"
+ALPACA_PORTFOLIO_DISPATCHER_EXECUTION_PATH = "src/jobs/dispatch_alpaca_portfolio.py"
 CONFIGURATION_UID_ARGUMENT = "--configuration-uid"
 SCHEDULED_ARGUMENT = "--scheduled"
 RUNNING_JOB_STATUSES = frozenset({"PENDING", "QUEUED", "RUNNING", "STARTED"})
@@ -59,23 +55,14 @@ class ConfigurationJobSpec:
 
 
 JOB_SPECS: dict[str, ConfigurationJobSpec] = {
-    "signal": ConfigurationJobSpec(
-        "signal",
-        "alpaca-etf-signal",
-        SIGNAL_JOB_NAME,
-        ALPACA_ETF_SIGNAL_EXECUTION_PATH,
-        "alpaca-etf-signal-dispatcher",
-        SIGNAL_DISPATCHER_JOB_NAME,
-        ALPACA_ETF_SIGNAL_DISPATCHER_EXECUTION_PATH,
-    ),
     "portfolio": ConfigurationJobSpec(
         "portfolio",
-        "alpaca-etf-portfolio",
+        "alpaca-portfolio",
         PORTFOLIO_JOB_NAME,
-        ALPACA_ETF_PORTFOLIO_EXECUTION_PATH,
-        "alpaca-etf-portfolio-dispatcher",
+        ALPACA_PORTFOLIO_EXECUTION_PATH,
+        "alpaca-portfolio-dispatcher",
         PORTFOLIO_DISPATCHER_JOB_NAME,
-        ALPACA_ETF_PORTFOLIO_DISPATCHER_EXECUTION_PATH,
+        ALPACA_PORTFOLIO_DISPATCHER_EXECUTION_PATH,
     ),
 }
 
@@ -113,13 +100,6 @@ class ConfigurationJobState:
     job: Any | None
     latest_runs: dict[str, ConfigurationJobRun]
     dispatcher: Any | None = None
-
-
-def _signal_configurations() -> Any:
-    """The ETF signal configurations, loaded only for the signal kind (ADR 0027)."""
-    from alpaca_connectors.operations import signal_job_configurations
-
-    return signal_job_configurations
 
 
 def _canonical_uid(value: Any, *, label: str) -> str:
@@ -287,13 +267,6 @@ def list_configuration_runs(
     return result
 
 
-def list_signal_job_runs(configuration_uid: Any, *, limit: int = 25) -> list[ConfigurationJobRun]:
-    configuration = _signal_configurations().get_signal_job_configuration(configuration_uid)
-    if configuration is None:
-        raise LookupError(f"Signal configuration {configuration_uid!s} does not exist.")
-    return list_configuration_runs(configuration, kind="signal", limit=limit)
-
-
 def list_portfolio_job_runs(
     configuration_uid: Any, *, limit: int = 25
 ) -> list[ConfigurationJobRun]:
@@ -304,7 +277,7 @@ def list_portfolio_job_runs(
 
 
 def get_configuration_job_run(job_run_uid: Any) -> ConfigurationJobRun | None:
-    """Return a run of this branch's signal or portfolio Job, or None for any other run."""
+    """Return a run of this branch's portfolio Job, or None for any other run."""
     from mainsequence.client import JobRun
 
     rows = list(JobRun.filter(uid=_canonical_uid(job_run_uid, label="JobRun UID"), timeout=60))
@@ -344,19 +317,6 @@ def launch_configuration_job(
     return _start_run(job, configuration_uid)
 
 
-def launch_signal_job(configuration_uid: Any) -> ConfigurationJobSubmission:
-    """Start one signal run, whether or not the scheduled run includes the configuration."""
-    signals = _signal_configurations()
-    configuration = signals.get_signal_job_configuration(configuration_uid)
-    if configuration is None:
-        raise LookupError(f"Signal configuration {configuration_uid!s} does not exist.")
-    signals.validate_signal_job_references(
-        universe_uid=configuration.universe_uid,
-        account_uid=configuration.account_uid,
-    )
-    return launch_configuration_job(configuration, kind="signal")
-
-
 def require_portfolio_preflight(configuration_uid: Any) -> None:
     """Raise ValueError naming the blockers when the portfolio cannot run."""
     from alpaca_connectors.portfolios.execution import preflight_portfolio_configuration
@@ -392,11 +352,7 @@ def dispatch_scheduled_configurations(kind: ConfigurationKind) -> dict[str, Any]
     preflight is blocked. One failed start does not stop the others.
     """
     job = require_configuration_job(kind)
-    configurations = (
-        _signal_configurations().scheduled_signal_configurations()
-        if kind == "signal"
-        else scheduled_portfolio_configurations()
-    )
+    configurations = scheduled_portfolio_configurations()
     active = _active_configuration_uids(job)
     launched: list[dict[str, str]] = []
     skipped: list[dict[str, str]] = []
@@ -410,8 +366,7 @@ def dispatch_scheduled_configurations(kind: ConfigurationKind) -> dict[str, Any]
             continue
         # One configuration's failure must not stop the others.
         try:
-            if kind == "portfolio":
-                require_portfolio_preflight(configuration_uid)
+            require_portfolio_preflight(configuration_uid)
         except ValueError as exc:
             skipped.append({"configuration_uid": configuration_uid, "reason": str(exc)})
             continue
@@ -488,15 +443,10 @@ def run_configuration_job(
     kind: ConfigurationKind, argv: Sequence[str] | None = None
 ) -> dict[str, Any]:
     """Entry point of the kind's Job: execute the configuration ``--configuration-uid`` selects."""
+    from alpaca_connectors.portfolios.execution import execute_portfolio_configuration
+
     args = build_job_argument_parser(kind).parse_args(argv)
-    if kind == "signal":
-        from alpaca_connectors.operations.signal_jobs import execute_signal_configuration
-
-        summary = execute_signal_configuration(args.configuration_uid)
-    else:
-        from alpaca_connectors.portfolios.execution import execute_portfolio_configuration
-
-        summary = execute_portfolio_configuration(args.configuration_uid).summary()
+    summary = execute_portfolio_configuration(args.configuration_uid).summary()
     return {
         **summary,
         "configuration_uid": args.configuration_uid,
@@ -505,10 +455,8 @@ def run_configuration_job(
 
 
 __all__ = [
-    "ALPACA_ETF_PORTFOLIO_DISPATCHER_EXECUTION_PATH",
-    "ALPACA_ETF_PORTFOLIO_EXECUTION_PATH",
-    "ALPACA_ETF_SIGNAL_DISPATCHER_EXECUTION_PATH",
-    "ALPACA_ETF_SIGNAL_EXECUTION_PATH",
+    "ALPACA_PORTFOLIO_DISPATCHER_EXECUTION_PATH",
+    "ALPACA_PORTFOLIO_EXECUTION_PATH",
     "CONFIGURATION_UID_ARGUMENT",
     "ConfigurationJobRun",
     "ConfigurationJobSpec",
@@ -519,8 +467,6 @@ __all__ = [
     "PORTFOLIO_JOB_NAME",
     "RUN_SCAN_LIMIT",
     "SCHEDULED_ARGUMENT",
-    "SIGNAL_DISPATCHER_JOB_NAME",
-    "SIGNAL_JOB_NAME",
     "WORKFLOW_PATH",
     "build_dispatcher_argument_parser",
     "build_job_argument_parser",
@@ -531,10 +477,8 @@ __all__ = [
     "get_configuration_job_run",
     "launch_configuration_job",
     "launch_portfolio_job",
-    "launch_signal_job",
     "list_configuration_runs",
     "list_portfolio_job_runs",
-    "list_signal_job_runs",
     "require_configuration_job",
     "require_portfolio_preflight",
     "resolve_configuration_job",

@@ -29,15 +29,14 @@ def test_portfolio_runtime_includes_project_foreign_key_dependencies(remote_back
     table_names = _table_names(portfolio_runtime_models())
     application_tables = set(_table_names(application_runtime_models()))
 
-    signal_configuration = "alpaca_connectors__etf_signal_job_configuration"
     bars_configuration = "alpaca_connectors__bars_configuration"
-    portfolio_configuration = "alpaca_connectors__etf_portfolio_configuration"
+    rebalance_configuration = "alpaca_connectors__portfolio_rebalance_configuration"
+    portfolio_configuration = "alpaca_connectors__portfolio_configuration"
 
-    assert signal_configuration in table_names
     assert bars_configuration in table_names
     assert application_tables.issubset(table_names)
-    assert table_names.index(signal_configuration) < table_names.index(portfolio_configuration)
     assert table_names.index(bars_configuration) < table_names.index(portfolio_configuration)
+    assert table_names.index(rebalance_configuration) < table_names.index(portfolio_configuration)
 
 
 def test_runtimes_attach_only_this_applications_tables(remote_backend) -> None:

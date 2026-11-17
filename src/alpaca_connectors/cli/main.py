@@ -48,12 +48,6 @@ from .holdings import (
 from .holdings import (
     configure_list_parser as configure_holdings_list_parser,
 )
-from .holdings_category import (
-    configure_delete_parser as configure_universe_delete_parser,
-)
-from .holdings_category import configure_get_parser as configure_universe_get_parser
-from .holdings_category import configure_list_parser as configure_universe_list_parser
-from .holdings_category import configure_run_parser as configure_universe_run_parser
 from .instances import configure_backfill_parser as configure_instances_backfill_parser
 from .instances import (
     configure_grant_markets_access_parser as configure_instances_grant_markets_access_parser,
@@ -81,44 +75,6 @@ from .portfolios import (
 )
 from .portfolios import (
     configure_runs_parser as configure_portfolio_runs_parser,
-)
-from .portfolios import (
-    configure_update_parser as configure_portfolio_update_parser,
-)
-from .signal_jobs import (
-    configure_action_parser as configure_signal_action_parser,
-)
-from .signal_jobs import (
-    configure_delete_parser as configure_signal_delete_parser,
-)
-from .signal_jobs import configure_get_parser as configure_signal_get_parser
-from .signal_jobs import configure_list_parser as configure_signal_list_parser
-from .signal_jobs import configure_runs_parser as configure_signal_runs_parser
-from .signal_jobs import configure_update_parser as configure_signal_update_parser
-from .signal_jobs import (
-    run_pause_command as run_signal_pause_command,
-)
-from .signal_jobs import (
-    run_reconcile_command as run_signal_reconcile_command,
-)
-from .signal_jobs import (
-    run_resume_command as run_signal_resume_command,
-)
-from .signal_jobs import run_run_command as run_signal_run_command
-from .universe_source import (
-    configure_delete_parser as configure_source_delete_parser,
-)
-from .universe_source import (
-    configure_get_parser as configure_source_get_parser,
-)
-from .universe_source import (
-    configure_list_parser as configure_source_list_parser,
-)
-from .universe_source import (
-    configure_preview_parser as configure_source_preview_parser,
-)
-from .universe_source import (
-    configure_update_parser as configure_source_update_parser,
 )
 
 
@@ -233,50 +189,6 @@ def build_parser() -> argparse.ArgumentParser:
     configure_holdings_list_parser(holdings_commands.add_parser("list"))
     configure_holdings_capture_parser(holdings_commands.add_parser("capture"))
 
-    source_parser = top_level.add_parser(
-        "universe-source",
-        help="Review, change and remove the remaining universe extraction sources.",
-    )
-    source_commands = source_parser.add_subparsers(dest="universe_source_command")
-    configure_source_list_parser(source_commands.add_parser("list"))
-    configure_source_get_parser(source_commands.add_parser("get"))
-    configure_source_update_parser(source_commands.add_parser("update"))
-    configure_source_delete_parser(source_commands.add_parser("delete"))
-    configure_source_preview_parser(source_commands.add_parser("preview"))
-
-    universe_parser = top_level.add_parser(
-        "universe",
-        help="Universe capability commands.",
-    )
-    universe_commands = universe_parser.add_subparsers(dest="universe_command")
-    configure_universe_list_parser(universe_commands.add_parser("list"))
-    configure_universe_get_parser(universe_commands.add_parser("get"))
-    configure_universe_delete_parser(universe_commands.add_parser("delete"))
-    configure_universe_run_parser(
-        universe_commands.add_parser(
-            "run",
-            help="Plan or run a registered Asset Universe by its UID.",
-        )
-    )
-
-    signal_parser = top_level.add_parser(
-        "signal",
-        help="Review, run and remove the remaining ETF signal configurations.",
-    )
-    signal_commands = signal_parser.add_subparsers(dest="signal_command")
-    configure_signal_list_parser(signal_commands.add_parser("list"))
-    configure_signal_get_parser(signal_commands.add_parser("get"))
-    configure_signal_update_parser(signal_commands.add_parser("update"))
-    configure_signal_delete_parser(signal_commands.add_parser("delete"))
-    configure_signal_action_parser(signal_commands.add_parser("run"), run_signal_run_command)
-    configure_signal_action_parser(signal_commands.add_parser("pause"), run_signal_pause_command)
-    configure_signal_action_parser(signal_commands.add_parser("resume"), run_signal_resume_command)
-    configure_signal_action_parser(
-        signal_commands.add_parser("reconcile"),
-        run_signal_reconcile_command,
-    )
-    configure_signal_runs_parser(signal_commands.add_parser("runs"))
-
     portfolio_parser = top_level.add_parser(
         "portfolio",
         help="Review, run and end analytical portfolio configurations on the portfolio Job.",
@@ -284,7 +196,6 @@ def build_parser() -> argparse.ArgumentParser:
     portfolio_commands = portfolio_parser.add_subparsers(dest="portfolio_command")
     configure_portfolio_list_parser(portfolio_commands.add_parser("list"))
     configure_portfolio_get_parser(portfolio_commands.add_parser("get"))
-    configure_portfolio_update_parser(portfolio_commands.add_parser("update"))
     configure_portfolio_delete_parser(portfolio_commands.add_parser("delete"))
     configure_portfolio_action_parser(portfolio_commands.add_parser("run"))
     configure_portfolio_runs_parser(portfolio_commands.add_parser("runs"))

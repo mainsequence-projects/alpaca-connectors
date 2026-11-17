@@ -16,13 +16,11 @@ dependencies = [
     "mainsequence-metatable>=0.1.66,<0.2",
     # 0.45.0 is the first release whose asset model knows the TXSE exchange.
     "alpaca-py>=0.45.0",
-    "playwright",
     "mkdocs>=1.6.1",
     "mkdocs-material>=9.7.6",
     "fastapi>=0.135.3",
     "uvicorn>=0.52.4,<0.53",
     "httpx>=0.28.1",
-    "etfhextractor",
     "empyrical-reloaded>=0.5.12",
     # Runtime of the `harness_agent` (api/agent/main.py); the platform runs it from this image.
     "ms-tau-sdk>=2.0.26,<3",
@@ -36,9 +34,6 @@ alpaca-connectors = "alpaca_connectors.cli:main"
 # entry point are executed from the checkout by path and are not part of the wheel.
 where = ["src"]
 include = ["alpaca_connectors*"]
-
-[tool.setuptools.package-data]
-"alpaca_connectors.universes" = ["fixtures/*.json"]
 
 [tool.ruff]
 line-length = 100                 # Max line length for Ruff/Black.
@@ -91,10 +86,6 @@ ignore = ["E203", "E501"]
 [tool.ruff.lint.isort]
 # Treat these as your own packages so they sort as "first-party".
 known-first-party = ["mainsequence","metatables","alpaca_connectors"]
-
-[tool.uv.sources]
-# The ETF library is released only as Git tags; consumers pin the tag of the release they tested.
-etfhextractor = { git = "https://github.com/mainsequence-projects/etfholdingextractor", tag = "v0.6.0" }
 
 [dependency-groups]
 dev = [

@@ -16,8 +16,7 @@ never creates schema (that is the migration provider's job). ``msm.start_engine`
 and cached per configuration, so calling it more than once in a process is safe.
 
 Call this once at every process entrypoint (CLI ``main()``, each job ``main()``, FastAPI
-startup, which first starts the Markets API: ``alpaca_connectors.dependencies``). Never call it
-from the SDK-free ETF extractor import graph.
+startup, which first starts the Markets API: ``alpaca_connectors.dependencies``).
 """
 
 from __future__ import annotations
@@ -44,17 +43,15 @@ def use_markets_api() -> Any:
 
 
 def project_runtime_models() -> list[type[Any]]:
-    """This project's asset, bars, universe, configuration and operation tables."""
+    """This project's asset, bars, configuration and operation tables."""
     from alpaca_connectors.assets.alpaca_asset_details import project_asset_models
     from alpaca_connectors.market_data import project_configuration_models, project_storage_models
     from alpaca_connectors.operations import project_operation_models
     from alpaca_connectors.portfolios import project_portfolio_configuration_models
-    from alpaca_connectors.universes import project_universe_models
 
     return [
         *project_asset_models(),
         *project_storage_models(),
-        *project_universe_models(),
         *project_configuration_models(),
         *project_operation_models(),
         *project_portfolio_configuration_models(),
@@ -88,7 +85,7 @@ def application_runtime_models() -> list[type[Any]]:
 
 
 def portfolio_runtime_models(extra_models: list[type[Any]] | None = None) -> list[type[Any]]:
-    """Runtime models for ETF-holdings portfolio construction.
+    """Runtime models for portfolio construction.
 
     The application tables plus the signal and portfolio contract instances. Configured
     interpolated-price storage classes are dynamic and must be migrated before normal

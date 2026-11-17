@@ -52,9 +52,7 @@ def configure_configuration_list_parser(parser: argparse.ArgumentParser) -> None
     parser.add_argument("--search")
     parser.add_argument("--enabled", action=argparse.BooleanOptionalAction, default=None)
     parser.add_argument("--scheduled", action=argparse.BooleanOptionalAction, default=None)
-    parser.add_argument(
-        "--asset-source", choices=("assets", "universe", "account_holdings", "portfolios")
-    )
+    parser.add_argument("--asset-source", choices=("assets", "account_holdings", "portfolios"))
     parser.add_argument("--ordering", default="name")
     parser.set_defaults(handler=run_configuration_list_command)
 
@@ -71,10 +69,9 @@ def _add_configuration_values(parser: argparse.ArgumentParser, *, required: bool
     parser.add_argument(
         "--asset-source",
         required=required,
-        choices=("assets", "universe", "account_holdings", "portfolios"),
+        choices=("assets", "account_holdings", "portfolios"),
     )
     parser.add_argument("--asset-uids", help="Comma-separated Asset UIDs for the assets source.")
-    parser.add_argument("--universe-uid", help="Registered Asset Universe UID.")
     parser.add_argument("--frequency", required=required)
     parser.add_argument("--feed", required=required)
     parser.add_argument("--adjustment", required=required)
@@ -181,7 +178,6 @@ def _configuration_values(args: argparse.Namespace, *, exclude_none: bool) -> di
         "account_uid": args.account_uid,
         "asset_source": args.asset_source,
         "asset_uids": parse_csv(args.asset_uids) if args.asset_uids else None,
-        "universe_uid": args.universe_uid,
         "frequency_id": args.frequency,
         "feed": args.feed,
         "adjustment": args.adjustment,

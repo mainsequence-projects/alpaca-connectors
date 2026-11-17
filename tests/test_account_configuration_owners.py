@@ -46,7 +46,6 @@ from alpaca_connectors.account.services import (
 CALLER = AccountOwner.main_sequence_user(CALLER_UID)
 ANOTHER_USER = AccountOwner.main_sequence_user("99999999-9999-4999-8999-999999999999")
 ACCOUNT_UID = "account-uid"
-SIGNAL_SERVICES = "alpaca_connectors.api.app.services.signal_jobs"
 BAR_SERVICES = "alpaca_connectors.api.app.services.bar_configurations"
 BAR_BODY = {
     "name": "Daily bars",
@@ -98,27 +97,19 @@ def test_only_an_external_persons_claim_of_an_unowned_account_is_checked(
 
 
 def test_only_enabled_configurations_run_with_an_account() -> None:
-    signals = [
-        SimpleNamespace(uid="s-on", enabled=True),
-        SimpleNamespace(uid="s-paused", enabled=False),
+    bars = [
+        SimpleNamespace(uid="b-on", enabled=True),
+        SimpleNamespace(uid="b-off", enabled=False),
     ]
-    bars = [SimpleNamespace(uid="b-off", enabled=False)]
-    with (
-        patch(
-            "alpaca_connectors.operations.signal_job_configurations.signal_job_configurations_for_account",
-            return_value=signals,
-        ) as read_signals,
-        patch(
-            "alpaca_connectors.market_data.configurations.bar_configurations_for_account",
-            return_value=bars,
-        ) as read_bars,
-    ):
+    with patch(
+        "alpaca_connectors.market_data.configurations.bar_configurations_for_account",
+        return_value=bars,
+    ) as read_bars:
         found = enabled_account_configurations(ACCOUNT_UID)
-    read_signals.assert_called_once_with(ACCOUNT_UID)
     read_bars.assert_called_once_with(ACCOUNT_UID)
-    assert found == AccountConfigurations(signal_uids=("s-on",), bar_uids=())
+    assert found == AccountConfigurations(bar_uids=("b-on",))
     assert found and len(found) == 1
-    assert not AccountConfigurations(signal_uids=(), bar_uids=())
+    assert not AccountConfigurations(bar_uids=())
 
 
 # ------------------------------------------------------------------------------------------------
@@ -150,7 +141,7 @@ def test_other_registrations_never_ask_about_configurations(owner, existing) -> 
 
 def test_a_claim_reads_the_existing_rows_account_or_asks_markets_by_identity() -> None:
     reads = "alpaca_connectors.account.services.enabled_account_configurations"
-    in_use = AccountConfigurations(signal_uids=("s-on",))
+    in_use = AccountConfigurations(bar_uids=("b-on",))
     with (
         patch(reads, return_value=in_use) as configurations,
         patch("msm.api.accounts.Account") as markets_account,
@@ -190,20 +181,9 @@ def test_a_claim_of_an_account_in_use_answers_409_naming_nothing(vouching) -> No
 # Configurations on an owned account
 # ------------------------------------------------------------------------------------------------
 def _configuration_calls(client, headers) -> dict[str, int]:
-    """Each write that makes a configuration run with ``account-uid``'s keys.
-
-    No signal configuration is created any more (ADR 0027); the existing ones are still changed
-    and resumed only for the account's owner.
-    """
-    signal = "/v1/signal-jobs"
+    """Each write that makes a configuration run with ``account-uid``'s keys."""
     bars = "/v1/market-data/bar-configurations"
     return {
-        "signal update": client.patch(
-            f"{signal}/signal-uid", json={"name": "Renamed"}, headers=headers
-        ).status_code,
-        "signal resume": client.post(
-            f"{signal}/signal-uid/actions/resume", headers=headers
-        ).status_code,
         "bars create": client.post(bars, json=BAR_BODY, headers=headers).status_code,
         "bars update": client.patch(
             f"{bars}/bars-uid", json={"name": "Renamed"}, headers=headers
@@ -212,17 +192,14 @@ def _configuration_calls(client, headers) -> dict[str, int]:
 
 
 def _configured_account(owner: AccountOwner | None):
-    """The account is owned by ``owner``; both configurations already run with it."""
+    """The account is owned by ``owner``; a bar configuration already runs with it."""
     configured = SimpleNamespace(account_uid=ACCOUNT_UID)
     return (
         patch(
             "alpaca_connectors.api.app.services.accounts.get_account_registration",
             return_value=registration(owner, uid=ACCOUNT_UID),
         ),
-        patch(f"{SIGNAL_SERVICES}.get_signal_job_configuration", return_value=configured),
         patch(f"{BAR_SERVICES}.get_bar_configuration", return_value=configured),
-        patch(f"{SIGNAL_SERVICES}.update_signal_job_configuration", side_effect=Reached()),
-        patch(f"{SIGNAL_SERVICES}.resume_signal_job_configuration", side_effect=Reached()),
         patch(f"{BAR_SERVICES}.create_bar_configuration", side_effect=Reached()),
         patch(f"{BAR_SERVICES}.update_bar_configuration", side_effect=Reached()),
     )
@@ -230,7 +207,7 @@ def _configured_account(owner: AccountOwner | None):
 
 def _call(vouching, owner: AccountOwner | None, headers) -> tuple[dict[str, int], list]:
     with ExitStack() as stack:
-        _, _, _, *services = [stack.enter_context(item) for item in _configured_account(owner)]
+        _, _, *services = [stack.enter_context(item) for item in _configured_account(owner)]
         answers = _configuration_calls(vouching.client, headers)
     return answers, services
 
@@ -297,15 +274,14 @@ def test_removal_preflight_warns_instead_of_blocking(vouching) -> None:
     assert answer.status_code == 200
     assert body["allowed"] is True
     assert body["blockers"] == []
-    assert any("2 enabled signal or bar configurations" in item for item in body["warnings"])
+    assert any("2 enabled bar configurations" in item for item in body["warnings"])
 
 
 def test_the_owner_removes_an_account_that_configurations_run_on(vouching) -> None:
     removed = {
         "account_uid": ACCOUNT_UID,
         "registration_removed": True,
-        "disabled_signal_configuration_uids": ["s-on"],
-        "disabled_bar_configuration_uids": [],
+        "disabled_bar_configuration_uids": ["b-on"],
     }
     with (
         patch(
@@ -320,7 +296,7 @@ def test_the_owner_removes_an_account_that_configurations_run_on(vouching) -> No
             f"/v1/accounts/{ACCOUNT_UID}", headers=vouching.headers(**baggage())
         )
     assert answer.status_code == 200
-    assert answer.json()["disabled_signal_configuration_uids"] == ["s-on"]
+    assert answer.json()["disabled_bar_configuration_uids"] == ["b-on"]
     remove.assert_called_once_with(ACCOUNT_UID)
 
 
@@ -333,14 +309,10 @@ def test_the_agent_configures_and_removes_for_the_person_it_works_for() -> None:
     person = AccountOwner.main_sequence_user("person-uid")
     with (
         patch("alpaca_connectors.agent_tools._acting_user_uid", return_value="person-uid"),
-        patch(f"{SIGNAL_SERVICES}.update_configuration") as update_signal,
         patch(f"{BAR_SERVICES}.create_configuration") as create_bars,
         patch(f"{BAR_SERVICES}.update_configuration") as update_bars,
         patch("alpaca_connectors.api.app.services.accounts.remove_account") as remove,
     ):
-        agent_tools.manage_etf_signal(
-            {"operation": "update", "configuration_uid": "s", "request": {"scheduled": True}}
-        )
         agent_tools.manage_bar_configuration({"operation": "create", "request": BAR_BODY})
         agent_tools.manage_bar_configuration(
             {"operation": "update", "configuration_uid": "b", "request": {"name": "Renamed"}}
@@ -352,7 +324,7 @@ def test_the_agent_configures_and_removes_for_the_person_it_works_for() -> None:
                 "confirmation": "DELETE account-uid",
             }
         )
-    for call in (update_signal, create_bars, update_bars):
+    for call in (create_bars, update_bars):
         assert call.call_args.kwargs["owner"] == person
     # Configurations no longer refuse the Agent's removal; the service disables them.
     remove.assert_called_once_with(ACCOUNT_UID)
@@ -369,12 +341,13 @@ def test_the_cli_dry_run_names_the_configurations_it_would_disable(capsys) -> No
         patch("alpaca_connectors.holdings.services.list_account_holdings", return_value=([], 3)),
         patch(
             f"{services}.enabled_account_configurations",
-            return_value=AccountConfigurations(signal_uids=("s-on",), bar_uids=("b-on",)),
+            return_value=AccountConfigurations(bar_uids=("b-on",)),
         ),
         patch(f"{services}.remove_account_registration") as remove,
     ):
         assert run_account_remove_command(Namespace(account_uid=ACCOUNT_UID, execute=False)) == 0
     remove.assert_not_called()
     printed = capsys.readouterr().out
-    assert '"disables_signal_configuration_uids"' in printed
-    assert "s-on" in printed and "b-on" in printed
+    assert '"disables_bar_configuration_uids"' in printed
+    assert "b-on" in printed
+    assert "signal" not in printed

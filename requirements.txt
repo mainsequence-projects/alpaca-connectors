@@ -40,7 +40,6 @@ cachetools==7.1.4
     #   ms-markets
 certifi==2026.10.19
     # via
-    #   etfhextractor
     #   httpcore
     #   httpx
     #   mainsequence
@@ -77,8 +76,6 @@ cryptography==50.0.2
     #   secretstorage
 empyrical-reloaded==0.5.12
     # via alpaca-connectors
-etfhextractor @ git+https://github.com/mainsequence-projects/etfholdingextractor@ccdd1a6842f50a712c5da75569c23bd5a97fec20
-    # via alpaca-connectors
 exchange-calendars==4.13.2
     # via pandas-market-calendars
 fastapi==0.136.3
@@ -101,8 +98,6 @@ googleapis-common-protos==1.75.0
     # via
     #   opentelemetry-exporter-otlp-proto-grpc
     #   opentelemetry-exporter-otlp-proto-http
-greenlet==3.5.1
-    # via playwright
 grpcio==1.81.1
     # via opentelemetry-exporter-otlp-proto-grpc
 h11==0.16.0
@@ -172,13 +167,11 @@ loguru==0.7.3
 mainsequence==9.0.38
     # via
     #   alpaca-connectors
-    #   etfhextractor
     #   mainsequence-metatable
     #   ms-markets
 mainsequence-metatable==0.1.67
     # via
     #   alpaca-connectors
-    #   etfhextractor
     #   ms-markets
 mako==1.3.12
     # via alembic
@@ -228,9 +221,7 @@ more-itertools==11.1.0
     #   jaraco-classes
     #   jaraco-functools
 ms-markets==4.0.1
-    # via
-    #   alpaca-connectors
-    #   etfhextractor
+    # via alpaca-connectors
 ms-tau-sdk==2.0.26
     # via alpaca-connectors
 msgpack==1.2.0
@@ -300,9 +291,7 @@ pandas==3.0.3
     #   ms-markets
     #   pandas-market-calendars
 pandas-market-calendars==5.4.0
-    # via
-    #   etfhextractor
-    #   ms-markets
+    # via ms-markets
 pathspec==1.1.1
     # via mkdocs
 peewee==3.17.3
@@ -318,8 +307,6 @@ platformdirs==4.10.0
     #   mainsequence-metatable
     #   mkdocs-get-deps
     #   textual
-playwright==1.60.0
-    # via alpaca-connectors
 portalocker==3.2.0
     # via concurrent-log-handler
 protobuf==6.33.6
@@ -362,8 +349,6 @@ pydantic-core==2.46.4
     # via pydantic
 pydantic-settings==2.15.0
     # via ms-tau-sdk
-pyee==13.0.1
-    # via playwright
 pygments==2.20.0
     # via
     #   mainsequence
@@ -506,7 +491,6 @@ typing-extensions==4.15.0
     #   opentelemetry-semantic-conventions
     #   pydantic
     #   pydantic-core
-    #   pyee
     #   sqlalchemy
     #   textual
     #   typing-inspection

@@ -54,7 +54,6 @@ def _typed_configuration_row() -> AlpacaBarsConfiguration:
         account_uid=uuid.UUID("22222222-2222-4222-8222-222222222222"),
         asset_source="account_holdings",
         asset_uids=[],
-        universe_uid=None,
         frequency_id="1d",
         feed="sip",
         adjustment="all",
@@ -72,7 +71,6 @@ def test_api_service_projects_typed_configuration_rows_for_create_get_and_update
         account_uid=str(row.account_uid),
         asset_source=row.asset_source,
         asset_uids=[],
-        universe_uid=None,
         frequency_id=row.frequency_id,
         feed=row.feed,
         adjustment=row.adjustment,
@@ -120,13 +118,11 @@ def test_configuration_table_has_uuid_identity_and_no_dataset_pointer() -> None:
     assert "dataset_uid" not in table.columns
     assert "account_uid" in table.columns
     assert "asset_source" in table.columns
-    assert "universe_uid" in table.columns
-    universe_foreign_key = next(
-        foreign_key
-        for foreign_key in table.foreign_keys
-        if foreign_key.parent.name == "universe_uid"
-    )
-    assert universe_foreign_key.target_fullname == "alpaca_connectors__asset_universe.uid"
+    # A configuration chooses its assets by list, account holdings or portfolios (ADR 0027).
+    assert "universe_uid" not in table.columns
+    assert {key.column.table.name for key in table.foreign_keys} == {
+        "ms_markets__account",
+    }
 
 
 def test_explicit_assets_use_a_normalized_composite_membership() -> None:
@@ -187,24 +183,25 @@ def test_explicit_asset_memberships_use_one_bulk_upsert_and_one_stale_delete() -
     execute_operation.assert_called_once_with("delete-stale-operation", context=context)
 
 
-def test_scope_validation_owns_three_exclusive_source_shapes() -> None:
+def test_scope_validation_owns_the_exclusive_source_shapes() -> None:
     asset_uid = uuid.uuid4()
-    universe_uid = uuid.uuid4()
     assert validate_configuration_scope(
-        asset_source="assets", asset_uids=[asset_uid, asset_uid], universe_uid=None
-    ) == ("assets", [asset_uid], None)
-    assert validate_configuration_scope(
-        asset_source="universe", asset_uids=None, universe_uid=universe_uid
-    ) == ("universe", [], universe_uid)
-    assert validate_configuration_scope(
-        asset_source="account_holdings", asset_uids=None, universe_uid=None
-    ) == ("account_holdings", [], None)
+        asset_source="assets", asset_uids=[asset_uid, asset_uid]
+    ) == ("assets", [asset_uid])
+    assert validate_configuration_scope(asset_source="account_holdings", asset_uids=None) == (
+        "account_holdings",
+        [],
+    )
+    assert validate_configuration_scope(asset_source="portfolios", asset_uids=None) == (
+        "portfolios",
+        [],
+    )
+    with pytest.raises(ValueError, match="requires"):
+        validate_configuration_scope(asset_source="assets", asset_uids=None)
     with pytest.raises(ValueError, match="forbids"):
-        validate_configuration_scope(
-            asset_source="account_holdings",
-            asset_uids=[asset_uid],
-            universe_uid=None,
-        )
+        validate_configuration_scope(asset_source="account_holdings", asset_uids=[asset_uid])
+    with pytest.raises(ValueError, match="Unsupported"):
+        validate_configuration_scope(asset_source="universe", asset_uids=None)
 
 
 def test_runtime_config_hash_material_uses_source_identity_not_resolved_members() -> None:
@@ -218,16 +215,8 @@ def test_runtime_config_hash_material_uses_source_identity_not_resolved_members(
     )
     assert account_config.asset_list is None
     assert account_config.account_uid == account_uid
-
-    universe_config = AlpacaStockBarsConfig(
-        frequency_id="1d",
-        feed="sip",
-        adjustment="all",
-        asset_source="universe",
-        asset_category_unique_identifier="HOLDINGS__SPY",
-    )
-    assert universe_config.asset_list is None
-    assert universe_config.asset_category_unique_identifier == "HOLDINGS__SPY"
+    # The retired category field stays in the hash material, always null (ADR 0027).
+    assert account_config.asset_category_unique_identifier is None
 
 
 def test_runtime_config_rejects_mixed_source_fields() -> None:
@@ -302,7 +291,6 @@ def test_review_resolution_never_resolves_secret_values() -> None:
         account_uid=account_uid,
         asset_source="assets",
         asset_uids=[asset_uid],
-        universe_uid=None,
         frequency_id="1d",
         feed="sip",
         adjustment="all",
@@ -311,7 +299,6 @@ def test_review_resolution_never_resolves_secret_values() -> None:
             "account_uid": str(account_uid),
             "asset_source": "assets",
             "asset_uids": [str(asset_uid)],
-            "universe_uid": None,
             "frequency_id": "1d",
             "feed": "sip",
             "adjustment": "all",

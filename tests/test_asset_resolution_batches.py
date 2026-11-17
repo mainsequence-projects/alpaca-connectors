@@ -5,7 +5,6 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from alpaca_connectors.assets.resolution import (
-    asset_unique_identifiers_for_category,
     assets_by_uids,
     assets_for_ticker,
     ticker_and_optional_figi_by_unique_identifiers,
@@ -77,8 +76,10 @@ def test_bar_identity_details_use_one_markets_read_and_one_own_query() -> None:
     assert len(own_queries) == 1
 
 
-def test_category_members_are_paged_and_resolved_in_batches() -> None:
-    from msm.api.assets import Asset, AssetCategory, AssetCategoryMembership
+def test_category_members_are_read_in_pages() -> None:
+    from msm.api.assets import AssetCategoryMembership
+
+    from alpaca_connectors.markets_api import category_member_asset_uids
 
     category_uid = uuid.uuid4()
     member_uids = [uuid.UUID(int=index + 1) for index in range(501)]
@@ -91,25 +92,15 @@ def test_category_members_are_paged_and_resolved_in_batches() -> None:
         return [SimpleNamespace(asset_uid=value) for value in chunk]
 
     with (
-        patch.object(
-            AssetCategory,
-            "get_by_unique_identifier",
-            classmethod(lambda cls, value: SimpleNamespace(uid=category_uid)),
-        ),
         patch.object(AssetCategoryMembership, "count", classmethod(lambda cls, **kw: 501)),
         patch.object(
             AssetCategoryMembership, "filter", classmethod(lambda cls, **kw: memberships(**kw))
         ),
-        patch.object(
-            Asset,
-            "filter",
-            classmethod(lambda cls, **kw: [_asset(uuid.UUID(value)) for value in kw["uid__in"]]),
-        ),
     ):
-        identifiers = asset_unique_identifiers_for_category("HOLDINGS__IVV")
+        uids = category_member_asset_uids(category_uid)
 
     assert pages == [(500, 0), (500, 500)]
-    assert identifiers == sorted(f"ALPACA::{value}" for value in member_uids)
+    assert uids == [str(value) for value in member_uids]
 
 
 def test_ticker_lookup_reads_own_details_then_markets_assets() -> None:

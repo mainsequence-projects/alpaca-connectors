@@ -1,9 +1,8 @@
 """CLI for durable portfolio and rebalance configurations.
 
 Every portfolio configuration runs on the portfolio Job declared in the repository workflow
-(ADR 0013). A configuration holds no schedule or compute: `--no-scheduled` leaves it out of that
-Job's scheduled run. Portfolios are created only by the applications that give them weights
-(ADR 0024); no ETF portfolio is created any more (ADR 0027).
+(ADR 0013). Portfolios are created, given weights and changed only by the applications that own
+them (ADR 0024); an operator lists, runs and ends them here.
 """
 
 from __future__ import annotations
@@ -22,21 +21,10 @@ def _print(value: Any) -> None:
     print(json.dumps(value, indent=2, sort_keys=True, default=str))
 
 
-def _add_scheduled_argument(parser: argparse.ArgumentParser, *, create: bool) -> None:
-    # Schedule and compute belong to the portfolio Job in the workflow file (ADR 0013).
-    parser.add_argument(
-        "--scheduled",
-        action=argparse.BooleanOptionalAction,
-        default=True if create else None,
-        help="Include the configuration in the portfolio Job's scheduled run.",
-    )
-
-
 def configure_list_parser(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--limit", type=int, default=25)
     parser.add_argument("--offset", type=int, default=0)
     parser.add_argument("--search")
-    parser.add_argument("--signal-configuration-uid")
     parser.add_argument("--bars-configuration-uid")
     parser.add_argument("--ordering", default="name")
     parser.set_defaults(handler=run_list_command)
@@ -45,23 +33,6 @@ def configure_list_parser(parser: argparse.ArgumentParser) -> None:
 def configure_get_parser(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("configuration_uid")
     parser.set_defaults(handler=run_get_command)
-
-
-def configure_update_parser(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("configuration_uid")
-    parser.add_argument("--name")
-    parser.add_argument("--description")
-    parser.add_argument("--signal-configuration-uid")
-    parser.add_argument("--bars-configuration-uid")
-    parser.add_argument("--rebalance-configuration-uid")
-    parser.add_argument("--valuation-column")
-    parser.add_argument("--commission-fee", type=float)
-    parser.add_argument("--valuation-maximum-staleness-seconds", type=int)
-    parser.add_argument(
-        "--fail-on-missing-prices", action=argparse.BooleanOptionalAction, default=None
-    )
-    _add_scheduled_argument(parser, create=False)
-    parser.set_defaults(handler=run_update_command)
 
 
 def configure_delete_parser(parser: argparse.ArgumentParser) -> None:
@@ -152,7 +123,6 @@ def run_list_command(args: argparse.Namespace) -> int:
         limit=args.limit,
         offset=args.offset,
         search=args.search,
-        signal_configuration_uid=args.signal_configuration_uid,
         bars_configuration_uid=args.bars_configuration_uid,
         ordering=args.ordering,
     )
@@ -170,35 +140,10 @@ def run_get_command(args: argparse.Namespace) -> int:
     return 0
 
 
-def run_update_command(args: argparse.Namespace) -> int:
-    from alpaca_connectors.portfolios import update_portfolio_configuration
-
-    values = {
-        key: value
-        for key, value in {
-            "name": args.name,
-            "description": args.description,
-            "signal_configuration_uid": args.signal_configuration_uid,
-            "bars_configuration_uid": args.bars_configuration_uid,
-            "rebalance_configuration_uid": args.rebalance_configuration_uid,
-            "valuation_column": args.valuation_column,
-            "commission_fee": args.commission_fee,
-            "valuation_maximum_staleness_seconds": (args.valuation_maximum_staleness_seconds),
-            "fail_on_missing_prices": args.fail_on_missing_prices,
-            "scheduled": args.scheduled,
-        }.items()
-        if value is not None
-    }
-    if not values:
-        raise SystemExit("At least one portfolio configuration field must be provided.")
-    _print(update_portfolio_configuration(args.configuration_uid, **values))
-    return 0
-
-
 def run_delete_command(args: argparse.Namespace) -> int:
     """End a portfolio as the API does: retire its `Portfolio`, then delete the configuration.
 
-    The operator acts for no owner, so a provided-weights portfolio is ended too (ADR 0027).
+    The operator acts for no owner, so any portfolio can be ended (ADR 0027).
     """
     from alpaca_connectors.portfolios import get_portfolio_configuration
     from alpaca_connectors.portfolios.provided_weights import (
@@ -359,5 +304,4 @@ __all__ = [
     "configure_rebalance_list_parser",
     "configure_rebalance_update_parser",
     "configure_runs_parser",
-    "configure_update_parser",
 ]

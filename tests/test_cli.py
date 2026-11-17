@@ -47,7 +47,7 @@ class CliTests(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertEqual(build_plan.call_args.kwargs["account_uid"], "account-uid")
 
-    def test_asset_register_accepts_only_exact_symbols_not_etf_seed_expansion(self) -> None:
+    def test_asset_register_accepts_only_exact_symbols_without_seed_expansion(self) -> None:
         parser = build_parser()
         asset_parser = next(
             action.choices["asset"]
@@ -175,45 +175,29 @@ class CliTests(unittest.TestCase):
             account_is_active=None,
         )
 
-    def test_universe_run_uses_registered_universe_uid(self) -> None:
-        plan = SimpleNamespace(summary=lambda: {"etf_ticker": "IVV"}, has_blockers=lambda: False)
-        universe = {
-            "uid": "universe-uid",
-            "source_uid": "source-uid",
-            "asset_category_uid": "category-uid",
-        }
-        stdout = io.StringIO()
-        with (
-            patch("alpaca_connectors.universes.get_asset_universe_view", return_value=universe),
-            patch(
-                "alpaca_connectors.universes.preview_asset_universe", return_value=plan
-            ) as preview,
-            contextlib.redirect_stdout(stdout),
-        ):
-            exit_code = main(
-                [
-                    "universe",
-                    "run",
-                    "--universe-uid",
-                    "universe-uid",
-                    "--account-uid",
-                    "account-uid",
-                ]
-            )
-        self.assertEqual(exit_code, 0)
-        preview.assert_called_once_with(
-            "universe-uid",
-            account_uid="account-uid",
-            timeout=30.0,
+    def test_only_the_provided_weights_portfolio_commands_remain(self) -> None:
+        # ADR 0027: one kind of portfolio, from provided weights; no universe, source or signal.
+        parser = build_parser()
+        top_level = next(
+            action.choices for action in parser._actions if getattr(action, "choices", None)
         )
-        self.assertIn("Dry run only", stdout.getvalue())
-
-    def test_no_command_creates_an_etf_object(self) -> None:
-        # ADR 0027: what exists is read, run and deleted until each Environment is drained.
+        self.assertEqual(
+            set(top_level),
+            {"asset", "market-data", "account", "instances", "holdings", "portfolio"},
+        )
+        portfolio_commands = next(
+            action.choices
+            for action in top_level["portfolio"]._actions
+            if getattr(action, "choices", None)
+        )
+        self.assertEqual(
+            set(portfolio_commands),
+            {"list", "get", "delete", "run", "runs", "prepare-interpolated-prices", "rebalance"},
+        )
         for command in (
-            ["universe-source", "create", "--name", "S", "--symbol", "IVV", "--url", "https://x"],
-            ["universe-source", "seed-defaults"],
-            ["signal", "create", "--name", "S", "--universe-uid", "u", "--account-uid", "a"],
+            ["universe-source", "list"],
+            ["universe", "list"],
+            ["signal", "list"],
             ["portfolio", "create", "--name", "P", "--signal-configuration-uid", "s"],
         ):
             with (
@@ -222,31 +206,6 @@ class CliTests(unittest.TestCase):
                 self.assertRaises(SystemExit),
             ):
                 main(command)
-
-    def test_asset_universe_delete_is_a_dry_run_by_default(self) -> None:
-        universe = {
-            "uid": "universe-uid",
-            "source_uid": "source-uid",
-            "asset_category_uid": "category-uid",
-            "asset_count": 12,
-        }
-        stdout = io.StringIO()
-        with (
-            patch(
-                "alpaca_connectors.universes.get_asset_universe_view",
-                return_value=universe,
-            ),
-            patch(
-                "alpaca_connectors.market_data.configurations.bar_configurations_for_universe",
-                return_value=[],
-            ),
-            patch("alpaca_connectors.universes.delete_asset_universe") as delete,
-            contextlib.redirect_stdout(stdout),
-        ):
-            exit_code = main(["universe", "delete", "universe-uid"])
-        self.assertEqual(exit_code, 0)
-        delete.assert_not_called()
-        self.assertIn('"asset_count": 12', stdout.getvalue())
 
     def test_market_data_update_requires_only_stored_configuration_uid(self) -> None:
         node = SimpleNamespace()
@@ -304,7 +263,6 @@ class CliTests(unittest.TestCase):
             account_uid="account-uid",
             asset_source="assets",
             asset_uids=["asset-1", "asset-2"],
-            universe_uid=None,
             frequency_id="1d",
             feed="sip",
             adjustment="all",
@@ -331,26 +289,6 @@ class CliTests(unittest.TestCase):
                     "--no-scheduled",
                 ]
             )
-
-        self.assertEqual(exit_code, 0)
-        update.assert_called_once_with("configuration-uid", scheduled=False)
-
-    def test_signal_update_rejects_job_settings_and_an_environment_selector(self) -> None:
-        base = ["signal", "update", "configuration-uid", "--name", "Daily IVV observation"]
-        for extra in (
-            ["--environment-uid", "environment-uid"],
-            ["--schedule-type", "interval"],
-            ["--cpu-request", "1"],
-        ):
-            with self.subTest(extra=extra), self.assertRaises(SystemExit):
-                main([*base, *extra])
-
-    def test_portfolio_update_can_change_only_the_scheduled_flag(self) -> None:
-        with patch(
-            "alpaca_connectors.portfolios.update_portfolio_configuration",
-            return_value={"uid": "configuration-uid", "scheduled": False},
-        ) as update:
-            exit_code = main(["portfolio", "update", "configuration-uid", "--no-scheduled"])
 
         self.assertEqual(exit_code, 0)
         update.assert_called_once_with("configuration-uid", scheduled=False)
@@ -429,12 +367,12 @@ class CliTests(unittest.TestCase):
         sensitive = "raw-secret-value"
         with (
             patch(
-                "alpaca_connectors.universes.preview_universe_source",
+                "alpaca_connectors.portfolios.get_portfolio_configuration",
                 side_effect=RuntimeError(f"upstream headers contained {sensitive}"),
             ),
             contextlib.redirect_stderr(stderr),
         ):
-            exit_code = main(["universe-source", "preview", "source-uid"])
+            exit_code = main(["portfolio", "get", "configuration-uid"])
 
         self.assertEqual(exit_code, 2)
         self.assertNotIn(sensitive, stderr.getvalue())

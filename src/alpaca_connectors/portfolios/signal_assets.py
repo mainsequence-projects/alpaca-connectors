@@ -5,10 +5,9 @@
 table keeps the answer as one row per ``(signal_uid, asset_identifier)``, so a `portfolios` bars
 configuration resolves its assets by primary key, whatever the number of observations.
 
-Both producers write it before they publish: the provided-weights service before
-``ApplicationWeights.publish`` and the ETF Signal Job before its update. Writing first keeps it a
-superset of what is published: a publication that then fails leaves at worst an asset fetched that
-no portfolio holds yet, never a held asset without bars.
+The provided-weights service writes it before ``ApplicationWeights.publish``. Writing first keeps
+it a superset of what is published: a publication that then fails leaves at worst an asset fetched
+that no portfolio holds yet, never a held asset without bars.
 """
 
 from __future__ import annotations
@@ -36,8 +35,8 @@ class SignalAssetTable(ProjectStorageNameMixin, AlpacaMarketsMetaTableMixin, Mar
     __project_storage_concept__ = "signal_asset"
     __markets_base_identifier__ = "SignalAsset"
     __metatable_description__ = (
-        "One row per weight signal and asset it has ever published. Which US stocks and ETFs "
-        "each ETF holdings signal or application-provided weights signal of the Alpaca "
+        "One row per weight signal and asset it has ever published. Which US stocks and "
+        "exchange-traded funds each application-provided weights signal of the Alpaca "
         "Connectors application has given a weight, zero included, so price updates can find "
         "the assets a portfolio needs without reading the signal's whole history; written by "
         "the application each time a signal publishes."

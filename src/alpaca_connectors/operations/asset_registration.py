@@ -65,9 +65,9 @@ class AssetRegistrationOperationTable(
     __markets_base_identifier__ = "AssetRegistrationOperation"
     __metatable_description__ = (
         "One row per asset registration request. Progress and outcome of requests to plan or "
-        "register US stocks and ETFs from Alpaca as Main Sequence assets: who asked, each step's "
-        "state, the result or a sanitized error, and timestamps, recorded by the Alpaca "
-        "Connectors API while the request runs so that clients can follow it."
+        "register US stocks and exchange-traded funds from Alpaca as Main Sequence assets: who "
+        "asked, each step's state, the result or a sanitized error, and timestamps, recorded by "
+        "the Alpaca Connectors API while the request runs so that clients can follow it."
     )
     __metatable_labels__ = ["equities", "reference-data", "operations", "alpaca"]
     __table_args__ = markets_table_args(

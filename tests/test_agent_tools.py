@@ -11,16 +11,12 @@ EXPECTED_TOOL_NAMES = (
     "alpaca_query_accounts",
     "alpaca_manage_account",
     "alpaca_account_key_request",
-    "alpaca_query_universes",
-    "alpaca_manage_universe",
     "alpaca_query_bar_configurations",
     "alpaca_manage_bar_configuration",
-    "alpaca_query_etf_signals",
-    "alpaca_manage_etf_signal",
     "alpaca_query_rebalance_configurations",
     "alpaca_manage_rebalance_configuration",
-    "alpaca_query_etf_portfolios",
-    "alpaca_manage_etf_portfolio",
+    "alpaca_query_portfolios",
+    "alpaca_manage_portfolio",
     "alpaca_get_job_run_status",
 )
 

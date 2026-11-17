@@ -1,6 +1,6 @@
 {
   "name": "Alpaca Agent",
-  "description": "Operates this repository's supported Alpaca asset, account, holdings, Universe, market-data, ETF weight signal, rebalance, and analytical ETF portfolio workflows through verified project tools.",
+  "description": "Operates this repository's supported Alpaca asset, account, holdings, market-data, rebalance, and analytical portfolio workflows through verified project tools.",
   "version": "0.1.41",
   "capabilities": {
     "extensions": [
@@ -49,20 +49,6 @@
       "path": ".tau/skills/alpaca-account-workflow/SKILL.md"
     },
     {
-      "id": "holdings-category",
-      "name": "ETF Universes",
-      "description": "Inspect, extract and remove the remaining ETF extraction sources and registered Universes, which bulk materialize linked AssetCategory members and one observed weight frame.",
-      "tags": [
-        "etf",
-        "universes",
-        "asset-categories"
-      ],
-      "examples": [
-        "Preview and extract the components for this registered ETF Universe using my selected account."
-      ],
-      "path": ".tau/skills/alpaca-holdings-category/SKILL.md"
-    },
-    {
       "id": "stock-bars",
       "name": "Alpaca Stock Bars",
       "description": "Manage stored Alpaca bar configurations, resolve their configured Asset scope and migrated dataset, run updates, and query observations.",
@@ -72,37 +58,23 @@
         "bars"
       ],
       "examples": [
-        "Resolve this daily Universe-backed bars configuration and run its update Job."
+        "Resolve this daily bars configuration that follows my portfolios and run its update Job."
       ],
       "path": ".tau/skills/alpaca-stock-bars/SKILL.md"
     },
     {
-      "id": "etf-weight-signals",
-      "name": "ETF Weight Signals",
-      "description": "Inspect, run, and remove the remaining Universe-backed ETF weight signal configurations on the shared, workflow-declared signal Job.",
+      "id": "portfolios",
+      "name": "Analytical Portfolios",
+      "description": "Read, run, pause, resume, and delete analytical portfolios built from the weights an application provides, manage calendar-event rebalance rules, and read their history and statistics.",
       "tags": [
-        "etf",
-        "signals",
-        "jobs"
-      ],
-      "examples": [
-        "Run this ETF weight signal once and show its latest observations."
-      ],
-      "path": ".tau/skills/alpaca-etf-weight-signals/SKILL.md"
-    },
-    {
-      "id": "etf-portfolios",
-      "name": "Analytical ETF Portfolios",
-      "description": "Manage calendar-event rebalance rules and run, inspect, pause or end analytical portfolios built from stored weight signals and Alpaca bars, including history and statistics.",
-      "tags": [
-        "etf",
         "portfolios",
-        "rebalancing"
+        "rebalancing",
+        "alpaca"
       ],
       "examples": [
         "Run this analytical portfolio and show its performance and statistics."
       ],
-      "path": ".tau/skills/alpaca-etf-portfolios/SKILL.md"
+      "path": ".tau/skills/alpaca-portfolios/SKILL.md"
     }
   ]
 }

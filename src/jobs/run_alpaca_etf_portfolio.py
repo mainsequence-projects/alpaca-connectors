@@ -1,28 +1,20 @@
-"""Entry point of the workflow-declared `alpaca-etf-portfolio` Job (ADR 0013).
+"""Entry point of the retired `alpaca-etf-portfolio` Job, kept for one release (ADR 0027).
 
-`--configuration-uid <uid>` executes one portfolio configuration. The API, the CLI and the
-`alpaca-etf-portfolio-dispatcher` Job's scheduled run start these runs; the Job has no schedule of
-its own. The schema gate (ADR 0012) comes first, before any runtime bootstrap. Executing a
-configuration bootstraps the complete portfolio runtime before it reads any configuration.
+Launchers run by path, so this file stays while the platform may still list a Job bound to it;
+revision 0028's release deletes it. A run is the `alpaca-portfolio` Job's: it delegates to
+`run_alpaca_portfolio.py`, which checks the schema first (ADR 0012).
 """
 
 from __future__ import annotations
 
-import json
+import runpy
 from collections.abc import Sequence
+from pathlib import Path
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    from alpaca_connectors.migrations.schema_gate import skip_if_schema_behind
-
-    if skip_if_schema_behind("Alpaca ETF portfolio Job"):
-        return 0
-
-    from alpaca_connectors.operations.configuration_jobs import run_configuration_job
-
-    summary = run_configuration_job("portfolio", argv)
-    print(json.dumps(summary, sort_keys=True, default=str))
-    return 1 if summary.get("failed") else 0
+    launcher = runpy.run_path(str(Path(__file__).with_name("run_alpaca_portfolio.py")))
+    return launcher["main"](argv)
 
 
 if __name__ == "__main__":

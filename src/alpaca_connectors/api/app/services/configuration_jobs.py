@@ -1,4 +1,4 @@
-"""API shaping of the workflow-declared signal and portfolio Jobs (ADR 0013).
+"""API shaping of the workflow-declared portfolio Job (ADR 0013).
 
 Configuration responses report the kind's declared Job as ``job_uid`` and ``job``: its compute and
 image, with the live schedule of the kind's dispatcher Job, whose scheduled run starts the Job's
@@ -92,19 +92,6 @@ def job_fields(
     }
 
 
-def lifecycle_state(job: Any | None, *, scheduled: bool, dispatcher: Any | None = None) -> str:
-    """``provisioning`` before the push creates the Job, then ``ready`` or ``paused``.
-
-    ``ready`` means the configuration is scheduled and the dispatcher that starts the Job's
-    scheduled runs has a schedule.
-    """
-    if job is None:
-        return "provisioning"
-    if scheduled and getattr(dispatcher, "task_schedule", None):
-        return "ready"
-    return "paused"
-
-
 def accepted_run(submission: Any) -> dict[str, Any]:
     """A started run as the 202 body: the submission plus the JobRun status URL."""
     payload = asdict(submission)
@@ -115,6 +102,5 @@ __all__ = [
     "accepted_run",
     "job_fields",
     "job_response",
-    "lifecycle_state",
     "schedule_payload",
 ]

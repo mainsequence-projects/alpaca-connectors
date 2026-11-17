@@ -314,7 +314,6 @@ def read_portfolio_history(
     *,
     configuration_uid: Any,
     observation_limit: int = 100,
-    weights_source: str = "etf_signal",
 ) -> PortfolioHistory:
     """Read one portfolio's canonical metadata and latest value observations.
 
@@ -334,9 +333,7 @@ def read_portfolio_history(
     from alpaca_connectors.runtime import start_markets_engine
 
     normalized_limit = _normalize_limit(observation_limit)
-    portfolio_identifier = portfolio_unique_identifier(
-        configuration_uid, weights_source=weights_source
-    )
+    portfolio_identifier = portfolio_unique_identifier(configuration_uid)
     runtime = start_markets_engine()
     portfolio = Portfolio.get_by_unique_identifier(portfolio_identifier)
     if portfolio is None:

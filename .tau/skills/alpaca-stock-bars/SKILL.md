@@ -1,6 +1,6 @@
 ---
 name: alpaca-stock-bars
-description: Configure and run Alpaca bars for Assets, Universe members or recent Account holdings, then query resolved migrated datasets through Alpaca MCP tools.
+description: Configure and run Alpaca bars for Assets, recent Account holdings or the assets of the portfolios that use them, then query resolved migrated datasets through Alpaca MCP tools.
 ---
 
 # Alpaca Stock Bars
@@ -19,11 +19,12 @@ Never invent profiles or dynamically create schemas.
 
 A stored configuration selects one Account and exactly one source:
 
-- `assets`: non-empty registered `asset_uids`, no Universe UID.
-- `universe`: an active registered `universe_uid`, no explicit Asset UIDs.
-- `account_holdings`: neither explicit Assets nor Universe. The configured Account resolves
-  its newest stored holdings inside the inclusive trailing 30-day window; resolution is read-only
-  and never captures holdings.
+- `assets`: non-empty registered `asset_uids`.
+- `account_holdings`: no explicit Assets. The configured Account resolves its newest stored
+  holdings inside the inclusive trailing 30-day window; resolution is read-only and never
+  captures holdings.
+- `portfolios`: no explicit Assets. Every asset ever given a weight by the live portfolios that
+  name this configuration; a new asset joins the next update without editing the configuration.
 
 Collections use limit 1–100 and offset in multiples of the fixed limit. Examples are arguments to
 `alpaca__call_tool`; replace placeholders with discovered identifiers/profile values:
@@ -33,7 +34,7 @@ Collections use limit 1–100 and offset in multiples of the fixed limit. Exampl
 ```
 
 ```json
-{"tool":"alpaca_manage_bar_configuration","arguments":{"operation":"create","request":{"name":"Universe daily bars","account_uid":"ACCOUNT_UID","asset_source":"universe","universe_uid":"UNIVERSE_UID","frequency_id":"MIGRATED_FREQUENCY_ID","feed":"MIGRATED_FEED","adjustment":"MIGRATED_ADJUSTMENT"}}}
+{"tool":"alpaca_manage_bar_configuration","arguments":{"operation":"create","request":{"name":"Holdings daily bars","account_uid":"ACCOUNT_UID","asset_source":"account_holdings","frequency_id":"MIGRATED_FREQUENCY_ID","feed":"MIGRATED_FEED","adjustment":"MIGRATED_ADJUSTMENT"}}}
 ```
 
 ## Resolve, Submit And Verify
@@ -73,6 +74,6 @@ Observation queries accept the resolved dataset UID, optional Asset filters, ISO
 ```
 
 Run never accepts a dataset UID, Account/profile/scope override. The service uses set-based
-identity queries and symbol-batched provider requests; do not drop constituents or make per-Asset
+identity queries and symbol-batched provider requests; do not drop assets or make per-Asset
 fallback calls. Deletion requires the person's exact `DELETE <configuration_uid>` confirmation;
 respect dependency blockers and retain historical data.

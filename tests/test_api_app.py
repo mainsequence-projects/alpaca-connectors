@@ -7,7 +7,6 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
-from etfhextractor.exceptions import WorkbookParseError
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 from msm.api.http import (
@@ -25,7 +24,6 @@ from alpaca_connectors.api.app.schemas import (
     AccountResponse,
     AssetRegistrationOperationResponse,
     AssetRegistrationRequest,
-    AssetUniverseResponse,
     BarConfigurationUpdateAcceptedResponse,
     BulkActionRequest,
     JobRunStatusResponse,
@@ -33,43 +31,8 @@ from alpaca_connectors.api.app.schemas import (
     ResourceCollection,
     ResourceDiscoveryResponse,
 )
-from alpaca_connectors.api.app.services.universes import (
-    preview_universe_run as preview_universe_service,
-)
 from alpaca_connectors.holdings.services import AccountHoldingsRegistryError
 from alpaca_connectors.platform_secrets import PlatformSecretAccessError
-
-
-def _asset_universe_response(
-    *,
-    uid: str = "universe-uid",
-    source_uid: str = "source-uid",
-    asset_category_uid: str = "category-uid",
-    display_name: str = "S&P 500 holdings",
-    symbol: str = "IVV",
-    is_active: bool = True,
-    asset_count: int = 0,
-) -> AssetUniverseResponse:
-    now = datetime(2026, 9, 3, tzinfo=UTC)
-    return AssetUniverseResponse(
-        uid=uid,
-        source_uid=source_uid,
-        asset_category_uid=asset_category_uid,
-        display_name=display_name,
-        symbol=symbol,
-        source_url=f"https://example.com/{symbol.lower()}",
-        description=f"Configured holdings universe for ETF {symbol}.",
-        is_active=is_active,
-        asset_count=asset_count,
-        asset_category={
-            "uid": asset_category_uid,
-            "unique_identifier": f"HOLDINGS__{symbol}",
-            "display_name": display_name,
-            "description": f"Configured holdings universe for ETF {symbol}.",
-        },
-        created_at=now,
-        updated_at=now,
-    )
 
 
 def _discovery_paths() -> list[str]:
@@ -138,10 +101,6 @@ class ApiAppTests(unittest.TestCase):
                 "/v1/accounts/actions/capture-holdings/preflight",
                 "/v1/accounts/{account_uid}/holdings/actions/capture/preflight",
                 "/v1/accounts/{account_uid}/orders/actions/submit/preflight",
-                "/v1/universes/actions/run/preflight",
-                "/v1/universes/actions/activate/preflight",
-                "/v1/universes/actions/deactivate/preflight",
-                "/v1/universes/actions/remove/preflight",
             },
         )
 
@@ -161,19 +120,17 @@ class ApiAppTests(unittest.TestCase):
             "/v1/assets",
             "/v1/assets/registration/operations",
             "/v1/assets/registration/operations/{operation_uid}",
-            "/v1/universe-sources",
-            "/v1/universes",
-            "/v1/universes/{universe_uid}/assets",
             "/v1/market-data/datasets",
             "/v1/market-data/bar-configurations",
             "/v1/operations/job-runs/{job_run_uid}",
             "/v1/accounts/{account_uid}/actions/sync",
             "/v1/operations/{operation_uid}",
-            "/v1/signal-jobs/{configuration_uid}/observations",
+            "/v1/portfolio-configurations",
+            "/v1/portfolio-configurations/provided-weights",
+            "/v1/portfolio-configurations/{configuration_uid}/weights",
+            "/v1/portfolio-rebalance-configurations",
         }
         self.assertTrue(expected_capability_roots.issubset(visible_paths))
-        self.assertNotIn("/v1/universes/holdings/plan", visible_paths)
-        self.assertNotIn("/v1/universes/holdings/execute", visible_paths)
 
     def test_capability_catalog_contains_domain_capabilities_without_connections(self) -> None:
         response = self.client.get("/v1/project-state/capabilities")
@@ -185,7 +142,6 @@ class ApiAppTests(unittest.TestCase):
             [
                 "project_state",
                 "assets",
-                "universes",
                 "market_data",
                 "accounts",
                 "holdings",
@@ -657,41 +613,6 @@ class ApiAppTests(unittest.TestCase):
         self.assertIn("credentials_stored", response_properties)
         self.assertFalse({name for name in schemas if name.startswith("SecretReference")})
 
-    def test_universe_source_preview_route_returns_conflict_on_blocker(self) -> None:
-        with patch(
-            "alpaca_connectors.api.app.routers.universe_sources.preview_source",
-            side_effect=ValueError("blocked"),
-        ):
-            response = self.client.post(
-                "/v1/universe-sources/source-uid/actions/preview",
-                json={"timeout": 30},
-            )
-
-        self.assertEqual(response.status_code, 409)
-        self.assertEqual(
-            response.json()["detail"],
-            {
-                "code": "action_conflict",
-                "message": "blocked",
-                "retryable": False,
-            },
-        )
-
-    def test_universe_source_preview_hides_provider_exception_details(self) -> None:
-        provider_message = "provider workbook contains private diagnostic context"
-        with patch(
-            "alpaca_connectors.api.app.routers.universe_sources.preview_source",
-            side_effect=WorkbookParseError(provider_message),
-        ):
-            response = self.client.post(
-                "/v1/universe-sources/source-uid/actions/preview",
-                json={"timeout": 30},
-            )
-
-        self.assertEqual(response.status_code, 502)
-        self.assertEqual(response.json()["detail"]["code"], "provider_failure")
-        self.assertNotIn(provider_message, response.text)
-
     def test_holdings_bulk_action_rejects_registry_relaxation_option(self) -> None:
         response = self.client.post(
             "/v1/accounts/actions/capture-holdings",
@@ -853,7 +774,7 @@ class ApiAppTests(unittest.TestCase):
         )
 
     def test_discovery_uses_installed_command_center_contract_shape(self) -> None:
-        response = self.client.get("/v1/universe-sources/discovery")
+        response = self.client.get("/v1/portfolio-configurations/discovery")
         self.assertEqual(response.status_code, 200)
         payload = response.json()
         self.assertEqual(payload["contract"], "command-center.resource_discovery@v1")
@@ -868,275 +789,6 @@ class ApiAppTests(unittest.TestCase):
         self.assertIn("authorization", response.headers["vary"].lower())
         self.assertTrue(response.headers["etag"].startswith('"'))
         ResourceDiscovery.model_validate(payload)
-
-    def test_universe_discovery_advertises_lifecycle_and_delete_actions(self) -> None:
-        response = self.client.get("/v1/universes/discovery")
-
-        self.assertEqual(response.status_code, 200)
-        payload = response.json()
-        columns = {column["id"]: column for column in payload["list"]["columns"]}
-        self.assertIn("uid", columns)
-        self.assertEqual(columns["uid"]["header"], "UID")
-        self.assertNotIn("account-name", columns)
-        self.assertNotIn("unique-identifier", columns)
-        self.assertIn("is-active", [column["id"] for column in payload["list"]["columns"]])
-        self.assertEqual(
-            [action["id"] for action in payload["bulk_actions"]],
-            ["activate", "deactivate", "remove"],
-        )
-        delete_action = payload["bulk_actions"][-1]
-        self.assertEqual(delete_action["confirmation"]["word"], "DELETE")
-
-    def test_no_route_creates_an_etf_object(self) -> None:
-        # ADR 0027: the existing Universe Sources, Universes, signal configurations and ETF
-        # portfolios are read, run and deleted until each Environment is drained.
-        for path in (
-            "/v1/universe-sources",
-            "/v1/universes",
-            "/v1/signal-jobs",
-            "/v1/portfolio-configurations",
-        ):
-            self.assertTrue(_matches_registered_route("GET", path), path)
-            self.assertFalse(_matches_registered_route("POST", path), path)
-        self.assertTrue(
-            _matches_registered_route("POST", "/v1/portfolio-configurations/provided-weights")
-        )
-
-    def test_universe_run_executes_selected_universe(self) -> None:
-        universe = _asset_universe_response()
-        result = {
-            "universe_uid": "universe-uid",
-            "source_uid": "source-uid",
-            "asset_category_uid": "category-uid",
-            "account_uid": "account-uid",
-            "asset_uids": ["asset-aapl", "asset-msft", "asset-nvda"],
-            "asset_count": 3,
-            "existing_asset_uids_by_symbol": {},
-            "created_asset_uids_by_symbol": {
-                "AAPL": "asset-aapl",
-                "MSFT": "asset-msft",
-                "NVDA": "asset-nvda",
-            },
-            "openfigi_unmatched_symbols": [],
-        }
-        with (
-            patch(
-                "alpaca_connectors.api.app.routers.universes.get_universe", return_value=universe
-            ),
-            patch(
-                "alpaca_connectors.api.app.routers.universes.run_universe",
-                return_value=result,
-            ) as run,
-        ):
-            response = self.client.post(
-                "/v1/universes/actions/run",
-                json={
-                    "selection": {"mode": "explicit", "uids": ["universe-uid"]},
-                    "options": {"account_uid": "account-uid"},
-                },
-            )
-
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["results"][0]["asset_count"], 3)
-        run.assert_called_once_with(
-            "universe-uid",
-            account_uid="account-uid",
-            timeout=30.0,
-        )
-
-    def test_universe_assets_returns_standard_paginated_asset_resources(self) -> None:
-        asset = {
-            "uid": "asset-aapl",
-            "unique_identifier": "ALPACA::aapl-uuid",
-            "asset_type": "equity",
-            "alpaca_asset_id": "aapl-uuid",
-            "ticker": "AAPL",
-            "name": "Apple Inc.",
-            "exchange": "NASDAQ",
-            "status": "active",
-            "tradable": True,
-            "figi": None,
-            "composite_figi": None,
-        }
-        collection = {
-            "items": [asset],
-            "pageInfo": {
-                "pageIndex": 0,
-                "pageSize": 10,
-                "totalItems": 1,
-                "hasNextPage": False,
-                "hasPreviousPage": False,
-            },
-        }
-        with patch(
-            "alpaca_connectors.api.app.routers.universes.list_universe_assets",
-            return_value=collection,
-        ) as list_assets:
-            response = self.client.get(
-                "/v1/universes/universe-uid/assets",
-                params={"limit": 10, "offset": 0, "search": "AAPL", "ordering": "-ticker"},
-            )
-
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json(), collection)
-        list_assets.assert_called_once_with(
-            "universe-uid",
-            limit=10,
-            offset=0,
-            search="AAPL",
-            ordering="-ticker",
-        )
-
-    def test_universe_run_preflight_allows_automatic_constituent_registration(self) -> None:
-        universe = _asset_universe_response()
-        preview = {
-            "universe": universe.model_dump(mode="json"),
-            "plan_summary": {
-                "symbols_to_register": ["AAPL", "MSFT"],
-                "missing_symbols_from_alpaca": [],
-            },
-            "has_blockers": False,
-            "blockers": [],
-            "warnings": [
-                "Run will register 2 missing Alpaca-backed constituent asset(s) through "
-                "selected account account-uid before refreshing the universe membership."
-            ],
-        }
-        with (
-            patch(
-                "alpaca_connectors.api.app.routers.universes.get_universe", return_value=universe
-            ),
-            patch(
-                "alpaca_connectors.api.app.routers.universes.preview_universe_run",
-                return_value=preview,
-            ) as preview_run,
-        ):
-            response = self.client.post(
-                "/v1/universes/actions/run/preflight",
-                json={
-                    "selection": {"mode": "explicit", "uids": ["universe-uid"]},
-                    "options": {"account_uid": "account-uid"},
-                },
-            )
-
-        self.assertEqual(response.status_code, 200)
-        payload = response.json()
-        self.assertTrue(payload["allowed"])
-        self.assertEqual(payload["matched_count"], 1)
-        self.assertEqual(payload["blockers"], [])
-        self.assertEqual(payload["warnings"], preview["warnings"])
-        self.assertIn("register 2 missing", response.text)
-        preview_run.assert_called_once_with(
-            "universe-uid",
-            account_uid="account-uid",
-            timeout=30.0,
-        )
-
-    def test_universe_run_requires_an_execution_account(self) -> None:
-        response = self.client.post(
-            "/v1/universes/actions/run/preflight",
-            json={
-                "selection": {"mode": "explicit", "uids": ["universe-uid"]},
-                "options": {},
-            },
-        )
-
-        self.assertEqual(response.status_code, 400)
-        self.assertIn("options.account_uid", response.text)
-
-    def test_universe_preview_blocks_only_symbols_missing_from_alpaca(self) -> None:
-        universe = _asset_universe_response()
-        registration_plan = SimpleNamespace(
-            missing_symbols_from_alpaca=["UNKNOWN"],
-        )
-        registration_resolution = SimpleNamespace(
-            missing_assets=[SimpleNamespace(symbol="AAPL")],
-            unresolved_symbols_from_alpaca=["UNKNOWN"],
-            existing_off_catalog_assets_by_symbol={},
-        )
-        plan = SimpleNamespace(
-            registration_plan=registration_plan,
-            registration_resolution=registration_resolution,
-            account_uid="account-uid",
-            has_blockers=lambda: True,
-            summary=lambda: {
-                "symbols_to_register": ["AAPL"],
-                "missing_symbols_from_alpaca": ["UNKNOWN"],
-            },
-        )
-        with (
-            patch(
-                "alpaca_connectors.api.app.services.universes.get_universe",
-                return_value=universe,
-            ),
-            patch(
-                "alpaca_connectors.api.app.services.universes.preview_asset_universe",
-                return_value=plan,
-            ),
-        ):
-            preview = preview_universe_service(
-                "universe-uid",
-                account_uid="account-uid",
-                timeout=30.0,
-            )
-
-        self.assertTrue(preview["has_blockers"])
-        self.assertEqual(len(preview["blockers"]), 1)
-        self.assertIn("UNKNOWN", preview["blockers"][0])
-        self.assertEqual(len(preview["warnings"]), 1)
-        self.assertIn("register 1 missing", preview["warnings"][0])
-
-    def test_universe_deactivate_action_updates_selected_universe(self) -> None:
-        universe = _asset_universe_response(
-            asset_count=1,
-        )
-        inactive = universe.model_copy(update={"is_active": False})
-        with (
-            patch(
-                "alpaca_connectors.api.app.routers.universes.get_universe", return_value=universe
-            ),
-            patch(
-                "alpaca_connectors.api.app.routers.universes.update_universe", return_value=inactive
-            ) as update,
-        ):
-            response = self.client.post(
-                "/v1/universes/actions/deactivate",
-                json={
-                    "selection": {"mode": "explicit", "uids": ["universe-uid"]},
-                    "options": {},
-                },
-            )
-
-        self.assertEqual(response.status_code, 200)
-        self.assertFalse(response.json()["results"][0]["is_active"])
-        self.assertFalse(update.call_args.args[1].is_active)
-
-    def test_universe_delete_preflight_names_referencing_bar_configuration(self) -> None:
-        universe = _asset_universe_response()
-        blocker = (
-            "Universe universe-uid is referenced by bar configuration "
-            "Daily IVV bars (bars-configuration-uid)."
-        )
-        with (
-            patch(
-                "alpaca_connectors.api.app.routers.universes.get_universe", return_value=universe
-            ),
-            patch(
-                "alpaca_connectors.api.app.routers.universes.universe_delete_blockers",
-                return_value=[blocker],
-            ),
-        ):
-            response = self.client.post(
-                "/v1/universes/actions/remove/preflight",
-                json={
-                    "selection": {"mode": "explicit", "uids": ["universe-uid"]},
-                    "options": {},
-                },
-            )
-
-        self.assertEqual(response.status_code, 200)
-        self.assertFalse(response.json()["allowed"])
-        self.assertEqual(response.json()["blockers"], [blocker])
 
     def test_every_discovery_payload_obeys_manifest_column_and_action_constraints(self) -> None:
         for path in _discovery_paths():
@@ -1170,15 +822,22 @@ class ApiAppTests(unittest.TestCase):
                 ]
                 self.assertEqual(unrouted_endpoints, [])
 
-    def test_bar_configuration_discovery_names_the_universe_asset_source(self) -> None:
+    def test_bar_configuration_discovery_names_every_asset_source(self) -> None:
         response = self.client.get("/v1/market-data/bar-configurations/discovery")
 
         self.assertEqual(response.status_code, 200)
         filters = response.json()["list"]["controls"]["filters"]
         asset_source = next(item for item in filters if item["key"] == "asset_source")
-        self.assertIn(
-            {"value": "universe", "label": "Universe assets"},
-            asset_source["options"],
+        self.assertEqual(
+            sorted(option["value"] for option in asset_source["options"]),
+            ["account_holdings", "assets", "portfolios"],
+        )
+
+    def test_portfolio_discovery_names_portfolios(self) -> None:
+        resource = self.client.get("/v1/portfolio-configurations/discovery").json()["resource"]
+
+        self.assertEqual(
+            (resource["id"], resource["label"]), ("alpaca-portfolio-configurations", "Portfolios")
         )
 
     def test_bar_configurations_filter_and_show_the_scheduled_flag(self) -> None:

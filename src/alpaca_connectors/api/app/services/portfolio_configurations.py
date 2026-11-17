@@ -1,23 +1,21 @@
 """API shaping for durable analytical portfolio configurations.
 
 Every configuration runs on the portfolio Job declared in the repository workflow (ADR 0013). A
-provided-weights portfolio (ADR 0024) is changed, paused, given weights or deleted only by its
-owner; ETF portfolios keep their rules, and none is created any more (ADR 0027).
+portfolio is built from the weights an application provides (ADR 0024, ADR 0027) and is changed,
+paused, given weights or deleted only by its owner.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import asdict
-from typing import Any, Mapping
+from typing import Any
 
 from alpaca_connectors.account.ownership import AccountOwner
 from alpaca_connectors.operations import (
     configuration_job_state,
     launch_portfolio_job,
     list_portfolio_job_runs,
-    signal_job_configurations_by_uids,
-    signal_uid_for_configuration,
 )
 from alpaca_connectors.portfolios import (
     PortfolioRebalanceConfiguration,
@@ -53,40 +51,23 @@ from ..schemas import (
     ProvidedWeightsPortfolioCreateRequest,
     ProvidedWeightsPortfolioCreateResponse,
     PublishedWeightsResponse,
+    SignalObservationAssetResponse,
     SignalObservationsResponse,
 )
 from .common import collection_response
 from .configuration_jobs import accepted_run, job_fields
-from .signal_jobs import observations_response
 
 
 def _responses(rows: list[Any]) -> list[PortfolioConfigurationResponse]:
     if not rows:
         return []
     state = configuration_job_state("portfolio", [row.uid for row in rows])
-    signal_uids = list(
-        dict.fromkeys(
-            str(row.signal_configuration_uid)
-            for row in rows
-            if row.signal_configuration_uid is not None
-        )
-    )
     rebalance_uids = list(dict.fromkeys(str(row.rebalance_configuration_uid) for row in rows))
-    signal_configurations = signal_job_configurations_by_uids(signal_uids)
     rebalance_configurations = rebalance_configurations_by_uids(rebalance_uids)
     responses: list[PortfolioConfigurationResponse] = []
     for row in rows:
         rebalance_configuration = rebalance_configurations.get(str(row.rebalance_configuration_uid))
-        if row.is_provided:
-            signal_uid = provided_signal_uid(row.uid)
-        else:
-            signal_configuration = signal_configurations.get(str(row.signal_configuration_uid))
-            signal_uid = (
-                signal_uid_for_configuration(signal_configuration)
-                if signal_configuration is not None
-                else None
-            )
-        if signal_uid is None or rebalance_configuration is None:
+        if rebalance_configuration is None:
             raise RuntimeError(
                 f"Portfolio configuration {row.uid!s} has an unresolved required relationship."
             )
@@ -96,7 +77,7 @@ def _responses(rows: list[Any]) -> list[PortfolioConfigurationResponse]:
             PortfolioConfigurationResponse.model_validate(
                 {
                     **values,
-                    "signal_uid": signal_uid,
+                    "signal_uid": provided_signal_uid(row.uid),
                     "rebalance_strategy": rebalance_configuration.strategy,
                     **job_fields(
                         state.job,
@@ -114,18 +95,14 @@ def list_configurations(
     limit: int,
     offset: int,
     search: str | None,
-    signal_configuration_uid: str | None,
     bars_configuration_uid: str | None,
     ordering: str,
-    weights_source: str | None = None,
 ):
     rows, total = list_portfolio_configurations(
         limit=limit,
         offset=offset,
         search=search,
-        signal_configuration_uid=signal_configuration_uid,
         bars_configuration_uid=bars_configuration_uid,
-        weights_source=weights_source,
         ordering=ordering,
     )
     return collection_response(
@@ -149,83 +126,34 @@ def get_configuration_detail(
     """Resolve all business-facing portfolio detail and its latest value history."""
     from alpaca_connectors.account.services import get_account_registration
     from alpaca_connectors.market_data import get_bar_configuration
-    from alpaca_connectors.universes import get_asset_universe_view
+    from alpaca_connectors.portfolios.signal_assets import assets_for_signals
+    from alpaca_connectors.portfolios.signal_history import read_signal_observation_bounds
 
     row = get_portfolio_configuration(configuration_uid)
     if row is None:
         return None
     base = _responses([row])[0]
-    signal_configuration = (
-        None
-        if row.is_provided
-        else signal_job_configurations_by_uids([row.signal_configuration_uid]).get(
-            str(row.signal_configuration_uid)
-        )
-    )
     rebalance_configuration = get_rebalance_configuration(row.rebalance_configuration_uid)
     bars_configuration = get_bar_configuration(row.bars_configuration_uid)
-    if (
-        (signal_configuration is None and not row.is_provided)
-        or rebalance_configuration is None
-        or bars_configuration is None
-    ):
+    if rebalance_configuration is None or bars_configuration is None:
         raise RuntimeError(
             f"Portfolio configuration {configuration_uid!s} has an unresolved required relationship."
         )
 
-    account_cache: dict[str, Mapping[str, Any]] = {}
-
-    def account_details(account_uid: Any) -> Mapping[str, Any]:
-        key = str(account_uid)
-        if key not in account_cache:
-            account = get_account_registration(key)
-            if account is None:
-                raise RuntimeError(f"Portfolio detail references missing Alpaca account {key}.")
-            account_cache[key] = account
-        return account_cache[key]
-
-    universe_cache: dict[str, Mapping[str, Any]] = {}
-
-    def universe_details(universe_uid: Any) -> Mapping[str, Any]:
-        key = str(universe_uid)
-        if key not in universe_cache:
-            universe = get_asset_universe_view(key)
-            if universe is None:
-                raise RuntimeError(f"Portfolio detail references missing Asset Universe {key}.")
-            universe_cache[key] = universe
-        return universe_cache[key]
-
-    linked_signal: dict[str, Any] | None = None
-    provided_weights: dict[str, Any] | None = None
-    if signal_configuration is not None:
-        signal_account = account_details(signal_configuration.account_uid)
-        signal_universe = universe_details(signal_configuration.universe_uid)
-        linked_signal = {
-            "name": signal_configuration.name,
-            "description": signal_configuration.description,
-            "scheduled": signal_configuration.scheduled,
-            "universe_name": signal_universe["display_name"],
-            "universe_symbol": signal_universe["symbol"],
-            "account_name": signal_account["account_name"],
-            "account_environment": "paper" if signal_account["is_paper"] else "live",
-        }
-    else:
-        from alpaca_connectors.portfolios.signal_assets import assets_for_signals
-        from alpaca_connectors.portfolios.signal_history import read_signal_observation_bounds
-
-        bounds = read_signal_observation_bounds(signal_uid=base.signal_uid)
-        provided_weights = {
-            "signal_uid": base.signal_uid,
-            "first_observation_at": bounds.first_observation_at,
-            "last_observation_at": bounds.last_observation_at,
-            "asset_count": len(assets_for_signals([base.signal_uid])),
-        }
-    bars_account = account_details(bars_configuration.account_uid)
-    if bars_configuration.asset_source == "universe":
-        bars_universe = universe_details(bars_configuration.universe_uid)
-        asset_source_name = f"{bars_universe['display_name']} ({bars_universe['symbol']})"
-        asset_count: int | None = int(bars_universe.get("asset_count", 0))
-    elif bars_configuration.asset_source == "assets":
+    bounds = read_signal_observation_bounds(signal_uid=base.signal_uid)
+    provided_weights = {
+        "signal_uid": base.signal_uid,
+        "first_observation_at": bounds.first_observation_at,
+        "last_observation_at": bounds.last_observation_at,
+        "asset_count": len(assets_for_signals([base.signal_uid])),
+    }
+    bars_account = get_account_registration(str(bars_configuration.account_uid))
+    if bars_account is None:
+        raise RuntimeError(
+            f"Portfolio detail references missing Alpaca account {bars_configuration.account_uid}."
+        )
+    asset_count: int | None
+    if bars_configuration.asset_source == "assets":
         asset_count = len(bars_configuration.asset_uids)
         asset_source_name = f"{asset_count} explicitly selected registered assets"
     elif bars_configuration.asset_source == "portfolios":
@@ -240,7 +168,6 @@ def get_configuration_detail(
     history = read_portfolio_history(
         configuration_uid=configuration_uid,
         observation_limit=observation_limit,
-        weights_source=row.weights_source,
     )
     observations = [
         {
@@ -266,7 +193,6 @@ def get_configuration_detail(
     return PortfolioConfigurationDetailResponse.model_validate(
         {
             **base.model_dump(mode="json"),
-            "linked_signal": linked_signal,
             "provided_weights": provided_weights,
             "linked_bars": {
                 "name": bars_configuration.name,
@@ -339,9 +265,8 @@ def get_configuration_detail(
 
 
 def _require_owner(row: Any, owner: Callable[[], AccountOwner]) -> None:
-    """Only a provided-weights portfolio has an owner; the acting owner is read only for it."""
-    if row.is_provided:
-        require_portfolio_owner(row, owner())
+    """Refuse anyone but the portfolio's owner (ADR 0024, decision 6)."""
+    require_portfolio_owner(row, owner())
 
 
 def update_configuration(
@@ -368,9 +293,8 @@ def delete_configuration(
 ) -> dict[str, Any]:
     """End a portfolio: retire its ms-markets `Portfolio`, then delete its configuration.
 
-    Every portfolio ends this way, and the answer says what became of its `Portfolio` under
-    ``portfolio`` (issue #33, ADR 0027); its JobRuns and published data remain. Only a
-    provided-weights portfolio's owner may end it.
+    Only its owner may end it. The answer says what became of its `Portfolio` under
+    ``portfolio`` (issue #33, ADR 0027); its JobRuns and published data remain.
     """
     row = get_portfolio_configuration(configuration_uid)
     if row is None:
@@ -435,15 +359,34 @@ def give_weights(
     return _published_response(configuration_uid, published)
 
 
+def observations_response(configuration_uid: Any, matrix: Any) -> SignalObservationsResponse:
+    """A portfolio's signal observation matrix as the API answers it."""
+    assets = [
+        SignalObservationAssetResponse(
+            asset_identifier=asset.asset_identifier,
+            symbol=asset.symbol,
+            name=asset.name,
+            weights=list(asset.weights),
+        )
+        for asset in matrix.assets
+    ]
+    return SignalObservationsResponse(
+        configuration_uid=str(configuration_uid),
+        signal_uid=matrix.signal_uid,
+        observation_count=len(matrix.time_indexes),
+        asset_count=len(assets),
+        time_indexes=list(matrix.time_indexes),
+        assets=assets,
+    )
+
+
 def configuration_weights(configuration_uid: str, *, limit: int) -> SignalObservationsResponse:
-    """The stored observations of a provided-weights portfolio, newest first."""
+    """The stored observations of a portfolio's provided weights, newest first."""
     from alpaca_connectors.portfolios import read_signal_observation_matrix
 
     row = get_portfolio_configuration(configuration_uid)
     if row is None:
         raise LookupError(f"Portfolio configuration {configuration_uid!s} does not exist.")
-    if not row.is_provided:
-        raise ValueError("Only a provided-weights portfolio has provided weights.")
     matrix = read_signal_observation_matrix(
         signal_uid=provided_signal_uid(row.uid),
         observation_limit=limit,
@@ -527,6 +470,7 @@ __all__ = [
     "give_weights",
     "list_configurations",
     "list_rebalances",
+    "observations_response",
     "run_configuration",
     "update_configuration",
     "update_rebalance",

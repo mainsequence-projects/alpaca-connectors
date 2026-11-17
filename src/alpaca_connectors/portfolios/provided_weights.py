@@ -1,11 +1,11 @@
 """Portfolios built from weights an application provides (ADR 0024).
 
-A provided-weights portfolio is a row of the portfolio configuration table with
-``weights_source = "provided"``. Its signal is ms-markets' ``ApplicationWeights`` with
-``provider`` = this connector's namespace and ``key`` = the configuration UID, bound to this
-application's ``AlpacaSignalWeightsStorage`` instance, so its signal UID never changes. Each call
-that gives weights publishes one or more observations; ms-markets writes a dropped asset at ``0``
-and refuses an observation at or before the last one.
+Every portfolio of this connector is one (ADR 0027): a row of the portfolio configuration table.
+Its signal is ms-markets' ``ApplicationWeights`` with ``provider`` = this connector's namespace
+and ``key`` = the configuration UID, bound to this application's ``AlpacaSignalWeightsStorage``
+instance, so its signal UID never changes. Each call that gives weights publishes one or more
+observations; ms-markets writes a dropped asset at ``0`` and refuses an observation at or before
+the last one.
 
 Only the portfolio's owner, the acting owner that created it, gives it weights, changes, pauses
 or deletes it. Errors carry a code and never name an asset, a weight or an owner.
@@ -22,7 +22,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from alpaca_connectors.account.ownership import AccountOwner
-from alpaca_connectors.portfolios.configurations import AlpacaETFPortfolioConfiguration
+from alpaca_connectors.portfolios.configurations import AlpacaPortfolioConfiguration
 from alpaca_connectors.settings import PROJECT_NAMESPACE
 
 PROVIDED_PORTFOLIO_PREFIX = "ALPACA_PORTFOLIO__"
@@ -59,7 +59,7 @@ class PublishedWeights:
 
 @dataclass(frozen=True, slots=True)
 class ProvidedPortfolioCreation:
-    configuration: AlpacaETFPortfolioConfiguration
+    configuration: AlpacaPortfolioConfiguration
     published: PublishedWeights
     portfolio_uid: str
     portfolio_unique_identifier: str
@@ -117,7 +117,7 @@ def provided_signal_uid(configuration_uid: Any) -> str:
     return str(compute_signal_uid(_SignalIdentity(configuration_uid)))
 
 
-def is_owner(configuration: AlpacaETFPortfolioConfiguration, owner: AccountOwner) -> bool:
+def is_owner(configuration: AlpacaPortfolioConfiguration, owner: AccountOwner) -> bool:
     return (
         configuration.owner_gateway_uid == owner.gateway_uid
         and configuration.owner_user_uid == owner.user_uid
@@ -125,14 +125,11 @@ def is_owner(configuration: AlpacaETFPortfolioConfiguration, owner: AccountOwner
 
 
 def require_portfolio_owner(
-    configuration: AlpacaETFPortfolioConfiguration,
+    configuration: AlpacaPortfolioConfiguration,
     owner: AccountOwner,
 ) -> None:
-    """Refuse a change to a provided-weights portfolio by anyone but its owner.
-
-    ETF portfolios have no owner and keep their rules (ADR 0024, decision 6).
-    """
-    if configuration.is_provided and not is_owner(configuration, owner):
+    """Refuse a change to a portfolio by anyone but its owner (ADR 0024, decision 6)."""
+    if not is_owner(configuration, owner):
         raise PortfolioOwnedByAnotherError()
 
 
@@ -219,7 +216,7 @@ def _not_after_last() -> ProvidedWeightsError:
 
 
 def ensure_provided_signal_metadata(
-    configuration: AlpacaETFPortfolioConfiguration,
+    configuration: AlpacaPortfolioConfiguration,
 ) -> str:
     """Register the signal in Markets before its first publication (its rows reference it)."""
     from msm_portfolios.api.market_metadata import SignalMetadata
@@ -239,16 +236,10 @@ def _observation_assets(normalized: Mapping[dt.datetime, Mapping[str, float]]) -
 
 
 def publish_provided_weights(
-    configuration: AlpacaETFPortfolioConfiguration,
+    configuration: AlpacaPortfolioConfiguration,
     observations: Sequence[Mapping[str, Any]],
 ) -> PublishedWeights:
     """Validate and publish one or more observations of the portfolio's signal, in one write."""
-    if not configuration.is_provided:
-        raise ProvidedWeightsError(
-            "not_a_provided_weights_portfolio",
-            "Only a provided-weights portfolio takes weights.",
-            status_code=409,
-        )
     normalized = normalize_observations(observations)
     assets = _observation_assets(normalized)
     require_alpaca_assets(assets)
@@ -256,7 +247,7 @@ def publish_provided_weights(
 
 
 def _publish_validated(
-    configuration: AlpacaETFPortfolioConfiguration,
+    configuration: AlpacaPortfolioConfiguration,
     normalized: Mapping[dt.datetime, Mapping[str, float]],
     assets: Sequence[str],
 ) -> PublishedWeights:
@@ -327,16 +318,15 @@ class PortfolioRemoval:
 
 
 def end_portfolio_configuration(
-    configuration: AlpacaETFPortfolioConfiguration,
+    configuration: AlpacaPortfolioConfiguration,
 ) -> PortfolioRemoval:
     """End a portfolio: retire its `Portfolio`, then delete its configuration.
 
-    Every delete ends a portfolio this way, whatever its weights source (ADR 0027): retiring comes
-    first (ms-markets ADR 0049), so a portfolio an account's current target names is refused with
-    ``409 portfolio_in_account_target`` and nothing changes. A configuration whose `Portfolio` was
-    never created, such as an ETF portfolio before its first run, answers ``absent``. A
-    provided-weights portfolio's rows in the signal-asset table go with it; an ETF signal's stay
-    with its Signal Configuration. The `Portfolio`, its series and account history stay. Retiring
+    Every delete ends a portfolio this way (ADR 0027): retiring comes first (ms-markets ADR 0049),
+    so a portfolio an account's current target names is refused with
+    ``409 portfolio_in_account_target`` and nothing changes. A configuration whose `Portfolio` no
+    longer exists answers ``absent``. Then the signal's rows in the signal-asset table and the
+    configuration row are deleted. The `Portfolio`, its series and account history stay. Retiring
     a retired portfolio does nothing, so a retry after a partial failure is safe, and a retired
     portfolio's updaters write nothing meanwhile (issue #33). It checks no owner: its callers do.
     """
@@ -344,7 +334,6 @@ def end_portfolio_configuration(
 
     from alpaca_connectors.markets_api import retire_portfolio
     from alpaca_connectors.portfolios.configurations import delete_portfolio_configuration_row
-    from alpaca_connectors.portfolios.execution import configuration_portfolio_identifier
     from alpaca_connectors.portfolios.signal_assets import forget_signal_assets
 
     portfolio_uid = (
@@ -365,13 +354,12 @@ def end_portfolio_configuration(
             ) from exc
         retired_at = getattr(portfolio, "retired_at", None)
         state = "retired"
-    if configuration.is_provided:
-        forget_signal_assets(provided_signal_uid(configuration.uid))
+    forget_signal_assets(provided_signal_uid(configuration.uid))
     delete_portfolio_configuration_row(configuration.uid)
     return PortfolioRemoval(
         configuration_uid=str(configuration.uid),
         portfolio_uid=portfolio_uid,
-        portfolio_unique_identifier=configuration_portfolio_identifier(configuration),
+        portfolio_unique_identifier=provided_portfolio_unique_identifier(configuration.uid),
         portfolio_state=state,
         retired_at=retired_at,
     )
@@ -382,7 +370,7 @@ def delete_provided_weights_portfolio(
     *,
     owner: AccountOwner,
 ) -> PortfolioRemoval:
-    """End a provided-weights portfolio for its owner (ADR 0024, decision 6).
+    """End a portfolio for its owner (ADR 0024, decision 6).
 
     Anyone but its owner is refused before anything changes; then
     ``end_portfolio_configuration`` retires its `Portfolio` and deletes its configuration.
@@ -392,12 +380,6 @@ def delete_provided_weights_portfolio(
     configuration = get_portfolio_configuration(configuration_uid)
     if configuration is None:
         raise LookupError(f"Portfolio configuration {configuration_uid!s} does not exist.")
-    if not configuration.is_provided:
-        raise ProvidedWeightsError(
-            "not_a_provided_weights_portfolio",
-            "Only a provided-weights portfolio is retired by this call.",
-            status_code=409,
-        )
     require_portfolio_owner(configuration, owner)
     return end_portfolio_configuration(configuration)
 
@@ -418,7 +400,7 @@ def give_portfolio_weights(
     return publish_provided_weights(configuration, observations)
 
 
-def _upsert_portfolio_row(configuration: AlpacaETFPortfolioConfiguration) -> Any:
+def _upsert_portfolio_row(configuration: AlpacaPortfolioConfiguration) -> Any:
     from msm.api.portfolios import Portfolio
 
     from alpaca_connectors.assets.calendars import ensure_trading_calendar
@@ -480,7 +462,7 @@ def create_provided_weights_portfolio(
     require_alpaca_assets(assets)
 
     created_bars_uid: uuid.UUID | None = None
-    configuration: AlpacaETFPortfolioConfiguration | None = None
+    configuration: AlpacaPortfolioConfiguration | None = None
     try:
         if bars_configuration is not None:
             created = create_bar_configuration(
@@ -491,7 +473,6 @@ def create_provided_weights_portfolio(
         configuration = create_portfolio_configuration_row(
             name=name,
             description=description,
-            weights_source="provided",
             owner_gateway_uid=owner.gateway_uid,
             owner_user_uid=owner.user_uid,
             bars_configuration_uid=bars_configuration_uid,

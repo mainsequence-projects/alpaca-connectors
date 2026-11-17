@@ -11,7 +11,7 @@ def test_platform_job_preserves_backend_crontab_timezone_fields() -> None:
             "description": "",
             "code_repository_branch_uid": "945bfddd-5f1f-4541-a87a-faea3af6271f",
             "organization_environment_uid": "18595d12-f92a-4960-84cd-0c6798a1ad25",
-            "execution_path": "src/jobs/run_alpaca_etf_portfolio.py",
+            "execution_path": "src/jobs/run_alpaca_portfolio.py",
             "task_schedule": {
                 "name": "daily portfolio task",
                 "task": "tdag.pod_manager.tasks.run_job_in_celery",

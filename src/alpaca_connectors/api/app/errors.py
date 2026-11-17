@@ -168,14 +168,13 @@ def api_http_error(exc: Exception) -> HTTPException:
         # A conflict the connector raises itself, in its own words.
         return api_error(status_code=409, code="action_conflict", message=str(exc))
     from alpaca.common.exceptions import APIError as AlpacaAPIError
-    from etfhextractor.exceptions import ETFHoldingsError
     from requests import RequestException
 
-    if isinstance(exc, (AlpacaAPIError, ETFHoldingsError, RequestException)):
+    if isinstance(exc, (AlpacaAPIError, RequestException)):
         return api_error(
             status_code=502,
             code="provider_failure",
-            message="Alpaca or the holdings provider could not complete the operation.",
+            message="Alpaca could not complete the operation.",
         )
     if not isinstance(exc, (HTTPException, LookupError, TypeError)):
         upstream = upstream_failure(exc)

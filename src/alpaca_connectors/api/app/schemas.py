@@ -54,9 +54,7 @@ class CapabilityCatalogResponse(BaseModel):
 
 class ProjectConfigurationResponse(BaseModel):
     api_version: str = "0.1.27"
-    supported_component_providers: list[str]
     migrated_market_data_profiles: list[str]
-    universe_sources_are_user_managed: bool = True
     organization_environment_uid: str | None = None
     organization_environment_name: str | None = None
     agent_uid: str | None = Field(
@@ -69,7 +67,6 @@ class ProjectConfigurationResponse(BaseModel):
     request_user_uid: str | None = None
     registered_account_count: int = 0
     has_registered_account: bool = False
-    universe_source_count: int = 0
     market_data_dataset_count: int = 0
     market_data_datasets: list[dict[str, Any]] = Field(default_factory=list)
 
@@ -524,79 +521,6 @@ class OrderBatchResponse(BaseModel):
     orders: list[OrderStateResponse]
 
 
-class UniverseSourceUpdateRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    name: str | None = Field(default=None, min_length=1, max_length=255)
-    symbol: str | None = Field(default=None, min_length=1, max_length=32)
-    source_url: str | None = Field(default=None, min_length=1, max_length=2048)
-    enabled: bool | None = None
-
-    @model_validator(mode="after")
-    def require_change(self) -> "UniverseSourceUpdateRequest":
-        if all(getattr(self, field_name) is None for field_name in self.__class__.model_fields):
-            raise ValueError("At least one universe-source field must be provided.")
-        return self
-
-
-class UniverseSourceResponse(BaseModel):
-    uid: str
-    name: str
-    symbol: str
-    source_url: str
-    enabled: bool
-    created_at: Any
-    updated_at: Any
-
-
-class UniverseSourceActionRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    timeout: float = Field(default=30.0, gt=0, le=300)
-
-
-class UniverseSourcePreviewResponse(BaseModel):
-    source: UniverseSourceResponse
-    plan_summary: dict[str, Any]
-    has_blockers: bool
-
-
-class AssetUniverseUpdateRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    display_name: str | None = Field(default=None, min_length=1, max_length=255)
-    description: str | None = None
-    is_active: bool | None = None
-
-    @model_validator(mode="after")
-    def require_change(self) -> "AssetUniverseUpdateRequest":
-        if all(getattr(self, field_name) is None for field_name in self.__class__.model_fields):
-            raise ValueError("At least one universe display field must be provided.")
-        return self
-
-
-class AssetCategorySummaryResponse(BaseModel):
-    uid: str
-    unique_identifier: str
-    display_name: str
-    description: str | None = None
-
-
-class AssetUniverseResponse(BaseModel):
-    uid: str
-    source_uid: str
-    asset_category_uid: str
-    display_name: str
-    symbol: str
-    source_url: str
-    description: str | None = None
-    is_active: bool
-    asset_count: int
-    asset_category: AssetCategorySummaryResponse
-    created_at: Any
-    updated_at: Any
-
-
 class BarConfigurationCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -611,23 +535,18 @@ class BarConfigurationCreateRequest(BaseModel):
         ),
     )
     account_uid: str
-    asset_source: Literal["assets", "universe", "account_holdings", "portfolios"]
+    asset_source: Literal["assets", "account_holdings", "portfolios"]
     asset_uids: list[str] = Field(default_factory=list)
-    universe_uid: str | None = None
     frequency_id: str
     feed: str
     adjustment: str
 
     @model_validator(mode="after")
     def validate_source(self) -> "BarConfigurationCreateRequest":
-        if self.asset_source == "assets" and (not self.asset_uids or self.universe_uid):
-            raise ValueError("assets source requires asset_uids and forbids universe_uid.")
-        if self.asset_source == "universe" and (not self.universe_uid or self.asset_uids):
-            raise ValueError("universe source requires universe_uid and forbids asset_uids.")
-        if self.asset_source in {"account_holdings", "portfolios"} and (
-            self.asset_uids or self.universe_uid
-        ):
-            raise ValueError(f"{self.asset_source} source forbids asset_uids and universe_uid.")
+        if self.asset_source == "assets" and not self.asset_uids:
+            raise ValueError("assets source requires asset_uids.")
+        if self.asset_source in {"account_holdings", "portfolios"} and self.asset_uids:
+            raise ValueError(f"{self.asset_source} source forbids asset_uids.")
         return self
 
 
@@ -642,9 +561,8 @@ class BarConfigurationUpdateRequest(BaseModel):
         description="Include the configuration in the daily bars update.",
     )
     account_uid: str | None = None
-    asset_source: Literal["assets", "universe", "account_holdings", "portfolios"] | None = None
+    asset_source: Literal["assets", "account_holdings", "portfolios"] | None = None
     asset_uids: list[str] | None = None
-    universe_uid: str | None = None
     frequency_id: str | None = None
     feed: str | None = None
     adjustment: str | None = None
@@ -677,9 +595,8 @@ class BarConfigurationResponse(BaseModel):
     enabled: bool
     scheduled: bool
     account_uid: str
-    asset_source: Literal["assets", "universe", "account_holdings", "portfolios"]
+    asset_source: Literal["assets", "account_holdings", "portfolios"]
     asset_uids: list[str]
-    universe_uid: str | None
     frequency_id: str
     feed: str
     adjustment: str
@@ -693,7 +610,7 @@ class BarConfigurationResolutionResponse(BaseModel):
     configuration: BarConfigurationResponse
     dataset: dict[str, Any]
     account_uid: str
-    asset_source: Literal["assets", "universe", "account_holdings", "portfolios"]
+    asset_source: Literal["assets", "account_holdings", "portfolios"]
     asset_count: int
     asset_uids: list[str]
     asset_identifiers: list[str]
@@ -716,8 +633,8 @@ WORKFLOW_OWNED_JOB_SETTINGS = (
     f"Job schedule and compute are declared in {CONFIGURATION_JOBS_WORKFLOW_PATH} (ADR 0013); "
     "`scheduled` decides whether the Job's scheduled run includes this configuration."
 )
-# Settings of the former one-Job-per-configuration design: nested `job` (portfolios) and the
-# flat schedule and compute fields (signals).
+# Settings of the former one-Job-per-configuration design: a nested `job` and the flat schedule
+# and compute fields.
 RETIRED_JOB_SETTING_FIELDS = frozenset(
     {
         "job",
@@ -752,20 +669,6 @@ class _ConfigurationRequest(BaseModel):
         return data
 
 
-class SignalJobConfigurationUpdateRequest(_ConfigurationRequest):
-    name: str | None = Field(default=None, min_length=1, max_length=255)
-    description: str | None = None
-    universe_uid: str | None = None
-    account_uid: str | None = None
-    scheduled: bool | None = None
-
-    @model_validator(mode="after")
-    def require_change(self) -> "SignalJobConfigurationUpdateRequest":
-        if not self.model_fields_set:
-            raise ValueError("At least one signal configuration field must be provided.")
-        return self
-
-
 class ConfigurationJobResponse(BaseModel):
     """The workflow-declared Job that runs every configuration of one kind (ADR 0013)."""
 
@@ -785,27 +688,6 @@ class ConfigurationJobResponse(BaseModel):
     spot: bool
     image_status: str | None
     automatic_deployment: bool
-
-
-class SignalJobConfigurationResponse(BaseModel):
-    """A signal configuration and the shared signal Job; both Job fields are null before a push."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    uid: str
-    name: str
-    description: str | None
-    signal_uid: str
-    universe_uid: str
-    account_uid: str
-    scheduled: bool
-    job_uid: str | None
-    job: ConfigurationJobResponse | None
-    lifecycle_state: Literal["provisioning", "ready", "paused"]
-    latest_run_status: str | None = None
-    latest_run_at: dt.datetime | None = None
-    created_at: dt.datetime
-    updated_at: dt.datetime
 
 
 class SignalObservationAssetResponse(BaseModel):
@@ -830,8 +712,8 @@ class SignalObservationsResponse(BaseModel):
     assets: list[SignalObservationAssetResponse]
 
 
-class SignalJobRunResponse(BaseModel):
-    """One run of the shared Job; ``command_args`` select its configuration."""
+class PortfolioJobRunResponse(BaseModel):
+    """One run of the shared portfolio Job; ``command_args`` select its configuration."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -850,7 +732,7 @@ class SignalJobRunResponse(BaseModel):
     failure_message: str | None
 
 
-class SignalJobRunAcceptedResponse(BaseModel):
+class PortfolioJobRunAcceptedResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     configuration_uid: str
@@ -997,7 +879,6 @@ class PublishedWeightsResponse(BaseModel):
 class PortfolioConfigurationUpdateRequest(_ConfigurationRequest):
     name: str | None = Field(default=None, min_length=1, max_length=255)
     description: str | None = None
-    signal_configuration_uid: str | None = None
     bars_configuration_uid: str | None = None
     rebalance_configuration_uid: str | None = None
     upsample_frequency_id: Literal["1d"] | None = None
@@ -1016,15 +897,13 @@ class PortfolioConfigurationUpdateRequest(_ConfigurationRequest):
 
 
 class PortfolioConfigurationResponse(BaseModel):
-    """A portfolio configuration and the shared portfolio Job; both are null before a push."""
+    """A portfolio configuration and the shared portfolio Job; the Job is null before a push."""
 
     model_config = ConfigDict(extra="forbid")
 
     uid: str
     name: str
     description: str | None
-    weights_source: Literal["etf_signal", "provided"] = "etf_signal"
-    signal_configuration_uid: str | None
     signal_uid: str
     bars_configuration_uid: str
     rebalance_configuration_uid: str
@@ -1045,18 +924,6 @@ class PortfolioConfigurationResponse(BaseModel):
     updated_at: dt.datetime
 
 
-class PortfolioLinkedSignalResponse(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    name: str
-    description: str | None
-    scheduled: bool
-    universe_name: str
-    universe_symbol: str
-    account_name: str
-    account_environment: Literal["paper", "live"]
-
-
 class PortfolioLinkedBarsResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -1066,7 +933,7 @@ class PortfolioLinkedBarsResponse(BaseModel):
     scheduled: bool
     account_name: str
     account_environment: Literal["paper", "live"]
-    asset_source: Literal["assets", "universe", "account_holdings", "portfolios"]
+    asset_source: Literal["assets", "account_holdings", "portfolios"]
     asset_source_name: str
     asset_count: int | None = Field(default=None, ge=0)
     frequency_id: str
@@ -1159,7 +1026,7 @@ class ProvidedWeightsPortfolioCreateResponse(BaseModel):
 
 
 class PortfolioProvidedWeightsResponse(BaseModel):
-    """The signal of a provided-weights portfolio, on its detail."""
+    """The signal of the weights the portfolio was given, on its detail."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -1170,24 +1037,12 @@ class PortfolioProvidedWeightsResponse(BaseModel):
 
 
 class PortfolioConfigurationDetailResponse(PortfolioConfigurationResponse):
-    """Resolved detail projection used only after one portfolio is selected.
+    """Resolved detail projection used only after one portfolio is selected."""
 
-    An ETF portfolio has ``linked_signal``; a provided-weights one has ``provided_weights``.
-    """
-
-    linked_signal: PortfolioLinkedSignalResponse | None
-    provided_weights: PortfolioProvidedWeightsResponse | None = None
+    provided_weights: PortfolioProvidedWeightsResponse
     linked_bars: PortfolioLinkedBarsResponse
     linked_rebalance: PortfolioLinkedRebalanceResponse
     canonical_portfolio: CanonicalPortfolioDetailResponse
-
-
-class PortfolioJobRunResponse(SignalJobRunResponse):
-    pass
-
-
-class PortfolioJobRunAcceptedResponse(SignalJobRunAcceptedResponse):
-    pass
 
 
 class JobRunFailureResponse(BaseModel):

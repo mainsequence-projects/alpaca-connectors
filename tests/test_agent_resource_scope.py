@@ -1,7 +1,7 @@
 """What the deployed Alpaca Agent reads from this repository (ms-tau-sdk ADR 0025).
 
 The Agent is not a coding agent, so its workflow does not admit the repository's development
-resources and the runtime reads only `.tau/`: `.tau/SYSTEM.md` and the six skills under
+resources and the runtime reads only `.tau/`: `.tau/SYSTEM.md` and the four skills under
 `.tau/skills`, the same folder the API publishes over its MCP. The root `AGENTS.md` and the development skills under
 `.agents/skills` are for the coding agents that develop the repository. The session is built the
 way the SDK builds it, through `tau_resource_paths`, which also installs the SDK's context filter;
@@ -32,9 +32,7 @@ ROOT_AGENTS_PATH = REPO_ROOT / "AGENTS.md"
 EXPECTED_SKILLS = {
     "alpaca-account-workflow",
     "alpaca-asset-registration",
-    "alpaca-etf-portfolios",
-    "alpaca-etf-weight-signals",
-    "alpaca-holdings-category",
+    "alpaca-portfolios",
     "alpaca-stock-bars",
 }
 SYNCED_DEVELOPMENT_SKILL = (
@@ -86,7 +84,7 @@ def test_the_deployed_agent_reads_only_tau(tmp_path: Path) -> None:
             )
         )
         try:
-            # Exactly the six `.tau/skills`, none of the 40-odd synced development skills.
+            # Exactly the four `.tau/skills`, none of the 40-odd synced development skills.
             assert {skill.name for skill in session.skills} == EXPECTED_SKILLS
             assert {Path(skill.path).resolve() for skill in session.skills} == {
                 (REPO_ROOT / ".tau/skills" / name / "SKILL.md").resolve()

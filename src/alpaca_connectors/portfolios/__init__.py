@@ -1,18 +1,12 @@
-"""Portfolio construction helpers for Alpaca-backed market data.
-
-The ETF signal and ETF portfolio modules load only when one of their names is used (ADR 0027), so
-importing this package, the provided-weights portfolios included, never loads the ETF extractor.
-"""
-
-from importlib import import_module
+"""Portfolios built from the weights an application provides, valued with Alpaca bars."""
 
 from alpaca_connectors.portfolios.configurations import (
     DEFAULT_PORTFOLIO_CALENDAR_IDENTIFIER,
     REBALANCE_CADENCES,
     REBALANCE_EVENTS,
     REBALANCE_STRATEGIES,
-    AlpacaETFPortfolioConfiguration,
-    AlpacaETFPortfolioConfigurationTable,
+    AlpacaPortfolioConfiguration,
+    AlpacaPortfolioConfigurationTable,
     PortfolioRebalanceConfiguration,
     PortfolioRebalanceConfigurationTable,
     create_portfolio_configuration_row,
@@ -63,44 +57,9 @@ from alpaca_connectors.portfolios.signal_history import (
     read_signal_observation_matrix,
 )
 
-_LAZY_IMPORTS = {
-    name: f"alpaca_connectors.portfolios.{module}"
-    for module, names in {
-        "alpaca_etf_signal": (
-            "AlpacaETFHoldingsSignal",
-            "AlpacaETFHoldingsSignalConfig",
-            "build_alpaca_etf_holdings_signal",
-        ),
-        "etf_tracking": (
-            "AlpacaEtfPortfolioBuild",
-            "AlpacaEtfPortfolioPlan",
-            "AlpacaEtfTrackingPortfolioConfig",
-            "ResolvedEtfUniverse",
-            "build_alpaca_etf_tracking_portfolio",
-            "build_alpaca_etf_tracking_portfolio_unique_identifier",
-            "plan_alpaca_etf_tracking_portfolio",
-        ),
-    }.items()
-    for name in names
-}
-
-
-def __getattr__(name: str):
-    if name in _LAZY_IMPORTS:
-        value = getattr(import_module(_LAZY_IMPORTS[name]), name)
-        globals()[name] = value
-        return value
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-
-
 __all__ = [
-    "AlpacaETFHoldingsSignal",
-    "AlpacaETFHoldingsSignalConfig",
-    "AlpacaETFPortfolioConfiguration",
-    "AlpacaETFPortfolioConfigurationTable",
-    "AlpacaEtfPortfolioBuild",
-    "AlpacaEtfPortfolioPlan",
-    "AlpacaEtfTrackingPortfolioConfig",
+    "AlpacaPortfolioConfiguration",
+    "AlpacaPortfolioConfigurationTable",
     "DEFAULT_PORTFOLIO_CALENDAR_IDENTIFIER",
     "MAX_SIGNAL_OBSERVATIONS",
     "MAX_PORTFOLIO_OBSERVATIONS",
@@ -115,14 +74,10 @@ __all__ = [
     "REBALANCE_CADENCES",
     "REBALANCE_EVENTS",
     "REBALANCE_STRATEGIES",
-    "ResolvedEtfUniverse",
     "ResolvedPortfolioConfiguration",
     "SignalObservationAsset",
     "SignalObservationMatrix",
     "alpaca_interpolated_prices_storage_model",
-    "build_alpaca_etf_holdings_signal",
-    "build_alpaca_etf_tracking_portfolio",
-    "build_alpaca_etf_tracking_portfolio_unique_identifier",
     "build_alpaca_interpolated_prices",
     "build_portfolio_graph",
     "calculate_portfolio_performance",
@@ -136,7 +91,6 @@ __all__ = [
     "list_portfolio_configurations",
     "list_rebalance_configurations",
     "normalize_rebalance_strategy",
-    "plan_alpaca_etf_tracking_portfolio",
     "portfolio_unique_identifier",
     "preflight_portfolio_configuration",
     "project_portfolio_configuration_models",

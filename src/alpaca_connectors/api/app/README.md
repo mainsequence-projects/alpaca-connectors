@@ -2,9 +2,9 @@
 
 This package is the HTTP integration layer over the reusable `alpaca_connectors` services.
 
-Routers expose Project State, Assets, Accounts, Holdings, order Execution (ADR 0016), Universe
-Sources, materialized Universes, Market Data datasets, and stored Alpaca bar configurations. Pydantic transport contracts live in
-`schemas.py`; provider-neutral collection, discovery, bulk-action, error, and observable-operation
+Routers expose Project State, Assets, Accounts, Holdings, order Execution (ADR 0016), Market Data
+datasets, stored Alpaca bar configurations, and portfolios built from provided weights (ADR 0024).
+Pydantic transport contracts live in `schemas.py`; provider-neutral collection, discovery, bulk-action, error, and observable-operation
 contracts derive from `msm.api.http`; route-facing response shaping lives in `services/`. Provider
 extraction, MetaTable writes, account transformation, source resolution, and DataNode execution
 remain in the reusable `alpaca_connectors` modules.

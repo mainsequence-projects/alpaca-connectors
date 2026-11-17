@@ -209,12 +209,11 @@ def run_account_remove_command(args: argparse.Namespace) -> int:
         "account_uid": args.account_uid,
         "retained_holdings_rows": holdings_count,
         "credential_source": account.get("credential_source"),
-        "disables_signal_configuration_uids": list(dependents.signal_uids),
         "disables_bar_configuration_uids": list(dependents.bar_uids),
         "detail": (
             "The Alpaca binding, its stored keys included, will be removed and Account will be "
-            "deactivated. The enabled signal and bar configurations that run with its keys are "
-            "disabled first (ADR 0022). Main Sequence Secrets a registration made before revision "
+            "deactivated. The enabled bar configurations that run with its keys are disabled "
+            "first (ADR 0022). Main Sequence Secrets a registration made before revision "
             "0018 still references are deleted when this application created them and kept "
             "otherwise."
         ),

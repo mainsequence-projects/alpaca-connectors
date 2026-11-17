@@ -1,7 +1,7 @@
 """API shaping for branch-owned Main Sequence JobRun status.
 
-Bars runs come from the declared bars Job; signal and portfolio runs from the two Jobs declared in
-the API workflow (ADR 0013), which report the configuration their arguments select.
+Bars runs come from the declared bars Job; portfolio runs from the portfolio Job declared in the
+API workflow (ADR 0013), whose arguments select the configuration they report.
 """
 
 from __future__ import annotations

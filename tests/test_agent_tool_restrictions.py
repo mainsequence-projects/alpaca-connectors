@@ -107,12 +107,12 @@ def test_local_reader_serves_only_the_agents_tau_skill_files(tmp_path: Path):
         tau_resource_paths(REPO_ROOT, state_home=tmp_path)
     )
     assert not diagnostics
-    # Since ms-tau-sdk 2.0.26 (ADR 0025) the runtime reads skills only from `.tau/skills`: the six
+    # Since ms-tau-sdk 2.0.26 (ADR 0025) the runtime reads skills only from `.tau/skills`: the four
     # business skills, which the API also publishes through its MCP (test_agent_mcp_skills.py
     # covers their real HTTP discovery and verified reads). The copied development bundles under
     # `.agents/skills/` are not the Agent's skills, so the restricted reader refuses them.
     skill_files = {path.resolve() for path in (REPO_ROOT / ".tau/skills").glob("*/SKILL.md")}
-    assert len(skill_files) == 6
+    assert len(skill_files) == 4
     assert {Path(skill.path).resolve() for skill in skills} == skill_files
     business = REPO_ROOT / ".tau/skills/alpaca-account-workflow/SKILL.md"
     assert business.resolve() in skill_files

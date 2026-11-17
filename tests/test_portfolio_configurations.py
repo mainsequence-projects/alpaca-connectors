@@ -9,8 +9,8 @@ import pytest
 
 from alpaca_connectors.portfolios import configurations, execution
 from alpaca_connectors.portfolios.configurations import (
-    AlpacaETFPortfolioConfiguration,
-    AlpacaETFPortfolioConfigurationTable,
+    AlpacaPortfolioConfiguration,
+    AlpacaPortfolioConfigurationTable,
     PortfolioRebalanceConfiguration,
     normalize_rebalance_strategy,
     update_portfolio_configuration,
@@ -30,19 +30,19 @@ from alpaca_connectors.portfolios.signal_history import (
 )
 
 CONFIGURATION_UID = uuid.UUID("11111111-1111-4111-8111-111111111111")
-SIGNAL_CONFIGURATION_UID = uuid.UUID("22222222-2222-4222-8222-222222222222")
 BARS_CONFIGURATION_UID = uuid.UUID("33333333-3333-4333-8333-333333333333")
 REBALANCE_CONFIGURATION_UID = uuid.UUID("44444444-4444-4444-8444-444444444444")
 PORTFOLIO_UID = uuid.UUID("55555555-5555-4555-8555-555555555555")
 
 
-def portfolio_configuration(**overrides) -> AlpacaETFPortfolioConfiguration:
+def portfolio_configuration(**overrides) -> AlpacaPortfolioConfiguration:
     now = dt.datetime(2026, 9, 5, 9, tzinfo=dt.UTC)
     values = {
         "uid": CONFIGURATION_UID,
-        "name": "Daily IVV analytical portfolio",
-        "description": "NYSE-close ETF portfolio backtest.",
-        "signal_configuration_uid": SIGNAL_CONFIGURATION_UID,
+        "name": "Daily analytical portfolio",
+        "description": "NYSE-close portfolio backtest.",
+        "owner_gateway_uid": "owner-uid",
+        "owner_user_uid": "owner-uid",
         "bars_configuration_uid": BARS_CONFIGURATION_UID,
         "rebalance_configuration_uid": REBALANCE_CONFIGURATION_UID,
         "portfolio_uid": None,
@@ -57,7 +57,7 @@ def portfolio_configuration(**overrides) -> AlpacaETFPortfolioConfiguration:
         "updated_at": now,
     }
     values.update(overrides)
-    return AlpacaETFPortfolioConfiguration.model_validate(values)
+    return AlpacaPortfolioConfiguration.model_validate(values)
 
 
 def rebalance_configuration() -> PortfolioRebalanceConfiguration:
@@ -83,12 +83,6 @@ def rebalance_configuration() -> PortfolioRebalanceConfiguration:
 def resolved_configuration() -> ResolvedPortfolioConfiguration:
     return ResolvedPortfolioConfiguration(
         configuration=portfolio_configuration(),
-        signal_configuration=SimpleNamespace(
-            uid=SIGNAL_CONFIGURATION_UID,
-            name="Daily IVV signal",
-            universe_uid=uuid.uuid4(),
-            account_uid=uuid.uuid4(),
-        ),
         bars_configuration=SimpleNamespace(
             uid=BARS_CONFIGURATION_UID,
             frequency_id="1d",
@@ -104,7 +98,7 @@ def resolved_configuration() -> ResolvedPortfolioConfiguration:
 
 
 def test_portfolio_configuration_owns_calculation_fields_and_the_scheduled_flag() -> None:
-    columns = AlpacaETFPortfolioConfigurationTable.__table__.c
+    columns = AlpacaPortfolioConfigurationTable.__table__.c
 
     for forbidden in (
         "environment_uid",
@@ -121,16 +115,20 @@ def test_portfolio_configuration_owns_calculation_fields_and_the_scheduled_flag(
         "universe_uid",
         "account_uid",
         "source_time_index_meta_table_uid",
+        # One weights source (ADR 0027): no signal configuration, no unused job_uid.
+        "weights_source",
+        "signal_configuration_uid",
+        "job_uid",
     ):
         assert forbidden not in columns
-    assert columns.signal_configuration_uid.foreign_keys
     assert columns.bars_configuration_uid.foreign_keys
     assert columns.rebalance_configuration_uid.foreign_keys
     assert columns.portfolio_uid.foreign_keys
-    # Revision 0016: the only operational column; the retired job_uid stays until a later drop.
     assert columns.scheduled.nullable is False
     assert columns.scheduled.server_default is not None
-    assert "job_uid" in columns
+    # Every portfolio has its owner (ADR 0024, decision 6).
+    assert columns.owner_gateway_uid.nullable is False
+    assert columns.owner_user_uid.nullable is False
 
 
 def test_rebalance_accepts_only_calendar_event_signal() -> None:
@@ -210,7 +208,6 @@ def test_preflight_of_a_missing_configuration_is_not_found() -> None:
 
 def test_portfolio_resolution_uses_published_signal_and_selected_bars_profile() -> None:
     row = portfolio_configuration()
-    signal_configuration = SimpleNamespace(uid=SIGNAL_CONFIGURATION_UID)
     bars_configuration = SimpleNamespace(
         uid=BARS_CONFIGURATION_UID,
         frequency_id="1d",
@@ -238,10 +235,15 @@ def test_portfolio_resolution_uses_published_signal_and_selected_bars_profile() 
         ),
         patch(
             "alpaca_connectors.portfolios.execution.validate_portfolio_references",
-            return_value=(signal_configuration, bars_configuration, rebalance),
+            return_value=(bars_configuration, rebalance),
         ),
         patch(
-            "alpaca_connectors.operations.signal_uid_for_configuration", return_value="signal-uid"
+            "alpaca_connectors.portfolios.provided_weights.provided_signal_uid",
+            return_value="signal-uid",
+        ),
+        patch(
+            "alpaca_connectors.portfolios.signal_assets.assets_for_signals",
+            return_value=["ALPACA::asset-a"],
         ),
         patch(
             "alpaca_connectors.portfolios.execution.read_signal_observation_matrix",
@@ -276,7 +278,7 @@ def test_execution_updates_each_released_stage_without_tree_walk() -> None:
     portfolio_node.signal_weights.get_update_statistics.return_value = signal_statistics
     portfolio_node.target_portfolio = SimpleNamespace(
         uid=PORTFOLIO_UID,
-        unique_identifier="ALPACA_ETF_PORTFOLIO__11111111111141118111111111111111",
+        unique_identifier="ALPACA_PORTFOLIO__11111111111141118111111111111111",
     )
     portfolio_row = portfolio_node.target_portfolio
     manager = Mock()

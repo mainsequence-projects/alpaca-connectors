@@ -20,15 +20,12 @@ from alpaca_connectors.api.app.schemas import (
     AccountSecretNameRegistrationRequest,
     AccountSecretNameUpdateRequest,
     AssetRegistrationRequest,
-    AssetUniverseUpdateRequest,
     BarConfigurationCreateRequest,
     BarConfigurationResolveRequest,
     BarConfigurationUpdateRequest,
     PortfolioConfigurationUpdateRequest,
     PortfolioRebalanceConfigurationCreateRequest,
     PortfolioRebalanceConfigurationUpdateRequest,
-    SignalJobConfigurationUpdateRequest,
-    UniverseSourceUpdateRequest,
 )
 
 ToolHandler = Callable[[Mapping[str, Any]], Any]
@@ -378,131 +375,6 @@ def account_key_request(arguments: Mapping[str, Any]) -> Any:
     return cancel_own_key_request(key_request_uid, requester_uid=requester_uid)
 
 
-def query_universes(arguments: Mapping[str, Any]) -> Any:
-    from alpaca_connectors.api.app.services.universe_sources import (
-        get_source,
-        list_sources,
-        preview_source,
-    )
-    from alpaca_connectors.api.app.services.universes import (
-        get_universe,
-        list_universe_assets,
-        list_universes,
-        preview_universe_run,
-    )
-
-    operation = _operation(
-        arguments,
-        {
-            "get",
-            "get_source",
-            "list",
-            "list_sources",
-            "members",
-            "preview_extraction",
-            "preview_source",
-        },
-    )
-    if operation == "get":
-        universe_uid = _required_text(arguments, "universe_uid")
-        return _require_found(get_universe(universe_uid), label="Universe", uid=universe_uid)
-    if operation == "get_source":
-        source_uid = _required_text(arguments, "source_uid")
-        return _require_found(get_source(source_uid), label="Universe source", uid=source_uid)
-    if operation == "preview_source":
-        return preview_source(
-            _required_text(arguments, "source_uid"),
-            timeout=float(arguments.get("timeout", 30.0)),
-        )
-    if operation == "preview_extraction":
-        return preview_universe_run(
-            _required_text(arguments, "universe_uid"),
-            account_uid=_required_text(arguments, "account_uid"),
-            timeout=float(arguments.get("timeout", 30.0)),
-        )
-    limit, offset = _page(arguments)
-    if operation == "members":
-        return list_universe_assets(
-            _required_text(arguments, "universe_uid"),
-            limit=limit,
-            offset=offset,
-            search=_optional_text(arguments, "search"),
-            ordering=str(arguments.get("ordering") or "name"),
-        )
-    if operation == "list_sources":
-        return list_sources(
-            limit=limit,
-            offset=offset,
-            search=_optional_text(arguments, "search"),
-            enabled=arguments.get("enabled"),
-            ordering=str(arguments.get("ordering") or "name"),
-        )
-    return list_universes(
-        limit=limit,
-        offset=offset,
-        search=_optional_text(arguments, "search"),
-        ordering=str(arguments.get("ordering") or "display_name"),
-    )
-
-
-def manage_universe(arguments: Mapping[str, Any]) -> Any:
-    """Change, run or delete an existing Universe or source; none is created (ADR 0027)."""
-    from alpaca_connectors.api.app.services.universe_sources import (
-        delete_source,
-        update_source,
-    )
-    from alpaca_connectors.api.app.services.universes import (
-        delete_universe,
-        run_universe,
-        universe_delete_blockers,
-        update_universe,
-    )
-
-    operation = _operation(
-        arguments,
-        {
-            "activate",
-            "deactivate",
-            "delete",
-            "delete_source",
-            "extract_components",
-            "update",
-            "update_source",
-        },
-    )
-    if operation == "update_source":
-        return update_source(
-            _required_text(arguments, "source_uid"),
-            _request_model(arguments, UniverseSourceUpdateRequest),
-        )
-    if operation == "delete_source":
-        source_uid = _required_text(arguments, "source_uid")
-        _confirm_delete(arguments, source_uid)
-        return delete_source(source_uid)
-    universe_uid = _required_text(arguments, "universe_uid")
-    if operation == "update":
-        return update_universe(
-            universe_uid,
-            _request_model(arguments, AssetUniverseUpdateRequest),
-        )
-    if operation in {"activate", "deactivate"}:
-        return update_universe(
-            universe_uid,
-            AssetUniverseUpdateRequest(is_active=operation == "activate"),
-        )
-    if operation == "extract_components":
-        return run_universe(
-            universe_uid,
-            account_uid=_required_text(arguments, "account_uid"),
-            timeout=float(arguments.get("timeout", 30.0)),
-        )
-    _confirm_delete(arguments, universe_uid)
-    blockers = universe_delete_blockers(universe_uid)
-    if blockers:
-        raise ValueError(" ".join(blockers))
-    return delete_universe(universe_uid)
-
-
 def query_bar_configurations(arguments: Mapping[str, Any]) -> Any:
     from alpaca_connectors.api.app.services.bar_configurations import (
         get_configuration,
@@ -593,64 +465,6 @@ def manage_bar_configuration(arguments: Mapping[str, Any]) -> Any:
     return delete_configuration(configuration_uid)
 
 
-def query_etf_signals(arguments: Mapping[str, Any]) -> Any:
-    from alpaca_connectors.api.app.services.signal_jobs import (
-        configuration_runs,
-        get_configuration,
-        get_configuration_observations,
-        list_configurations,
-    )
-
-    operation = _operation(arguments, {"get", "list", "observations", "runs"})
-    if operation == "get":
-        configuration_uid = _required_text(arguments, "configuration_uid")
-        return _require_found(
-            get_configuration(configuration_uid),
-            label="ETF signal configuration",
-            uid=configuration_uid,
-        )
-    if operation == "observations":
-        return get_configuration_observations(
-            _required_text(arguments, "configuration_uid"),
-            limit=_integer(arguments, "limit", default=100, minimum=1, maximum=100),
-        )
-    if operation == "runs":
-        return configuration_runs(
-            _required_text(arguments, "configuration_uid"),
-            limit=_integer(arguments, "limit", default=25, minimum=1, maximum=100),
-        )
-    limit, offset = _page(arguments)
-    return list_configurations(
-        limit=limit,
-        offset=offset,
-        search=_optional_text(arguments, "search"),
-        scheduled=arguments.get("scheduled"),
-        ordering=str(arguments.get("ordering") or "name"),
-    )
-
-
-def manage_etf_signal(arguments: Mapping[str, Any]) -> Any:
-    """Change, run or delete an existing ETF signal; none is created (ADR 0027)."""
-    from alpaca_connectors.api.app.services.signal_jobs import (
-        delete_configuration,
-        run_configuration,
-        update_configuration,
-    )
-
-    operation = _operation(arguments, {"delete", "run", "update"})
-    configuration_uid = _required_text(arguments, "configuration_uid")
-    if operation == "update":
-        return update_configuration(
-            configuration_uid,
-            _request_model(arguments, SignalJobConfigurationUpdateRequest),
-            owner=_acting_owner(),
-        )
-    if operation == "run":
-        return run_configuration(configuration_uid)
-    _confirm_delete(arguments, configuration_uid)
-    return delete_configuration(configuration_uid)
-
-
 def query_rebalance_configurations(arguments: Mapping[str, Any]) -> Any:
     from alpaca_connectors.api.app.services.portfolio_configurations import (
         get_rebalance,
@@ -696,7 +510,7 @@ def manage_rebalance_configuration(arguments: Mapping[str, Any]) -> Any:
     return delete_rebalance(configuration_uid)
 
 
-def query_etf_portfolios(arguments: Mapping[str, Any]) -> Any:
+def query_portfolios(arguments: Mapping[str, Any]) -> Any:
     from alpaca_connectors.api.app.services.portfolio_configurations import (
         configuration_runs,
         get_configuration_detail,
@@ -717,7 +531,7 @@ def query_etf_portfolios(arguments: Mapping[str, Any]) -> Any:
                     maximum=5_000,
                 ),
             ),
-            label="ETF portfolio configuration",
+            label="Portfolio configuration",
             uid=configuration_uid,
         )
     if operation == "runs":
@@ -730,30 +544,33 @@ def query_etf_portfolios(arguments: Mapping[str, Any]) -> Any:
         limit=limit,
         offset=offset,
         search=_optional_text(arguments, "search"),
-        signal_configuration_uid=_optional_text(arguments, "signal_configuration_uid"),
         bars_configuration_uid=_optional_text(arguments, "bars_configuration_uid"),
         ordering=str(arguments.get("ordering") or "name"),
     )
 
 
-def manage_etf_portfolio(arguments: Mapping[str, Any]) -> Any:
-    """Change, run or end an existing portfolio; none is created here (ADR 0024, ADR 0027)."""
+def manage_portfolio(arguments: Mapping[str, Any]) -> Any:
+    """Run, pause, resume or end a portfolio; none is created here (ADR 0024, ADR 0027).
+
+    Pausing, resuming and ending are the portfolio owner's: a call that works for anyone else is
+    refused with ``portfolio_owned_by_another``.
+    """
     from alpaca_connectors.api.app.services.portfolio_configurations import (
         delete_configuration,
         run_configuration,
         update_configuration,
     )
 
-    operation = _operation(arguments, {"delete", "run", "update"})
+    operation = _operation(arguments, {"delete", "pause", "resume", "run"})
     configuration_uid = _required_text(arguments, "configuration_uid")
-    if operation == "update":
-        return update_configuration(
-            configuration_uid,
-            _request_model(arguments, PortfolioConfigurationUpdateRequest),
-            owner=_acting_owner,
-        )
     if operation == "run":
         return run_configuration(configuration_uid)
+    if operation in {"pause", "resume"}:
+        return update_configuration(
+            configuration_uid,
+            PortfolioConfigurationUpdateRequest(scheduled=operation == "resume"),
+            owner=_acting_owner,
+        )
     _confirm_delete(arguments, configuration_uid)
     return delete_configuration(configuration_uid, owner=_acting_owner)
 
@@ -771,14 +588,6 @@ ORDERING = {"ordering": {"type": "string"}}
 ACCOUNT_BOOLEAN_FILTERS = {
     "active": {"type": "boolean"},
     "is_paper": {"type": "boolean"},
-}
-TIMEOUT = {
-    "timeout": {
-        "type": "number",
-        "exclusiveMinimum": 0,
-        "maximum": 300,
-        "default": 30,
-    }
 }
 
 
@@ -894,8 +703,8 @@ PROJECT_AGENT_TOOLS: tuple[ProjectAgentTool, ...] = (
             "capture. Never ask a user for Alpaca key values; to register an account or replace "
             "keys from values the person holds, use alpaca_account_key_request so the person "
             "enters them on the Alpaca site. Deleting an account deletes its stored keys and "
-            "disables the enabled signal and bar configurations that run with them; the result "
-            "lists their UIDs."
+            "disables the enabled bar configurations that run with them; the result lists their "
+            "UIDs."
         ),
         parameters=_operations(
             *[
@@ -991,117 +800,6 @@ PROJECT_AGENT_TOOLS: tuple[ProjectAgentTool, ...] = (
         handler=account_key_request,
     ),
     ProjectAgentTool(
-        name="alpaca_query_universes",
-        label="Query Alpaca Universes",
-        description=(
-            "Read Universe sources, registered Universes, linked AssetCategory members, and "
-            "component-extraction plans."
-        ),
-        parameters=_operations(
-            _operation_case("list", properties={**PAGE, **SEARCH, **ORDERING}),
-            _operation_case(
-                "get",
-                properties={"universe_uid": _uid("Universe")},
-                required=("universe_uid",),
-            ),
-            _operation_case(
-                "members",
-                properties={
-                    "universe_uid": _uid("Universe"),
-                    **PAGE,
-                    **SEARCH,
-                    **ORDERING,
-                },
-                required=("universe_uid",),
-            ),
-            _operation_case(
-                "list_sources",
-                properties={**PAGE, **SEARCH, **ORDERING, "enabled": {"type": "boolean"}},
-            ),
-            _operation_case(
-                "get_source",
-                properties={"source_uid": _uid("UniverseSource")},
-                required=("source_uid",),
-            ),
-            _operation_case(
-                "preview_source",
-                properties={"source_uid": _uid("UniverseSource"), **TIMEOUT},
-                required=("source_uid",),
-            ),
-            _operation_case(
-                "preview_extraction",
-                properties={
-                    "universe_uid": _uid("Universe"),
-                    "account_uid": _uid("Account"),
-                    **TIMEOUT,
-                },
-                required=("universe_uid", "account_uid"),
-            ),
-        ),
-        execution_mode="parallel",
-        handler=query_universes,
-    ),
-    ProjectAgentTool(
-        name="alpaca_manage_universe",
-        label="Manage Alpaca Universe",
-        description=(
-            "Update, activate, deactivate, delete, or extract one registered Universe, and update "
-            "or delete its extraction source. No Universe or source is created any more: the "
-            "existing ones are kept running until they are deleted. Component extraction "
-            "registers missing assets in bulk and publishes one weight observation."
-        ),
-        parameters=_operations(
-            _operation_case(
-                "update",
-                properties={
-                    "universe_uid": _uid("Universe"),
-                    "request": _request(AssetUniverseUpdateRequest, "Mutable Universe fields."),
-                },
-                required=("universe_uid", "request"),
-            ),
-            *[
-                _operation_case(
-                    operation,
-                    properties={"universe_uid": _uid("Universe")},
-                    required=("universe_uid",),
-                )
-                for operation in ("activate", "deactivate")
-            ],
-            _operation_case(
-                "extract_components",
-                properties={
-                    "universe_uid": _uid("Universe"),
-                    "account_uid": _uid("Account"),
-                    **TIMEOUT,
-                },
-                required=("universe_uid", "account_uid"),
-            ),
-            _operation_case(
-                "delete",
-                properties={"universe_uid": _uid("Universe"), "confirmation": _confirmation()},
-                required=("universe_uid", "confirmation"),
-            ),
-            _operation_case(
-                "update_source",
-                properties={
-                    "source_uid": _uid("UniverseSource"),
-                    "request": _request(
-                        UniverseSourceUpdateRequest,
-                        "Mutable extraction-source fields.",
-                    ),
-                },
-                required=("source_uid", "request"),
-            ),
-            _operation_case(
-                "delete_source",
-                properties={"source_uid": _uid("UniverseSource"), "confirmation": _confirmation()},
-                required=("source_uid", "confirmation"),
-            ),
-        ),
-        execution_mode="sequential",
-        handler=manage_universe,
-    ),
-    ProjectAgentTool(
         name="alpaca_query_bar_configurations",
         label="Query Alpaca Bar Configurations",
         description=(
@@ -1119,7 +817,7 @@ PROJECT_AGENT_TOOLS: tuple[ProjectAgentTool, ...] = (
                     "scheduled": {"type": "boolean"},
                     "asset_source": {
                         "type": "string",
-                        "enum": ["assets", "universe", "account_holdings", "portfolios"],
+                        "enum": ["assets", "account_holdings", "portfolios"],
                     },
                 },
             ),
@@ -1206,85 +904,6 @@ PROJECT_AGENT_TOOLS: tuple[ProjectAgentTool, ...] = (
         handler=manage_bar_configuration,
     ),
     ProjectAgentTool(
-        name="alpaca_query_etf_signals",
-        label="Query ETF Weight Signals",
-        description=(
-            "Read Universe-backed ETF signal configurations, their latest 100 observed weight "
-            "frames, and their runs of the shared signal Job."
-        ),
-        parameters=_operations(
-            _operation_case(
-                "list",
-                properties={
-                    **PAGE,
-                    **SEARCH,
-                    **ORDERING,
-                    "scheduled": {"type": "boolean"},
-                },
-            ),
-            _operation_case(
-                "get",
-                properties={"configuration_uid": _uid("ETF signal configuration")},
-                required=("configuration_uid",),
-            ),
-            _operation_case(
-                "observations",
-                properties={
-                    "configuration_uid": _uid("ETF signal configuration"),
-                    "limit": {"type": "integer", "minimum": 1, "maximum": 100, "default": 100},
-                },
-                required=("configuration_uid",),
-            ),
-            _operation_case(
-                "runs",
-                properties={
-                    "configuration_uid": _uid("ETF signal configuration"),
-                    "limit": {"type": "integer", "minimum": 1, "maximum": 100, "default": 25},
-                },
-                required=("configuration_uid",),
-            ),
-        ),
-        execution_mode="parallel",
-        handler=query_etf_signals,
-    ),
-    ProjectAgentTool(
-        name="alpaca_manage_etf_signal",
-        label="Manage ETF Weight Signal",
-        description=(
-            "Update, delete, or run an existing Universe-backed ETF signal configuration; none is "
-            "created any more. The shared signal Job declared in the workflow runs it. An Account "
-            "that has an owner is configured only for that owner."
-        ),
-        parameters=_operations(
-            _operation_case(
-                "update",
-                properties={
-                    "configuration_uid": _uid("ETF signal configuration"),
-                    "request": _request(
-                        SignalJobConfigurationUpdateRequest,
-                        "Mutable ETF signal fields, including scheduled.",
-                    ),
-                },
-                required=("configuration_uid", "request"),
-            ),
-            _operation_case(
-                "run",
-                properties={"configuration_uid": _uid("ETF signal configuration")},
-                required=("configuration_uid",),
-            ),
-            _operation_case(
-                "delete",
-                properties={
-                    "configuration_uid": _uid("ETF signal configuration"),
-                    "confirmation": _confirmation(),
-                },
-                required=("configuration_uid", "confirmation"),
-            ),
-        ),
-        execution_mode="sequential",
-        handler=manage_etf_signal,
-    ),
-    ProjectAgentTool(
         name="alpaca_query_rebalance_configurations",
         label="Query Rebalance Configurations",
         description="List or retrieve stored calendar-event portfolio rebalance configurations.",
@@ -1338,10 +957,11 @@ PROJECT_AGENT_TOOLS: tuple[ProjectAgentTool, ...] = (
         handler=manage_rebalance_configuration,
     ),
     ProjectAgentTool(
-        name="alpaca_query_etf_portfolios",
-        label="Query ETF Portfolios",
+        name="alpaca_query_portfolios",
+        label="Query Portfolios",
         description=(
-            "Read analytical ETF portfolio configurations, linked signal/bars/rebalance details, "
+            "Read analytical portfolio configurations built from the weights an application "
+            "provides, with their linked bars and rebalance details, provided-weights summary, "
             "historical performance, statistics, and their runs of the shared portfolio Job."
         ),
         parameters=_operations(
@@ -1351,14 +971,13 @@ PROJECT_AGENT_TOOLS: tuple[ProjectAgentTool, ...] = (
                     **PAGE,
                     **SEARCH,
                     **ORDERING,
-                    "signal_configuration_uid": _uid("ETF signal configuration"),
                     "bars_configuration_uid": _uid("bar configuration"),
                 },
             ),
             _operation_case(
                 "get",
                 properties={
-                    "configuration_uid": _uid("ETF portfolio configuration"),
+                    "configuration_uid": _uid("portfolio configuration"),
                     "observation_limit": {
                         "type": "integer",
                         "minimum": 1,
@@ -1371,60 +990,52 @@ PROJECT_AGENT_TOOLS: tuple[ProjectAgentTool, ...] = (
             _operation_case(
                 "runs",
                 properties={
-                    "configuration_uid": _uid("ETF portfolio configuration"),
+                    "configuration_uid": _uid("portfolio configuration"),
                     "limit": {"type": "integer", "minimum": 1, "maximum": 100, "default": 25},
                 },
                 required=("configuration_uid",),
             ),
         ),
         execution_mode="parallel",
-        handler=query_etf_portfolios,
+        handler=query_portfolios,
     ),
     ProjectAgentTool(
-        name="alpaca_manage_etf_portfolio",
-        label="Manage ETF Portfolio",
+        name="alpaca_manage_portfolio",
+        label="Manage Portfolio",
         description=(
-            "Update, delete, or run an existing analytical portfolio configuration; none is "
-            "created here. The shared portfolio Job declared in the workflow runs it; "
-            "`scheduled` includes it in that Job's daily scheduled run. Deleting it retires its "
-            "portfolio first, which is refused while an account's target names it. A portfolio "
-            "built from provided weights is changed or deleted only for its owner."
+            "Run, pause, resume, or delete an analytical portfolio configuration; no portfolio "
+            "is created here. The shared portfolio Job declared in the workflow runs it, and "
+            "pausing leaves it out of that Job's daily scheduled run. Pausing, resuming and "
+            "deleting are done only for the portfolio's owner. Deleting it retires its portfolio "
+            "first, which is refused while an account's target names it."
         ),
         parameters=_operations(
-            _operation_case(
-                "update",
-                properties={
-                    "configuration_uid": _uid("ETF portfolio configuration"),
-                    "request": _request(
-                        PortfolioConfigurationUpdateRequest,
-                        "Mutable ETF portfolio fields, including scheduled.",
-                    ),
-                },
-                required=("configuration_uid", "request"),
-            ),
-            _operation_case(
-                "run",
-                properties={"configuration_uid": _uid("ETF portfolio configuration")},
-                required=("configuration_uid",),
-            ),
+            *[
+                _operation_case(
+                    operation,
+                    properties={"configuration_uid": _uid("portfolio configuration")},
+                    required=("configuration_uid",),
+                )
+                for operation in ("run", "pause", "resume")
+            ],
             _operation_case(
                 "delete",
                 properties={
-                    "configuration_uid": _uid("ETF portfolio configuration"),
+                    "configuration_uid": _uid("portfolio configuration"),
                     "confirmation": _confirmation(),
                 },
                 required=("configuration_uid", "confirmation"),
             ),
         ),
         execution_mode="sequential",
-        handler=manage_etf_portfolio,
+        handler=manage_portfolio,
     ),
     ProjectAgentTool(
         name="alpaca_get_job_run_status",
         label="Get Alpaca JobRun Status",
         description=(
-            "Read one branch-owned Alpaca bars, ETF signal, or ETF portfolio JobRun status and "
-            "its sanitized failure summary."
+            "Read one branch-owned Alpaca bars or portfolio JobRun status and its sanitized "
+            "failure summary."
         ),
         parameters={
             "type": "object",

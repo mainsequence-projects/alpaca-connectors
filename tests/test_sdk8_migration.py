@@ -1,23 +1,14 @@
 from __future__ import annotations
 
-import datetime as dt
 from importlib.metadata import version
 from types import SimpleNamespace
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 
-from etfhextractor.portfolio_signal import ETFHoldingsSignal, ETFHoldingsSignalConfig
-from msm_portfolios.time_index.signals.storage import SignalWeightsStorage
 from packaging.specifiers import SpecifierSet
 
 from alpaca_connectors.market_data.alpaca_bars import AlpacaStockBarsNode
 from alpaca_connectors.market_data.storage import AlpacaStockBars1dSipAllStorage
 from alpaca_connectors.migrations import METADATA, PROJECT_TABLE_NAMES, migration
-from alpaca_connectors.portfolios.etf_tracking import (
-    AlpacaEtfPortfolioPlan,
-    AlpacaEtfTrackingPortfolioConfig,
-    ResolvedEtfUniverse,
-    build_alpaca_etf_tracking_portfolio,
-)
 from alpaca_connectors.portfolios.interpolated_prices import (
     build_alpaca_interpolated_prices,
     resolve_alpaca_bars_time_index_meta_table_uid,
@@ -35,21 +26,11 @@ def test_alpaca_bars_node_declares_sdk8_output_table() -> None:
     assert not hasattr(AlpacaStockBarsNode, "_required_storage_table")
 
 
-def test_external_holdings_signal_uses_current_ms_markets_output_contract() -> None:
-    config = ETFHoldingsSignalConfig(etf_ticker="IVV", provider="ishares")
-
-    assert ETFHoldingsSignal._required_output_table() is SignalWeightsStorage
-    assert (
-        ETFHoldingsSignal.default_config(signal_configuration=config).signal_configuration == config
-    )
-
-
 def test_migration_metadata_includes_fk_dependencies_but_manages_only_project_tables() -> None:
     assert {
         "ms_markets__accountgroup",
         "ms_markets__account",
         "ms_markets__asset",
-        "ms_markets__assetcategory",
         "ms_markets__calendar",
         "ms_markets__index",
         "ms_markets__portfolio",
@@ -69,7 +50,6 @@ def test_migration_metadata_includes_fk_dependencies_but_manages_only_project_ta
     } == {
         "alpaca_connectors__bars_1d_iex_raw",
         "alpaca_connectors__bars_1d_sip_all",
-        "alpaca_connectors__asset_universe",
         "alpaca_connectors__bars_configuration",
         "alpaca_connectors__bars_configuration_asset",
         "alpaca_connectors__signal_asset",
@@ -78,10 +58,8 @@ def test_migration_metadata_includes_fk_dependencies_but_manages_only_project_ta
         "alpaca_connectors__account_sync_operation",
         "alpaca_connectors__asset_alpaca",
         "alpaca_connectors__asset_registration_operation",
-        "alpaca_connectors__etf_portfolio_configuration",
-        "alpaca_connectors__etf_signal_job_configuration",
+        "alpaca_connectors__portfolio_configuration",
         "alpaca_connectors__portfolio_rebalance_configuration",
-        "alpaca_connectors__universe_source",
         # Contract instances of the Markets time series (ms-markets ADR 0047).
         "alpaca_connectors__signalweightsts__main",
         "alpaca_connectors__portfoliosts__main",
@@ -131,91 +109,3 @@ def test_interpolated_prices_scope_is_identifiers_and_bars_follow_each_asset_cal
     # registration linked it to (ADR 0026).
     interpolation_config = interpolated_prices.call_args.kwargs["interpolation_config"]
     assert interpolation_config.asset_list == ["ALPACA::asset-a", "ALPACA::asset-b"]
-
-
-def test_alpaca_portfolio_uses_connector_owned_universe_signal() -> None:
-    config = AlpacaEtfTrackingPortfolioConfig(
-        universe_uid="universe-uid",
-        account_uid="account-uid",
-    )
-    universe_run_plan = object()
-    plan = AlpacaEtfPortfolioPlan(
-        config=config,
-        universe=ResolvedEtfUniverse(
-            universe_uid="universe-uid",
-            source_uid="source-uid",
-            asset_category_uid="category-uid",
-            etf_ticker="IVV",
-            provider="ishares",
-            component_weights_by_symbol={"AAPL": 1.0},
-            asset_identifiers_by_symbol={"AAPL": "ALPACA::asset-uuid"},
-        ),
-        universe_run_plan=universe_run_plan,
-        source_time_index_meta_table_uid="source-table-uid",
-        source_storage_identifier="bars-storage",
-        source_storage_table_name="bars-table",
-        interpolated_storage_identifier="interpolated-storage",
-        portfolio_unique_identifier="IVV_TRACKER__ALPACA",
-    )
-    valuation_source = object()
-    calendar_row = SimpleNamespace(uid="calendar-uid", unique_identifier="NYSE")
-    portfolio_row = SimpleNamespace(uid="portfolio-uid")
-    signal = SimpleNamespace(signal_uid="signal-uid")
-    calendar_events = Mock()
-    portfolio_node = Mock()
-
-    with (
-        patch("alpaca_connectors.runtime.start_portfolio_markets_engine") as start_engine,
-        patch(
-            "alpaca_connectors.portfolios.etf_tracking.plan_alpaca_etf_tracking_portfolio",
-            return_value=plan,
-        ),
-        patch(
-            "alpaca_connectors.portfolios.etf_tracking.build_alpaca_interpolated_prices",
-            return_value=valuation_source,
-        ) as build_prices,
-        patch(
-            "alpaca_connectors.portfolios.etf_tracking.build_alpaca_etf_holdings_signal",
-            return_value=signal,
-        ) as build_signal,
-        patch(
-            "alpaca_connectors.portfolios.etf_tracking.ensure_trading_calendar",
-            return_value=calendar_row,
-        ),
-        patch("msm.api.portfolios.Portfolio.upsert", return_value=portfolio_row),
-        patch(
-            "msm_portfolios.configuration.PortfolioConfiguration",
-            return_value="portfolio-configuration",
-        ),
-        patch("msm_portfolios.configuration.PortfolioBuildConfiguration"),
-        patch("msm_portfolios.configuration.PortfolioExecutionConfiguration"),
-        patch("msm_portfolios.configuration.BacktestingWeightsConfig"),
-        patch("msm_portfolios.configuration.PortfolioMarketsConfig"),
-        patch("msm_portfolios.configuration.FrontEndDetails"),
-        patch("msm_portfolios.rebalance_strategy.CalendarEventSignal"),
-        patch(
-            "msm_portfolios.time_index.PortfolioCalendarEvents",
-            return_value=calendar_events,
-        ),
-        patch("msm_portfolios.time_index.PortfolioCalendarEventsConfiguration"),
-        patch("msm_portfolios.time_index.PortfoliosUpdater", return_value=portfolio_node),
-    ):
-        result = build_alpaca_etf_tracking_portfolio(config, run=False)
-
-    start_engine.assert_called_once_with()
-    build_signal.assert_called_once_with(
-        universe_uid="universe-uid",
-        account_uid="account-uid",
-        prepared_plan=universe_run_plan,
-    )
-    build_prices.assert_called_once_with(
-        source_time_index_meta_table_uid="source-table-uid",
-        asset_identifiers=["ALPACA::asset-uuid"],
-        upsample_frequency_id="1d",
-        intraday_bar_interpolation_rule="ffill",
-    )
-    assert result.calendar_row is calendar_row
-    assert result.portfolio_row is portfolio_row
-    assert result.signal is signal
-    assert result.calendar_events is calendar_events
-    assert result.portfolio_node is portfolio_node

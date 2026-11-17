@@ -1,13 +1,10 @@
 """Durable analytical portfolio and rebalance configuration API.
 
-ETF portfolios follow an ETF signal; provided-weights portfolios follow weights the calling
-application gives (ADR 0024) and are changed only by their owner. Only provided-weights
-portfolios are created; ETF portfolios are read, run and deleted until none is left (ADR 0027).
+Every portfolio follows the weights the calling application gives (ADR 0024, ADR 0027) and is
+changed only by its owner.
 """
 
 from __future__ import annotations
-
-from typing import Literal
 
 from fastapi import APIRouter, Body, Query
 
@@ -56,9 +53,7 @@ def portfolio_configurations_list(
     limit: int = Query(default=25, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
     search: str | None = None,
-    signal_configuration_uid: str | None = None,
     bars_configuration_uid: str | None = None,
-    weights_source: Literal["etf_signal", "provided"] | None = None,
     ordering: str = "name",
 ) -> ResourceCollection:
     validate_page_window(limit=limit, offset=offset)
@@ -68,9 +63,7 @@ def portfolio_configurations_list(
             limit=limit,
             offset=offset,
             search=search,
-            signal_configuration_uid=signal_configuration_uid,
             bars_configuration_uid=bars_configuration_uid,
-            weights_source=weights_source,
             ordering=ordering,
         )
     except Exception as exc:
@@ -83,12 +76,12 @@ def portfolio_configurations_list(
 )
 def portfolio_configurations_discovery() -> ResourceDiscoveryResponse:
     return resource_discovery(
-        resource_id="alpaca-etf-portfolio-configurations",
-        label="ETF Portfolios",
+        resource_id="alpaca-portfolio-configurations",
+        label="Portfolios",
         item_label="portfolio configuration",
         identity_fields=["uid"],
         searchable_fields=["name", "description"],
-        filterable_fields=["signal_configuration_uid", "bars_configuration_uid", "weights_source"],
+        filterable_fields=["bars_configuration_uid"],
         orderable_fields=["name", "updated_at"],
         columns=[
             {"id": "name", "header": "Portfolio", "sortable_key": "name", "hideable": False},

@@ -371,7 +371,5 @@ def test_bars_dispatch_runs_after_utc_midnight_and_before_the_portfolio() -> Non
     # is the first run that includes the session closed at 20:00 or 21:00 UTC.
     assert _crontab_time(by_key["alpaca-bars-update-dispatcher"]) == (0, 0)
     assert _crontab_time(by_key["alpaca-bars-update-dispatcher"]) < _crontab_time(
-        by_key["alpaca-etf-portfolio-dispatcher"]
+        by_key["alpaca-portfolio-dispatcher"]
     )
-    # No new ETF observation is taken (ADR 0027): the signal dispatcher has no schedule.
-    assert by_key["alpaca-etf-signal-dispatcher"]["spec"]["task_schedule"] is None

@@ -33,11 +33,8 @@ from sqlalchemy.types import Uuid
 
 from alpaca_connectors.metatables import AlpacaMarketsMetaTableMixin, ProjectStorageNameMixin
 
-AssetSource = Literal["assets", "universe", "account_holdings", "portfolios"]
-ASSET_SOURCES: tuple[AssetSource, ...] = ("assets", "universe", "account_holdings", "portfolios")
-# The Asset Universe table, named so the bars configurations never import the Universe package
-# (ADR 0027); the migration provider's metadata holds the table itself.
-ASSET_UNIVERSE_TABLE_NAME = "alpaca_connectors__asset_universe"
+AssetSource = Literal["assets", "account_holdings", "portfolios"]
+ASSET_SOURCES: tuple[AssetSource, ...] = ("assets", "account_holdings", "portfolios")
 UTC = dt.timezone.utc
 _UNSET = object()
 
@@ -58,21 +55,17 @@ class AlpacaBarsConfigurationTable(
     __metatable_description__ = (
         "One row per stored stock price-update configuration. Saved settings for downloading "
         "stock prices (OHLCV bars) from Alpaca: the registered Alpaca brokerage account whose "
-        "keys to use, how to choose the assets to price (an explicit list, an asset universe, "
-        "the account's recent holdings, or every asset the portfolios that name it hold) and the bar frequency, data feed and corporate-action "
-        "adjustment; created by operators of the Alpaca Connectors application."
+        "keys to use, how to choose the assets to price (an explicit list, the account's recent "
+        "holdings, or every asset the portfolios that name it hold) and the bar frequency, data "
+        "feed and corporate-action adjustment; created by operators of the Alpaca Connectors "
+        "application."
     )
     __metatable_labels__ = ["equities", "prices", "configuration", "alpaca"]
     __table_args__ = markets_table_args(
         "AlpacaBarsConfiguration",
         CheckConstraint(
-            "asset_source IN ('assets', 'universe', 'account_holdings', 'portfolios')",
+            "asset_source IN ('assets', 'account_holdings', 'portfolios')",
             name="ck_alpaca_bars_configuration_asset_source",
-        ),
-        CheckConstraint(
-            "(asset_source = 'universe' AND universe_uid IS NOT NULL) OR "
-            "(asset_source <> 'universe' AND universe_uid IS NULL)",
-            name="ck_alpaca_bars_configuration_universe_scope",
         ),
         Index(None, "name"),
         Index(None, "enabled"),
@@ -133,22 +126,10 @@ class AlpacaBarsConfigurationTable(
         info={
             "label": "Asset source",
             "description": (
-                "How the assets to price are chosen: assets for an explicit list, universe for "
-                "an asset universe's current members, account_holdings for the account's "
-                "latest holdings from the past 30 days, or portfolios for every asset ever "
-                "published by the live portfolios that name this configuration."
-            ),
-        },
-    )
-    universe_uid: Mapped[uuid.UUID | None] = mapped_column(
-        Uuid(as_uuid=True),
-        ForeignKey(f"{ASSET_UNIVERSE_TABLE_NAME}.uid", ondelete="RESTRICT"),
-        nullable=True,
-        info={
-            "label": "Universe UID",
-            "description": (
-                "UID of the asset universe whose current members are priced when the asset "
-                "source is universe; null for any other asset source."
+                "How the assets to price are chosen: assets for an explicit list, "
+                "account_holdings for the account's latest holdings from the past 30 days, or "
+                "portfolios for every asset ever published by the live portfolios that name this "
+                "configuration."
             ),
         },
     )
@@ -229,9 +210,9 @@ class AlpacaBarsConfigurationAssetTable(
     __markets_base_identifier__ = "AlpacaBarsConfigurationAsset"
     __metatable_description__ = (
         "One row per asset per stock price-update configuration. The explicit list of US stocks "
-        "and ETFs priced by each stored Alpaca price-update configuration that chooses its "
-        "assets by list, maintained with the configuration by operators of the Alpaca "
-        "Connectors application."
+        "and exchange-traded funds priced by each stored Alpaca price-update configuration that "
+        "chooses its assets by list, maintained with the configuration by operators of the "
+        "Alpaca Connectors application."
     )
     __metatable_labels__ = ["equities", "prices", "configuration", "alpaca"]
     __table_args__ = markets_table_args(
@@ -256,7 +237,10 @@ class AlpacaBarsConfigurationAssetTable(
         nullable=False,
         info={
             "label": "Asset UID",
-            "description": "Main Sequence asset UID of a stock or ETF the configuration prices.",
+            "description": (
+                "Main Sequence asset UID of a stock or exchange-traded fund the configuration "
+                "prices."
+            ),
         },
     )
 
@@ -277,7 +261,6 @@ class AlpacaBarsConfiguration(MarketsMetaTableRow):
     enabled: bool
     account_uid: uuid.UUID
     asset_source: AssetSource
-    universe_uid: uuid.UUID | None
     frequency_id: str
     feed: str
     adjustment: str
@@ -307,9 +290,8 @@ def validate_configuration_scope(
     *,
     asset_source: str,
     asset_uids: list[uuid.UUID | str] | None,
-    universe_uid: uuid.UUID | str | None,
-) -> tuple[AssetSource, list[uuid.UUID], uuid.UUID | None]:
-    """Normalize and validate the three mutually exclusive source shapes."""
+) -> tuple[AssetSource, list[uuid.UUID]]:
+    """Normalize and validate the mutually exclusive source shapes."""
     normalized_source = asset_source.strip().lower()
     if normalized_source not in ASSET_SOURCES:
         raise ValueError(
@@ -318,28 +300,21 @@ def validate_configuration_scope(
     normalized_asset_uids = list(
         dict.fromkeys(uuid.UUID(str(asset_uid)) for asset_uid in (asset_uids or []))
     )
-    normalized_universe_uid = uuid.UUID(str(universe_uid)) if universe_uid is not None else None
     if normalized_source == "assets":
-        if not normalized_asset_uids or normalized_universe_uid is not None:
-            raise ValueError("assets source requires asset_uids and forbids universe_uid.")
-    elif normalized_source == "universe":
-        if normalized_universe_uid is None or normalized_asset_uids:
-            raise ValueError("universe source requires universe_uid and forbids asset_uids.")
-    elif normalized_asset_uids or normalized_universe_uid is not None:
-        raise ValueError(f"{normalized_source} source forbids asset_uids and universe_uid.")
-    return normalized_source, normalized_asset_uids, normalized_universe_uid  # type: ignore[return-value]
+        if not normalized_asset_uids:
+            raise ValueError("assets source requires asset_uids.")
+    elif normalized_asset_uids:
+        raise ValueError(f"{normalized_source} source forbids asset_uids.")
+    return normalized_source, normalized_asset_uids  # type: ignore[return-value]
 
 
 def _validate_references(
     *,
     account_uid: uuid.UUID,
-    asset_source: AssetSource,
     asset_uids: list[uuid.UUID],
-    universe_uid: uuid.UUID | None,
 ) -> None:
     from alpaca_connectors.account.services import get_account_registration
     from alpaca_connectors.assets.resolution import assets_by_uids
-    from alpaca_connectors.universes import get_asset_universe
 
     if get_account_registration(account_uid) is None:
         raise LookupError(f"Alpaca account registration {account_uid!s} does not exist.")
@@ -349,27 +324,6 @@ def _validate_references(
     ]
     if missing_assets:
         raise LookupError(f"These Asset UIDs do not exist: {sorted(missing_assets)!r}")
-    if asset_source == "universe":
-        universe = get_asset_universe(universe_uid)
-        if universe is None:
-            raise LookupError(f"Asset Universe {universe_uid!s} does not exist.")
-        if not universe.is_active:
-            raise ValueError(
-                f"Asset Universe {universe_uid!s} is inactive and cannot be configured."
-            )
-
-
-def bar_configurations_for_universe(
-    universe_uid: uuid.UUID | str,
-) -> list[AlpacaBarsConfiguration]:
-    """Return stored bar configurations that hold a real FK to one Asset Universe."""
-    from alpaca_connectors.runtime import account_runtime_models, start_markets_engine
-
-    start_markets_engine(models=account_runtime_models())
-    return sorted(
-        AlpacaBarsConfiguration.filter(universe_uid=str(universe_uid), limit=10_000),
-        key=lambda configuration: (configuration.name, str(configuration.uid)),
-    )
 
 
 def bar_configurations_for_account(
@@ -389,7 +343,7 @@ def disable_bar_configuration(configuration_uid: uuid.UUID | str) -> AlpacaBarsC
     """Stop every run of the configuration, writing only ``enabled`` (ADR 0022).
 
     The removal of the account it runs with calls this, so nothing the configuration references
-    is validated: a configuration whose universe is gone is still disabled.
+    is validated.
     """
     return AlpacaBarsConfiguration.update(
         configuration_uid,
@@ -524,7 +478,6 @@ def create_bar_configuration(
     feed: str,
     adjustment: str,
     asset_uids: list[uuid.UUID | str] | None = None,
-    universe_uid: uuid.UUID | str | None = None,
     description: str | None = None,
     enabled: bool = True,
     scheduled: bool = True,
@@ -541,10 +494,9 @@ def create_bar_configuration(
     from alpaca_connectors.market_data.storage import storage_for
     from alpaca_connectors.runtime import account_runtime_models, start_markets_engine
 
-    source, normalized_asset_uids, normalized_universe_uid = validate_configuration_scope(
+    source, normalized_asset_uids = validate_configuration_scope(
         asset_source=asset_source,
         asset_uids=asset_uids,
-        universe_uid=universe_uid,
     )
     normalized_account_uid = uuid.UUID(str(account_uid))
     normalized_frequency = normalize_frequency_id(frequency_id)
@@ -552,12 +504,7 @@ def create_bar_configuration(
     normalized_adjustment = normalize_adjustment(adjustment)
     storage_for(normalized_frequency, normalized_feed, normalized_adjustment)
     start_markets_engine(models=account_runtime_models())
-    _validate_references(
-        account_uid=normalized_account_uid,
-        asset_source=source,
-        asset_uids=normalized_asset_uids,
-        universe_uid=normalized_universe_uid,
-    )
+    _validate_references(account_uid=normalized_account_uid, asset_uids=normalized_asset_uids)
     now = utc_now()
     values: dict[str, Any] = {
         "uid": uuid.UUID(str(uid)) if uid is not None else new_markets_uid(),
@@ -567,7 +514,6 @@ def create_bar_configuration(
         "scheduled": bool(scheduled),
         "account_uid": normalized_account_uid,
         "asset_source": source,
-        "universe_uid": normalized_universe_uid,
         "frequency_id": normalized_frequency,
         "feed": normalized_feed,
         "adjustment": normalized_adjustment,
@@ -717,7 +663,6 @@ def update_bar_configuration(
     account_uid: uuid.UUID | str | None = None,
     asset_source: str | None = None,
     asset_uids: list[uuid.UUID | str] | None | object = _UNSET,
-    universe_uid: uuid.UUID | str | None | object = _UNSET,
     frequency_id: str | None = None,
     feed: str | None = None,
     adjustment: str | None = None,
@@ -725,7 +670,7 @@ def update_bar_configuration(
     """Update the configuration's fields, its flags, or both.
 
     Changing only ``scheduled`` skips the scope and reference validation, so a configuration
-    whose account or universe is gone can still be left out of the daily run (as for portfolios).
+    whose account is gone can still be left out of the daily run (as for portfolios).
     """
     from alpaca_connectors.market_data.alpaca_bars_support import (
         normalize_adjustment,
@@ -751,7 +696,6 @@ def update_bar_configuration(
         and all(value is None for value in other_fields)
         and description is _UNSET
         and asset_uids is _UNSET
-        and universe_uid is _UNSET
     ):
         row = AlpacaBarsConfiguration.update(
             configuration_uid,
@@ -759,32 +703,23 @@ def update_bar_configuration(
         )
         return _with_memberships(row, asset_uids=list(current.asset_uids))
     requested_source = asset_source if asset_source is not None else current.asset_source
-    if asset_source is None and asset_uids is _UNSET and universe_uid is _UNSET:
+    if asset_source is None and asset_uids is _UNSET:
         requested_asset_uids = list(current.asset_uids)
-        requested_universe_uid = current.universe_uid
     else:
         requested_asset_uids = None if asset_uids is _UNSET else asset_uids
-        requested_universe_uid = None if universe_uid is _UNSET else universe_uid
-    source, normalized_asset_uids, normalized_universe_uid = validate_configuration_scope(
+    source, normalized_asset_uids = validate_configuration_scope(
         asset_source=requested_source,
         asset_uids=requested_asset_uids,
-        universe_uid=requested_universe_uid,
     )
     normalized_account_uid = uuid.UUID(str(account_uid or current.account_uid))
     normalized_frequency = normalize_frequency_id(frequency_id or current.frequency_id)
     normalized_feed = normalize_feed(feed or current.feed)
     normalized_adjustment = normalize_adjustment(adjustment or current.adjustment)
     storage_for(normalized_frequency, normalized_feed, normalized_adjustment)
-    _validate_references(
-        account_uid=normalized_account_uid,
-        asset_source=source,
-        asset_uids=normalized_asset_uids,
-        universe_uid=normalized_universe_uid,
-    )
+    _validate_references(account_uid=normalized_account_uid, asset_uids=normalized_asset_uids)
     values: dict[str, Any] = {
         "account_uid": normalized_account_uid,
         "asset_source": source,
-        "universe_uid": normalized_universe_uid,
         "frequency_id": normalized_frequency,
         "feed": normalized_feed,
         "adjustment": normalized_adjustment,
@@ -823,7 +758,6 @@ __all__ = [
     "AssetSource",
     "create_bar_configuration",
     "bar_configurations_for_account",
-    "bar_configurations_for_universe",
     "delete_bar_configuration",
     "disable_bar_configuration",
     "get_bar_configuration",

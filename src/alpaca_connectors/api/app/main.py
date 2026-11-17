@@ -36,9 +36,6 @@ from .routers.operations import router as operations_router
 from .routers.orders import router as orders_router
 from .routers.portfolio_configurations import router as portfolio_configurations_router
 from .routers.project_state import router as project_state_router
-from .routers.signal_jobs import router as signal_jobs_router
-from .routers.universe_sources import router as universe_sources_router
-from .routers.universes import router as universes_router
 
 ROUTERS = (
     project_state_router,
@@ -47,11 +44,8 @@ ROUTERS = (
     accounts_router,
     holdings_router,
     orders_router,
-    universe_sources_router,
-    universes_router,
     market_data_router,
     bar_configurations_router,
-    signal_jobs_router,
     portfolio_configurations_router,
     operations_router,
 )

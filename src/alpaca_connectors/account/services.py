@@ -659,33 +659,20 @@ def _claimed_account_in_use(existing: dict[str, Any] | None, unique_identifier: 
 class AccountConfigurations:
     """The enabled configurations that run with one account's keys (ADR 0022)."""
 
-    signal_uids: tuple[str, ...] = ()
     bar_uids: tuple[str, ...] = ()
 
     def __bool__(self) -> bool:
-        return bool(self.signal_uids or self.bar_uids)
+        return bool(self.bar_uids)
 
     def __len__(self) -> int:
-        return len(self.signal_uids) + len(self.bar_uids)
+        return len(self.bar_uids)
 
 
 def enabled_account_configurations(account_uid: uuid.UUID | str) -> AccountConfigurations:
-    """The signal and bar configurations that run with the account's keys.
-
-    A signal configuration runs while it is in the scheduled run (``enabled``, reported as
-    ``scheduled``); a bar configuration runs at all only while it is ``enabled``.
-    """
+    """The bar configurations that run with the account's keys: those still ``enabled``."""
     from alpaca_connectors.market_data.configurations import bar_configurations_for_account
-    from alpaca_connectors.operations.signal_job_configurations import (
-        signal_job_configurations_for_account,
-    )
 
     return AccountConfigurations(
-        signal_uids=tuple(
-            str(configuration.uid)
-            for configuration in signal_job_configurations_for_account(account_uid)
-            if configuration.enabled
-        ),
         bar_uids=tuple(
             str(configuration.uid)
             for configuration in bar_configurations_for_account(account_uid)
@@ -695,17 +682,12 @@ def enabled_account_configurations(account_uid: uuid.UUID | str) -> AccountConfi
 
 
 def disable_account_configurations(configurations: AccountConfigurations) -> None:
-    """Leave the signal configurations out of the scheduled run and stop the bar configurations.
+    """Stop the bar configurations that run with the account's keys.
 
-    Only the flag is written, so a configuration whose universe is gone is disabled all the same.
+    Only the flag is written, so a configuration is disabled whatever it references.
     """
     from alpaca_connectors.market_data.configurations import disable_bar_configuration
-    from alpaca_connectors.operations.signal_job_configurations import (
-        update_signal_job_configuration_row,
-    )
 
-    for configuration_uid in configurations.signal_uids:
-        update_signal_job_configuration_row(configuration_uid, values={"enabled": False})
     for configuration_uid in configurations.bar_uids:
         disable_bar_configuration(configuration_uid)
 
@@ -1100,8 +1082,8 @@ def remove_account_registration(account_uid: str) -> dict[str, Any]:
     The stored keys go with the row. A registration that still referenced Main Sequence Secrets
     from before revision 0018 has its managed ones deleted; external ones are kept.
 
-    Configurations never block a removal (ADR 0022): the enabled signal and bar configurations
-    that run with the account's keys are disabled first, and the result names them. They keep
+    Configurations never block a removal (ADR 0022): the enabled bar configurations that run with
+    the account's keys are disabled first, and the result names them. They keep
     their account and stay until someone deletes them; the account's owner can enable them again
     once the account is registered again.
     """
@@ -1129,7 +1111,6 @@ def remove_account_registration(account_uid: str) -> dict[str, Any]:
         "registration_removed": True,
         "account_deactivated": True,
         "retained_holdings_sets": retained_holdings_sets,
-        "disabled_signal_configuration_uids": list(dependents.signal_uids),
         "disabled_bar_configuration_uids": list(dependents.bar_uids),
         "deleted_secrets": deleted_secrets,
         "warnings": warnings,

@@ -21,7 +21,7 @@ def _markets_rows(*, portfolio_exists: bool = True):
     from msm_portfolios.api import PortfolioMetadata
 
     portfolio = SimpleNamespace(
-        unique_identifier="ALPACA_ETF_PORTFOLIO__ABC",
+        unique_identifier="ALPACA_PORTFOLIO__ABC",
         calendar_uid="calendar-uid",
         backtest_table_price_column_name="close",
     )
@@ -43,7 +43,7 @@ def _markets_rows(*, portfolio_exists: bool = True):
             PortfolioMetadata,
             "filter",
             classmethod(
-                lambda cls, **kw: [SimpleNamespace(description="Daily analytical ETF portfolio.")]
+                lambda cls, **kw: [SimpleNamespace(description="Daily analytical portfolio.")]
             ),
         ),
     )
@@ -80,7 +80,7 @@ def test_portfolio_history_reads_markets_metadata_and_own_values_in_one_query() 
         ),
         patch(
             "alpaca_connectors.portfolios.execution.portfolio_unique_identifier",
-            return_value="ALPACA_ETF_PORTFOLIO__ABC",
+            return_value="ALPACA_PORTFOLIO__ABC",
         ),
         portfolio_patch,
         calendar_patch,
@@ -97,7 +97,7 @@ def test_portfolio_history_reads_markets_metadata_and_own_values_in_one_query() 
         history = read_portfolio_history(configuration_uid="config-uid", observation_limit=100)
 
     assert history.materialized is True
-    assert history.description == "Daily analytical ETF portfolio."
+    assert history.description == "Daily analytical portfolio."
     assert history.calendar_name == "US equities"
     assert history.calendar_timezone == "America/New_York"
     assert history.backtest_price_column == "close"
@@ -128,7 +128,7 @@ def test_portfolio_history_reports_an_unmaterialized_portfolio() -> None:
         ),
         patch(
             "alpaca_connectors.portfolios.execution.portfolio_unique_identifier",
-            return_value="ALPACA_ETF_PORTFOLIO__ABC",
+            return_value="ALPACA_PORTFOLIO__ABC",
         ),
         portfolio_patch,
         calendar_patch,

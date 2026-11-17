@@ -2,8 +2,8 @@
 
 In the storage-first ms-markets model, ``Asset`` carries only ``uid`` / ``unique_identifier`` /
 ``asset_type``. Alpaca's immutable UUID and current symbol live on the required project detail row;
-FIGI metadata lives on a separate optional detail row. These helpers are reused by bars, universes,
-holdings, portfolios, and API catalog search.
+FIGI metadata lives on a separate optional detail row. These helpers are reused by bars, holdings,
+portfolios, and API catalog search.
 
 Markets rows (``Asset``, ``AssetCategory`` memberships, ``OpenFigiDetails``) are read with batched
 ``msm.api`` row calls, which run on the Markets API under the remote backend (ms-markets ADR
@@ -113,25 +113,6 @@ def ticker_and_optional_figi_by_unique_identifiers(
     }
 
 
-def asset_unique_identifiers_for_category(category_unique_identifier: str) -> list[str]:
-    """Return the asset unique identifiers that are members of an asset category.
-
-    Raises ``ValueError`` if the category does not exist. The memberships and their Assets are
-    read from Markets in pages and batches.
-    """
-    from msm.api.assets import AssetCategory
-
-    from alpaca_connectors.markets_api import assets_by_uid, category_member_asset_uids
-
-    category = AssetCategory.get_by_unique_identifier(category_unique_identifier)
-    if category is None:
-        raise ValueError(
-            f"Missing asset category for unique_identifier: {category_unique_identifier!r}"
-        )
-    assets = assets_by_uid(category_member_asset_uids(category.uid))
-    return sorted(str(asset.unique_identifier) for asset in assets.values())
-
-
 def assets_for_ticker(ticker: str) -> list[Any]:
     """Return the typed ``Asset`` rows that a provider ticker resolves to.
 
@@ -155,7 +136,6 @@ def unique_identifiers_for_ticker(ticker: str) -> list[str]:
 
 
 __all__ = [
-    "asset_unique_identifiers_for_category",
     "assets_by_uids",
     "assets_by_unique_identifiers",
     "assets_for_ticker",

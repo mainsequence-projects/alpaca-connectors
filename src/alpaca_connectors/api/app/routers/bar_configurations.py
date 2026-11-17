@@ -70,8 +70,8 @@ def configurations_discovery() -> ResourceDiscoveryResponse:
         filter_options={
             "asset_source": [
                 {"value": "account_holdings", "label": "Latest account holdings"},
-                {"value": "universe", "label": "Universe assets"},
                 {"value": "assets", "label": "Explicit assets"},
+                {"value": "portfolios", "label": "Assets of its portfolios"},
             ]
         },
         orderable_fields=["name", "updated_at", "frequency_id"],

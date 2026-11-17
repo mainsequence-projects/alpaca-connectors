@@ -93,9 +93,9 @@ class AlpacaAssetDetailsTable(
     __markets_base_identifier__ = "AlpacaAssetDetails"
     __metatable_description__ = (
         "One row per asset registered from Alpaca. Security reference data for US stocks and "
-        "ETFs: the immutable Alpaca asset ID, ticker symbol, listing exchange, catalog status and "
-        "trading permissions, taken from the Alpaca trading asset catalog each time the asset is "
-        "registered."
+        "exchange-traded funds: the immutable Alpaca asset ID, ticker symbol, listing exchange, "
+        "catalog status and trading permissions, taken from the Alpaca trading asset catalog each "
+        "time the asset is registered."
     )
     __metatable_labels__ = ["equities", "us", "reference-data", "alpaca"]
     __table_args__ = markets_table_args(

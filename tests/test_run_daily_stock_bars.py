@@ -24,7 +24,7 @@ class RunDailyStockBarsTests(unittest.TestCase):
     def test_parse_tickers_dedupes_and_normalizes(self) -> None:
         self.assertEqual(parse_tickers(" nvda,MSFT,nvda "), ["NVDA", "MSFT"])
 
-    def test_identifier_is_shared_between_asset_and_category_scopes(self) -> None:
+    def test_identifier_is_shared_between_asset_and_account_holdings_scopes(self) -> None:
         ticker_config = AlpacaStockBarsConfig(
             frequency_id="1d",
             feed="sip",
@@ -32,20 +32,20 @@ class RunDailyStockBarsTests(unittest.TestCase):
             asset_source="assets",
             asset_list=["BBG000BBJQV0"],
         )
-        category_config = AlpacaStockBarsConfig(
+        holdings_config = AlpacaStockBarsConfig(
             frequency_id="1d",
             feed="sip",
             adjustment="all",
-            asset_source="universe",
-            asset_category_unique_identifier="HOLDINGS__IVV",
+            asset_source="account_holdings",
+            account_uid="11111111-1111-4111-8111-111111111111",
         )
         ticker_storage = storage_for(
             ticker_config.frequency_id, ticker_config.feed, ticker_config.adjustment
         )
-        category_storage = storage_for(
-            category_config.frequency_id, category_config.feed, category_config.adjustment
+        holdings_storage = storage_for(
+            holdings_config.frequency_id, holdings_config.feed, holdings_config.adjustment
         )
-        self.assertIs(ticker_storage, category_storage)
+        self.assertIs(ticker_storage, holdings_storage)
 
     def test_node_requires_account_resolved_historical_client(self) -> None:
         node = object.__new__(AlpacaStockBarsNode)

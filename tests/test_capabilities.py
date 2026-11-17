@@ -13,7 +13,6 @@ def test_capability_catalog_keys_are_unique_and_in_navigation_order() -> None:
     assert keys == [
         "project_state",
         "assets",
-        "universes",
         "market_data",
         "accounts",
         "holdings",
@@ -23,6 +22,8 @@ def test_capability_catalog_keys_are_unique_and_in_navigation_order() -> None:
     ]
     assert len(keys) == len(set(keys))
     assert "connections" not in keys
+    # Portfolios are built only from provided weights; no universe capability remains (ADR 0027).
+    assert "universes" not in keys
 
 
 def test_capability_summaries_are_json_safe() -> None:

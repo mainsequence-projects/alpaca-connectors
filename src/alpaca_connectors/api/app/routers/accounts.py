@@ -196,7 +196,7 @@ def accounts_remove_preflight(request: BulkActionRequest = Body(...)) -> dict[st
     warnings = [f"{retained_rows} historical holdings rows will be retained."]
     if disabled_configurations:
         warnings.append(
-            f"{disabled_configurations} enabled signal or bar configurations that run with these "
+            f"{disabled_configurations} enabled bar configurations that run with these "
             "accounts' keys will be disabled."
         )
     return {

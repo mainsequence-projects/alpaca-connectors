@@ -1141,7 +1141,7 @@ def _register_alpaca_asset(
     alpaca_asset: AlpacaAssetRecord,
     match: OpenFigiMatch | None = None,
 ) -> str:
-    """Upsert one Alpaca asset; universe-sized callers use the batch implementation."""
+    """Upsert one Alpaca asset; callers with many assets use the batch implementation."""
     from msm.api.assets import Asset, AssetSnapshots, AssetType, OpenFigiDetails
 
     from alpaca_connectors.assets.alpaca_asset_details import (

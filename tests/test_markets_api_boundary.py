@@ -354,24 +354,23 @@ def test_markets_reads_every_contract_instance_through_a_second_namespace() -> N
 
 
 def test_signal_and_ledger_updaters_are_bound_to_own_instances(monkeypatch) -> None:
+    from msm_portfolios.contrib.signals import ApplicationWeights
+
     from alpaca_connectors.execution.services import MarketsExecutionLedger
     from alpaca_connectors.instances import (
         AlpacaOrdersStorage,
         AlpacaSignalWeightsStorage,
         AlpacaTradesStorage,
     )
-    from alpaca_connectors.portfolios.alpaca_etf_signal import (
-        AlpacaETFHoldingsSignal,
-        build_alpaca_etf_holdings_signal,
-    )
+    from alpaca_connectors.portfolios.provided_weights import provided_weights_signal
 
     built: dict[str, Any] = {}
     monkeypatch.setattr(
-        AlpacaETFHoldingsSignal,
+        ApplicationWeights,
         "from_signal_configuration",
         classmethod(lambda cls, config, **kwargs: built.setdefault("signal", kwargs)),
     )
-    build_alpaca_etf_holdings_signal(universe_uid="universe", account_uid="account")
+    provided_weights_signal("11111111-1111-4111-8111-111111111111")
     assert built["signal"] == {"output_table": AlpacaSignalWeightsStorage}
 
     class Node:

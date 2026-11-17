@@ -1128,23 +1128,15 @@ class AccountCredentialUpdateTests(unittest.TestCase):
 
 
 class AccountRemovalTests(unittest.TestCase):
-    def _remove(self, current, *, signals=(), bars=()):
+    def _remove(self, current, *, bars=()):
         calls = MagicMock()
         with (
             patch(
                 "alpaca_connectors.account.services.get_account_registration", return_value=current
             ),
             patch(
-                "alpaca_connectors.operations.signal_job_configurations.signal_job_configurations_for_account",
-                return_value=list(signals),
-            ),
-            patch(
                 "alpaca_connectors.market_data.configurations.bar_configurations_for_account",
                 return_value=list(bars),
-            ),
-            patch(
-                "alpaca_connectors.operations.signal_job_configurations.update_signal_job_configuration_row",
-                new=calls.pause_signal,
             ),
             patch(
                 "alpaca_connectors.market_data.configurations.disable_bar_configuration",
@@ -1172,10 +1164,8 @@ class AccountRemovalTests(unittest.TestCase):
         calls.delete_model.assert_called_once()
         self.assertEqual(calls.delete_model.call_args.kwargs["uid"], "acc-uid-1")
         delete_legacy.assert_not_called()
-        calls.pause_signal.assert_not_called()
         calls.disable_bars.assert_not_called()
         self.assertEqual(result["deleted_secrets"], [])
-        self.assertEqual(result["disabled_signal_configuration_uids"], [])
         self.assertEqual(result["disabled_bar_configuration_uids"], [])
         self.assertTrue(result["registration_removed"])
 
@@ -1187,26 +1177,16 @@ class AccountRemovalTests(unittest.TestCase):
 
     def test_configurations_never_block_a_removal_and_are_disabled_first(self) -> None:
         # Issue #25: another principal's configurations used to refuse the owner's removal.
-        signals = [
-            SimpleNamespace(uid="signal-on", name="Theirs", enabled=True),
-            SimpleNamespace(uid="signal-paused", name="Paused", enabled=False),
-        ]
         bars = [
-            SimpleNamespace(uid="bars-on", name="Daily", enabled=True),
+            SimpleNamespace(uid="bars-on", name="Theirs", enabled=True),
             SimpleNamespace(uid="bars-off", name="Off", enabled=False),
         ]
 
-        result, calls, _ = self._remove(_stub_registration(), signals=signals, bars=bars)
+        result, calls, _ = self._remove(_stub_registration(), bars=bars)
 
         self.assertTrue(result["registration_removed"])
-        self.assertEqual(result["disabled_signal_configuration_uids"], ["signal-on"])
         self.assertEqual(result["disabled_bar_configuration_uids"], ["bars-on"])
         # Only the flag is written, and only on the enabled ones, before the keys are deleted.
-        self.assertEqual(
-            [name for name, *_ in calls.mock_calls if name in {"pause_signal", "disable_bars"}],
-            ["pause_signal", "disable_bars"],
-        )
-        calls.pause_signal.assert_called_once_with("signal-on", values={"enabled": False})
         calls.disable_bars.assert_called_once_with("bars-on")
         order = [name for name, *_ in calls.mock_calls]
         self.assertLess(order.index("disable_bars"), order.index("delete_model"))

@@ -42,7 +42,7 @@ def test_job_migrates_only_this_application_but_the_gate_also_waits_for_ms_marke
 
 def test_each_provider_ships_one_head() -> None:
     heads = _heads()
-    assert heads[APP] == "0026"
+    assert heads[APP] == "0027"
     assert heads[MSM]
 
 
@@ -51,8 +51,8 @@ def test_each_provider_ships_one_head() -> None:
     [
         ((), True),  # never migrated
         (("0016",), True),  # this image's revision not applied yet
-        (("0025",), True),  # one revision behind
-        (("0026",), False),  # current
+        (("0026",), True),  # one revision behind
+        (("0027",), False),  # current
         (("0099_from_a_newer_release",), False),  # database ahead: older image still runs
     ],
 )
@@ -60,7 +60,7 @@ def test_provider_state_compares_database_with_code(applied, behind) -> None:
     state = schema_state([APP], read_applied=lambda migration: applied, read_markets=None)
 
     assert state.providers == (
-        ProviderSchemaState(provider=APP, applied=applied, code_head="0026", behind=behind),
+        ProviderSchemaState(provider=APP, applied=applied, code_head="0027", behind=behind),
     )
     assert state.behind is behind
 
@@ -195,19 +195,11 @@ def test_migration_job_failure_fails_the_job() -> None:
     ("launcher", "work"),
     [
         (
-            "run_alpaca_etf_signal.py",
+            "run_alpaca_portfolio.py",
             "alpaca_connectors.operations.configuration_jobs.run_configuration_job",
         ),
         (
-            "run_alpaca_etf_portfolio.py",
-            "alpaca_connectors.operations.configuration_jobs.run_configuration_job",
-        ),
-        (
-            "dispatch_alpaca_etf_signal.py",
-            "alpaca_connectors.operations.configuration_jobs.run_dispatcher_job",
-        ),
-        (
-            "dispatch_alpaca_etf_portfolio.py",
+            "dispatch_alpaca_portfolio.py",
             "alpaca_connectors.operations.configuration_jobs.run_dispatcher_job",
         ),
         (
@@ -323,10 +315,8 @@ def test_every_resource_that_uses_metatables_declares_its_branch() -> None:
         "alpaca": True,
         "alpaca-connectors-migrate": True,
         "alpaca-credential-migration": True,
-        "alpaca-etf-signal": True,
-        "alpaca-etf-portfolio": True,
-        "alpaca-etf-signal-dispatcher": True,
-        "alpaca-etf-portfolio-dispatcher": True,
+        "alpaca-portfolio": True,
+        "alpaca-portfolio-dispatcher": True,
         "alpaca-bars-update": True,
         "alpaca-bars-update-dispatcher": True,
     }

@@ -430,7 +430,7 @@ def test_no_route_admits_an_anonymous_request(request, mode) -> None:
         if client.request(method, path, headers={"X-Public-Ingress": "1"}).status_code != 401
     ]
 
-    assert len(calls) > 80
+    assert len(calls) > 60
     assert admitted == []
 
 

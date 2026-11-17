@@ -1,5 +1,5 @@
-"""ADR 0013: signal and portfolio configurations run on two workflow-declared Jobs, whose
-scheduled runs two dispatcher Jobs start."""
+"""ADR 0013: portfolio configurations run on a workflow-declared Job, whose scheduled run a
+dispatcher Job starts; portfolios are the one configuration kind (ADR 0027)."""
 
 from __future__ import annotations
 
@@ -13,20 +13,15 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
-import sqlalchemy as sa
 import yaml
 
-from alpaca_connectors.operations import configuration_jobs, signal_job_configurations
+from alpaca_connectors.operations import configuration_jobs
 from alpaca_connectors.operations.configuration_jobs import (
-    ALPACA_ETF_PORTFOLIO_DISPATCHER_EXECUTION_PATH,
-    ALPACA_ETF_PORTFOLIO_EXECUTION_PATH,
-    ALPACA_ETF_SIGNAL_DISPATCHER_EXECUTION_PATH,
-    ALPACA_ETF_SIGNAL_EXECUTION_PATH,
+    ALPACA_PORTFOLIO_DISPATCHER_EXECUTION_PATH,
+    ALPACA_PORTFOLIO_EXECUTION_PATH,
     JOB_SPECS,
     PORTFOLIO_DISPATCHER_JOB_NAME,
     PORTFOLIO_JOB_NAME,
-    SIGNAL_DISPATCHER_JOB_NAME,
-    SIGNAL_JOB_NAME,
     WORKFLOW_PATH,
     ConfigurationJobState,
     ConfigurationJobSubmission,
@@ -34,9 +29,7 @@ from alpaca_connectors.operations.configuration_jobs import (
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 JOBS = PROJECT_ROOT / "src" / "jobs"
-SIGNAL_JOB_UID = "99999999-9999-4999-8999-999999999999"
 PORTFOLIO_JOB_UID = "88888888-8888-4888-8888-888888888888"
-SIGNAL_DISPATCHER_UID = "77777777-7777-4777-8777-777777777771"
 PORTFOLIO_DISPATCHER_UID = "77777777-7777-4777-8777-777777777772"
 A = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 B = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
@@ -48,9 +41,9 @@ class FakeJob:
     def __init__(
         self,
         *,
-        uid: str = SIGNAL_JOB_UID,
-        name: str = SIGNAL_JOB_NAME,
-        execution_path: str = ALPACA_ETF_SIGNAL_EXECUTION_PATH,
+        uid: str = PORTFOLIO_JOB_UID,
+        name: str = PORTFOLIO_JOB_NAME,
+        execution_path: str = ALPACA_PORTFOLIO_EXECUTION_PATH,
         image_status: str = "ready",
         task_schedule: object | None = None,
         failing: set[str] | None = None,
@@ -75,26 +68,12 @@ class FakeJob:
         return {"message": "accepted", "job_run_uid": f"run-{len(self.calls)}"}
 
 
-def _portfolio_job(**overrides) -> FakeJob:
+def _dispatcher(**overrides) -> FakeJob:
+    """The portfolio dispatcher Job, which holds the schedule of the portfolio Job."""
     values = {
-        "uid": PORTFOLIO_JOB_UID,
-        "name": PORTFOLIO_JOB_NAME,
-        "execution_path": ALPACA_ETF_PORTFOLIO_EXECUTION_PATH,
-        **overrides,
-    }
-    return FakeJob(**values)
-
-
-def _dispatcher(kind: str = "signal", **overrides) -> FakeJob:
-    """The kind's dispatcher Job, which holds the schedule of the kind's Job."""
-    values = {
-        "uid": SIGNAL_DISPATCHER_UID if kind == "signal" else PORTFOLIO_DISPATCHER_UID,
-        "name": SIGNAL_DISPATCHER_JOB_NAME if kind == "signal" else PORTFOLIO_DISPATCHER_JOB_NAME,
-        "execution_path": (
-            ALPACA_ETF_SIGNAL_DISPATCHER_EXECUTION_PATH
-            if kind == "signal"
-            else ALPACA_ETF_PORTFOLIO_DISPATCHER_EXECUTION_PATH
-        ),
+        "uid": PORTFOLIO_DISPATCHER_UID,
+        "name": PORTFOLIO_DISPATCHER_JOB_NAME,
+        "execution_path": ALPACA_PORTFOLIO_DISPATCHER_EXECUTION_PATH,
         **overrides,
     }
     return FakeJob(**values)
@@ -105,8 +84,8 @@ def _run(
     configuration_uid=None,
     *,
     status="SUCCEEDED",
-    job_uid=SIGNAL_JOB_UID,
-    job_name=SIGNAL_JOB_NAME,
+    job_uid=PORTFOLIO_JOB_UID,
+    job_name=PORTFOLIO_JOB_NAME,
     command_args=None,
 ):
     if command_args is None:
@@ -158,29 +137,11 @@ def platform(monkeypatch):
     return state
 
 
-def _configuration(monkeypatch, *, kind="signal", uid=A):
-    configuration = SimpleNamespace(
-        uid=uuid.UUID(uid),
-        universe_uid=uuid.uuid4(),
-        account_uid=uuid.uuid4(),
-    )
-    if kind == "signal":
-        monkeypatch.setattr(
-            signal_job_configurations,
-            "get_signal_job_configuration",
-            lambda value: configuration,
-        )
-    else:
-        monkeypatch.setattr(
-            configuration_jobs, "get_portfolio_configuration", lambda value: configuration
-        )
-    validated: list[dict] = []
+def _configuration(monkeypatch, *, uid=A):
+    configuration = SimpleNamespace(uid=uuid.UUID(uid))
     monkeypatch.setattr(
-        signal_job_configurations,
-        "validate_signal_job_references",
-        lambda **values: validated.append(values),
+        configuration_jobs, "get_portfolio_configuration", lambda value: configuration
     )
-    configuration.validated = validated
     return configuration
 
 
@@ -197,71 +158,79 @@ def _preflight(monkeypatch, blocked: dict[str, list[str]] | None = None):
 
 
 def test_the_declared_job_is_found_by_name_and_reviewed_launcher(platform) -> None:
-    assert configuration_jobs.resolve_configuration_job("signal") is None
-    assert platform.job_queries == [{"name": SIGNAL_JOB_NAME, "timeout": 60}]
+    assert configuration_jobs.resolve_configuration_job("portfolio") is None
+    assert platform.job_queries == [{"name": PORTFOLIO_JOB_NAME, "timeout": 60}]
 
     job = FakeJob()
     platform.jobs = [job]
-    assert configuration_jobs.resolve_configuration_job("signal") is job
+    assert configuration_jobs.resolve_configuration_job("portfolio") is job
 
     platform.jobs = [FakeJob(execution_path="src/jobs/other.py")]
     with pytest.raises(RuntimeError, match="does not run"):
-        configuration_jobs.resolve_configuration_job("signal")
+        configuration_jobs.resolve_configuration_job("portfolio")
 
     platform.jobs = [FakeJob(), FakeJob()]
     with pytest.raises(RuntimeError, match="More than one branch Job"):
-        configuration_jobs.resolve_configuration_job("signal")
+        configuration_jobs.resolve_configuration_job("portfolio")
+
+
+def test_portfolios_are_the_one_configuration_kind() -> None:
+    assert set(JOB_SPECS) == {"portfolio"}
+    spec = JOB_SPECS["portfolio"]
+    assert (spec.workflow_key, spec.dispatcher_workflow_key) == (
+        "alpaca-portfolio",
+        "alpaca-portfolio-dispatcher",
+    )
+    assert (spec.name, spec.dispatcher_name) == ("Alpaca Portfolio", "Alpaca Portfolio Dispatcher")
+    assert (spec.execution_path, spec.dispatcher_execution_path) == (
+        "src/jobs/run_alpaca_portfolio.py",
+        "src/jobs/dispatch_alpaca_portfolio.py",
+    )
 
 
 def test_launch_starts_one_run_that_carries_the_configuration_uid(platform, monkeypatch) -> None:
     job = FakeJob()
     platform.jobs = [job]
     platform.runs = [_run("other", B, status="RUNNING")]
-    configuration = _configuration(monkeypatch)
+    _configuration(monkeypatch)
+    _preflight(monkeypatch)
 
-    submission = configuration_jobs.launch_signal_job(A)
+    submission = configuration_jobs.launch_portfolio_job(A)
 
     assert job.calls == [["--configuration-uid", A]]
-    assert submission == ConfigurationJobSubmission(A, SIGNAL_JOB_UID, "run-1", "QUEUED")
-    assert configuration.validated == [
-        {"universe_uid": configuration.universe_uid, "account_uid": configuration.account_uid}
-    ]
+    assert submission == ConfigurationJobSubmission(A, PORTFOLIO_JOB_UID, "run-1", "QUEUED")
 
 
 def test_launch_refuses_without_a_ready_job_or_while_a_run_is_active(platform, monkeypatch) -> None:
     _configuration(monkeypatch)
+    _preflight(monkeypatch)
     with pytest.raises(ValueError, match=WORKFLOW_PATH):
-        configuration_jobs.launch_signal_job(A)
+        configuration_jobs.launch_portfolio_job(A)
 
     platform.jobs = [FakeJob(image_status="building")]
     with pytest.raises(ValueError, match="image is not ready"):
-        configuration_jobs.launch_signal_job(A)
+        configuration_jobs.launch_portfolio_job(A)
 
     job = FakeJob()
     platform.jobs = [job]
     platform.runs = [_run("newest", A, status="RUNNING"), _run("older", A)]
     with pytest.raises(ValueError, match="pending or running"):
-        configuration_jobs.launch_signal_job(A)
+        configuration_jobs.launch_portfolio_job(A)
     assert job.calls == []
 
 
 def test_launch_of_a_missing_configuration_is_not_found(platform, monkeypatch) -> None:
-    monkeypatch.setattr(
-        signal_job_configurations, "get_signal_job_configuration", lambda value: None
-    )
     monkeypatch.setattr(configuration_jobs, "get_portfolio_configuration", lambda value: None)
 
-    with pytest.raises(LookupError, match="Signal configuration"):
-        configuration_jobs.launch_signal_job(A)
     with pytest.raises(LookupError, match="Portfolio configuration"):
         configuration_jobs.launch_portfolio_job(A)
     assert platform.job_queries == []
 
 
 def test_portfolio_launch_requires_an_allowed_preflight(platform, monkeypatch) -> None:
-    job = _portfolio_job()
+    job = FakeJob()
     platform.jobs = [job]
-    _configuration(monkeypatch, kind="portfolio")
+    _configuration(monkeypatch)
     _preflight(monkeypatch, {A: ["Signal x has no published observations."]})
     with pytest.raises(
         ValueError,
@@ -285,19 +254,19 @@ def test_runs_map_back_to_configurations_through_their_arguments(platform) -> No
         _run("bars", A, job_uid="other-job", job_name="Alpaca Bars Update"),
     ]
 
-    runs = configuration_jobs.list_configuration_runs(SimpleNamespace(uid=A), kind="signal")
+    runs = configuration_jobs.list_configuration_runs(SimpleNamespace(uid=A), kind="portfolio")
     assert [run.uid for run in runs] == ["a-new", "a-old"]
     assert runs[0].configuration_uid == A
     assert runs[0].command_args == ["--configuration-uid", A]
     assert runs[1].status == "FAILED"
-    assert runs[1].failure_message == "The signal update failed."
+    assert runs[1].failure_message == "The portfolio update failed."
     limited = configuration_jobs.list_configuration_runs(
-        SimpleNamespace(uid=A), kind="signal", limit=1
+        SimpleNamespace(uid=A), kind="portfolio", limit=1
     )
     assert [run.uid for run in limited] == ["a-new"]
 
     platform.scanned = 0
-    state = configuration_jobs.configuration_job_state("signal", [A, uuid.UUID(B)])
+    state = configuration_jobs.configuration_job_state("portfolio", [A, uuid.UUID(B)])
     assert state.job is platform.jobs[0]
     assert {key: run.uid for key, run in state.latest_runs.items()} == {A: "a-new", B: "b"}
     assert state.latest_runs[B].status == "SUCCEEDED"
@@ -313,8 +282,8 @@ def test_configuration_state_before_the_push_has_no_job_and_no_runs(platform) ->
 
 
 def test_configuration_state_names_the_dispatcher_that_schedules_the_job(platform) -> None:
-    job, dispatcher = _portfolio_job(), _dispatcher("portfolio")
-    platform.jobs = [job, dispatcher, _dispatcher("signal")]
+    job, dispatcher = FakeJob(), _dispatcher()
+    platform.jobs = [job, dispatcher]
 
     state = configuration_jobs.configuration_job_state("portfolio", [A])
 
@@ -322,7 +291,7 @@ def test_configuration_state_names_the_dispatcher_that_schedules_the_job(platfor
     assert configuration_jobs.resolve_dispatcher_job("portfolio") is dispatcher
     assert {"name": PORTFOLIO_DISPATCHER_JOB_NAME, "timeout": 60} in platform.job_queries
 
-    platform.jobs = [job, _dispatcher("portfolio", execution_path="src/jobs/other.py")]
+    platform.jobs = [job, _dispatcher(execution_path="src/jobs/other.py")]
     with pytest.raises(RuntimeError, match="does not run"):
         configuration_jobs.resolve_dispatcher_job("portfolio")
 
@@ -340,11 +309,11 @@ def test_job_run_lookup_owns_only_runs_of_this_branch_jobs(platform) -> None:
     ]
 
     run = configuration_jobs.get_configuration_job_run(mine)
-    assert (run.configuration_uid, run.job_uid) == (A, SIGNAL_JOB_UID)
+    assert (run.configuration_uid, run.job_uid) == (A, PORTFOLIO_JOB_UID)
     assert run.command_args == ["--configuration-uid", A]
     scheduled_run = configuration_jobs.get_configuration_job_run(dispatch)
     assert scheduled_run.configuration_uid is None
-    assert scheduled_run.failure_message == "The scheduled signal run failed."
+    assert scheduled_run.failure_message == "The scheduled portfolio run failed."
     assert configuration_jobs.get_configuration_job_run(bars) is None
     assert configuration_jobs.get_configuration_job_run(other_branch) is None
     assert configuration_jobs.get_configuration_job_run(missing) is None
@@ -355,15 +324,16 @@ def test_scheduled_run_starts_one_run_per_scheduled_configuration(platform, monk
     platform.jobs = [job]
     platform.runs = [_run("b-running", B, status="PENDING"), _run("a-done", A)]
     monkeypatch.setattr(
-        signal_job_configurations,
-        "scheduled_signal_configurations",
+        configuration_jobs,
+        "scheduled_portfolio_configurations",
         lambda: [SimpleNamespace(uid=uuid.UUID(value)) for value in (A, B, C)],
     )
+    _preflight(monkeypatch)
 
-    summary = configuration_jobs.dispatch_scheduled_configurations("signal")
+    summary = configuration_jobs.dispatch_scheduled_configurations("portfolio")
 
     assert job.calls == [["--configuration-uid", A]]
-    assert summary["job_uid"] == SIGNAL_JOB_UID
+    assert summary["job_uid"] == PORTFOLIO_JOB_UID
     assert summary["scheduled_configurations"] == 3
     assert summary["launched"] == [{"configuration_uid": A, "job_run_uid": "run-1"}]
     assert summary["skipped"] == [{"configuration_uid": B, "reason": "pending or running JobRun"}]
@@ -371,7 +341,7 @@ def test_scheduled_run_starts_one_run_per_scheduled_configuration(platform, monk
 
 
 def test_scheduled_portfolio_run_skips_a_blocked_preflight(platform, monkeypatch) -> None:
-    job = _portfolio_job()
+    job = FakeJob()
     platform.jobs = [job]
     monkeypatch.setattr(
         configuration_jobs,
@@ -393,10 +363,10 @@ def test_scheduled_portfolio_run_skips_a_blocked_preflight(platform, monkeypatch
 
 
 def test_scheduled_run_needs_the_declared_job(platform, monkeypatch) -> None:
-    monkeypatch.setattr(signal_job_configurations, "scheduled_signal_configurations", lambda: [])
+    monkeypatch.setattr(configuration_jobs, "scheduled_portfolio_configurations", lambda: [])
 
     with pytest.raises(ValueError, match=WORKFLOW_PATH):
-        configuration_jobs.dispatch_scheduled_configurations("signal")
+        configuration_jobs.dispatch_scheduled_configurations("portfolio")
 
 
 @pytest.mark.parametrize(
@@ -411,13 +381,12 @@ def test_scheduled_run_needs_the_declared_job(platform, monkeypatch) -> None:
 )
 def test_job_entry_points_run_exactly_one_configuration(argv) -> None:
     # The scheduled run belongs to the dispatcher: a Job cannot declare `runner` on itself.
-    for kind in ("signal", "portfolio"):
-        with pytest.raises(SystemExit):
-            configuration_jobs.build_job_argument_parser(kind).parse_args(argv)
-        parsed = configuration_jobs.build_job_argument_parser(kind).parse_args(
-            ["--configuration-uid", A.upper()]
-        )
-        assert parsed.configuration_uid == A
+    with pytest.raises(SystemExit):
+        configuration_jobs.build_job_argument_parser("portfolio").parse_args(argv)
+    parsed = configuration_jobs.build_job_argument_parser("portfolio").parse_args(
+        ["--configuration-uid", A.upper()]
+    )
+    assert parsed.configuration_uid == A
 
 
 @pytest.mark.parametrize(
@@ -425,14 +394,13 @@ def test_job_entry_points_run_exactly_one_configuration(argv) -> None:
     [[], ["--configuration-uid", A], ["--scheduled", "--configuration-uid", A]],
 )
 def test_dispatcher_entry_points_take_only_the_scheduled_argument(argv) -> None:
-    for kind in ("signal", "portfolio"):
-        with pytest.raises(SystemExit):
-            configuration_jobs.build_dispatcher_argument_parser(kind).parse_args(argv)
-        assert (
-            configuration_jobs.build_dispatcher_argument_parser(kind)
-            .parse_args(["--scheduled"])
-            .scheduled
-        )
+    with pytest.raises(SystemExit):
+        configuration_jobs.build_dispatcher_argument_parser("portfolio").parse_args(argv)
+    assert (
+        configuration_jobs.build_dispatcher_argument_parser("portfolio")
+        .parse_args(["--scheduled"])
+        .scheduled
+    )
 
 
 def test_dispatcher_job_starts_the_scheduled_runs_of_its_kind(monkeypatch) -> None:
@@ -448,7 +416,7 @@ def test_dispatcher_job_starts_the_scheduled_runs_of_its_kind(monkeypatch) -> No
     )
     assert dispatched == ["portfolio"]
     with pytest.raises(SystemExit):
-        configuration_jobs.run_configuration_job("signal", ["--scheduled"])
+        configuration_jobs.run_configuration_job("portfolio", ["--scheduled"])
     assert dispatched == ["portfolio"]
 
 
@@ -456,29 +424,8 @@ def _launcher(name: str):
     return runpy.run_path(str(JOBS / name))["main"]
 
 
-def test_signal_entry_point_executes_the_selected_configuration(monkeypatch, capsys) -> None:
-    main = _launcher("run_alpaca_etf_signal.py")
-    executed = []
-    monkeypatch.setenv("JOB_RUN_UID", "run-uid")
-    monkeypatch.setattr(
-        "alpaca_connectors.migrations.schema_gate.skip_if_schema_behind", lambda label: False
-    )
-    monkeypatch.setattr(
-        "alpaca_connectors.operations.signal_jobs.execute_signal_configuration",
-        lambda uid: executed.append(uid) or {"signal_weight_row_count": 3},
-    )
-
-    assert main(["--configuration-uid", A.upper()]) == 0
-    assert executed == [A]
-    assert json.loads(capsys.readouterr().out) == {
-        "configuration_uid": A,
-        "job_run_uid": "run-uid",
-        "signal_weight_row_count": 3,
-    }
-
-
 def test_portfolio_entry_point_executes_the_selected_configuration(monkeypatch, capsys) -> None:
-    main = _launcher("run_alpaca_etf_portfolio.py")
+    main = _launcher("run_alpaca_portfolio.py")
     executed = []
     monkeypatch.delenv("JOB_RUN_UID", raising=False)
     monkeypatch.setattr(
@@ -498,17 +445,8 @@ def test_portfolio_entry_point_executes_the_selected_configuration(monkeypatch, 
     }
 
 
-@pytest.mark.parametrize(
-    ("launcher", "kind"),
-    [
-        ("dispatch_alpaca_etf_signal.py", "signal"),
-        ("dispatch_alpaca_etf_portfolio.py", "portfolio"),
-    ],
-)
-def test_dispatcher_entry_point_fails_when_a_start_fails(
-    monkeypatch, capsys, launcher, kind
-) -> None:
-    main = _launcher(launcher)
+def test_dispatcher_entry_point_fails_when_a_start_fails(monkeypatch, capsys) -> None:
+    main = _launcher("dispatch_alpaca_portfolio.py")
     monkeypatch.setattr(
         "alpaca_connectors.migrations.schema_gate.skip_if_schema_behind", lambda label: False
     )
@@ -519,16 +457,14 @@ def test_dispatcher_entry_point_fails_when_a_start_fails(
     )
 
     assert main(["--scheduled"]) == 1
-    assert json.loads(capsys.readouterr().out)["kind"] == kind
+    assert json.loads(capsys.readouterr().out)["kind"] == "portfolio"
 
 
 @pytest.mark.parametrize(
     ("launcher", "argv"),
     [
-        ("run_alpaca_etf_signal.py", ["--configuration-uid", A]),
-        ("run_alpaca_etf_portfolio.py", ["--configuration-uid", A]),
-        ("dispatch_alpaca_etf_signal.py", ["--scheduled"]),
-        ("dispatch_alpaca_etf_portfolio.py", ["--scheduled"]),
+        ("run_alpaca_portfolio.py", ["--configuration-uid", A]),
+        ("dispatch_alpaca_portfolio.py", ["--scheduled"]),
     ],
 )
 def test_entry_points_check_the_schema_before_any_work(monkeypatch, launcher, argv) -> None:
@@ -546,160 +482,24 @@ def test_entry_points_check_the_schema_before_any_work(monkeypatch, launcher, ar
         )
 
     assert main(argv) == 0
-    assert calls and calls[0].startswith("Alpaca ETF")
-
-
-def test_pause_and_resume_toggle_the_scheduled_flag(monkeypatch) -> None:
-    from alpaca_connectors.operations import signal_jobs
-
-    current = SimpleNamespace(uid=uuid.UUID(A), universe_uid=uuid.uuid4(), account_uid=None)
-    updates = []
-    monkeypatch.setattr(signal_jobs, "get_signal_job_configuration", lambda value: current)
-    monkeypatch.setattr(
-        signal_jobs,
-        "validate_signal_job_references",
-        lambda **values: pytest.fail("pausing must not validate references"),
-    )
-    monkeypatch.setattr(
-        signal_jobs,
-        "update_signal_job_configuration_row",
-        lambda uid, *, values: updates.append((uid, values)) or current,
-    )
-    monkeypatch.setattr(signal_jobs, "_ensure_signal_metadata", lambda row: "signal-uid")
-
-    signal_jobs.pause_signal_job_configuration(A)
-    signal_jobs.resume_signal_job_configuration(A)
-
-    assert updates == [(current.uid, {"enabled": False}), (current.uid, {"enabled": True})]
-
-
-def test_configuration_lifecycle_never_touches_a_platform_job(monkeypatch) -> None:
-    from alpaca_connectors.operations import signal_jobs
-
-    row = SimpleNamespace(uid=uuid.UUID(A))
-    created = []
-    deleted = []
-    monkeypatch.setattr(
-        "alpaca_connectors.operations.platform_jobs.PlatformJob.filter",
-        lambda **kwargs: pytest.fail("configuration lifecycle read a platform Job"),
-    )
-    monkeypatch.setattr(
-        signal_jobs,
-        "create_signal_job_configuration_row",
-        lambda **values: created.append(values) or row,
-    )
-    monkeypatch.setattr(signal_jobs, "_ensure_signal_metadata", lambda value: "signal-uid")
-    monkeypatch.setattr(signal_jobs, "get_signal_job_configuration", lambda value: row)
-    monkeypatch.setattr(
-        signal_jobs,
-        "delete_signal_job_configuration_row",
-        lambda uid: deleted.append(uid) or {"deleted": 1},
-    )
-
-    assert (
-        signal_jobs.create_signal_job_configuration(
-            name="Daily IVV", universe_uid=B, account_uid=C, scheduled=False
-        )
-        is row
-    )
-    assert created == [
-        {
-            "name": "Daily IVV",
-            "universe_uid": B,
-            "account_uid": C,
-            "description": None,
-            "scheduled": False,
-        }
-    ]
-    assert signal_jobs.reconcile_signal_job_configuration(A) is row
-    assert signal_jobs.delete_signal_job_configuration(A) == {
-        "configuration_uid": A,
-        "deleted": True,
-        "storage_result": {"deleted": 1},
-    }
-    assert deleted == [row.uid]
-
-
-def _signal_row(uid: str, *, scheduled: bool):
-    from alpaca_connectors.operations.signal_job_configurations import (
-        AlpacaETFSignalJobConfiguration,
-    )
-
-    return AlpacaETFSignalJobConfiguration.model_validate(
-        {
-            "uid": uid,
-            "name": f"signal {uid[:4]}",
-            "description": None,
-            "universe_uid": uuid.uuid4(),
-            "account_uid": uuid.uuid4(),
-            "enabled": scheduled,
-            # Retired columns the table still returns are ignored.
-            "job_uid": uuid.uuid4(),
-            "schedule_type": "interval",
-            "lifecycle_state": "error",
-            "created_at": NOW,
-            "updated_at": NOW,
-        }
-    )
-
-
-def test_signal_responses_report_the_declared_job_and_lifecycle(monkeypatch) -> None:
-    from alpaca_connectors.api.app.services import signal_jobs as service
-
-    # The Job has no schedule of its own; its dispatcher's schedule is the one reported.
-    job = FakeJob()
-    dispatcher = _dispatcher(
-        task_schedule={
-            "schedule": {"type": "crontab", "expression": "30 0 * * *", "timezone": "UTC"}
-        }
-    )
-    run = configuration_jobs._shape_run(_run("a-run", A, status="RUNNING"), "signal")
-    rows = [_signal_row(A, scheduled=True), _signal_row(B, scheduled=False)]
-    states = {"signal": ConfigurationJobState(job=job, latest_runs={A: run}, dispatcher=dispatcher)}
-    monkeypatch.setattr(
-        service,
-        "configuration_job_state",
-        lambda kind, uids: states.get(kind, ConfigurationJobState(job=None, latest_runs={})),
-    )
-    monkeypatch.setattr(service, "signal_uid_for_configuration", lambda row: f"signal-{row.uid}")
-
-    first, second = service._responses(rows)
-
-    assert (first.job_uid, second.job_uid) == (SIGNAL_JOB_UID, SIGNAL_JOB_UID)
-    assert first.job.schedule_expression == "30 0 * * *"
-    assert first.job.schedule_timezone == "UTC"
-    assert (first.scheduled, second.scheduled) == (True, False)
-    assert (first.lifecycle_state, second.lifecycle_state) == ("ready", "paused")
-    assert (first.latest_run_status, second.latest_run_status) == ("RUNNING", None)
-
-    # Without a dispatcher nothing schedules the Job, so a scheduled configuration is paused.
-    states["signal"] = ConfigurationJobState(job=job, latest_runs={})
-    (unscheduled,) = service._responses(rows[:1])
-    assert unscheduled.job_uid == SIGNAL_JOB_UID
-    assert unscheduled.job.schedule_expression is None
-    assert unscheduled.lifecycle_state == "paused"
-
-    states.clear()
-    (provisioning,) = service._responses(rows[:1])
-    assert (provisioning.job_uid, provisioning.job) == (None, None)
-    assert provisioning.lifecycle_state == "provisioning"
+    assert calls and calls[0].startswith("Alpaca portfolio")
 
 
 def test_portfolio_responses_report_the_declared_job(monkeypatch) -> None:
     from alpaca_connectors.api.app.services import portfolio_configurations as service
-    from alpaca_connectors.portfolios import AlpacaETFPortfolioConfiguration
+    from alpaca_connectors.portfolios import AlpacaPortfolioConfiguration
 
-    row = AlpacaETFPortfolioConfiguration.model_validate(
+    row = AlpacaPortfolioConfiguration.model_validate(
         {
             "uid": A,
-            "name": "Daily IVV analytical portfolio",
+            "name": "Daily analytical portfolio",
             "description": None,
-            "signal_configuration_uid": B,
+            "owner_gateway_uid": "owner-uid",
+            "owner_user_uid": "owner-uid",
             "bars_configuration_uid": C,
             "rebalance_configuration_uid": C,
             "portfolio_uid": None,
             "scheduled": False,
-            "job_uid": uuid.uuid4(),
             "upsample_frequency_id": "1d",
             "intraday_bar_interpolation_rule": "ffill",
             "valuation_column": "close",
@@ -710,9 +510,9 @@ def test_portfolio_responses_report_the_declared_job(monkeypatch) -> None:
             "updated_at": NOW,
         }
     )
-    job = _portfolio_job()
+    job = FakeJob()
     dispatcher = _dispatcher(
-        "portfolio", task_schedule={"schedule": {"type": "crontab", "expression": "0 2 * * *"}}
+        task_schedule={"schedule": {"type": "crontab", "expression": "0 2 * * *"}}
     )
     monkeypatch.setattr(
         service,
@@ -720,14 +520,10 @@ def test_portfolio_responses_report_the_declared_job(monkeypatch) -> None:
         lambda kind, uids: ConfigurationJobState(job=job, latest_runs={}, dispatcher=dispatcher),
     )
     monkeypatch.setattr(
-        service, "signal_job_configurations_by_uids", lambda uids: {B: SimpleNamespace(uid=B)}
-    )
-    monkeypatch.setattr(
         service,
         "rebalance_configurations_by_uids",
         lambda uids: {C: SimpleNamespace(strategy="calendar_event_signal")},
     )
-    monkeypatch.setattr(service, "signal_uid_for_configuration", lambda row: "signal-uid")
 
     (response,) = service._responses([row])
 
@@ -756,7 +552,7 @@ PROVIDED_WEIGHTS_BODY = {
 def test_create_requests_reject_job_settings_naming_the_workflow_file(
     body, field, api_client
 ) -> None:
-    # The only create left is a provided-weights portfolio's (ADR 0024, ADR 0027).
+    # The only create is a provided-weights portfolio's (ADR 0024, ADR 0027).
     response = api_client.post("/v1/portfolio-configurations/provided-weights", json=body)
 
     assert response.status_code == 422
@@ -766,32 +562,22 @@ def test_create_requests_reject_job_settings_naming_the_workflow_file(
 
 
 @pytest.mark.parametrize(
-    ("path", "body"),
-    [
-        (f"/v1/signal-jobs/{A}", {"cpu_request": "1"}),
-        (f"/v1/signal-jobs/{A}", {"enabled": False}),
-        (f"/v1/portfolio-configurations/{A}", {"job": {"schedule_type": "interval"}}),
-    ],
+    "body",
+    [{"cpu_request": "1"}, {"enabled": False}, {"job": {"schedule_type": "interval"}}],
 )
-def test_update_requests_reject_job_settings_naming_the_workflow_file(
-    path, body, api_client
-) -> None:
-    response = api_client.patch(path, json=body)
+def test_update_requests_reject_job_settings_naming_the_workflow_file(body, api_client) -> None:
+    response = api_client.patch(f"/v1/portfolio-configurations/{A}", json=body)
 
     assert response.status_code == 422
     assert WORKFLOW_PATH in response.json()["detail"][0]["msg"]
 
 
-def test_portfolio_patch_sets_only_the_scheduled_flag(api_client) -> None:
-    from types import SimpleNamespace
-
+def test_portfolio_patch_sets_only_the_scheduled_flag(api_client, local_caller) -> None:
     services = "alpaca_connectors.api.app.services.portfolio_configurations"
+    owned = SimpleNamespace(owner_gateway_uid=local_caller.uid, owner_user_uid=local_caller.uid)
     with (
-        # An ETF portfolio has no owner, so the PATCH checks none (ADR 0024).
-        patch(
-            f"{services}.get_portfolio_configuration",
-            return_value=SimpleNamespace(is_provided=False),
-        ),
+        # Only the portfolio's owner pauses it (ADR 0024, decision 6).
+        patch(f"{services}.get_portfolio_configuration", return_value=owned),
         patch(
             f"{services}.update_portfolio_configuration",
             side_effect=LookupError("stop"),
@@ -806,10 +592,7 @@ def test_portfolio_patch_sets_only_the_scheduled_flag(api_client) -> None:
 def test_job_run_status_returns_the_run_arguments(monkeypatch) -> None:
     from alpaca_connectors.api.app.services import operations
 
-    shaped = configuration_jobs._shape_run(
-        _run("run-uid", A, status="ERROR", job_uid=PORTFOLIO_JOB_UID, job_name=PORTFOLIO_JOB_NAME),
-        "portfolio",
-    )
+    shaped = configuration_jobs._shape_run(_run("run-uid", A, status="ERROR"), "portfolio")
     monkeypatch.setattr(operations, "get_alpaca_bars_update_job_run", lambda uid: None)
     monkeypatch.setattr(operations, "get_configuration_job_run", lambda uid: shaped)
 
@@ -822,76 +605,27 @@ def test_job_run_status_returns_the_run_arguments(monkeypatch) -> None:
 
 
 def test_configurations_store_the_scheduled_flag_but_no_job_link() -> None:
-    from alpaca_connectors.operations.signal_job_configurations import (
-        AlpacaETFSignalJobConfiguration,
-        AlpacaETFSignalJobConfigurationTable,
-    )
     from alpaca_connectors.portfolios.configurations import (
-        AlpacaETFPortfolioConfiguration,
-        AlpacaETFPortfolioConfigurationTable,
+        AlpacaPortfolioConfiguration,
+        AlpacaPortfolioConfigurationTable,
     )
 
-    scheduled = AlpacaETFPortfolioConfigurationTable.__table__.columns["scheduled"]
+    columns = AlpacaPortfolioConfigurationTable.__table__.columns
+    scheduled = columns["scheduled"]
     assert scheduled.nullable is False
     assert scheduled.default.arg is True
     assert str(scheduled.server_default.arg) == "true"
-    # Signals reuse the existing flag column instead of adding one.
-    enabled = AlpacaETFSignalJobConfigurationTable.__table__.columns["enabled"]
-    assert enabled.nullable is False
-    assert "scheduled" not in AlpacaETFSignalJobConfigurationTable.__table__.columns
-    # The retired link columns stay in the schema but leave the row models.
-    for table in (AlpacaETFSignalJobConfigurationTable, AlpacaETFPortfolioConfigurationTable):
-        assert "job_uid" in table.__table__.columns
-    for row_type in (AlpacaETFSignalJobConfiguration, AlpacaETFPortfolioConfiguration):
-        assert "job_uid" not in row_type.model_fields
-    assert "scheduled" in AlpacaETFPortfolioConfiguration.model_fields
-    assert set(AlpacaETFSignalJobConfiguration.model_fields) == {
-        "uid",
-        "name",
-        "description",
-        "universe_uid",
-        "account_uid",
-        "enabled",
-        "created_at",
-        "updated_at",
-    }
+    # The retired per-configuration Job link did not move to the one table (ADR 0027).
+    assert "job_uid" not in columns
+    assert "job_uid" not in AlpacaPortfolioConfiguration.model_fields
+    assert "scheduled" in AlpacaPortfolioConfiguration.model_fields
 
     revision = PROJECT_ROOT.joinpath(
         "src/alpaca_connectors/migrations/versions/alpaca_connectors/"
         "0016_add_portfolio_scheduled_flag.py"
     ).read_text()
     assert 'down_revision: Union[str, Sequence[str], None] = "0015"' in revision
-    assert 'TABLE_NAME = "alpaca_connectors__etf_portfolio_configuration"' in revision
     assert "server_default=sa.true()" in revision
-
-
-def test_new_signal_rows_satisfy_the_retired_column_constraints() -> None:
-    """The placeholders pass revision 0009's NOT NULL and CHECK constraints."""
-    from alpaca_connectors.operations.signal_job_configurations import (
-        RETIRED_JOB_COLUMN_VALUES,
-        AlpacaETFSignalJobConfigurationTable,
-    )
-
-    table = AlpacaETFSignalJobConfigurationTable.__table__
-    engine = sa.create_engine("sqlite://")
-    table.create(engine)
-    with engine.begin() as connection:
-        connection.execute(
-            table.insert().values(
-                **RETIRED_JOB_COLUMN_VALUES,
-                uid=uuid.UUID(A),
-                name="Daily IVV",
-                universe_uid=uuid.UUID(B),
-                account_uid=uuid.UUID(C),
-                enabled=True,
-                created_at=NOW,
-                updated_at=NOW,
-            )
-        )
-        row = connection.execute(sa.select(table)).mappings().one()
-    assert row["job_uid"] is None
-    assert row["schedule_type"] == "interval"
-    assert row["lifecycle_state"] == "provisioning"
 
 
 def _job_calls(path: Path) -> list[str]:
@@ -941,8 +675,7 @@ def test_workflow_declares_one_job_and_one_dispatcher_per_kind_outside_the_steps
     ]
     api_entries = resources["alpaca"]["access"]["resources"]
 
-    # The ETF signal dispatcher has no schedule any more (ADR 0027): no new ETF observation.
-    for kind, expression in (("signal", None), ("portfolio", "0 2 * * *")):
+    for kind, expression in (("portfolio", "0 2 * * *"),):
         spec = JOB_SPECS[kind]
         resource = resources[spec.workflow_key]
         dispatcher = resources[spec.dispatcher_workflow_key]
@@ -974,23 +707,13 @@ def test_workflow_declares_one_job_and_one_dispatcher_per_kind_outside_the_steps
         # so the explicit null and empty list remove the schedule earlier pushes set.
         assert resource["spec"]["task_schedule"] is None
         assert resource["spec"]["scheduled_command_args"] == []
-        # The signal Job registers constituents through the configuration's account, so it opens
-        # that account's stored keys (ADR 0017); the portfolio Job never calls Alpaca.
-        secrets = (
-            {"secrets": [{"name": "ALPACA_CONNECTORS_DATA_KEY", "policy": "value_reader"}]}
-            if kind == "signal"
-            else {}
-        )
-        assert resource["access"] == {"branches": metatables, **secrets}
+        # The portfolio Job never calls Alpaca, so it opens no account keys.
+        assert resource["access"] == {"branches": metatables}
         # The dispatcher holds the schedule and may only run (and see) the kind's Job.
-        if expression is None:
-            assert dispatcher["spec"]["task_schedule"] is None
-            assert dispatcher["spec"]["scheduled_command_args"] == []
-        else:
-            assert dispatcher["spec"]["task_schedule"] == {
-                "schedule": {"type": "crontab", "expression": expression, "timezone": "UTC"}
-            }
-            assert dispatcher["spec"]["scheduled_command_args"] == ["--scheduled"]
+        assert dispatcher["spec"]["task_schedule"] == {
+            "schedule": {"type": "crontab", "expression": expression, "timezone": "UTC"}
+        }
+        assert dispatcher["spec"]["scheduled_command_args"] == ["--scheduled"]
         assert dispatcher["access"] == {
             "branches": metatables,
             "resources": [{"key": spec.workflow_key, "policy": "runner"}],
@@ -998,3 +721,10 @@ def test_workflow_declares_one_job_and_one_dispatcher_per_kind_outside_the_steps
         # The API starts and lists the kind's runs and reports the dispatcher's schedule.
         assert {"key": spec.workflow_key, "policy": "runner"} in api_entries
         assert {"key": spec.dispatcher_workflow_key, "policy": "viewer"} in api_entries
+    # No other configuration Job is declared any more (ADR 0027).
+    assert {key for key in resources if key not in {"alpaca", "alpaca-connectors-agent"}} == {
+        "alpaca-connectors-migrate",
+        "alpaca-credential-migration",
+        "alpaca-portfolio",
+        "alpaca-portfolio-dispatcher",
+    }

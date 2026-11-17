@@ -7,11 +7,10 @@ tables in the Markets namespace). They now write into this application's instanc
 and can be rolled back, with ms-markets' shared series moves (``msm.storage_copies``,
 ``msm_portfolios.services.series_moves``):
 
-- ``SignalSeriesMove`` for the signals of this application's signal configurations that no
-  portfolio of it currently points to. Signal observations are live ETF extractions that cannot be
-  recomputed, so they are copied, never rebuilt;
-- ``PortfolioSeriesMove`` per ``ALPACA_ETF_PORTFOLIO__*`` portfolio: its current signal's weights,
-  rebalance state, weights and values, then the Markets catalog row (``register``) last;
+- ``PortfolioSeriesMove`` per portfolio of this application's portfolio configurations: its
+  current signal's weights, rebalance state, weights and values, then the Markets catalog row
+  (``register``) last. Signal observations are provided weights that cannot be recomputed, so
+  they are copied, never rebuilt;
 - ``TableSeriesMove`` for the calendar events of its rebalance calendars, the interpolated prices
   of each bars profile (keyed by asset) and the orders and trades of its registered accounts.
 
@@ -53,36 +52,18 @@ def _scope() -> dict[str, Any]:
     from sqlalchemy import select
 
     from alpaca_connectors.account.alpaca_account_details import AlpacaAccountDetails
-    from alpaca_connectors.operations.signal_job_configurations import (
-        AlpacaETFSignalJobConfiguration,
-        AlpacaETFSignalJobConfigurationTable,
-    )
-    from alpaca_connectors.operations.signal_jobs import signal_uid_for_configuration
     from alpaca_connectors.portfolios.configurations import (
-        AlpacaETFPortfolioConfigurationTable,
+        AlpacaPortfolioConfigurationTable,
         PortfolioRebalanceConfigurationTable,
     )
     from alpaca_connectors.portfolios.execution import portfolio_unique_identifier
 
     identifiers = sorted(
-        portfolio_unique_identifier(
-            row["uid"], weights_source=row.get("weights_source") or "etf_signal"
-        )
-        for row in _own_rows(
-            select(
-                AlpacaETFPortfolioConfigurationTable.uid,
-                AlpacaETFPortfolioConfigurationTable.weights_source,
-            )
-        )
+        portfolio_unique_identifier(row["uid"])
+        for row in _own_rows(select(AlpacaPortfolioConfigurationTable.uid))
     )
     # A configuration that never ran has no Portfolio row and no rows to move.
     portfolios = Portfolio.filter(unique_identifier__in=identifiers, limit=max(len(identifiers), 1))
-    configured_signals = {
-        signal_uid_for_configuration(AlpacaETFSignalJobConfiguration.model_validate(row))
-        for row in _own_rows(select(AlpacaETFSignalJobConfigurationTable))
-    }
-    # A portfolio's current signal moves with its portfolio; the others move on their own.
-    portfolio_signals = {str(item.signal_uid) for item in portfolios if item.signal_uid}
     calendars = {
         str(row["calendar_identifier"])
         for row in _own_rows(select(PortfolioRebalanceConfigurationTable.calendar_identifier))
@@ -94,7 +75,6 @@ def _scope() -> dict[str, Any]:
     }
     return {
         "portfolios": sorted(portfolios, key=lambda item: str(item.unique_identifier)),
-        "signal_uids": sorted(configured_signals - portfolio_signals),
         "calendar_identifiers": sorted(calendars),
         "account_identifiers": sorted(accounts),
     }
@@ -149,17 +129,13 @@ def build_series_moves(*, register_catalog: bool, keys_per_read: int | None = No
 
     ``register_catalog`` writes the Markets catalog rows and signal bindings after a complete
     move (and removes them on a rollback); it needs the Markets workload's ``data_viewer`` on the
-    portfolio and signal instances, and every moved signal needs a ``SignalMetadata`` row (the
-    moves refuse before any catalog call otherwise). ``keys_per_read`` bounds the keys one copy
+    portfolio and signal instances, and every moved portfolio's signal needs a ``SignalMetadata``
+    row (the moves refuse before any catalog call otherwise). ``keys_per_read`` bounds the keys one copy
     request reads (ms-markets' default when ``None``).
     """
     from msm.storage_copies import TableSeriesMove
     from msm.time_index.execution.storage import OrdersStorage, TradesStorage
-    from msm_portfolios.services.series_moves import (
-        PortfolioSeriesMove,
-        PortfolioSeriesTables,
-        SignalSeriesMove,
-    )
+    from msm_portfolios.services.series_moves import PortfolioSeriesMove, PortfolioSeriesTables
     from msm_portfolios.time_index.portfolios.storage import PortfolioCalendarEventsStorage
 
     from alpaca_connectors import instances
@@ -173,16 +149,6 @@ def build_series_moves(*, register_catalog: bool, keys_per_read: int | None = No
         signal_weights=instances.AlpacaSignalWeightsStorage,
     )
     moves: list[Any] = []
-    if scope["signal_uids"]:
-        moves.append(
-            SignalSeriesMove(
-                scope["signal_uids"],
-                instances.AlpacaSignalWeightsStorage,
-                label="signal configurations",
-                register=register_catalog,
-                **reads,
-            )
-        )
     moves.extend(
         PortfolioSeriesMove(
             str(portfolio.unique_identifier),

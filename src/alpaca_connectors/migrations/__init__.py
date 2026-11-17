@@ -8,7 +8,6 @@ from msm.models import (
     OrderManagerTable,
     PortfolioTable,
 )
-from msm.models.assets.categories import AssetCategoryTable
 from msm.models.assets.core import AssetTable
 from msm_portfolios.models import SignalMetadataTable
 
@@ -19,7 +18,6 @@ from alpaca_connectors.market_data import project_configuration_models, project_
 from alpaca_connectors.operations import project_operation_models
 from alpaca_connectors.portfolios import project_portfolio_configuration_models
 from alpaca_connectors.settings import PROJECT_NAMESPACE
-from alpaca_connectors.universes import project_universe_models
 from metatables.migrations import (
     build_alembic_version_metatable,
     build_metatable_migration_provider,
@@ -33,7 +31,6 @@ def all_project_metatable_models() -> list[type]:
         *project_asset_models(),
         *project_storage_models(),
         *project_account_models(),
-        *project_universe_models(),
         *project_configuration_models(),
         *project_operation_models(),
         *project_portfolio_configuration_models(),
@@ -63,7 +60,6 @@ def _include_project_tables(
 METADATA = metadata_for_models(
     [
         AssetTable,
-        AssetCategoryTable,
         AccountGroupTable,
         AccountTable,
         CalendarTable,

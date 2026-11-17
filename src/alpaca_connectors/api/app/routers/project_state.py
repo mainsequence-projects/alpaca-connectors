@@ -38,7 +38,7 @@ def capabilities() -> CapabilityCatalogResponse:
     "/v1/project-state/configuration",
     response_model=ProjectConfigurationResponse,
     summary="Runtime application configuration",
-    description="Return live account, universe-source, and migrated dataset catalog state.",
+    description="Return live account, Agent, and migrated dataset catalog state.",
 )
 def configuration() -> ProjectConfigurationResponse:
     return get_project_configuration(request_user_uid=acting_user_uid())
