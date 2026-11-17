@@ -4,9 +4,8 @@ The connector keeps one kind of portfolio, built from the weights an application
 ETF extractor, Universe Sources, Asset Universes, holdings categories, ETF signals and ETF
 portfolios are gone, and no name says ETF. This is the one test module that names them.
 
-Two exemptions: the applied revisions under `migrations/versions/` keep the names of the tables
-they made, and the four launchers of the retired ETF Jobs stay at their paths for one release
-while the platform may still list a Job bound to them (revision 0028's release deletes them).
+One exemption: the applied revisions under `migrations/versions/` keep the names of the tables
+they made and dropped.
 """
 
 from __future__ import annotations
@@ -14,13 +13,10 @@ from __future__ import annotations
 import ast
 import json
 import re
-import runpy
 import subprocess
 import sys
 import tomllib
 from pathlib import Path
-
-import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 JOBS = REPO_ROOT / "src" / "jobs"
@@ -38,15 +34,12 @@ SCANNED_FILES = (
 SKIPPED_PARTS = {"__pycache__", ".pytest_cache", ".ruff_cache"}
 # Applied revisions name the tables they made and are never edited.
 REVISIONS = "src/alpaca_connectors/migrations/versions/"
-# The retired Jobs' launchers: the portfolio pair delegates to the new launchers, the signal pair
-# does nothing. Revision 0028's release deletes all four.
-RETIRED_PORTFOLIO_LAUNCHERS = {
-    "run_alpaca_etf_portfolio.py": ("run_configuration_job", ["--configuration-uid", "uid"]),
-    "dispatch_alpaca_etf_portfolio.py": ("run_dispatcher_job", ["--scheduled"]),
-}
-RETIRED_SIGNAL_LAUNCHERS = ("run_alpaca_etf_signal.py", "dispatch_alpaca_etf_signal.py")
-RETIRED_LAUNCHERS = frozenset(
-    f"src/jobs/{name}" for name in (*RETIRED_PORTFOLIO_LAUNCHERS, *RETIRED_SIGNAL_LAUNCHERS)
+# The launchers of the retired Jobs, kept one release after the Jobs went (ADR 0027).
+RETIRED_LAUNCHERS = (
+    "run_alpaca_etf_portfolio.py",
+    "dispatch_alpaca_etf_portfolio.py",
+    "run_alpaca_etf_signal.py",
+    "dispatch_alpaca_etf_signal.py",
 )
 REMOVED_ROUTE_PREFIXES = ("/v1/universe-sources", "/v1/universes", "/v1/signal-jobs")
 REMOVED_DISTRIBUTIONS = ("etfhextractor", "playwright")
@@ -82,7 +75,7 @@ def test_no_file_or_name_mentions_etf() -> None:
     mentions: list[str] = []
     for path in _scanned_files():
         relative = path.relative_to(REPO_ROOT).as_posix()
-        if relative.startswith(REVISIONS) or relative in RETIRED_LAUNCHERS:
+        if relative.startswith(REVISIONS):
             continue
         if ETF_MENTION.search(relative):
             mentions.append(relative)
@@ -186,48 +179,9 @@ def test_no_application_module_loads_the_etf_extractor() -> None:
     assert [name for name in report["loaded"] if name.split(".")[0] == "etfhextractor"] == []
 
 
-@pytest.mark.parametrize("launcher", sorted(RETIRED_PORTFOLIO_LAUNCHERS))
-def test_a_retired_portfolio_launcher_runs_the_portfolio_launcher(
-    monkeypatch, capsys, launcher
-) -> None:
-    from alpaca_connectors.operations import configuration_jobs
-
-    work, argv = RETIRED_PORTFOLIO_LAUNCHERS[launcher]
-    gate: list[str] = []
-    runs: list[tuple[str, str, list[str]]] = []
-    behind = True
-    monkeypatch.setattr(
-        "alpaca_connectors.migrations.schema_gate.skip_if_schema_behind",
-        lambda label: gate.append(label) or behind,
-    )
-    for name in ("run_configuration_job", "run_dispatcher_job"):
-        monkeypatch.setattr(
-            configuration_jobs,
-            name,
-            lambda kind, given, name=name: runs.append((name, kind, list(given))) or {},
-        )
-    main = runpy.run_path(str(JOBS / launcher))["main"]
-
-    # The schema gate of the portfolio launcher comes first.
-    assert main(argv) == 0
-    assert runs == [] and gate[0].startswith("Alpaca portfolio")
-
-    behind = False
-    assert main(argv) == 0
-    capsys.readouterr()
-    assert runs == [(work, "portfolio", argv)]
-
-
-@pytest.mark.parametrize("launcher", RETIRED_SIGNAL_LAUNCHERS)
-def test_a_retired_signal_launcher_does_nothing(monkeypatch, capsys, launcher) -> None:
-    from alpaca_connectors.operations import configuration_jobs
-
-    monkeypatch.setattr(
-        "alpaca_connectors.migrations.schema_gate.skip_if_schema_behind",
-        lambda label: pytest.fail("a launcher that does nothing needs no schema check"),
-    )
-    for work in ("run_configuration_job", "run_dispatcher_job"):
-        monkeypatch.setattr(configuration_jobs, work, lambda *args: pytest.fail("ran work"))
-
-    assert runpy.run_path(str(JOBS / launcher))["main"](["--scheduled"]) == 0
-    assert json.loads(capsys.readouterr().out)["retired"] is True
+def test_the_retired_jobs_launchers_are_gone() -> None:
+    assert [name for name in RETIRED_LAUNCHERS if (JOBS / name).exists()] == []
+    assert sorted(path.name for path in JOBS.glob("*portfolio*.py")) == [
+        "dispatch_alpaca_portfolio.py",
+        "run_alpaca_portfolio.py",
+    ]

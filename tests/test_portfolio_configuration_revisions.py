@@ -1,7 +1,8 @@
-"""Every portfolio moves to the one configuration table (ADR 0027, revision 0027).
+"""Every portfolio moves to the one configuration table (ADR 0027, revisions 0027 and 0028).
 
-Each revision runs here on SQLite through Alembic's own operations, over the tables it reads as
-the revision before it left them.
+Each revision runs here on SQLite through Alembic's own operations, in the batch mode the
+MetaTables environment uses for SQLite, over the tables it reads as the revision before it left
+them.
 """
 
 from __future__ import annotations
@@ -17,7 +18,10 @@ import sqlalchemy as sa
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
 
+from alpaca_connectors.market_data.configurations import AlpacaBarsConfigurationTable
 from alpaca_connectors.portfolios.configurations import AlpacaPortfolioConfigurationTable
+from alpaca_connectors.portfolios.provided_weights import provided_signal_uid
+from metatables.migrations.sqlite import AUTO_BATCH_OPTION
 
 REVISIONS = (
     Path(__file__).resolve().parents[1]
@@ -40,6 +44,7 @@ def _revision(file_name: str):
 
 REVISION_0025 = _revision("0025_add_provided_weights_portfolios.py")
 REVISION_0027 = _revision("0027_add_portfolio_configurations.py")
+REVISION_0028 = _revision("0028_drop_retired_configuration_tables.py")
 # The names the previous release's tables and rows used, read from the revisions that made them.
 PREVIOUS_TABLE = REVISION_0027.PREVIOUS_TABLE
 PREVIOUS_SIGNAL_TABLE = PREVIOUS_TABLE.replace("portfolio", "signal_job")
@@ -51,15 +56,26 @@ PREVIOUS_WEIGHTS_SOURCE = next(
 
 
 def _previous_schema(connection: sa.Connection) -> None:
-    """The tables revision 0027 reads, as revision 0026 left them (the columns it uses)."""
+    """The tables revisions 0027 and 0028 read, as revision 0026 left them (the parts they use)."""
     for statement in (
         "CREATE TABLE ms_markets__portfolio (uid CHAR(32) PRIMARY KEY)",
+        "CREATE TABLE ms_markets__account (uid CHAR(32) PRIMARY KEY)",
+        "CREATE TABLE ms_markets__assetcategory (uid CHAR(32) PRIMARY KEY)",
         "CREATE TABLE alpaca_connectors__portfolio_rebalance_configuration "
         "(uid CHAR(32) PRIMARY KEY)",
         "CREATE TABLE alpaca_connectors__universe_source (uid CHAR(32) PRIMARY KEY)",
         "CREATE TABLE alpaca_connectors__asset_universe (uid CHAR(32) PRIMARY KEY)",
         "CREATE TABLE alpaca_connectors__bars_configuration (uid CHAR(32) PRIMARY KEY, "
-        "asset_source VARCHAR(32) NOT NULL, universe_uid CHAR(32))",
+        "asset_source VARCHAR(32) NOT NULL, universe_uid CHAR(32), "
+        f"CONSTRAINT {REVISION_0028.BARS_UNIVERSE_CHECK} "
+        f"CHECK ({REVISION_0028.BARS_UNIVERSE_SCOPE}), "
+        f"CONSTRAINT {REVISION_0028.BARS_UNIVERSE_KEY} FOREIGN KEY(universe_uid) "
+        "REFERENCES alpaca_connectors__asset_universe (uid) ON DELETE RESTRICT, "
+        f"CONSTRAINT {REVISION_0028.BARS_SOURCE_CHECK} "
+        f"CHECK ({REVISION_0028.PREVIOUS_BARS_SOURCES}))",
+        "CREATE TABLE alpaca_connectors__signal_asset (signal_uid VARCHAR(255) NOT NULL, "
+        "asset_identifier VARCHAR(255) NOT NULL, first_published_at DATETIME NOT NULL, "
+        "PRIMARY KEY (signal_uid, asset_identifier))",
         f"CREATE TABLE {PREVIOUS_SIGNAL_TABLE} (uid CHAR(32) PRIMARY KEY)",
         f"CREATE TABLE {PREVIOUS_TABLE} (uid CHAR(32) PRIMARY KEY, "
         "name VARCHAR(255) NOT NULL, description TEXT, signal_configuration_uid CHAR(32), "
@@ -114,9 +130,34 @@ def _configuration_row(connection: sa.Connection, uid: uuid.UUID, **values) -> N
     )
 
 
+def _operations(connection: sa.Connection) -> Operations:
+    """Alembic's operations as the MetaTables environment runs them on SQLite."""
+    return Operations(MigrationContext.configure(connection, opts={AUTO_BATCH_OPTION: True}))
+
+
 def _upgrade(connection: sa.Connection, revision) -> None:
-    with patch.object(revision, "op", Operations(MigrationContext.configure(connection))):
+    with patch.object(revision, "op", _operations(connection)):
         revision.upgrade()
+
+
+def _downgrade(connection: sa.Connection, revision) -> None:
+    with patch.object(revision, "op", _operations(connection)):
+        revision.downgrade()
+
+
+def _uids(connection: sa.Connection, table: str) -> set[str]:
+    return {row[0] for row in connection.execute(sa.text(f"SELECT uid FROM {table}"))}
+
+
+def _signal_assets(connection: sa.Connection, *signal_uids: str) -> None:
+    for signal_uid in signal_uids:
+        connection.execute(
+            sa.text(
+                "INSERT INTO alpaca_connectors__signal_asset "
+                "VALUES (:signal_uid, 'ALPACA::asset', '2026-11-16 09:00:00')"
+            ),
+            {"signal_uid": signal_uid},
+        )
 
 
 @pytest.fixture
@@ -235,3 +276,129 @@ def test_revision_0027_creates_the_table_the_model_declares(connection) -> None:
     assert {
         key["name"]: key["referred_table"] for key in inspector.get_foreign_keys(table.name)
     } == (foreign_keys)
+
+
+def test_revision_0028_copies_the_late_rows_then_drops_every_retired_object(connection) -> None:
+    copied, late, created = uuid.UUID(int=1), uuid.UUID(int=2), uuid.UUID(int=3)
+    _configuration_row(connection, copied)
+    _upgrade(connection, REVISION_0027)
+    # The release still serving during the rollout inserts a row after the copy, and the new
+    # release creates one of its own.
+    _configuration_row(connection, late, scheduled=False)
+    connection.execute(
+        sa.text(
+            f"INSERT INTO {REVISION_0027.TABLE_NAME} SELECT "
+            + ", ".join(REVISION_0027.COPIED_COLUMNS)
+            + f" FROM {PREVIOUS_TABLE} WHERE uid = :uid"
+        ),
+        {"uid": late.hex},
+    )
+    connection.execute(
+        sa.text(f"UPDATE {REVISION_0027.TABLE_NAME} SET uid = :created WHERE uid = :late"),
+        {"created": created.hex, "late": late.hex},
+    )
+    _signal_assets(
+        connection,
+        provided_signal_uid(copied),
+        provided_signal_uid(late),
+        "signal-no-configuration-names",
+    )
+
+    _upgrade(connection, REVISION_0028)
+
+    assert _uids(connection, REVISION_0028.TABLE_NAME) == {copied.hex, late.hex, created.hex}
+    tables = set(sa.inspect(connection).get_table_names())
+    assert tables.isdisjoint(
+        {
+            REVISION_0028.PREVIOUS_TABLE,
+            REVISION_0028.SIGNAL_CONFIGURATION_TABLE,
+            REVISION_0028.UNIVERSE_TABLE,
+            REVISION_0028.SOURCE_TABLE,
+        }
+    )
+    assert {
+        row[0]
+        for row in connection.execute(
+            sa.text("SELECT DISTINCT signal_uid FROM alpaca_connectors__signal_asset")
+        )
+    } == {provided_signal_uid(copied), provided_signal_uid(late)}
+
+
+def test_revision_0028_leaves_the_bars_configurations_as_the_model_declares(connection) -> None:
+    _upgrade(connection, REVISION_0027)
+    _upgrade(connection, REVISION_0028)
+    table = AlpacaBarsConfigurationTable.__table__
+    inspector = sa.inspect(connection)
+
+    assert "universe_uid" not in {
+        column["name"] for column in inspector.get_columns(REVISION_0028.BARS_TABLE)
+    }
+    assert inspector.get_foreign_keys(REVISION_0028.BARS_TABLE) == []
+    declared = {
+        constraint.name: str(constraint.sqltext)
+        for constraint in table.constraints
+        if isinstance(constraint, sa.CheckConstraint)
+    }
+    created = {
+        check["name"]: check["sqltext"]
+        for check in inspector.get_check_constraints(REVISION_0028.BARS_TABLE)
+    }
+    assert created == declared == {REVISION_0028.BARS_SOURCE_CHECK: REVISION_0028.BARS_SOURCES}
+    with pytest.raises(sa.exc.IntegrityError):
+        connection.exec_driver_sql(
+            "INSERT INTO alpaca_connectors__bars_configuration VALUES ('b2', 'universe')"
+        )
+
+
+def test_revision_0028_refuses_while_an_object_remains(connection) -> None:
+    _upgrade(connection, REVISION_0027)
+    connection.exec_driver_sql(
+        f"INSERT INTO alpaca_connectors__universe_source VALUES ('{uuid.UUID(int=6).hex}')"
+    )
+
+    with pytest.raises(RuntimeError, match=f"1 {REVISION_0028.REMAINING_OBJECTS[4][0]}"):
+        _upgrade(connection, REVISION_0028)
+
+    assert PREVIOUS_TABLE in sa.inspect(connection).get_table_names()
+
+
+def test_revision_0028_downgrade_restores_the_tables_with_every_configuration(connection) -> None:
+    first, second = uuid.UUID(int=1), uuid.UUID(int=2)
+    _configuration_row(connection, first, portfolio_uid=PORTFOLIO.hex)
+    _configuration_row(connection, second, scheduled=False)
+    _upgrade(connection, REVISION_0027)
+    _upgrade(connection, REVISION_0028)
+
+    _downgrade(connection, REVISION_0028)
+
+    inspector = sa.inspect(connection)
+    assert {
+        REVISION_0028.PREVIOUS_TABLE,
+        REVISION_0028.SIGNAL_CONFIGURATION_TABLE,
+        REVISION_0028.UNIVERSE_TABLE,
+        REVISION_0028.SOURCE_TABLE,
+    } <= set(inspector.get_table_names())
+    assert "universe_uid" in {
+        column["name"] for column in inspector.get_columns(REVISION_0028.BARS_TABLE)
+    }
+    # Without the key to the Asset Universes, which the catalog no longer holds; the upgrade
+    # below drops it only where it exists.
+    assert inspector.get_foreign_keys(REVISION_0028.BARS_TABLE) == []
+    assert REVISION_0028.BARS_UNIVERSE_CHECK in {
+        check["name"] for check in inspector.get_check_constraints(REVISION_0028.BARS_TABLE)
+    }
+    rows = {
+        row["uid"]: row
+        for row in connection.execute(sa.text(f"SELECT * FROM {PREVIOUS_TABLE}")).mappings()
+    }
+    assert set(rows) == {first.hex, second.hex}
+    assert {row["weights_source"] for row in rows.values()} == {"provided"}
+    assert rows[first.hex]["portfolio_uid"] == PORTFOLIO.hex
+    assert rows[second.hex]["scheduled"] == 0
+
+    # Revision 0027's downgrade then finds every configuration in the previous table, and the
+    # upgrade runs again.
+    _downgrade(connection, REVISION_0027)
+    _upgrade(connection, REVISION_0027)
+    _upgrade(connection, REVISION_0028)
+    assert _uids(connection, REVISION_0028.TABLE_NAME) == {first.hex, second.hex}
