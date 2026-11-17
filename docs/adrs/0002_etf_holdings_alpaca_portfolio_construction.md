@@ -2,6 +2,9 @@
 
 ## Status
 
+Superseded on 2026-11-17 by [ADR 0027](0027_one_portfolio_path.md): no portfolio here tracks an ETF
+any more. The valuation on interpolated Alpaca bars stays, as ADRs 0008, 0009 and 0024 state it.
+
 Superseded in part by
 [ADR 0006](0006_universe_backed_alpaca_etf_signal.md) and
 [ADR 0008](0008_portfolio_configuration_and_job_ownership.md). The Alpaca valuation and portfolio

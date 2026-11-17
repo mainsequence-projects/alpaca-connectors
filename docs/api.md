@@ -46,7 +46,7 @@ exception text. Besides the codes each section below names, every route can answ
 |---|---|---|
 | `503` | `dependency_starting` | A Main Sequence release the work needs (the Markets API, the MetaTables API) is still starting. `retryable: true` and `Retry-After` (seconds): send the request again then ([ADR 0020](adrs/0020_dependencies_that_are_starting.md)). |
 | `503` | `dependency_unavailable` | Anything unexpected; the API logs it. `retryable: true`. |
-| `502` | `provider_failure` | Alpaca or the holdings provider failed, or answered with data the connector cannot read (the log names the fields, never their values). |
+| `502` | `provider_failure` | Alpaca failed, or answered with data the connector cannot read (the log names the fields, never their values). |
 | `409` | `action_conflict` | A conflict the connector finds itself, in its own words. |
 
 A request waits for a starting release at most as long as its caller will
@@ -63,17 +63,14 @@ before its work finds the Markets API starting as well.
 | Accounts | `GET/POST /v1/accounts`, `POST /v1/accounts/registration/preflight`, `GET/PATCH/DELETE /v1/accounts/{account_uid}`, refresh and bulk actions; the signed-in person's key requests under `/v1/accounts/key-requests` |
 | Holdings | list/get and capture under `/v1/accounts/{account_uid}/holdings`; `/latest` lists only the newest immutable snapshot; the [account sync](#account-sync) at `POST /v1/accounts/{account_uid}/actions/sync` |
 | Execution | submit (with preflight), sync and cancel order batches, and list recorded orders, under `/v1/accounts/{account_uid}/orders` |
-| Universe Sources | Explicit extraction-configuration CRUD and read-only source preview under `/v1/universe-sources` |
-| Universes | Create/list/get/update registered `AssetUniverse` rows; list linked category Assets at `GET /v1/universes/{universe_uid}/assets`; run, activate, deactivate, and confirmed delete actions under `/v1/universes` |
 | Market Data | configuration CRUD and resolve/update actions under `/v1/market-data/bar-configurations`; dataset list/get and bounded observations under `/v1/market-data/datasets` |
-| ETF Signals | signal configuration CRUD under `/v1/signal-jobs`; run, pause, resume, reconcile, and JobRun-history actions on the shared signal Job |
-| ETF Portfolios | configuration CRUD under `/v1/portfolio-configurations`; portfolios from weights an application provides (`/provided-weights`, `/{uid}/weights`); reusable calendar-event policies under `/v1/portfolio-rebalance-configurations`; run and JobRun-history actions on the shared portfolio Job |
-| Operations | poll an accepted Alpaca bars, ETF signal, or ETF portfolio JobRun under `GET /v1/operations/job-runs/{job_run_uid}`; read an account sync again at `GET /v1/operations/{operation_uid}` |
+| Portfolios | portfolios built from weights an application provides: create at `POST /v1/portfolio-configurations/provided-weights`, new weights at `/{uid}/weights`, list/get/`PATCH`/`DELETE`, and run and JobRun-history actions on the portfolio Job under `/v1/portfolio-configurations`; reusable calendar-event policies under `/v1/portfolio-rebalance-configurations` |
+| Operations | poll an accepted Alpaca bars or portfolio JobRun under `GET /v1/operations/job-runs/{job_run_uid}`; read an account sync again at `GET /v1/operations/{operation_uid}` |
 
 Market-data writes are configuration-oriented. Create one stored definition with exactly one
-source (`assets`, `universe`, `account_holdings`, or `portfolios`), review it with the `resolve` action, and run it
-with the `update` action. Neither request accepts a dataset UID. The response reports the derived
-output MetaTable only as diagnostics.
+source (`assets`, `account_holdings`, or `portfolios`), review it with the `resolve` action, and
+run it with the `update` action. Neither request accepts a dataset UID. The response reports the
+derived output MetaTable only as diagnostics.
 
 A bar configuration's `scheduled` field (default `true`) includes it in the daily bars update at
 00:00 UTC ([ADR 0021](adrs/0021_daily_bars_dispatcher.md)). An unscheduled configuration still
@@ -85,25 +82,6 @@ preflight, submits the branch-owned `Alpaca Bars Update` Job with exactly
 `--configuration-uid <UUID>`, and returns `202 Accepted` with a JobRun status URL. The HTTP process
 does not contact Alpaca or write bars. Poll responses are never cached and expose only sanitized
 failure information plus the platform log URL.
-
-`POST /v1/universes` requires a name, ETF ticker, and explicit holdings source URL. It stores or
-resolves that exact source, creates an empty category, and creates an `AssetUniverse` with explicit
-source and category relationships. The identities are returned as `uid`, `source_uid`, and
-`asset_category_uid`; creation does not extract holdings. Run is a separate action on the registered
-Universe UID and requires `options.account_uid` as execution context. Its preflight extracts the
-source and plans provider-native asset registration through the selected account. Missing
-Main Sequence assets are work to perform, not blockers. Execution registers them first and replaces
-membership only after every constituent succeeds. Symbols that Alpaca cannot resolve are returned
-as blockers and leave membership unchanged. No ticker, provider, source, category, or account is
-inferred or persisted on the Universe.
-
-`GET /v1/universes/{universe_uid}` returns the linked category identity and an aggregate Asset
-count without embedding all members. `GET /v1/universes/{universe_uid}/assets` reuses the standard
-paginated Asset response and discovery contract, scoped to that linked category. The Universe
-collection and detail endpoints do not perform one backend request per Asset. Universe execution
-publishes the extracted weights into this application's `SignalWeightsTS` instance
-(`alpaca_connectors__signalweightsts__main`). The linked category
-records membership only; weights do not become category-membership columns.
 
 ## Order Execution
 
@@ -175,8 +153,8 @@ fills with its `holdings_time`, and `orders`, one per request leg, with `client_
 ## Project State And The Site's Agent
 
 The Alpaca site reads `GET /v1/project-state/configuration` on page load. Besides the migrated
-market-data profiles and the account, Universe-source and dataset counts, it names the Agent that
-the site's conversation opens:
+market-data profiles and the account and dataset counts, it names the Agent that the site's
+conversation opens:
 
 | Field | Value |
 | --- | --- |
@@ -198,113 +176,46 @@ The site takes both UIDs from this one answer, never from its build or from the 
 Center Environment. A re-created Agent has a new UID, and the API's next answer names it without a
 site rebuild. The `alpaca_project_state` MCP tool returns the same configuration.
 
-## Signal And Portfolio Jobs
+## The Portfolio Job
 
-Signal and portfolio configurations run on the two Jobs declared in
-`.mainsequence/workflows/alpaca-connectors-api.yaml`, one per kind
-([ADR 0013](adrs/0013_workflow_declared_configuration_jobs.md)).
+Portfolio configurations run on the `alpaca-portfolio` Job ("Alpaca Portfolio") declared in
+`.mainsequence/workflows/alpaca-connectors-api.yaml`, and its dispatcher,
+`alpaca-portfolio-dispatcher`, starts their scheduled runs at 02:00 UTC
+([ADR 0013](adrs/0013_workflow_declared_configuration_jobs.md),
+[Jobs](operations/jobs.md#the-portfolio-job)).
 
 - **Requests.** Create and update requests accept `scheduled` (default true). It decides whether
-  the kind's daily scheduled run includes the configuration. A request that still sends schedule or
-  compute settings (a nested portfolio `job`, or the flat signal schedule and compute fields) gets
-  422 naming the workflow file, because they belong to the declaration. Signals no longer accept
-  `enabled`; send `scheduled`.
-- **Responses.** They report `scheduled` and the kind's Job as `job_uid` and `job` (its schedule,
-  compute and image). Both are null until a push creates the Job on the branch. A signal's
-  `lifecycle_state` is `provisioning` until then, and afterwards `ready` or `paused`.
-- **Runs.** A run returns 202 with the JobRun UID and a `status_url`. It starts the kind's Job with
+  the daily scheduled run includes the configuration. A request that still sends schedule or
+  compute settings (a nested `job`) gets 422 naming the workflow file, because they belong to the
+  declaration.
+- **Responses.** They report `scheduled` and the Job as `job_uid` and `job` (its schedule, compute
+  and image). Both are null until a push creates the Job on the branch.
+- **Runs.** A run returns 202 with the JobRun UID and a `status_url`. It starts the Job with
   `--configuration-uid <uid>` and is refused while that configuration's newest run is pending or
   running. Run lists and `/v1/operations/job-runs/{job_run_uid}` find a configuration's runs by that
   argument and return it as `command_args`.
 
-## ETF Signals
+## Portfolios
 
-`POST /v1/signal-jobs` creates one durable signal configuration from one Universe and one registered
-Alpaca account; it does not touch the platform. `universe_uid` defines signal identity.
-`account_uid` is runtime configuration and never becomes part of the final signal UID or the
-signal weights. A run performs one Universe extraction, materialization and signal update.
-
-Lifecycle routes are:
-
-```text
-POST /v1/signal-jobs/{configuration_uid}/actions/run
-POST /v1/signal-jobs/{configuration_uid}/actions/pause
-POST /v1/signal-jobs/{configuration_uid}/actions/resume
-POST /v1/signal-jobs/{configuration_uid}/actions/reconcile
-GET  /v1/signal-jobs/{configuration_uid}/runs
-GET  /v1/signal-jobs/{configuration_uid}/observations?limit=100
-```
-
-`pause` and `resume` set `scheduled`. `reconcile` only ensures the signal's ms-markets metadata.
-The list filters on `scheduled` and orders by `name` or `updated_at`. Deleting a configuration
-removes only its row; prior signal observations and the shared Job's runs remain.
-
-The observations endpoint resolves the signal UID from the stored configuration, selects the
-latest distinct observation timestamps from this application's `SignalWeightsTS` instance, and
-returns all constituent rows for those timestamps as a compact aligned payload. It never accepts an
-arbitrary signal UID and performs one set-based backend query rather than one request per Asset.
-The limit is between 1 and 100 and defaults to 100. Timestamps are returned chronologically and each
-Asset carries one aligned weight per timestamp; the frontend projects that payload with timestamps
-as rows and Assets as columns. Because signal updates publish complete frames, an absent Asset row
-is represented as zero while an explicit stored null remains null.
-
-## ETF Portfolios
-
-`POST /v1/portfolio-configurations` creates one durable calculation definition; it does not touch
-the platform. The definition references an existing ETF Signal Configuration, Bars Configuration,
-and Rebalance Configuration. The supported strategy is `CalendarEventSignal`, backed by persisted
-market-session events; valuation uses daily persistent `InterpolatedPrices`, forward-fill
-interpolation, and a bounded staleness policy.
-
-The Portfolio Configuration MetaTable stores no schedule, compute, image, deployment, Environment,
-or JobRun state; its only operational field is `scheduled`. `PATCH {"scheduled": false}` pauses a
-portfolio without validating its references. A run also needs an allowed preflight: its linked
-configurations must exist and be enabled, and its signal must have published observations.
+An application builds a portfolio from weights it chooses
+([ADR 0024](adrs/0024_portfolios_from_provided_weights.md)), and that is the connector's only
+kind of portfolio ([ADR 0027](adrs/0027_one_portfolio_path.md)). Its signal is ms-markets'
+`ApplicationWeights`, configured with this connector's namespace and the configuration UID as key,
+so its `signal_uid` never changes. The supported rebalance strategy is `CalendarEventSignal`,
+backed by persisted market-session events; valuation uses daily persistent `InterpolatedPrices`,
+forward-fill interpolation, and a bounded staleness policy. The
+[Portfolios page](portfolios/portfolios.md) describes the whole flow.
 
 ```text
-GET|POST /v1/portfolio-configurations
+POST             /v1/portfolio-configurations/provided-weights
+POST|GET         /v1/portfolio-configurations/{configuration_uid}/weights
+GET              /v1/portfolio-configurations
 GET|PATCH|DELETE /v1/portfolio-configurations/{configuration_uid}
-POST /v1/portfolio-configurations/{configuration_uid}/actions/run
-GET  /v1/portfolio-configurations/{configuration_uid}/runs
+POST             /v1/portfolio-configurations/{configuration_uid}/actions/run
+GET              /v1/portfolio-configurations/{configuration_uid}/runs
 
-GET|POST /v1/portfolio-rebalance-configurations
+GET|POST         /v1/portfolio-rebalance-configurations
 GET|PATCH|DELETE /v1/portfolio-rebalance-configurations/{configuration_uid}
-```
-
-There is no Environment request field. A run selects its configuration with
-`--configuration-uid <uid>` and updates persistent interpolation, calendar events, rebalance state,
-executed weights, and valuation without rerunning the Signal or raw Bars producers. Rebalance rows use actual configured
-market-event timestamps and select the latest signal observed at or before each event. The result
-is still an analytical reconstruction rather than guaranteed point-in-time ETF replication.
-
-The configuration detail `GET` accepts `observation_limit` from 1 through 5,000 (default 2,500). It
-returns resolved Signal, Universe, Alpaca account, Bars, Rebalance, Job, and canonical
-portfolio/calendar summaries (read through the Markets API) plus the requested latest values from
-this application's `PortfoliosTS` instance (`alpaca_connectors__portfoliosts__main`). The history
-query is scoped by the canonical Portfolio unique identifier and runs only when a consumer opens
-that configuration; API consumers do not need to interpret or display related resource UIDs.
-
-The same response includes window-scoped performance statistics calculated from those canonical
-daily values with `empyrical-reloaded`: total and annualized return, annualized volatility, Sharpe,
-Sortino, maximum drawdown, Calmar, best/worst daily return, and the positive-period ratio. The
-response records the exact observation count, date window, 252-period annualization factor, and 0%
-risk-free-rate assumption. Alpha and beta are not reported because this workflow has no configured
-benchmark. If the requested window is shorter than the stored history, the response marks it as
-truncated rather than presenting the statistics as since-inception results.
-
-### Portfolios From Provided Weights
-
-An application can build a portfolio from weights it chooses
-([ADR 0024](adrs/0024_portfolios_from_provided_weights.md)). The portfolio is one more row of the
-same configuration table, with `weights_source: "provided"` and no Signal Configuration, and runs
-on the same Job, dispatcher, series and catalog as an ETF portfolio. Its signal is ms-markets'
-`ApplicationWeights` with this connector's namespace and the configuration UID as key, so its
-`signal_uid` never changes.
-
-```text
-POST /v1/portfolio-configurations/provided-weights
-POST /v1/portfolio-configurations/{configuration_uid}/weights
-GET  /v1/portfolio-configurations/{configuration_uid}/weights
 ```
 
 - **Create** takes `name`, `description?`, either `bars_configuration_uid` or `bars_configuration`
@@ -324,16 +235,37 @@ GET  /v1/portfolio-configurations/{configuration_uid}/weights
   names an asset, a weight or an owner.
 - **The owner.** The acting owner at creation owns the portfolio. Only that owner gives it
   weights, changes, pauses or deletes it; anyone else gets `403 portfolio_owned_by_another`. Reads
-  and runs stay open. ETF portfolios have no owner. Responses carry `weights_source`, never the
-  owner.
+  and runs stay open. Responses never carry the owner.
 - **Deleting ends it.** `DELETE` retires the ms-markets `Portfolio` (ms-markets ADR 0049), then
   deletes the configuration, and answers `portfolio: {uid, unique_identifier, state: "retired",
   retired_at}`. While an account's current target names the portfolio it answers
   `409 portfolio_in_account_target` and changes nothing. The `Portfolio`, its series and account
   history stay; a retired portfolio is no longer offered as a target and is no longer computed.
-- **The detail** of a provided-weights portfolio has `linked_signal: null` and a
-  `provided_weights` block: the signal UID, its first and last observation times and its asset
-  count.
+- **No schedule or compute is stored.** The configuration's only operational field is
+  `scheduled`. `PATCH {"scheduled": false}` pauses a portfolio without validating its references.
+  A run also needs an allowed preflight: its bars configuration must exist and be enabled, its
+  rebalance configuration must exist, and it must have at least one observation.
+
+There is no Environment request field. A run selects its configuration with
+`--configuration-uid <uid>` and updates persistent interpolation, calendar events, rebalance state,
+executed weights, and valuation without rerunning the raw Bars producer. Rebalance rows use actual
+configured market-event timestamps and select the latest observation at or before each event.
+
+The configuration detail `GET` accepts `observation_limit` from 1 through 5,000 (default 2,500). It
+returns the resolved Bars, Rebalance, Job, and canonical portfolio/calendar summaries (read through
+the Markets API), a `provided_weights` block (the signal UID, its first and last observation times
+and its asset count), plus the requested latest values from this application's `PortfoliosTS`
+instance (`alpaca_connectors__portfoliosts__main`). The history query is scoped by the canonical
+Portfolio unique identifier and runs only when a consumer opens that configuration; API consumers
+do not need to interpret or display related resource UIDs.
+
+The same response includes window-scoped performance statistics calculated from those canonical
+daily values with `empyrical-reloaded`: total and annualized return, annualized volatility, Sharpe,
+Sortino, maximum drawdown, Calmar, best/worst daily return, and the positive-period ratio. The
+response records the exact observation count, date window, 252-period annualization factor, and 0%
+risk-free-rate assumption. Alpha and beta are not reported because this workflow has no configured
+benchmark. If the requested window is shorter than the stored history, the response marks it as
+truncated rather than presenting the statistics as since-inception results.
 
 A `portfolios` bars configuration fetches every asset ever published by the live portfolios that
 name it: a deleted portfolio or one whose `Portfolio` is retired drops out, a paused one still
@@ -548,19 +480,16 @@ API believes it only from a caller listed in `ALPACA_CONNECTORS_VOUCHING_CALLERS
 - A call for an external person reaches only that person's accounts: every route that names an
   account, in its path, body or options, answers `404` for anyone else's, and `GET /v1/accounts`
   lists only theirs. Account key requests are refused for them (`400`). Other calls are unchanged.
-- Only an account's owner creates, updates or resumes a signal or bar configuration on it, judged
-  on the account the configuration will run with: the one the request names, else its current
-  one ([ADR 0022](adrs/0022_configurations_never_block_an_owners_removal.md)). Anyone else gets
-  `409 account_owned_by_another`, and an external person `404`. The signal pause action and
-  deleting a configuration are unchanged, and an account without an owner stays open to every
-  caller.
+- Only an account's owner creates, updates or resumes a bar configuration on it, judged on the
+  account the configuration will run with: the one the request names, else its current one
+  ([ADR 0022](adrs/0022_configurations_never_block_an_owners_removal.md)). Anyone else gets
+  `409 account_owned_by_another`, and an external person `404`. Deleting a configuration is
+  unchanged, and an account without an owner stays open to every caller.
 - An external person's registration of an account without an owner answers `409 account_in_use`
-  while enabled signal or bar configurations run with its keys. It names none of them.
+  while enabled bar configurations run with its keys. It names none of them.
 - Configurations never block a removal. `DELETE /v1/accounts/{account_uid}` and the bulk remove
-  first disable the enabled signal configurations (out of the scheduled run) and bar
-  configurations (no runs) that use the account, and return their UIDs as
-  `disabled_signal_configuration_uids` and `disabled_bar_configuration_uids`. The remove preflight
-  counts them in a warning.
+  first disable the enabled bar configurations (no runs) that use the account, and return their
+  UIDs as `disabled_bar_configuration_uids`. The remove preflight counts them in a warning.
 - `GET /v1/accounts` filters by `owner_gateway_uid` and `owner_user_uid`, given together.
 - A malformed `ALPACA_CONNECTORS_VOUCHING_CALLERS` stops the API from starting.
 

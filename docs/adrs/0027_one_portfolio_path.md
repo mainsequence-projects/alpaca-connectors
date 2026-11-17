@@ -151,7 +151,7 @@ Every path that deletes a portfolio configuration ends the portfolio as ADR 0024
 
 | Before | After |
 | --- | --- |
-| table `alpaca_connectors__etf_portfolio_configuration`, class `AlpacaETFPortfolioConfigurationTable` | `alpaca_connectors__portfolio_configuration`, `PortfolioConfigurationTable`, created by revision `0027` with every row copied under its own uid (Hunch keeps them as `Take.portfolio_configuration_uid`); no `weights_source`, no `signal_configuration_uid`, and the owner pair is required |
+| table `alpaca_connectors__etf_portfolio_configuration`, class `AlpacaETFPortfolioConfigurationTable` | `alpaca_connectors__portfolio_configuration`, `AlpacaPortfolioConfigurationTable`, created by revision `0027` with every row copied under its own uid (Hunch keeps them as `Take.portfolio_configuration_uid`); no `weights_source`, no `signal_configuration_uid`, and the owner pair is required |
 | Jobs `alpaca-etf-portfolio` and `alpaca-etf-portfolio-dispatcher` (02:00 UTC) | `alpaca-portfolio` ("Alpaca Portfolio", `src/jobs/run_alpaca_portfolio.py`) and `alpaca-portfolio-dispatcher` ("Alpaca Portfolio Dispatcher", `src/jobs/dispatch_alpaca_portfolio.py`, 02:00 UTC) |
 | Jobs `alpaca-etf-signal` and `alpaca-etf-signal-dispatcher` (00:30 UTC) | none |
 | tools `alpaca_query_etf_portfolios`, `alpaca_manage_etf_portfolio` | `alpaca_query_portfolios`, and `alpaca_manage_portfolio`: run, and pause, resume or delete for the portfolio's owner, with no create |
@@ -312,9 +312,15 @@ alpaca-connectors universe-source delete <SOURCE_UID> --execute
 - **The ETF product goes** (decision 2), and the names change (decision 5). Every `weights_source`
   branch goes with it.
 - **Revision `0027`** creates `alpaca_connectors__portfolio_configuration` and copies every row
-  with its uid. It refuses to run while any ETF row remains, so R2 cannot reach an Environment
-  ahead of its drain: its migration Job fails, and the API that waits for it is not deployed
+  with its uid. It refuses to run while any ETF object remains: an ETF portfolio configuration,
+  a signal configuration, a bars configuration on the `universe` source, an Asset Universe or a
+  Universe Source. So R2 cannot reach an Environment ahead of its drain: its migration Job
+  fails, and the API that waits for it is not deployed
   ([ADR 0012](0012_deployment_workflow_migrations_and_schema_gated_jobs.md)).
+- **The minutes between the migration and the new API.** The old API still writes the old
+  table. A configuration it creates then reaches the new table only when revision `0028` copies
+  it, so until R3 the new API answers 404 for it; a change or a delete made then is not carried
+  over. Ship R3 soon after R2.
 - **The Jobs.** The workflow declares `alpaca-portfolio` and `alpaca-portfolio-dispatcher` and
   drops the four ETF Jobs; the API's declared Job access follows. The push deletes the four Jobs
   bound to the dropped declarations, and their runs with them (tdag-django ADR-077).
@@ -346,7 +352,10 @@ them.
   drops `alpaca_connectors__etf_portfolio_configuration`, the three ETF tables
   (`alpaca_connectors__universe_source`, `alpaca_connectors__asset_universe` and
   `alpaca_connectors__etf_signal_job_configuration`) and the bars `universe_uid` column, with the
-  `universe` value of its source check.
+  `universe` value of its source check, and deletes the signal-asset rows of the signals no
+  configuration names. It refuses, as `0027` does, while any ETF object remains. Its downgrade
+  restores the tables, the rows (as provided-weights rows) and the bars column with its checks,
+  but not the bars foreign key to the Asset Universe table nor the deleted signal-asset rows.
 - **The four old launchers** (`src/jobs/run_alpaca_etf_signal.py`,
   `src/jobs/dispatch_alpaca_etf_signal.py`, `src/jobs/run_alpaca_etf_portfolio.py` and
   `src/jobs/dispatch_alpaca_etf_portfolio.py`) go once the platform lists no Job bound to them on

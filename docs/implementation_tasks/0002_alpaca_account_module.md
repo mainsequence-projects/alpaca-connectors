@@ -1,8 +1,8 @@
 # Alpaca account storage and holdings
 
-> **Status:** implemented locally. Revision `0002` adds Secret-name bindings and the user-managed
-> universe-source table. Applying and verifying that revision in the platform remains an explicit
-> deployment operation.
+> **Status:** implemented locally. Revision `0002` adds Secret-name bindings and a user-managed
+> extraction-source table, which [ADR 0027](../adrs/0027_one_portfolio_path.md) removes. Applying
+> and verifying that revision in the platform remains an explicit deployment operation.
 
 ## Purpose
 
@@ -49,8 +49,8 @@ row, deactivates the generic Account, and retains historical holdings.
 
 ## Migration
 
-`src.migrations:migration` owns `AlpacaAccountDetails` and `UniverseSourceTable`. Apply revision
-`0002` with:
+`src.migrations:migration` owns `AlpacaAccountDetails` and, until ADR 0027, the extraction-source
+table. Apply revision `0002` with:
 
 ```bash
 mainsequence migrations upgrade --provider src.migrations:migration head

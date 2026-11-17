@@ -1,5 +1,12 @@
 # Project Status
 
+## Current
+
+- 2026-11-17: the owner decided one portfolio path (ADR 0027). Portfolios are built only from
+  weights an application provides; the second product and its extraction library leave the
+  connector in three releases with a drain of each Environment between the first two. The open
+  rollout is in `.agents/tasks.md`; the documentation already describes the end state.
+
 ## Verified
 
 - The repository resolves to CodeRepository `c4980dd0-db33-420c-9a3f-050815a03512`, branch
@@ -8,9 +15,8 @@
   `mainsequence-metatable>=0.1.55,<0.2`, and ms-markets `>=3.0.0,<4`. The committed `uv.lock` and
   `requirements.txt` resolve SDK 9.0.33, MetaTables 0.1.57 and ms-markets 3.0.0.
 - `pyproject.toml` uses compatible lower bounds and does not exactly pin Main Sequence packages.
-  Its `etfhextractor` Git source is pinned to release tag `v0.5.0`.
-- The project capability boundaries are Project State, Assets, Universes, Market Data, Accounts,
-  Holdings, Portfolios, and Operations.
+- The project capability boundaries are Project State, Assets, Market Data, Accounts, Holdings,
+  Execution, Portfolios, and Operations.
 - Reusable application behavior lives under `src/`; the installed CLI and thin FastAPI routers
   call those services.
 - Raw Alpaca key values are absent from CLI flags and API request/response schemas. Account
@@ -20,12 +26,8 @@
   from the stored frequency/feed/adjustment profile; MetaTable UIDs remain read-only query
   identifiers, and credentials come from the configuration's registered account.
 - Alpaca bar configurations are durable MetaTable rows with UUID identity and one of three asset
-  sources: explicit Assets, an active materialized universe, or the configured account's newest
-  persisted non-cash holdings snapshot in the inclusive trailing 30-day window.
-- Universe targets are rows in `UniverseSourceTable`. Runtime extraction and synchronization do
-  not read a Python ticker list or ticker/provider map.
-- The optional IVV bootstrap record is package data reconciled only by the explicit, idempotent
-  `universe-source seed-defaults` command and uses the official US iShares product page.
+  sources: explicit Assets, the configured account's newest persisted non-cash holdings snapshot in
+  the inclusive trailing 30-day window, or every asset of the live portfolios that name it.
 - FastAPI exposes resource collections, discovery contracts, CRUD/actions, stable errors,
   caller-sensitive discovery cache headers, and the current static-site CORS policy.
 - The discovery, collection, bulk-preflight, and bulk-execution payloads validated against the
@@ -40,20 +42,13 @@
   - `alpaca_connectors__bars_configuration`
   - `alpaca_connectors__bars_configuration_asset`
   - `alpaca_connectors__acct_alpaca`
-  - `alpaca_connectors__universe_source`
+  - the extraction-source table, which ADR 0027 later removed
   - `alpaca_connectors__asset_registration_operation`
 - Bar-configuration MetaTable UIDs:
   - configuration: `b24c4b08-f8b1-44ce-9160-324834f0ae86`
   - explicit membership: `933b62b8-1c5b-46b4-a248-db12ee56edc3`
-- UniverseSource MetaTable UID:
-  `630be5b8-5cb7-4bfc-99ea-8b84cd879c9d`.
-- The seeded IVV source exists as UID `28f98530-9380-4a3b-b70e-3da8b972c205` and its live row
-  points to `https://www.ishares.com/us/products/239726/ishares-core-sp-500-etf`.
-- A live read-only preview of that source returned 504 component symbols with an as-of date of
-  September 1, 2026. A second seed run preserved `updated_at`, proving the reconciliation is
-  idempotent after the URL correction.
-- Live CLI and FastAPI read checks return one source, zero registered Alpaca accounts, and two
-  migrated daily price datasets. Both price datasets currently contain zero rows.
+- Live CLI and FastAPI read checks returned zero registered Alpaca accounts and two migrated
+  daily price datasets, both with zero rows.
 - Local verification: 115 tests pass; Ruff passes; strict MkDocs build passes.
 - Streamlit was not removed or refactored.
 

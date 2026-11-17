@@ -1,19 +1,20 @@
 # Alpaca Connectors
 
-This project integrates Alpaca-backed assets, universes, market data, accounts, holdings, and
+This project integrates Alpaca-backed assets, market data, accounts, holdings, order execution and
 analytical portfolios with Main Sequence.
 
 Current scope:
 
-- register MainSequence public assets from Alpaca symbols through FIGI
-- maintain durable extraction sources and materialize provider-derived asset universes
+- register Main Sequence assets from Alpaca symbols under Alpaca's immutable asset UUID, with
+  optional OpenFIGI enrichment and the trading calendar of each asset's class
 - publish Alpaca stock bars through an ms-markets `AssetIndexedUpdater` (storage-first)
-- register Alpaca brokerage accounts with application-managed or external credential Secrets and
-  capture holdings snapshots independently
+- register Alpaca brokerage accounts with application-managed or imported keys and capture
+  holdings snapshots; the account sync sizes the account's target and allocates its funds
 - place, sync and cancel batches of market orders on a registered account for authorised
   applications, writing the ms-markets execution ledger (ADR 0016)
-- build durable scheduled analytical portfolios from existing ETF Weight Signals, persistent
-  interpolated Alpaca bars, and reusable persisted-calendar rebalance configurations
+- run durable scheduled analytical portfolios from weights an application provides, valued on
+  persistent interpolated Alpaca bars with reusable persisted-calendar rebalance configurations
+  (ADR 0024, ADR 0027)
 - expose plans, executions, validation outcomes, and existing invocation paths
 
 Market-domain behavior runs on **ms-markets** (`msm`) over `mainsequence`. See the migration
@@ -22,42 +23,24 @@ record at `docs/implementation_tasks/0001_ms_markets_storage_first_migration.md`
 ## Repository Areas
 
 - `src/alpaca_connectors/api/app/capabilities.py`: API-facing capability catalog
-- `src/alpaca_connectors/assets/`: asset registration, FIGI resolution, Alpaca universe checks
-- `src/alpaca_connectors/universes/`: source CRUD and Asset Universe execution across extraction, bulk registration,
-  category membership, and observed signal weights
+- `src/alpaca_connectors/assets/`: asset registration, FIGI enrichment, trading calendars
 - `src/alpaca_connectors/market_data/`: Alpaca bar storage, update logic, and supporting functions
 - `src/alpaca_connectors/account/`: Alpaca account registration and project-owned account details
 - `src/alpaca_connectors/holdings/`: public account-holdings capability boundary
 - `src/alpaca_connectors/execution/`: order batches, pre-trade checks and the execution ledger
 - `src/alpaca_connectors/cli/`: thin capability command adapters
 - `src/jobs/`: repository-local launchers for platform-managed execution
-- `src/alpaca_connectors/operations/`: durable workflow state and runs on the workflow-declared signal and portfolio Jobs
-- `src/alpaca_connectors/portfolios/`: ETF holdings portfolio construction with `msm_portfolios`
+- `src/alpaca_connectors/operations/`: durable workflow state and runs on the workflow-declared
+  portfolio Job
+- `src/alpaca_connectors/portfolios/`: portfolios from provided weights with `msm_portfolios`
 
 See [Capability Model](capabilities/index.md) before the workflow-specific pages.
 
-## ETF Extraction Documentation
-
-ETF extraction has its own standalone architecture page:
-
-- `docs/etf_extraction.md`
-
-Use that page first when the question is about:
-
-- provider extraction behavior
-- configured provider extraction
-- source-owned holdings membership refresh
-- the boundary between ETF logic and Alpaca logic
-
 ## Main Decisions
 
-- Assets are registered in MainSequence by FIGI, not as custom assets.
-- ETF holdings extraction is delegated to `etfhextractor`; managed extraction targets are
-  `UniverseSource` rows, not Python constants.
-- Holdings categories are source-owned: Universe Run resolves current ETF holdings and weights,
-  registers missing Alpaca-backed constituents through the account selected for that execution,
-  changes membership only after the complete constituent set is available, and publishes that same
-  extraction through `AlpacaETFHoldingsSignal`. Universes do not own accounts.
+- Assets are identified by Alpaca's immutable asset UUID (`ALPACA::<uuid>`, ADR 0004); FIGI is
+  optional enrichment, never an identity. Every asset write names the trading calendar of the
+  asset's Alpaca class (ADR 0026).
 - Alpaca daily bars share one storage table per `frequency_id`, `feed`, and `adjustment`
   (`src/alpaca_connectors/market_data/storage.py`); the table identifier preserves the legacy
   `alpaca_stock_bars_<freq>_<feed>_<adjustment>` string. Physical table names include the triple
@@ -66,17 +49,15 @@ Use that page first when the question is about:
 - Storage-first: schema lives on the storage class, not the DataNode config; tables must be
   migrated and the runtime attached (`start_markets_engine()`) before writes.
 - Bar updates are configuration-first: users maintain UUID-keyed `AlpacaBarsConfiguration` rows
-  with `assets`, `universe`, recent `account_holdings`, or `portfolios` sources. The output
-  MetaTable is resolved from frequency/feed/adjustment and is never a write input.
-- Portfolio construction uses the portfolio runtime (`start_portfolio_markets_engine()`), the
-  connector-owned Universe-backed `AlpacaETFHoldingsSignal`, and
-  persistent `msm_portfolios.InterpolatedPrices` over the registered Alpaca bars table. Durable
-  Portfolio Configurations reference existing Signal, Bars, and Rebalance Configurations, or, for
-  a portfolio whose weights an application provides, an `ApplicationWeights` signal instead of a
-  Signal Configuration (ADR 0024). The
-  signal and portfolio Jobs declared in `.mainsequence/workflows/alpaca-connectors-api.yaml` run
-  every configuration and own schedule and compute; a configuration only chooses whether the
-  daily scheduled run includes it (ADR 0013).
+  with `assets`, recent `account_holdings`, or `portfolios` sources. The output MetaTable is
+  resolved from frequency/feed/adjustment and is never a write input.
+- One portfolio path (ADR 0027): a portfolio is built from weights an application provides, whose
+  signal is ms-markets' `ApplicationWeights`, and the application owns it (ADR 0024). Portfolio
+  construction uses the portfolio runtime and persistent `msm_portfolios.InterpolatedPrices` over
+  the registered Alpaca bars table. The portfolio Job declared in
+  `.mainsequence/workflows/alpaca-connectors-api.yaml` runs every configuration and owns schedule
+  and compute; a configuration only chooses whether the daily scheduled run includes it
+  (ADR 0013). Every delete retires the portfolio's `Portfolio` first.
 - Daily bar `time_index` is normalized to `16:00 America/New_York` on the session date as a project convention.
 - The FastAPI application authenticates every caller through the SDK request identity that
   `create_app()` installs; routes read the verified caller with `User.get_logged_user()`, and no
@@ -97,20 +78,18 @@ uv run mkdocs build
 ## Related Entry Points
 
 - `alpaca-connectors asset register`
-- `alpaca-connectors universe run <UNIVERSE_UID>`
-- `alpaca-connectors universe-source list`
+- `alpaca-connectors asset link-calendars`
 - `alpaca-connectors account register`
 - `alpaca-connectors holdings capture`
 - `alpaca-connectors market-data update`
 - `alpaca-connectors market-data bar-configuration create`
 - `alpaca-connectors asset <ticker> update_prices <period>`
-- `alpaca-connectors signal create ...`
-- `alpaca-connectors signal run <CONFIGURATION_UID>`
 - `alpaca-connectors portfolio rebalance create ...`
-- `alpaca-connectors portfolio create ...`
+- `alpaca-connectors portfolio list`
 - `alpaca-connectors portfolio run <CONFIGURATION_UID>`
+- `POST /v1/portfolio-configurations/provided-weights`, the only way to create a portfolio
 - `src/jobs/run_alpaca_bars_update.py` and its daily dispatcher
   `src/jobs/dispatch_alpaca_bars_update.py`, declared in
   `.mainsequence/workflows/alpaca-bars-update.yaml`
-- `src/jobs/run_alpaca_etf_signal.py` and `src/jobs/run_alpaca_etf_portfolio.py`, declared in
-  `.mainsequence/workflows/alpaca-connectors-api.yaml`
+- `src/jobs/run_alpaca_portfolio.py` and its daily dispatcher `src/jobs/dispatch_alpaca_portfolio.py`,
+  declared in `.mainsequence/workflows/alpaca-connectors-api.yaml`

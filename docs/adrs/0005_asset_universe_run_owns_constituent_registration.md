@@ -2,6 +2,9 @@
 
 ## Status
 
+Superseded on 2026-11-17 by [ADR 0027](0027_one_portfolio_path.md): there are no Asset Universes. An
+application registers the assets its portfolios need through the asset routes.
+
 Accepted. This ADR supersedes the registration-order parts of ADR 0001.
 
 ## Context

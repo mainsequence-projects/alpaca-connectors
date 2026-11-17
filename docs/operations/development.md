@@ -30,21 +30,13 @@ system credential store, not in the CodeRepository `.env`. MetaTables schema com
 `metatables` CLI installed by `mainsequence-metatable`.
 
 Python 3.13 is required. `pyproject.toml` declares compatible ranges and intentionally does not pin
-exact dependency versions; `uv.lock` is the reproducible resolution. The one exception is the
-`etfhextractor` Git source, which `[tool.uv.sources]` pins to its release tag (`v0.5.6`); since
-0.5.5 it declares ms-markets as a range (`>=3.4.1,<4`), not an exact version.
+exact dependency versions; `uv.lock` is the reproducible resolution.
 
 The release image is built from `requirements.txt` alone with plain pip (`pip wheel --requirement`
 then `pip check`), which ignores `[tool.uv] override-dependencies`. Never use an override to get
 past a dependency's pin, and regenerate `requirements.txt`
 (`uv export --locked --no-dev --no-hashes --format requirements-txt -o requirements.txt`) with every
 `uv.lock` change, or the release build fails.
-
-Install Playwright support when a provider extraction path requires it:
-
-```bash
-bash scripts/install_browser_runtime.sh
-```
 
 The rules for running the CLI, the API and the Jobs against an environment are in the
 [Operator Guide](operator-guide.md).
@@ -157,18 +149,17 @@ their weights rows in place; they are reused by the next run.
 ## Exercise The Backend
 
 ```bash
-alpaca-connectors universe-source seed-defaults
-alpaca-connectors universe-source list
 alpaca-connectors account list
 alpaca-connectors market-data dataset list
+alpaca-connectors portfolio list
 uv run uvicorn alpaca_connectors.api.app.main:app --reload
 ```
 
 Mutating account and market-data operations use a registered Account UID. CLI account registration
 accepts Main Sequence Secret names only, imported once; the API also accepts values. Both store the
 keys encrypted on the account row, which needs the `ALPACA_CONNECTORS_DATA_KEY` Secret
-([operator guide](operator-guide.md#account-key-secret)). Universe sync uses a UniverseSource UID and does not infer
-extraction targets from source-code constants.
+([operator guide](operator-guide.md#account-key-secret)). A portfolio is created only through the API, by
+the application that gives it weights ([Portfolios](../portfolios/portfolios.md)).
 
 ### Call the local API
 

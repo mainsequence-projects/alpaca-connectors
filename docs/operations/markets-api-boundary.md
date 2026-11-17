@@ -17,10 +17,9 @@ agent session; every command below is run by the person the step names.
 | Account registration and holdings sync: asset type, asset and account upserts, `AssetSnapshots.publish`, the `USD` Asset ensured, `AccountHoldingsSnapshots.publish` | one `registerAccount` call (`POST /api/v1/account/registration/`, ms-markets 3.4.0, ADR 0051) |
 | No target read and no fund allocation | the account sync reads the account's target and plans and allocates each snapshot it publishes: `getAccountTargetPositions`, `planAccountVirtualFunds` and `allocateAccountVirtualFunds` (ms-markets 3.7.0, ADR 0054; [ADR 0023](../adrs/0023_account_sync_sizes_and_allocates_funds.md)) |
 | Registration listing joined `AccountTable` | pages `alpaca_connectors__acct_alpaca` (revision 0019 adds the account name and active flag) and reads the page's Accounts in one batch |
-| Universe listing and detail joined `AssetCategoryTable` and counted memberships | own universes plus `AssetCategory`/`AssetCategoryMembership` batched reads |
 | Signal weights, portfolio values, weights, rebalance state, calendar events, orders, trades in `ms_markets__*` | `alpaca_connectors__<contract>__main` instances (revision 0020) |
 | Interpolated prices in `ms_markets__interpolated_prices__t_*` (Markets namespace) | `alpaca_connectors__interpolated_prices__t_*` (revision 0021) |
-| Portfolio reads of Markets tables only | each portfolio's Markets dataset catalog row points at the instances (`PortfolioDatasets.register` after every run; `register_signal` after every signal run) |
+| Portfolio reads of Markets tables only | each portfolio's Markets dataset catalog row points at the instances (`PortfolioDatasets.register` after every run; `register_signal` after every publication of weights) |
 | Job schema gate read the ms-markets Alembic version table | waits until the Markets API's `/health` reports at least the ms-markets release of the image |
 | 13 project tables in `mainsequence.markets` | in `alpaca-connectors` (step 7) |
 
@@ -50,11 +49,10 @@ workload can use the project tables once they leave `mainsequence.markets`:
 | Workload | Role on `alpaca-connectors` | Why |
 |---|---|---|
 | `alpaca-connectors-migrate` | `editor` (holds it already) | registers and changes the project tables |
-| `alpaca` (API) | `editor` | writes project rows; runs the signal (Universe run) and the orders and trades updaters in-process |
-| `alpaca-etf-signal` | `editor` | writes Universe and asset-detail rows; runs the signal updater |
-| `alpaca-etf-portfolio` | `editor` | runs the interpolation, calendar-event, rebalance, weights and values updaters |
+| `alpaca` (API) | `editor` | writes project rows; publishes provided weights; runs the orders and trades updaters in-process |
+| `alpaca-portfolio` | `editor` | runs the interpolation, calendar-event, rebalance, weights and values updaters |
 | `alpaca-bars-update` | `data_viewer`, plus its table `editor` on the two bars tables (table roles move with the tables) | read configurations; run the bars updater |
-| `alpaca-etf-signal-dispatcher`, `alpaca-etf-portfolio-dispatcher` | `data_viewer` | preflight reads |
+| `alpaca-portfolio-dispatcher` | `data_viewer` | preflight reads |
 | `alpaca-bars-update-dispatcher` | `data_viewer` | read the enabled, scheduled bar configurations (ADR 0021) |
 | `alpaca-credential-migration` (one-off) | `data_writer` | reads and seals the account keys |
 
@@ -70,11 +68,10 @@ through `alpaca-connectors`.
 
 ## 2. Hold The Scheduled Runs
 
-A signal run before step 6 publishes into an empty signal instance, and a portfolio run would
-then start from that observation. Either push right after the 02:00 UTC portfolio dispatch and
-finish step 6 before the 00:30 UTC signal dispatch, or take every configuration off the schedule
-first (`alpaca-connectors signal update <uid> --no-scheduled`,
-`alpaca-connectors portfolio update <uid> --no-scheduled`) and put it back in step 8. Until the
+A portfolio run before step 6 would start from instances that do not hold the history that step
+moves. Either push right after the 02:00 UTC portfolio dispatch and finish step 6 before the next
+one, or take every portfolio off the schedule first
+(its owner's `PATCH /v1/portfolio-configurations/{uid}` with `{"scheduled": false}`) and put it back in step 8. Until the
 backfill, portfolio preflight blocks a run whose signal instance has no observation. Keep the runs
 held while a move or a rollback runs.
 
@@ -162,13 +159,17 @@ the Markets API) onto its details row.
 
 | Move | Rows | Key |
 |---|---|---|
-| `SignalSeriesMove` | signal weights of the signal configurations no portfolio points to | `signal_uid` |
-| `PortfolioSeriesMove`, one per `ALPACA_ETF_PORTFOLIO__*` portfolio | its current signal's weights, rebalance state, weights and values | `signal_uid`, `portfolio_identifier` |
+| `PortfolioSeriesMove`, one per portfolio configuration's `Portfolio` | its current signal's weights, rebalance state, weights and values | `signal_uid`, `portfolio_identifier` |
 | `TableSeriesMove` | calendar events of the rebalance calendars | `calendar_identifier` |
 | `TableSeriesMove` | orders and trades of the registered accounts | `account_identifier` |
 | `TableSeriesMove`, one per bars profile | the revision-0011 interpolated prices | `asset_identifier` |
 
-Signal observations are live ETF extractions, so they are copied, never recomputed. Each copy
+Since [ADR 0027](../adrs/0027_one_portfolio_path.md) the command no longer moves the signals
+of the signal configurations that ADR removed. An Environment that has not run the backfill runs it
+before that ADR's first release, whose
+[inventory](../adrs/0027_one_portfolio_path.md#before-r1-what-each-environment-holds) checks it.
+
+Signal observations are published, never restated, so they are copied, never recomputed. Each copy
 writes only the rows the instance lacks (by the full index) through the ms-markets
 `TimeIndexRowsCopy` updater, then counts both sides per key. A move whose keys are all complete is
 `moved`; with `--register-catalog` it then binds its signals (`register_signal`) and writes its
@@ -210,14 +211,17 @@ creates are registered there directly. Existing tables are moved once by adding 
 | `alpaca_connectors__bars_1d_iex_raw` | `alpaca_stock_bars_1d_iex_raw` | `alpaca-connectors.alpaca_stock_bars_1d_iex_raw` |
 | `alpaca_connectors__acct_alpaca` | `AlpacaAccountDetails` | `alpaca-connectors.AlpacaAccountDetails` |
 | `alpaca_connectors__account_key_request` | `AccountKeyRequest` | `alpaca-connectors.AccountKeyRequest` |
-| `alpaca_connectors__universe_source` | `UniverseSource` | `alpaca-connectors.UniverseSource` |
-| `alpaca_connectors__asset_universe` | `AssetUniverse` | `alpaca-connectors.AssetUniverse` |
 | `alpaca_connectors__bars_configuration` | `AlpacaBarsConfiguration` | `alpaca-connectors.AlpacaBarsConfiguration` |
 | `alpaca_connectors__bars_configuration_asset` | `AlpacaBarsConfigurationAsset` | `alpaca-connectors.AlpacaBarsConfigurationAsset` |
 | `alpaca_connectors__asset_registration_operation` | `AssetRegistrationOperation` | `alpaca-connectors.AssetRegistrationOperation` |
-| `alpaca_connectors__etf_signal_job_configuration` | `AlpacaETFSignalJobConfiguration` | `alpaca-connectors.AlpacaETFSignalJobConfiguration` |
 | `alpaca_connectors__portfolio_rebalance_configuration` | `PortfolioRebalanceConfiguration` | `alpaca-connectors.PortfolioRebalanceConfiguration` |
-| `alpaca_connectors__etf_portfolio_configuration` | `AlpacaETFPortfolioConfiguration` | `alpaca-connectors.AlpacaETFPortfolioConfiguration` |
+
+The other four of the thirteen were the configuration tables of the product
+[ADR 0027](../adrs/0027_one_portfolio_path.md) removed. Its revision `0027` copies the portfolio
+configurations into `alpaca_connectors__portfolio_configuration`, which is registered in
+`alpaca-connectors` from the start, and its revision `0028` drops the four. Every Environment whose
+migrations run on MetaTables 0.1.66 or later has made the move: their finalization is refused until
+it is done (below).
 
 The "before" column is what the code declared; check it against the catalog before the move.
 The portfolio code of earlier releases looked the two bars tables up with their physical name as
@@ -287,11 +291,11 @@ patching its old identifier undoes the move.
 
 Put the configurations held in step 2 back on the schedule, then check:
 
-- the API's portfolio configuration detail (`observation_limit`) and signal observations routes
-  show the copied history;
+- the API's portfolio configuration detail (`observation_limit`) and weights routes show the
+  copied history;
 - `PortfolioDatasets.get(portfolio_uids=[...])` (Markets API) reports `populated` for every
   portfolio, and the Markets portfolio values route returns the same rows as before;
-- the next scheduled signal and portfolio JobRuns succeed and append to the instances;
+- the next scheduled portfolio JobRuns succeed and append to the instances;
 - `alpaca-connectors account list` pages, searches and filters as before.
 
 ## Rolling Back
@@ -307,7 +311,7 @@ alpaca-connectors instances rollback --execute        # or: msm series rollback 
 The rollback runs the same moves backwards (portfolios first): it copies the rows the instances
 gained since the move into the shared tables, verifies every key, then removes each portfolio's
 catalog row (`unregister`, keeping signal bindings) and unbinds only the signals each move moved
-(`unregister_signal`: a portfolio its current signal, the signal move the others);
+(`unregister_signal`: each portfolio its current signal);
 `--keep-catalog` leaves them. `msm series rollback` passes `rollback=True` to the callable, which
 returns the same moves. The instances keep their rows. This release always writes the instances and
 registers the catalog after every run, so deploy the previous release before resuming the runs.

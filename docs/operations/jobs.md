@@ -1,26 +1,24 @@
 # Jobs And Deployment
 
-## Signal And Portfolio Jobs
+## The Portfolio Job
 
-Signal and portfolio configurations run on two Jobs declared in
-`.mainsequence/workflows/alpaca-connectors-api.yaml`, one per kind, and two dispatcher Jobs in the
-same file start their scheduled runs
-([ADR 0013](../adrs/0013_workflow_declared_configuration_jobs.md)). No code creates a Job: since
-`mainsequence` 9.0.2 only a workflow declaration can, and the push that carries a declaration creates
-its Job.
+Portfolio configurations run on one Job declared in
+`.mainsequence/workflows/alpaca-connectors-api.yaml`, and a dispatcher Job in the same file starts
+its scheduled runs ([ADR 0013](../adrs/0013_workflow_declared_configuration_jobs.md),
+[ADR 0027](../adrs/0027_one_portfolio_path.md)). No code creates a Job: since `mainsequence`
+9.0.2 only a workflow declaration can, and the push that carries a declaration creates its Job.
 
 | Key | Display name | Daily schedule | Arguments |
 |---|---|---|---|
-| `alpaca-etf-signal` | `Alpaca ETF Signal` | none | `--configuration-uid <uid>` per run |
-| `alpaca-etf-portfolio` | `Alpaca ETF Portfolio` | none | `--configuration-uid <uid>` per run |
-| `alpaca-etf-signal-dispatcher` | `Alpaca ETF Signal Dispatcher` | `30 0 * * *` UTC | `--scheduled` |
-| `alpaca-etf-portfolio-dispatcher` | `Alpaca ETF Portfolio Dispatcher` | `0 2 * * *` UTC | `--scheduled` |
+| `alpaca-portfolio` | `Alpaca Portfolio` | none | `--configuration-uid <uid>` per run |
+| `alpaca-portfolio-dispatcher` | `Alpaca Portfolio Dispatcher` | `0 2 * * *` UTC | `--scheduled` |
 
-The dispatchers run after the US equity close and after the 00:00 UTC
-[bars dispatcher](#daily-bars-dispatcher). All four Jobs
-use 0.25 CPU, 0.5 GiB and 3600 seconds, and every push promotes their image. No `execution.steps`
-entry references them, so a push may promote their image before the migration Job finishes; the
-schema gate in each entry point turns a run in that window into a clean skip
+The launchers are `src/jobs/run_alpaca_portfolio.py` and `src/jobs/dispatch_alpaca_portfolio.py`.
+The dispatcher runs after the US equity close and after the 00:00 UTC
+[bars dispatcher](#daily-bars-dispatcher). Both Jobs use 0.25 CPU, 0.5 GiB and 3600 seconds, and
+every push promotes their image. No `execution.steps` entry references them, so a push may promote
+their image before the migration Job finishes; the schema gate in each entry point turns a run in
+that window into a clean skip
 ([ADR 0012](../adrs/0012_deployment_workflow_migrations_and_schema_gated_jobs.md)). The gate is
 also a run's first call to the Markets and MetaTables APIs, which are usually asleep at these hours.
 It waits up to 300 s for each to wake. ms-markets' own 30 s failed every dispatcher run from
@@ -29,74 +27,61 @@ It waits up to 300 s for each to wake. ms-markets' own 30 s failed every dispatc
 
 How they run:
 
-- **A manual run executes one configuration.** These all start a run of the kind's Job with the
-  arguments `--configuration-uid <uid>`:
-  - `POST /v1/signal-jobs/{uid}/actions/run` and `POST /v1/portfolio-configurations/{uid}/actions/run`;
-  - `alpaca-connectors signal run <uid>` and `alpaca-connectors portfolio run <uid>`.
-
-  A run is refused while the configuration's newest run is pending or running, or while the Job's
-  image is not ready, which includes the image build after each push. A signal run needs an active
-  Universe and Account. A portfolio run needs an allowed preflight: its linked configurations must
-  exist and be enabled, and its signal must have published observations.
-- **The scheduled run belongs to the dispatcher and executes nothing itself.** Each dispatcher
-  starts one `--configuration-uid` run of its kind's Job for each configuration whose scheduled flag
-  is true. It may, because it declares `runner` on that Job. The kind's Job cannot start its own
-  runs: starting a run needs `runner` on the Job, and a Job cannot declare access to itself
+- **A manual run executes one configuration.** `POST /v1/portfolio-configurations/{uid}/actions/run`
+  and `alpaca-connectors portfolio run <uid>` start a run of the Job with the arguments
+  `--configuration-uid <uid>`. A run is refused while the configuration's newest run is pending or
+  running, or while the Job's image is not ready, which includes the image build after each push.
+  It also needs an allowed preflight: its bars configuration must exist and be enabled, its
+  rebalance configuration must exist, and the portfolio must have at least one published
+  observation.
+- **The scheduled run belongs to the dispatcher and executes nothing itself.** The dispatcher
+  starts one `--configuration-uid` run of the portfolio Job for each configuration whose scheduled
+  flag is true. It may, because it declares `runner` on that Job. The portfolio Job cannot start its
+  own runs: starting a run needs `runner` on the Job, and a Job cannot declare access to itself
   (`self_reference`).
-  - It skips configurations with a pending or running run, and portfolios whose preflight is
-    blocked.
+  - It skips configurations with a pending or running run, and those whose preflight is blocked.
   - It prints what it launched, skipped and failed, and fails if any start failed.
-  - The kind's Job accepts only `--configuration-uid`; a run with `--scheduled` fails with a usage
-    error.
+  - The portfolio Job accepts only `--configuration-uid`; a run with `--scheduled` fails with a
+    usage error.
 - **`scheduled` is the only per-configuration operational setting**, and it defaults to true.
-  - For a signal, `POST /v1/signal-jobs/{uid}/actions/pause` and `resume` set it. Signal rows store
-    it in the `enabled` column.
-  - `PATCH` sets it for either kind, and so do the CLI's `--scheduled` and `--no-scheduled`.
-  - A configuration left out of the scheduled run can still be run manually.
+  `PATCH` sets it, and so do the CLI's `--scheduled` and `--no-scheduled`. A configuration left out
+  of the scheduled run can still be run manually.
 - **Schedule and compute belong to the declarations.** To change them, edit the workflow file and
   push. A push re-applies the declared schedule, so a schedule edited on the platform lasts only
-  until the next push. A push changes only the fields a declaration states, so the two
-  configuration Jobs declare `task_schedule: null` and empty `scheduled_command_args`: that removes
-  the schedule earlier pushes gave them. Requests that still send schedule or compute settings get
-  422.
-- **Run history comes from each Job's 500 newest runs.** Configuration responses report the kind's
-  Job as `job_uid` and `job`, with its dispatcher's schedule. Both are null until the push creates
-  the Job, and the schedule is null while the dispatcher is missing. Run lists and
+  until the next push. A push changes only the fields a declaration states, so the portfolio Job
+  declares `task_schedule: null` and empty `scheduled_command_args`. Requests that still send
+  schedule or compute settings get 422.
+- **Run history comes from the Job's 500 newest runs.** Configuration responses report the Job as
+  `job_uid` and `job`, with its dispatcher's schedule. Both are null until the push creates the
+  Job, and the schedule is null while the dispatcher is missing. Run lists and
   `/v1/operations/job-runs/{uid}` find a configuration's runs by their `--configuration-uid`
   argument. Dispatcher runs are not configuration runs, so that route does not return them.
 
 A dispatcher starts runs of another Job from inside a Job runtime, with its own workload's
-`runner` policy. This has not yet been checked on a hosted runtime: confirm it on the first
-scheduled runs after the push (00:00, 00:30 and 02:00 UTC, the first being the bars dispatcher's).
-Each dispatcher's workload User also needs its
-MetaTables roles before then
-([Table Access And MetaTables Roles](#table-access-and-metatables-roles)).
+`runner` policy. Confirm it on the first scheduled runs after a push that creates a dispatcher
+(00:00 UTC for bars, 02:00 UTC for portfolios). Each new Job's workload User needs its MetaTables
+roles before then ([Table Access And MetaTables Roles](#table-access-and-metatables-roles)): the
+rename of [ADR 0027](../adrs/0027_one_portfolio_path.md) created both Jobs anew, with new
+workload Users.
 
 ### Cleanup Of Per-Configuration Jobs
 
 Before ADR 0013, the API created one Job per configuration. That worked with SDK 8, from 2026-09-04
 until the repository moved to `mainsequence` 9.0.2 on 2026-10-01. Such a Job has no workflow
-binding, so no push deletes it. It keeps its schedule:
+binding, so no push deletes it, and it keeps its schedule and runs its launcher by path.
+[ADR 0027](../adrs/0027_one_portfolio_path.md#r3-drop) retires those launchers and names these
+Jobs, so the Jobs must be gone before the launcher files are.
 
-- On its old image it still resolves its configuration through `job_uid` and repeats the work of
-  the declared Job.
-- If a push promotes it to the new image, it runs without a mode and fails with a usage error.
+On each platform branch:
 
-On each platform branch, after the push that creates the two declared Jobs:
-
-1. List the candidates from a checkout of the branch:
-   `mainsequence code-repository jobs list --filter "name__contains=Alpaca ETF"`.
-   - The four declared Jobs are named exactly `Alpaca ETF Signal`, `Alpaca ETF Portfolio`,
-     `Alpaca ETF Signal Dispatcher` and `Alpaca ETF Portfolio Dispatcher`.
-   - A per-configuration Job is named `Alpaca ETF Signal — <configuration name> [<UID prefix>]` or
-     `Alpaca ETF Portfolio — <configuration name> [<UID prefix>]`.
-   - On 2026-10-05 the `main` branch on the development server had two:
-     `0039edbc-f98a-418b-8237-e935c3a1bf3c` (signal) and
-     `c099820c-8b63-420a-aeb6-9672ae0112cd` (portfolio).
+1. List the candidates from a checkout of the branch with the `jobs list` filter of
+   [ADR 0027](../adrs/0027_one_portfolio_path.md#r3-drop). On 2026-10-05 the `main` branch on the
+   development server had two: `0039edbc-f98a-418b-8237-e935c3a1bf3c` (signal) and
+   `c099820c-8b63-420a-aeb6-9672ae0112cd` (portfolio).
 2. Delete each per-configuration Job in the platform UI, or with
    `uv run python -c "from mainsequence.client import Job; Job.destroy_by_uid('<Job UID>')"`.
    The `mainsequence` 9.0.5 CLI has no Job delete command. Deleting a Job also deletes its JobRuns.
-3. Check that the list from step 1 shows only the four declared Jobs.
+3. Check that the list from step 1 is empty.
 
 ### Cleanup Of The Duplicate Migration Job
 
@@ -143,85 +128,25 @@ After the push:
 The API deploy step needs the migration step, and the current Job's only run failed. Check that the
 push's migration run succeeds before expecting a new API revision.
 
-## ETF Weight Signals
+## Portfolio Runs
 
-A signal configuration is one Universe plus the registered Alpaca account its runs use. The durable
-record is `AlpacaETFSignalJobConfiguration`; JobRuns are execution history only.
-
-```bash
-alpaca-connectors signal create \
-  --name "Daily S&P 500 observation" \
-  --universe-uid <UNIVERSE_UID> \
-  --account-uid <ACCOUNT_UID>
-
-alpaca-connectors signal list
-alpaca-connectors signal run <CONFIGURATION_UID>
-alpaca-connectors signal runs <CONFIGURATION_UID>
-alpaca-connectors signal pause <CONFIGURATION_UID>
-alpaca-connectors signal resume <CONFIGURATION_UID>
-alpaca-connectors signal reconcile <CONFIGURATION_UID>
-```
-
-Creation stores the configuration and materializes the deterministic ms-markets Signal metadata. It
-does not publish weights and does not touch the platform. `reconcile` only ensures that metadata
-row. Environment scope is derived from the current CodeRepositoryBranch and is never a caller
-argument. See [ADR 0007](../adrs/0007_one_signal_configuration_per_job.md) for the signal identity
-rules that remain.
-
-The API exposes the same lifecycle at `/v1/signal-jobs`: list discovery, CRUD, run, pause, resume
-and reconcile actions, and per-configuration JobRun history.
-
-`GET /v1/signal-jobs/{configuration_uid}/observations?limit=100` is the read-only inspection
-surface for published weights. It resolves the stable signal identity from the saved configuration
-and returns the latest 100 distinct frames from `SignalWeightsStorage` as aligned timestamps,
-Assets, and weights. The static site displays timestamps as rows and Assets as columns. Opening
-signal details triggers this query; listing signals does not.
-
-The Job schedule and the `TimeIndexTableUpdater` configuration are separate contracts. The schedule
-decides when the JobRun starts. `AlpacaETFHoldingsSignal` receives `universe_uid` and the runtime
-`account_uid`, and its output remains the canonical `SignalWeightsStorage` grain. ms-markets nests
-that producer input under `SignalWeightsConfiguration.signal_configuration` and deliberately
-excludes it from the canonical shared `SignalWeights` update hash; `signal_uid` separates each
-Universe's observations in storage. The configuration row selected by `--configuration-uid` is the
-durable source for reconstructing those runtime values.
-
-Each `run()` call performs one update cycle directly. The removed `force_update` and `debug_mode`
-parameters are not configuration fields and are not exposed in the GUI, API, CLI, or Job launcher.
-This producer therefore publishes one observation on every successful call, including unchanged
-weights. Dependency-tree execution remains a run control. The inherited `offset_start` updater field
-is not exposed because this producer observes the provider's current holdings and cannot backfill
-historically effective ETF weights.
-
-## ETF Portfolios
-
-A Portfolio Configuration stores only calculation inputs and its scheduled flag. Schedule, compute,
-spot, maximum runtime, automatic deployment, and image state belong to the declared portfolio Job.
+A portfolio configuration stores only calculation inputs and its scheduled flag. Schedule,
+compute, spot, maximum runtime, automatic deployment, and image state belong to the declared
+portfolio Job. An application creates the configuration and gives it weights over HTTP
+([Portfolios](../portfolios/portfolios.md)), and its owner pauses and resumes it with
+`PATCH /v1/portfolio-configurations/{uid}` and `{"scheduled": false}` or `true`. The CLI runs
+and inspects it:
 
 ```bash
-alpaca-connectors portfolio rebalance create \
-  --name "NYSE close" \
-  --strategy calendar_event_signal \
-  --calendar-identifier NYSE \
-  --session-label regular \
-  --rebalance-event market_close \
-  --rebalance-cadence every_session
-
-alpaca-connectors portfolio create \
-  --name "Daily IVV analytical portfolio" \
-  --signal-configuration-uid <SIGNAL_CONFIGURATION_UID> \
-  --bars-configuration-uid <BARS_CONFIGURATION_UID> \
-  --rebalance-configuration-uid <REBALANCE_CONFIGURATION_UID>
-
 alpaca-connectors portfolio run <PORTFOLIO_CONFIGURATION_UID>
 alpaca-connectors portfolio runs <PORTFOLIO_CONFIGURATION_UID>
-alpaca-connectors portfolio update <PORTFOLIO_CONFIGURATION_UID> --no-scheduled
 ```
 
-Execution reads an existing Signal observation, updates the configuration-derived persistent
-`InterpolatedPrices`, and calculates `PortfoliosUpdater` with dependency traversal disabled. It
-does not rerun Universe extraction, the Signal producer, or the raw Bars updater. Revision `0010`
-and the configuration-derived interpolation storage must be migrated before the first live run.
-See [ADR 0008](../adrs/0008_portfolio_configuration_and_job_ownership.md).
+Execution reads the portfolio's published observations, updates the configuration-derived
+persistent `InterpolatedPrices`, and calculates `PortfoliosUpdater` with dependency traversal
+disabled. It does not rerun the raw Bars updater. Revision `0010` and the configuration-derived
+interpolation storage must be migrated before the first live run. See
+[ADR 0008](../adrs/0008_portfolio_configuration_and_job_ownership.md).
 
 Prepare that dynamic storage through the supported migration wrapper:
 
@@ -272,8 +197,8 @@ target by its file and key ([duplicate migration Job](#cleanup-of-the-duplicate-
 ### Daily Bars Dispatcher
 
 `alpaca-bars-update.yaml` also declares `alpaca-bars-update-dispatcher`
-([ADR 0021](../adrs/0021_daily_bars_dispatcher.md)), the bars counterpart of the signal and
-portfolio dispatchers:
+([ADR 0021](../adrs/0021_daily_bars_dispatcher.md)), the bars counterpart of the portfolio
+dispatcher:
 
 | Key | Display name | Daily schedule | Arguments |
 |---|---|---|---|
@@ -297,9 +222,9 @@ portfolio dispatchers:
   staleness settings decide what it does with bars that were not updated.
 - **00:00 UTC is the earliest daily time that includes the session just closed.** The `1d` updater
   takes only bars that start before the current UTC midnight, and US sessions close at 20:00 UTC
-  in summer and 21:00 UTC in winter. The run precedes the 00:30 UTC signal and 02:00 UTC portfolio
-  dispatchers, so the bars runs have two hours before the portfolio runs read them. The Sunday and
-  Monday 00:00 UTC runs find no new session.
+  in summer and 21:00 UTC in winter. The run precedes the 02:00 UTC portfolio dispatcher, so the
+  bars runs have two hours before the portfolio runs read them. The Sunday and Monday 00:00 UTC
+  runs find no new session.
 - **Its compute matches the bars Job's** (0.25 CPU, 0.5 GiB, 3600 seconds, no spot), and every
   push promotes it. It declares no Secret: it never opens account keys, the runs it starts do.
 - **`GET /v1/operations/job-runs/{uid}` does not return the dispatcher's runs,** only the
@@ -310,7 +235,7 @@ Its workload User needs `data_viewer` on `alpaca-connectors` before the first sc
 
 ### Run arguments
 
-The bars Job and the signal and portfolio Jobs receive their per-run arguments through
+The bars Job and the portfolio Job receive their per-run arguments through
 `JobRun.command_args`. Live verification on 2026-09-03 showed the runtime wrapper dropping them: run
 `d060f538-d63a-4328-bce9-979643876033` recorded the two arguments but invoked the launcher without
 them, so its required-argument validation failed.
@@ -341,7 +266,7 @@ mainsequence code-repository jobs run <JOB_UID>
 mainsequence code-repository jobs run <JOB_UID> -- --execute
 ```
 
-Like the API, the bars Job and the signal Job, it declares `value_reader` on the Secret in its
+Like the API and the bars Job, it declares `value_reader` on the Secret in its
 `access.secrets`; the schema migration Job, the portfolio Job and the dispatchers do not read keys
 and have no such grant.
 
@@ -422,11 +347,10 @@ In each Environment where the project runs:
    | Workload | `alpaca-connectors` |
    |---|---|
    | `alpaca-connectors-migrate` | `editor`: it registers the project tables |
-   | `alpaca` API | `editor`: it writes project rows and runs the signal (Universe run) and the orders and trades updaters in-process |
-   | `alpaca-etf-signal` | `editor` |
-   | `alpaca-etf-portfolio` | `editor` |
+   | `alpaca` API | `editor`: it writes project rows, publishes provided weights, and runs the orders and trades updaters in-process |
+   | `alpaca-portfolio` | `editor` |
    | `alpaca-bars-update` | `data_viewer`, plus table `editor` on `alpaca_connectors__bars_1d_sip_all` and `alpaca_connectors__bars_1d_iex_raw` |
-   | `alpaca-etf-signal-dispatcher`, `alpaca-etf-portfolio-dispatcher`, `alpaca-bars-update-dispatcher` | `data_viewer` |
+   | `alpaca-portfolio-dispatcher`, `alpaca-bars-update-dispatcher` | `data_viewer` |
    | `alpaca-credential-migration` (one-off) | `data_writer` |
    | `alpaca-connectors-agent` | none: its tools run in the API |
 
@@ -454,8 +378,8 @@ The connector reaches Markets through the Markets API (ms-markets ADR 0047): eve
 selects ms-markets' remote row backend (`alpaca_connectors.runtime.use_markets_api`), attaches only
 its own `alpaca-connectors` tables, and reads and writes Markets registries with `msm.api` row
 calls, `AccountHoldingsSnapshots`, `AssetSnapshots` and `PortfolioDatasets`. In each Environment
-the workflows grant every resource that calls Markets (the API, the signal and portfolio Jobs and
-their dispatchers, the bars Job and its dispatcher, and the credential migration) `reader` on the
+the workflows grant every resource that calls Markets (the API, the portfolio Job and its
+dispatcher, the bars Job and its dispatcher, and the credential migration) `reader` on the
 `MainSequenceMarkets` branch, which lets them find the Markets API and write through it; the
 migration Job and the Agent do not call it.
 

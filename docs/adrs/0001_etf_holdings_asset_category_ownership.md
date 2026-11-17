@@ -2,6 +2,9 @@
 
 ## Status
 
+Superseded on 2026-11-17 by [ADR 0027](0027_one_portfolio_path.md): the connector has no Universe
+Sources, Asset Universes or holdings categories any more. What follows is the record of what was.
+
 Accepted in principle; its registration-order details are superseded by ADR 0005.
 
 ## Context

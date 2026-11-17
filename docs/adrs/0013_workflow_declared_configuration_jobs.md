@@ -17,6 +17,10 @@ Amended on 2026-11-09: [ADR 0021](0021_daily_bars_dispatcher.md) applies decisio
 `alpaca-bars-update` Job. Its dispatcher, in `alpaca-bars-update.yaml`, updates every enabled,
 scheduled bar configuration at 00:00 UTC, the bars run the times in decision 1 follow.
 
+Amended on 2026-11-17 by [ADR 0027](0027_one_portfolio_path.md): only the portfolio kind remains, on
+`alpaca-portfolio` and its dispatcher `alpaca-portfolio-dispatcher` (02:00 UTC); the signal Job and
+its 00:30 UTC dispatcher go.
+
 ## Context
 
 ADR 0007 gave each signal configuration, and ADR 0008 each portfolio configuration, a dedicated Main

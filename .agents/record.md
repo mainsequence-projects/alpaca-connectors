@@ -53,7 +53,7 @@ metatables migrations revision --provider src.migrations:migration -m "describe 
 metatables migrations upgrade --provider src.migrations:migration head
 mainsequence code-repository jobs list --path .
 alpaca-connectors asset register --help
-alpaca-connectors holdings-category create --help
+alpaca-connectors portfolio --help
 alpaca-connectors bars run --help
 alpaca-connectors asset IVV update_prices daily --plan-only
 alpaca-connectors account register --help
@@ -65,12 +65,11 @@ uv run mkdocs build --strict
 ## Contracts
 
 - Asset registration requires an Alpaca match and OpenFIGI match before public-asset creation.
-- Holdings category sync fails when a constituent is unresolved or ambiguous.
 - DataNode schema lives on `_required_output_table()` storage classes.
 - Runtime attachment expects migrations to be complete and never creates schema.
-- Alpaca owns its bars/interpolation price source and configuration-derived Portfolio identity;
-  `etfhextractor.build_etf_tracking_portfolio` owns calendar, signal, Portfolio row, configuration,
-  and `PortfoliosDataNode` assembly.
+- Alpaca owns its bars/interpolation price source, the portfolio graph and the
+  configuration-derived Portfolio identity. A portfolio is built only from weights an application
+  provides, and every delete retires its Portfolio first (ADR 0024, ADR 0027).
 - Long-lived schedules live under `.mainsequence/workflows/`; `scheduled_jobs.yaml` is removed.
 - Dependency lower bounds live in `pyproject.toml`; reproducibility lives in `uv.lock` and exported
   `requirements.txt`.

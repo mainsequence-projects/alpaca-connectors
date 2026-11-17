@@ -1,9 +1,21 @@
 # Journal
 
+## 2026-11-17
+
+- Context: the owner decided that the connector keeps one portfolio path, portfolios built from
+  weights an application provides, and that its second product and the extraction library leave
+  it; the extraction moves to the portfolio API in HunchAPI.
+- Work completed: ADR 0027 records the decision and its rollout (R1, a drain of each Environment,
+  R2, R3). The documentation describes the end state: one portfolio page, 13 Agent tools and 4
+  skills, the `alpaca-portfolio` Job and its dispatcher, and no page for the removed product. The
+  superseded and amended ADRs carry a status line.
+- Verification: strict MkDocs build; every Mermaid diagram parsed. The code changes are separate
+  releases.
+
 ## 2026-09-02
 
-- Capability backend refactor: introduced user-managed `UniverseSource` MetaTable CRUD, Secret-name
-  Alpaca account registration, independent canonical holdings capture, migrated price-dataset
+- Capability backend refactor: introduced a user-managed extraction-source MetaTable with CRUD
+  (removed by ADR 0027), Secret-name Alpaca account registration, independent canonical holdings capture, migrated price-dataset
   discovery/query/update services, and matching thin CLI plus FastAPI resource surfaces. Applied
   provider revision `0002` and seeded the requested IVV source row; live reads show one source,
   zero accounts, and two empty daily-price datasets.
@@ -11,8 +23,8 @@
   bounded filtering/ordering, safe errors, caller-sensitive discovery caching, and an API 2.1.0
   workflow. The payloads validate against the pinned static-client contract fixtures.
 - Seed correction: changed the fixed-UID IVV bootstrap source to the official US iShares product
-  page and made explicit seeding reconcile existing starter metadata in place. The connector keeps
-  provider extraction in `etfhextractor` and does not add a local parser shim.
+  page and made explicit seeding reconcile existing starter metadata in place. The connector kept
+  provider extraction in its external library and added no local parser shim.
 
 - Context: migrate the connector and its backend-owned project MetaTables from the old SDK stack
   to Main Sequence SDK 8 and ms-markets 1 while keeping dependency declarations compatible rather
@@ -21,7 +33,7 @@
   `ms-markets>=1.0.2`, rebuilt `uv.lock`, exported `requirements.txt`, and refreshed the installed
   SDK and ms-markets scaffold bundles.
 - Code work: migrated the Alpaca bars node to `_required_output_table()`, changed API startup to a
-  lifespan handler, migrated `etfhextractor` itself and delegated the Alpaca portfolio graph back to its reusable
+  lifespan handler, migrated the external extraction library itself and delegated the Alpaca portfolio graph back to its reusable
   builder without changing the Alpaca portfolio identity, and replaced `scheduled_jobs.yaml` with
   a backend-validated CodeRepository workflow document.
 - Backend work: restored CLI authentication, resolved the CodeRepository branch, generated and
@@ -32,7 +44,7 @@
 - Scheduling state: the new workflow validated against backend contract `2.1.0`, but the backend
   job list is empty until a reviewed commit/sync triggers repository processing. The dirty checkout
   was not committed or pushed automatically.
-- Dependency backend work: applied the `etfhextractor_migrations:migration` provider at `0001`,
+- Dependency backend work: applied the extraction library's migration provider at `0001`,
   finalized its registry and demo-bars output active, attached its runtime, and live-read 508 IVV
   holdings from iShares. Its full suite passed 86 tests; this project passed 83 integration tests
   against the migrated checkout. After explicit authorization, canonical CodeRepository sync
@@ -69,16 +81,16 @@
 - Context: make the repository README useful as the project entrypoint instead of mostly referring
   readers to deeper docs pages.
 - Work completed: rewrote `README.md` into a capability summary covering the supported CLI, API,
-  ETF extraction, DataNode, and job surfaces, plus the repo ownership boundary
-  between `src/` and `etf_extraction/`.
+  holdings extraction, DataNode, and job surfaces, plus the repo ownership boundary
+  between `src/` and the extraction package of that time.
 - Verification: documentation content was verified by inspection against the current code,
   docs, and project-state files; no live platform validation was required because the change was
   documentation-only.
 
 ## 2026-04-30
 
-- Context: make ETF extraction documented independently from Alpaca-specific pages.
-- Work completed: added the standalone architecture page `docs/etf_extraction.md`, linked it from `mkdocs.yml`, `docs/index.md`, `README.md`, and added cross-references from the ETF extractor and holdings-category docs.
+- Context: document the holdings extraction independently from Alpaca-specific pages.
+- Work completed: added a standalone extraction architecture page (removed by ADR 0027 on 2026-11-17), linked it from `mkdocs.yml`, `docs/index.md`, `README.md`, and added cross-references from the extractor and holdings-category docs.
 - Verification: documentation wiring was verified locally by inspecting the MkDocs navigation config and the updated repository doc entry points; no live platform validation was required because the change was documentation-only.
 
 ## 2026-04-28

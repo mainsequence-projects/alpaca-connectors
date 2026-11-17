@@ -10,7 +10,7 @@ Project State exposes the health and configuration currently available to reposi
 - API health
 - authenticated request-user UID when the platform supplies it
 - migrated price dataset identities
-- account-registration and universe-source counts
+- the account-registration count
 - the current capability catalog
 
 It is an aggregate control view, not a persisted business entity.
@@ -22,20 +22,11 @@ Assets owns canonical instrument identity and registration:
 - Alpaca symbols and availability
 - OpenFIGI resolution
 - Main Sequence asset identity
+- the trading calendar of each asset's Alpaca class
 - registration plans, eligibility, blockers, and execution
 
-## Universes
-
-Universes owns reusable collections of registered assets:
-
-- durable user-maintained extraction sources
-- provider-derived constituent extraction
-- asset-registration coverage
-- strict membership validation
-- `AssetCategory` creation and refresh
-
-ETF holdings are one supported source of universe membership. They do not define the entire
-repository architecture.
+An application registers exactly the symbols it needs, for example the assets of a portfolio it
+is about to give weights.
 
 ## Market Data
 
@@ -43,7 +34,7 @@ Market Data owns Alpaca observations and update behavior:
 
 - OHLCV bar datasets
 - cadence, feed, and adjustment
-- selected assets or an asset universe
+- selected assets, an account's recent holdings, or every asset of the portfolios that use it
 - update planning and execution
 - asset-indexed Main Sequence storage
 
@@ -62,27 +53,26 @@ lifecycle operations.
 
 ## Holdings
 
-Holdings represents asset exposure at a point in time. The repository currently uses two forms:
-
-- persisted brokerage positions and cash associated with an account
-- provider-derived fund composition consumed by Universes and Portfolios
-
-The second form is currently extracted for downstream use rather than persisted as a
-project-owned holdings registry.
+Holdings represents an account's asset exposure at a point in time: the brokerage positions and
+cash of an account, published as immutable ms-markets snapshots. The account sync captures them,
+sizes the account's target and allocates the snapshot to the account's funds
+([ADR 0023](../adrs/0023_account_sync_sizes_and_allocates_funds.md)).
 
 ## Portfolios
 
-Portfolios owns analytical construction based on registered assets and market data:
+Portfolios owns analytical construction from weights an application provides, on registered
+assets and market data ([Portfolios](../portfolios/portfolios.md)):
 
-- portfolio identity
-- resolved component weights
-- price-source binding
+- portfolio identity and its owner, the acting owner of the call that created it (ADR 0024)
+- the provided weights, as an ms-markets `ApplicationWeights` signal
+- price-source binding to a bars configuration
 - persistent interpolated prices
 - reusable calendar-event rebalance configurations
-- durable calculation configurations composed from existing Signal and Bars configurations
 - portfolio weights and valuation results
-- runs on the shared portfolio Job declared in the API workflow, with a per-configuration
-  scheduled flag
+- runs on the portfolio Job declared in the API workflow, with a per-configuration scheduled flag
+- retirement of the `Portfolio` when a portfolio is deleted
+
+It is the connector's only kind of portfolio ([ADR 0027](../adrs/0027_one_portfolio_path.md)).
 
 ## Execution
 
@@ -114,7 +104,6 @@ A Job is one possible invocation mechanism. It is not the primary product ontolo
 Use these capability-oriented imports:
 
 - `alpaca_connectors.assets`
-- `alpaca_connectors.universes`
 - `alpaca_connectors.market_data`
 - `alpaca_connectors.account`
 - `alpaca_connectors.holdings`

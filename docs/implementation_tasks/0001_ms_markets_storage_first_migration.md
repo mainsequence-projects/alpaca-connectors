@@ -4,6 +4,9 @@
 > **Supported runtime:** Python 3.13, `mainsequence>=8.1.8`, `ms-markets>=1.0.14`.
 > `pyproject.toml` intentionally uses compatible lower bounds; `uv.lock` and the exported
 > `requirements.txt` provide the reproducible resolution.
+> **Since 2026-11-17:** the holdings-category and portfolio workflows of that time, and the
+> external library they came from, are removed by
+> [ADR 0027](../adrs/0027_one_portfolio_path.md); this record keeps only what still applies.
 
 ## Goal and success criteria
 
@@ -11,9 +14,9 @@ Migrate the connector from the removed `mainsequence.tdag`/implicit-registration
 SDK 8 and current ms-markets while preserving these workflows:
 
 - provider-native Alpaca UUID registration with optional OpenFIGI enrichment
-- ETF holdings extraction and `HOLDINGS__<ETF>` category membership refresh
+- holdings-category membership refresh (removed since)
 - single-asset and category-scoped Alpaca OHLCV publication
-- ETF-holdings portfolio construction
+- portfolio construction (since ADR 0027, only from provided weights)
 - thin FastAPI, CLI, and scheduled-job surfaces
 
 The migration is successful when:
@@ -110,15 +113,12 @@ and their three transitive core dependencies successfully.
 
 ## Portfolio migration
 
-ETF holdings signals continue to come from `etfhextractor`. Its current signal node uses the
-ms-markets `_required_output_table()` contract.
-
-`etfhextractor 0.4.x` is migrated as part of this backend change. Its demo node declares
-`_required_output_table()`, registered price-table UIDs resolve through `TimeIndexTableRef`, and its
-reusable `build_etf_tracking_portfolio(...)` owns calendar, signal, portfolio configuration,
-portfolio row, and `PortfoliosDataNode` assembly. The Alpaca project passes its interpolated price
-updater and explicit `...__ALPACA` identity into that builder; it does not duplicate or bypass the
-dependency's portfolio functionality.
+The portfolio signal and its assembly came from an external library, migrated in the same change
+to the ms-markets `_required_output_table()` contract; registered price-table UIDs resolved
+through `TimeIndexTableRef`, and the Alpaca project passed its interpolated price updater into that
+library's builder. [ADR 0027](../adrs/0027_one_portfolio_path.md) removed that library: portfolios
+are now built from weights an application provides, on the connector's own graph
+([ADR 0024](../adrs/0024_portfolios_from_provided_weights.md)).
 
 ## Scheduling migration
 
@@ -150,9 +150,3 @@ created.
 
 The backend-validated workflow also remains unapplied until the migration changes are reviewed,
 committed, and synchronized; the current dirty checkout was not committed or pushed automatically.
-
-`etfhextractor 0.4.1` is published at commit
-`036c8ba7f625f45dcb58e909ebf4eebbedbb5b97` with tag `v0.4.1`. This repository keeps the dependency
-source unpinned in `pyproject.toml`; `uv.lock` and exported `requirements.txt` capture that exact
-commit for reproducible builds. Since 2026-10-11, `pyproject.toml` pins the source to release tag
-`v0.4.4` (commit `062f3f8`).

@@ -6,30 +6,26 @@
 - [API](api.md)
 - Assets
   - [Registration Flow](assets/registration.md)
-  - [Extractors](assets/extractors.md)
-- Universes
-  - [Universe Sources](universes/sources.md)
-  - [Provider Holdings Architecture](etf_extraction.md)
-  - [Holdings Categories](assets/holdings_categories.md)
 - Market Data
   - [Alpaca Bars](market_data/alpaca_bars.md)
 - Accounts
   - [Account Registration](account/registration.md)
 - Portfolios
-  - [ETF Holdings Portfolios](portfolios/etf_holdings_portfolios.md)
+  - [Portfolios From Provided Weights](portfolios/portfolios.md)
 - Operations
   - [Jobs And Scheduling](operations/jobs.md)
   - [Development Workflow](operations/development.md)
   - [Operator Guide](operations/operator-guide.md)
   - [Markets API Boundary Runbook](operations/markets-api-boundary.md)
-- ADRs
-  - [0001 ETF Holdings AssetCategory Ownership](adrs/0001_etf_holdings_asset_category_ownership.md)
-  - [0002 ETF Holdings Alpaca Portfolio Construction](adrs/0002_etf_holdings_alpaca_portfolio_construction.md)
+- ADRs. Those marked superseded record the product [ADR 0027](adrs/0027_one_portfolio_path.md)
+  removed.
+  - [0001 ETF Holdings AssetCategory Ownership](adrs/0001_etf_holdings_asset_category_ownership.md) (superseded)
+  - [0002 ETF Holdings Alpaca Portfolio Construction](adrs/0002_etf_holdings_alpaca_portfolio_construction.md) (superseded)
   - [0003 Stored Alpaca Bars Configurations And Asset Sources](adrs/0003_stored_alpaca_bars_configurations_and_asset_sources.md)
   - [0004 Alpaca-Native Asset Identity](adrs/0004_alpaca_native_asset_identity.md)
-  - [0005 Asset Universe Run Owns Constituent Registration](adrs/0005_asset_universe_run_owns_constituent_registration.md)
-  - [0006 Universe-Backed Alpaca ETF Signal](adrs/0006_universe_backed_alpaca_etf_signal.md)
-  - [0007 One Signal Configuration Per Job](adrs/0007_one_signal_configuration_per_job.md)
+  - [0005 Asset Universe Run Owns Constituent Registration](adrs/0005_asset_universe_run_owns_constituent_registration.md) (superseded)
+  - [0006 Universe-Backed Alpaca ETF Signal](adrs/0006_universe_backed_alpaca_etf_signal.md) (superseded)
+  - [0007 One Signal Configuration Per Job](adrs/0007_one_signal_configuration_per_job.md) (superseded)
   - [0008 Portfolio Configuration And Job Ownership](adrs/0008_portfolio_configuration_and_job_ownership.md)
   - [0009 Calendar-Event Portfolio Timing](adrs/0009_calendar_event_portfolio_timing.md)
   - [0010 Shared ms-markets HTTP Contracts](adrs/0010_shared_ms_markets_http_contracts.md)
@@ -47,7 +43,9 @@
   - [0022 Configurations Never Block An Owner's Removal](adrs/0022_configurations_never_block_an_owners_removal.md)
   - [0023 The Account Sync Sizes And Allocates The Account's Funds](adrs/0023_account_sync_sizes_and_allocates_funds.md)
   - [0024 Portfolios Built From Weights An Application Provides](adrs/0024_portfolios_from_provided_weights.md)
+  - [0025 Markets Reads The Instances Through A Second Namespace](adrs/0025_markets_reads_the_instances_through_a_second_namespace.md)
+  - [0026 Assets Are Registered With Their Trading Calendar](adrs/0026_assets_are_registered_with_their_trading_calendar.md)
+  - [0027 One Portfolio Path](adrs/0027_one_portfolio_path.md)
 - Implementation Records
   - [SDK 8 And ms-markets Migration](implementation_tasks/0001_ms_markets_storage_first_migration.md)
   - [Alpaca Account Storage](implementation_tasks/0002_alpaca_account_module.md)
-  - [AssetUniverse Relational Identity Plan](implementation_tasks/0003_asset_universe_relational_identity.md)

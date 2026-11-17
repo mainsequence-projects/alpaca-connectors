@@ -64,7 +64,7 @@ class AgentArtifactsTests(unittest.TestCase):
         for heading in (
             "## Supported Operator Surfaces",
             "## Asset Registration",
-            "## Asset Universes And Holdings Categories",
+            "## Portfolios",
             "## Price Updates From Alpaca",
             "## Operational Notes",
         ):

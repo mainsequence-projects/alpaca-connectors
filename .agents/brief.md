@@ -26,7 +26,7 @@ In scope:
 
 Out of scope unless requested:
 
-- Changing the supported Alpaca, ETF extraction, API, or DataNode business logic beyond what is
+- Changing the supported Alpaca, API, or DataNode business logic beyond what is
   needed to describe the local agent-ready surface accurately.
 - Introducing a standalone local `agent.py` runtime.
 - Claiming or verifying a live platform release path for the project-to-agent surface.

@@ -2,6 +2,9 @@
 
 ## Status
 
+Superseded on 2026-11-17 by [ADR 0027](0027_one_portfolio_path.md): the connector has no ETF signal.
+The observations it published stay stored under their signal UIDs.
+
 Accepted
 
 Amended on 2026-11-16 by [ADR 0024](0024_portfolios_from_provided_weights.md): a second kind of

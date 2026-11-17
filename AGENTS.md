@@ -3,24 +3,24 @@
 ## CodeRepository-Specific Instructions
 
 This repository is the Alpaca connector project for Main Sequence: Alpaca US equity Assets,
-brokerage Accounts, holdings and order execution, ETF Universes, stock bars, Universe-backed ETF
-weight signals and analytical ETF portfolios. The installable `alpaca_connectors` package (`src/`)
-backs the `alpaca-connectors` CLI, the FastAPI application with its MCP server, and the Jobs.
+brokerage Accounts, holdings and order execution, stock bars, and analytical portfolios built from
+weights an application provides. The installable `alpaca_connectors` package (`src/`) backs the
+`alpaca-connectors` CLI, the FastAPI application with its MCP server, and the Jobs.
 
 Repository rules:
 
-- Capability boundaries are Assets, Universes, Market Data, Accounts, Holdings, Execution,
-  Portfolios and Operations; providers are dependencies, not a `Connection` domain. API-only
-  capability descriptions live in `alpaca_connectors.api.app`; the rest is reusable behavior.
-- Import capabilities from `alpaca_connectors.{universes,market_data,account,holdings,execution,
+- Capability boundaries are Assets, Market Data, Accounts, Holdings, Execution, Portfolios and
+  Operations; providers are dependencies, not a `Connection` domain. API-only capability
+  descriptions live in `alpaca_connectors.api.app`; the rest is reusable behavior.
+- Import capabilities from `alpaca_connectors.{assets,market_data,account,holdings,execution,
   portfolios}`; never reintroduce a generic top-level `src`, `api` or `migrations` package.
 - Execution (ADR 0016) is an API capability for applications, never an Agent tool; only
   `alpaca_connectors.execution.services` places market day orders and writes the execution ledger.
-- Frozen identities: the provider `alpaca_connectors.migrations:migration` keeps catalog key
-  `package="src"`, and `SIGNAL_IDENTITY_CLASS_IMPORT_PATH` (`src.portfolios.alpaca_etf_signal`)
-  keeps existing signal UIDs stable. Never change either.
-- Keep planning, registration, holdings and bars logic in `alpaca_connectors`; ETF extraction
-  comes from `etfhextractor`. The CLI, routes and Jobs only orchestrate; add no one-off scripts.
+- Frozen identity: `alpaca_connectors.migrations:migration` keeps catalog key `package="src"`.
+- One portfolio path (ADR 0027): an application creates each portfolio from weights it provides
+  and owns it (ADR 0024); every delete retires its `Portfolio` first.
+- Keep planning, registration, holdings, bars and portfolio logic in `alpaca_connectors`. The CLI,
+  routes and Jobs only orchestrate; add no one-off scripts.
 - Reach Markets only by `msm.api` row calls and the `markets_api` composites: registration and the
   sync's target read, plan and allocation (ADR 0023). Own tables: markets-api-boundary.md.
 - Only `.mainsequence/workflows/*.yaml` creates Jobs and sets their schedules; code never does.
@@ -50,13 +50,13 @@ FastAPI surface:
 
 Project-to-agent boundary:
 
-- One Harness Agent: `.agents/agent_card.json`, six skills under `.tau/skills/`, and the tools
+- One Harness Agent: `.agents/agent_card.json`, four skills under `.tau/skills/`, and the tools
   `alpaca_connectors.api.app.mcp_server` serves from `alpaca_connectors.agent_tools`. Add no
   separate `agents/` runtime and no `.tau/extensions` tools.
 - The API publishes `.tau/skills/` itself through `skills_extension`, so the Agent's skills and
   the published skills are one set: one copy per skill directly under it (no group folder, so the
   URIs stay `skill://<name>/SKILL.md`), named after its frontmatter, with no custom loader or
-  shim. Keep only these six there; development, SDK and platform skills stay in `.agents/skills/`.
+  shim. Keep only these four there; development, SDK and platform skills stay in `.agents/skills/`.
 - The `harness_agent` in `alpaca-connectors-api.yaml` serves `api/agent/main.py`
   (`ms_tau_sdk.create_app()`) with `acts_for_requester: true` and
   `mcp_applications: [{resource: alpaca}]`. It deploys after the API, the two hold `user` on
@@ -65,7 +65,7 @@ Project-to-agent boundary:
   - No tool or CLI command takes Alpaca key values; only the HTTP account create and rotate routes
     do. Keys live in the account table's encrypted columns under `ALPACA_CONNECTORS_DATA_KEY`
     (ADR 0017); nothing echoes, logs or returns them. Agent key entry: `alpaca_account_key_request` and the site (ADR 0015).
-  - Results and errors never quote arguments. Deletes need exact `DELETE <uid>`. Bars, signal and
+  - Results and errors never quote arguments. Deletes need exact `DELETE <uid>`. Bars and
     portfolio updates submit Jobs. Reads run in parallel and mutations in sequence.
   - No Environment selector, no tool over the order routes (ADR 0016), no SQL, shell or release.
 

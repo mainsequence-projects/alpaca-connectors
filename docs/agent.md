@@ -29,9 +29,9 @@ Python services own that behavior. MetaTables hold the durable business configur
 observations. Workflow Jobs own schedules and compute; JobRuns record executions, not configuration.
 TAU owns the conversation, model invocation, A2A transport, and application-MCP connection.
 
-The source card is named **Alpaca Agent**. Its six skills cover Asset registration, Accounts and
-holdings, ETF Universes, stock bars, ETF weight signals, and analytical portfolios (including
-rebalance configurations). The configured model is `openai-codex / gpt-5.6-luna` with `medium`
+The source card is named **Alpaca Agent**. Its four skills cover Asset registration, Accounts and
+holdings, stock bars, and portfolios built from provided weights (including rebalance
+configurations). The configured model is `openai-codex / gpt-5.6-luna` with `medium`
 thinking, selected explicitly from the development backend's authenticated catalog.
 The source card advertises completed A2A messages; a returned JobRun UID is not an A2A Task.
 
@@ -42,8 +42,8 @@ The source card advertises completed A2A messages; a returned JobRun UID is not 
 - `AGENTS.md` holds the short developer rules and the project boundary. It is for developers:
   the deployed Agent reads only `.tau/`. The CLI and operational rules live in the
   [operator guide](operations/operator-guide.md).
-- `.agents/agent_card.json` contains stable source metadata and six repository-owned skills.
-- `.tau/skills/` holds the six MCP-usage skills directly under it, with one authoritative copy
+- `.agents/agent_card.json` contains stable source metadata and four repository-owned skills.
+- `.tau/skills/` holds the four MCP-usage skills directly under it, with one authoritative copy
   each: the Agent's own skills and the skills the API publishes. The SDK/platform skill bundles
   under `.agents/skills/` remain private development guidance that the Agent does not read.
 - `api/agent/main.py` is the Agent's entry point: the Tau runtime from `ms_tau_sdk.create_app()`.
@@ -69,8 +69,8 @@ resources. There is no in-process extension tool directory and no `.tau/AGENTS.m
 has no project context file. The business skills live under
 `.tau/skills/<skill-name>/SKILL.md`, and the Agent Card points to those same files. TAU 2.0.14
 discovers and reads them through the application's authenticated MCP: `alpaca__list_resources`
-lists the six skills, and `alpaca__read_resource` reads a listed file after verifying its size and
-SHA-256 digest. The same six are the Agent's local TAU skills, but the MCP is the consumption path
+lists the four skills, and `alpaca__read_resource` reads a listed file after verifying its size and
+SHA-256 digest. The same four are the Agent's local TAU skills, but the MCP is the consumption path
 `.tau/SYSTEM.md` names. No custom loader, symlink, duplicate tree or generic-tool fallback is
 needed.
 
@@ -82,11 +82,9 @@ it in `tool` and passing its `arguments`. Read tools for project state and suppo
 - `alpaca_project_state`
 - `alpaca_query_assets`
 - `alpaca_query_accounts`
-- `alpaca_query_universes`
 - `alpaca_query_bar_configurations`
-- `alpaca_query_etf_signals`
 - `alpaca_query_rebalance_configurations`
-- `alpaca_query_etf_portfolios`
+- `alpaca_query_portfolios`
 - `alpaca_get_job_run_status`
 
 Sequential mutation tools for the same application workflows:
@@ -94,11 +92,14 @@ Sequential mutation tools for the same application workflows:
 - `alpaca_register_assets`
 - `alpaca_manage_account`
 - `alpaca_account_key_request`
-- `alpaca_manage_universe`
 - `alpaca_manage_bar_configuration`
-- `alpaca_manage_etf_signal`
 - `alpaca_manage_rebalance_configuration`
-- `alpaca_manage_etf_portfolio`
+- `alpaca_manage_portfolio`
+
+`alpaca_manage_portfolio` runs a portfolio, and pauses, resumes or deletes one for its owner. No
+tool creates a portfolio or gives it weights: an application does that over HTTP
+([ADR 0024](adrs/0024_portfolios_from_provided_weights.md),
+[ADR 0027](adrs/0027_one_portfolio_path.md)).
 
 Each multi-operation tool uses an explicit operation discriminator and a strict JSON Schema. The
 MCP server runs the existing application services inside the API's request identity: authorship
@@ -136,12 +137,11 @@ Harness needs no table role to use these tools. See
   with the request UID, and the Agent reads the result with operation `status`. Registration from
   existing Main Sequence Secret names stays available through `alpaca_manage_account`.
 - Account creation preserves the mandatory initial Asset registration and holdings capture.
-- Universe extraction registers missing constituents in bulk, replaces the linked AssetCategory in
-  bulk, and publishes one complete observed weight frame.
-- Bars, ETF signal, and ETF portfolio updates submit their existing Main Sequence Jobs and return a
-  JobRun UID. Large updates do not execute inline in the agent session.
-- Destructive tool operations require exact `DELETE <uid>` confirmation.
-- The 17 Alpaca tools expose no order submission, arbitrary SQL, shell execution, or unrelated
+- Bars and portfolio updates submit their existing Main Sequence Jobs and return a JobRun UID.
+  Large updates do not execute inline in the agent session.
+- Destructive tool operations require exact `DELETE <uid>` confirmation. Deleting a portfolio
+  retires its `Portfolio` first, and is refused while an account's target names it.
+- The 13 Alpaca tools expose no order submission, arbitrary SQL, shell execution, or unrelated
   platform-release operations. Order execution exists on the API for authorised applications
   ([ADR 0016](adrs/0016_order_execution_for_authorised_applications.md)); no Agent tool reaches it.
 
@@ -155,19 +155,19 @@ This is a runtime tool restriction, not a prompt-only instruction.
 The model-facing catalog retains:
 
 - `alpaca__list_tools` and `alpaca__call_tool`, reaching only the declared Alpaca application's
-  17 project tools;
+  13 project tools;
 - `alpaca__list_resources` and `alpaca__read_resource`, reaching only the skills/resources that
   same application advertises and verifying listed skill-file digests before returning content;
 - a restricted `read` that can open discovered skill files and their supporting files, not
   arbitrary repository files or paths outside those skills. Since TAU 2.0.26 the runtime discovers
-  skills only under `.tau/skills/`, so that index, which the prompt also lists, is the six
+  skills only under `.tau/skills/`, so that index, which the prompt also lists, is the four
   business skills; the copied Main Sequence, platform, MetaTables, ms-markets and TAU development
   bundles under `.agents/skills/` are not skills of the Agent and the `read` refuses them;
 - SDK `task_request_input` and `task_request_authorization` controls for the Agent's own A2A
   Task context. These are runtime controls, not general platform operations.
 
 No project extension tools are installed. Runtime authentication, requester delegation, and the
-Alpaca application's own platform access remain intact. The six business skills describe MCP
+Alpaca application's own platform access remain intact. The four business skills describe MCP
 operations only; human/developer CLI guidance stays in the repository documentation. The
 restricted Harness has no shell fallback. If an Alpaca tool cannot perform a requested operation,
 the Agent must report that limitation.
@@ -179,16 +179,15 @@ editing the workflow does not change an already deployed revision.
 
 ### Single-copy MCP skills — 2026-10-13
 
-The six repository-owned skills cover the existing application tools:
+The four repository-owned skills cover the existing application tools. There were six until
+[ADR 0027](adrs/0027_one_portfolio_path.md) removed two and renamed the portfolio skill.
 
 | Skill | Tool workflows covered |
 | --- | --- |
 | `alpaca-asset-registration` | Asset queries and exact-symbol registration planning/execution. |
 | `alpaca-account-workflow` | Account and holdings queries, account mutations, and site-based key requests. |
-| `alpaca-holdings-category` | Source and Universe CRUD, extraction previews, component extraction, and category members. |
-| `alpaca-stock-bars` | Stored bars configuration CRUD, resolution, dataset observations, and Job submission/status. |
-| `alpaca-etf-weight-signals` | Signal configuration CRUD, scheduled inclusion, Job submission/status, observations, and runs. |
-| `alpaca-etf-portfolios` | Rebalance and portfolio configuration CRUD, Job submission/status, performance, statistics, and runs. |
+| `alpaca-stock-bars` | Stored bars configuration CRUD, including the `portfolios` source, resolution, dataset observations, and Job submission/status. |
+| `alpaca-portfolios` | Rebalance configuration CRUD; reading portfolios, their weights, performance, statistics and runs; running them, and pausing, resuming or deleting them for their owner. |
 
 They preserve credential, identity, bulk-operation, observed-weight, calendar and destructive-
 confirmation boundaries. Each contains concrete `alpaca__call_tool` examples checked against the
@@ -205,14 +204,14 @@ with no group folder, so their `skill://<name>/SKILL.md` URIs did not change. MC
 resources.
 The modern `server/discover` capability advertises `io.modelcontextprotocol/skills`; legacy
 initialization remains supported. Skill requests use the same request-identity protection as
-tools. Local contract tests check all six manifests and exact source bytes/digests, reject private
+tools. Local contract tests check all four manifests and exact source bytes/digests, reject private
 SDK/platform resource URIs, require authentication and verify working-directory-independent
 resolution. This local implementation does not establish that a deployed revision serves it.
 
 The original six folders are moved, not copied. Their new folder names match their lowercase,
 hyphenated frontmatter names. Neither the `.agents/skills` tree nor managed Main Sequence,
 MetaTables, ms-markets, TAU or platform development guidance is published: `.tau/skills` holds only
-the six skills, so publishing the whole folder publishes exactly them.
+the four skills, so publishing the whole folder publishes exactly them.
 
 Serving skills is distinct from consuming them. TAU 2.0.14 fixes application skill consumption
 through `alpaca__list_resources` and `alpaca__read_resource`
@@ -224,7 +223,7 @@ cross-person catalog. Only advertised resources or listed skill files are read.
 
 The earlier grouped-local-discovery issue [TAU #99](https://github.com/mainsequence-sdk/ms-tau-sdk/issues/99)
 is closed. The solution used here is MCP consumption of the single published directory. Tests now
-exercise the real SDK application connector and resource tools over local HTTP: all six files must
+exercise the real SDK application connector and resource tools over local HTTP: all four files must
 be returned byte-for-byte with verified digests, private/traversal URIs must be refused, and
 altered content must never reach the model. This does not certify a deployed revision or a live
 model conversation.
@@ -232,7 +231,7 @@ model conversation.
 TAU 2.0.21 added recursive local loading: a folder without a `SKILL.md` groups skills, and it read
 the managed `.agents/skills/ms_tau_sdk/` skills and the other copied development bundles as the
 Agent's own. TAU 2.0.26 reads skills only from `.tau/skills`, so the Agent's local skills are
-exactly the six business skills. `tests/test_agent_resource_scope.py` loads a session through the
+exactly the four business skills. `tests/test_agent_resource_scope.py` loads a session through the
 SDK's `tau_resource_paths` and pins that set, no context file and no root `AGENTS.md` text in the
 prompt. The local-reader test checks that a synced `.agents/skills/ms_tau_sdk/` file and every
 other file, such as `pyproject.toml`, `AGENTS.md` or `.tau/SYSTEM.md`, are refused.
@@ -244,9 +243,9 @@ limit uses `TAU_MCP_TOOL_TIMEOUT_SECONDS`, which defaults to **60 seconds**, and
 its turn. The current Alpaca MCP catalog declares no per-tool limit and the workflow declares no
 override, so its calls use that default.
 
-Bars, signal, and portfolio update tools submit Jobs and return their JobRun UID for status checks.
-Some other mutations, including Asset registration, holdings capture, and Universe extraction,
-still execute synchronously in the API and can exceed the tool deadline. A timeout is not proof
+Bars and portfolio update tools submit Jobs and return their JobRun UID for status checks.
+Some other mutations, including Asset registration and holdings capture, still execute
+synchronously in the API and can exceed the tool deadline. A timeout is not proof
 that a write failed or was rolled back: inspect operation status or the affected resource before
 retrying a mutation. The new timeout support does not automatically move these operations to Jobs.
 
@@ -302,14 +301,13 @@ The project keeps Uvicorn on the `0.52` line with a non-exact `>=0.52.4,<0.53` p
 Platform validation of the file succeeds only after the push that indexes `api/agent/main.py`.
 Repository preparation and workflow validation do not alone prove a live Agent is ready. After a
 push, verify the workflow action, exact-commit image chain, deployment run, Agent readiness, the
-`alpaca__list_tools` result (the 17-tool catalog), and that the API release advertises its MCP
+`alpaca__list_tools` result (the 13-tool catalog), and that the API release advertises its MCP
 connection before relying on it.
 
 ## Current local compatibility review
 
-The installed and locked versions are Main Sequence **9.0.33**, TAU **2.0.26**, MetaTables
-(`mainsequence-metatable`) **0.1.63**, ms-markets **3.4.0** and `etfhextractor` **0.5.3**
-(2026-11-12).
+On 2026-11-12 the installed and locked versions were Main Sequence **9.0.33**, TAU **2.0.26**,
+MetaTables (`mainsequence-metatable`) **0.1.63** and ms-markets **3.4.0**.
 
 - Since 2026-10-15 the platform's caller assertions carry only the caller's identity (`sub` and
   `is_organization_admin`, no `team_uids`). The hosted API on Main Sequence 9.0.22 answered every
@@ -327,13 +325,9 @@ The installed and locked versions are Main Sequence **9.0.33**, TAU **2.0.26**, 
   earlier require, so the Agent lookup failed with `ValidationError` and the project
   configuration returned no Agent. Main Sequence 9.0.31 drops the field; on 2026-10-27 the range
   moved to `>=9.0.31`.
-- `etfhextractor` pins ms-markets exactly, so the two move together. Its calendar helpers are
-  imported from `etfhextractor.calendars`.
 - On 2026-11-12 the range moved to `ms-markets>=3.4.0` for its `registerAccount` call (ms-markets
   ADR 0051), which registers an account, its held assets and its holdings in one Markets call. The
-  resolution pulls MetaTables 0.1.63. `etfhextractor` 0.5.3 moved its pin from 3.0.2 to
-  `ms-markets==3.4.0` the same day, with its code unchanged; its one `AssetSnapshots.publish` call
-  ignores the result, whose type 3.4.0 changed.
+  resolution pulls MetaTables 0.1.63.
 - TAU 2.0.26 (ADR 0025) reads the deployed Agent's resources only from `.tau/`, so the six skills
   moved from `.agents/skills/mcp_tools/` to `.tau/skills/` in the same change.
 
@@ -343,10 +337,8 @@ The installed and locked versions are Main Sequence **9.0.33**, TAU **2.0.26**, 
 had moved from 9.0.23 to 9.0.24, which stopped scaffolding `AGENTS.md` and ships its guidance in
 the SDK skills, and MetaTables from 0.1.34 to 0.1.35. The earlier SDK upgrade moved the official
 MCP dependency from **1.30.0** to **2.3.0**, with its required transport dependencies.
-The `etfhextractor` Git source is pinned to release tag `v0.5.3` (commit `896019e`), which requires
-compatible versions. With these versions the suite passes 664 tests plus 97 subtests with network
-access blocked (2026-11-12). No Alpaca workload reads or writes its only table, `DemoBarsTS`, so the
-migration Job does not apply its provider.
+With these versions the suite passed 664 tests plus 97 subtests with network
+access blocked (2026-11-12).
 
 The API now uses MCP 2.x `MCPServer` and its supported stateless JSON ASGI application and
 session-manager lifespan, rather than the removed MCP 1.x low-level decorators. The project
@@ -362,13 +354,14 @@ application-MCP skill discovery and digest-checked reads, private/traversal deni
 rejection and caller isolation. The old local-index expectation is replaced with this released
 application-skill contract, not a copy or custom loader. The resource-scope test came with TAU
 2.0.26; the 2026-10-27 count above includes it.
-The MCP catalog contains nine read-only tools and eight mutation/multi-operation tools. This
-local review alone does not certify a deployed Agent or hosted migration completion.
+The MCP catalog then had nine read-only tools and eight mutation/multi-operation tools; since
+ADR 0027 it has seven and six. This local review alone does not certify a deployed Agent or hosted
+migration completion.
 The MetaTables SDK compatibility check and installed dependency consistency check also passed.
 
 Tool-restriction regressions exercise the installed TAU runtime's catalog assembly with mocked
 backend/model I/O: only the four Alpaca application tools, restricted local reader, and A2A Task
-controls remain. The local reader indexes only the six `.tau/skills` files. Local HTTP tests
+controls remain. The local reader indexes only the four `.tau/skills` files. Local HTTP tests
 additionally verify skill consumption through MCP, refusal of private files and digest
 mismatches, and separate caller identities on consecutive calls. Hosted caller tests sign
 identity-only assertions, and an assertion or requester statement that lists `team_uids` is
@@ -378,17 +371,16 @@ The requested development skill bundles were explicitly refreshed from the insta
 2026-10-21: Main Sequence 9.0.30, TAU 2.0.23 and MetaTables 0.1.51, and the platform skills from
 the development backend's catalog, which no longer ships `code_repository_design`. The existing
 ms-markets 2.2.10 bundle was left unchanged. The `ms_tau_sdk` bundle was synced again from TAU
-2.0.26 on 2026-10-25. Each bundle's `PINNED_FROM.txt` records its matching version. The six
+2.0.26 on 2026-10-25. Each bundle's `PINNED_FROM.txt` records its matching version. The
 repository-owned business skills remain single-copy. On 2026-10-14 `AGENTS.md` lost the retired SDK
 block and was cut to its developer rules, the operator manual moved to the
 [operator guide](operations/operator-guide.md), and `.tau/SYSTEM.md` became the runtime prompt.
 These changes are recorded on `main`;
 this local verification did not change hosted schema or certify a deployment.
 
-The earlier 2026-10-11 authenticated local API smoke test initializes a real MCP session,
-discovers all 17 tools,
-and successfully reads project state, Accounts, and Universes against the migrated local
-MetaTables runtime. Invalid tool arguments produce a structured error without echoing their
+The earlier 2026-10-11 authenticated local API smoke test initialized a real MCP session,
+discovered the 17 tools of that catalog, and read project state and Accounts against the migrated
+local MetaTables runtime. Invalid tool arguments produce a structured error without echoing their
 values. This verifies the API-to-MetaTables path, not the deployed Agent.
 
 A separate real local TAU conversation with `openai-codex / gpt-5.6-luna` passed both an initial
@@ -421,7 +413,7 @@ from receipt by the target. TAU 2.0.12 stops an over-limit turn and returns a st
 `a2a_message_limit_exceeded` error; increasing a client timeout does not extend this limit.
 Use Task mode for longer work only when fresh Agent discovery advertises Task support. This
 Agent currently advertises Message only, so test short read operations separately and submit
-long bars, signal, and portfolio computations through the existing Job tools. Never replay a
+long bars and portfolio computations through the existing Job tools. Never replay a
 Message after an ambiguous transport outcome. Local TAU has no platform Message limit, so a
 local success alone does not establish hosted timing compatibility.
 
@@ -434,8 +426,8 @@ Job applied revisions `0015`–`0017`, and the subsequent exact-commit image →
 succeeded. Agent discovery reported **Alpaca Agent**, a current Harness runtime, the requested Luna
 model, and the declared Alpaca MCP application. The Harness was not added to the table-writer Team.
 
-The deployed Agent discovered all 17 project tools and successfully read project state, Accounts,
-and Universes. A distinct same-session follow-up returned the remembered results without repeating
+The deployed Agent discovered all 17 project tools of that catalog and read project state and
+Accounts. A distinct same-session follow-up returned the remembered results without repeating
 those operations. This proves deployed application-tool access and conversation continuity, not
 failure-free direct-Message delivery.
 

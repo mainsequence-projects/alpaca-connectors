@@ -1,43 +1,43 @@
 # alpaca-connectors
 
 `alpaca-connectors` connects Alpaca-backed assets, market data, brokerage accounts, holdings,
-user-maintained universes, and analytical portfolios to Main Sequence and ms-markets.
+order execution, and portfolios built from weights an application provides to Main Sequence and
+ms-markets.
 
 ## Capabilities
 
-- **Project State:** API health, capability catalog, migrated datasets, account count, and
-  universe-source count.
-- **Assets:** provider-native Alpaca UUID identity, required Alpaca details, and optional OpenFIGI enrichment.
-- **Universe Sources:** durable user-maintained extraction URLs in the project
-  `UniverseSource` MetaTable.
-- **Universes:** connector-owned `AssetUniverse` registrations linking one explicit source to one
-  ms-markets `AssetCategory` materialization target through real foreign keys.
+- **Project State:** API health, capability catalog, migrated datasets, and account count.
+- **Assets:** provider-native Alpaca UUID identity, required Alpaca details, the trading calendar
+  of each asset's class, and optional OpenFIGI enrichment.
 - **Market Data:** maintain reusable bar configurations and query or publish Alpaca OHLCV
-  observations in migrated asset-indexed tables.
+  observations in migrated asset-indexed tables. A configuration fetches explicit assets, an
+  account's recent holdings, or every asset of the portfolios that name it.
 - **Accounts:** register and maintain Alpaca accounts from submitted keys, or from existing
   Main Sequence Secrets imported once by name; the keys are stored encrypted on the account row.
-- **Holdings:** capture Alpaca positions and cash as immutable ms-markets account snapshots.
+- **Holdings:** capture Alpaca positions and cash as immutable ms-markets account snapshots; the
+  account sync also sizes the account's target and allocates its funds
+  ([ADR 0023](docs/adrs/0023_account_sync_sizes_and_allocates_funds.md)).
 - **Execution:** place, sync and cancel batches of market orders on a registered account for
   authorised applications, keeping the ms-markets execution ledger
   ([ADR 0016](docs/adrs/0016_order_execution_for_authorised_applications.md)). The Alpaca Agent has
   no tool over it.
-- **Portfolios:** publish scheduled Universe-backed ETF signals and create durable scheduled
-  analytical ETF-tracking portfolios from existing signals, persistent interpolated Alpaca bars,
-  and reusable persisted-calendar rebalance configurations. Two Jobs declared in the API workflow,
-  one per kind, run every configuration ([ADR 0013](docs/adrs/0013_workflow_declared_configuration_jobs.md)).
-
-ETF extraction is supplied by `etfhextractor`; it is an input to Universes and Portfolios, not the
-project's top-level ontology.
+- **Portfolios:** run portfolios built from weights an application provides
+  ([ADR 0024](docs/adrs/0024_portfolios_from_provided_weights.md)), the connector's only kind
+  ([ADR 0027](docs/adrs/0027_one_portfolio_path.md)). The application registers the assets,
+  creates the portfolio over HTTP and owns it; the connector values it on persistent interpolated
+  Alpaca bars with reusable persisted-calendar rebalance configurations. One Job declared in the
+  API workflow runs every configuration, and its dispatcher starts the daily runs
+  ([ADR 0013](docs/adrs/0013_workflow_declared_configuration_jobs.md)). Deleting a portfolio
+  retires its `Portfolio` first.
 
 ## Repository Boundaries
 
-- `src/alpaca_connectors/assets/`: instrument discovery, FIGI resolution, and strict registration.
-- `src/alpaca_connectors/universes/`: source configurations, registered Asset Universes, and category materialization.
+- `src/alpaca_connectors/assets/`: instrument discovery, FIGI resolution, strict registration, and trading calendars.
 - `src/alpaca_connectors/market_data/`: migrated price storage, updater, queries, and account-backed execution.
 - `src/alpaca_connectors/account/`: account identity, encrypted credential storage, registration, and refresh.
 - `src/alpaca_connectors/holdings/`: Alpaca-position translation and canonical snapshot publication.
 - `src/alpaca_connectors/execution/`: order batches on registered accounts and the ms-markets execution ledger.
-- `src/alpaca_connectors/portfolios/`: analytical portfolio construction.
+- `src/alpaca_connectors/portfolios/`: portfolios from provided weights: configuration, construction, and valuation.
 - `src/alpaca_connectors/cli/`: thin command adapters over reusable services.
 - `src/jobs/`: reviewed launchers for platform-managed execution.
 - `src/alpaca_connectors/api/`: FastAPI-only contracts, pagination, routing, and response shaping.
@@ -53,9 +53,20 @@ contracts without moving business logic into the frontend.
 ## Alpaca Agent
 
 The **Alpaca Agent** is a TAU Harness over the existing application, not a second implementation.
-Its six business skills use 17 structured tools through the Alpaca API's MCP endpoint. REST, MCP,
-and CLI adapters reuse the same services; long bars, signal, and portfolio updates return JobRuns.
-Account key values are entered on the site, never in the Agent's conversation or tool arguments.
+Its four business skills use 13 structured tools through the Alpaca API's MCP endpoint. REST, MCP,
+and CLI adapters reuse the same services; long bars and portfolio updates return JobRuns. Account
+key values are entered on the site, never in the Agent's conversation or tool arguments.
+
+| Skill | Tools |
+| --- | --- |
+| `alpaca-asset-registration` | `alpaca_query_assets`, `alpaca_register_assets` |
+| `alpaca-account-workflow` | `alpaca_query_accounts`, `alpaca_manage_account`, `alpaca_account_key_request` |
+| `alpaca-stock-bars` | `alpaca_query_bar_configurations`, `alpaca_manage_bar_configuration` |
+| `alpaca-portfolios` | `alpaca_query_rebalance_configurations`, `alpaca_manage_rebalance_configuration`, `alpaca_query_portfolios`, `alpaca_manage_portfolio` |
+
+Every skill starts from `alpaca_project_state`, and the bars and portfolio skills follow their Jobs
+with `alpaca_get_job_run_status`. The Agent runs a portfolio, pauses, resumes or deletes one for
+its owner, and never creates one or gives it weights.
 
 See [Agent architecture and boundaries](docs/agent.md) for requester versus workload identity,
 deployment, timeouts, and the enforced exclusion of generic coding/shell and platform MCP tools.
@@ -65,7 +76,7 @@ application tools.
 ## Install And Migrate
 
 Python 3.13 is required. Dependency ranges remain unlocked in `pyproject.toml`; `uv.lock` records
-the reproducible resolution. The project runs on Main Sequence SDK 9, ms-markets 2, and the
+the reproducible resolution. The project runs on Main Sequence SDK 9, ms-markets 4, and the
 `mainsequence-metatable` client, which provides the `metatables` package and migration CLI.
 
 ```bash
@@ -74,12 +85,11 @@ mainsequence refresh-token
 metatables --local migrations upgrade --provider msm_migrations:migration head
 metatables --local migrations upgrade --provider alpaca_connectors.migrations:migration head   # local runtime; hosted: migration Job
 alpaca-connectors portfolio prepare-interpolated-prices
-alpaca-connectors universe-source seed-defaults
 ```
 
 The portfolio preparation command derives and migrates the persistent `InterpolatedPrices` tables
-from the registered Alpaca bars profiles. The explicit seed command creates the starter IVV source
-idempotently. Application startup never creates schema and never seeds rows.
+from the registered Alpaca bars profiles. Application startup never creates schema and never seeds
+rows.
 
 ## Core CLI
 
@@ -97,26 +107,6 @@ alpaca-connectors account list
 alpaca-connectors account refresh <ACCOUNT_UID>
 alpaca-connectors holdings capture --account-uid <ACCOUNT_UID> --execute
 ```
-
-Manage extraction targets and registered universes:
-
-```bash
-alpaca-connectors universe-source list
-alpaca-connectors universe-source create \
-  --name "S&P 500 source" \
-  --symbol IVV \
-  --url "https://www.ishares.com/us/products/239726/ishares-core-sp-500-etf"
-alpaca-connectors universe-source preview <SOURCE_UID>
-alpaca-connectors universe list
-alpaca-connectors universe run <UNIVERSE_UID>
-alpaca-connectors universe run <UNIVERSE_UID> --execute
-```
-
-An executed Universe run extracts once, bulk-registers missing Alpaca assets, bulk-replaces the
-linked category membership, and publishes the complete observed weights as one batch into this
-application's `SignalWeightsTS` instance (`alpaca_connectors__signalweightsts__main`, ms-markets
-ADR 0047). `universe_uid` defines signal identity; the required `account_uid`
-is execution configuration only.
 
 Create a reusable update configuration and run it:
 
@@ -141,24 +131,16 @@ The FastAPI update action queues the generic `Alpaca Bars Update` Job with only 
 configuration UID. Its JobRun can be polled at `/v1/operations/job-runs/{job_run_uid}`; the API
 does not execute the bars update in its own process.
 
-Create a Universe-backed signal configuration; the shared signal Job runs it:
+Exact asset registration:
 
 ```bash
-alpaca-connectors signal create \
-  --name "Daily S&P 500 observation" \
-  --universe-uid <UNIVERSE_UID> \
-  --account-uid <ACCOUNT_UID>
-alpaca-connectors signal run <CONFIGURATION_UID>
+alpaca-connectors asset register --account-uid <ACCOUNT_UID> --symbols NVDA,AAPL
 ```
 
-Signal and portfolio configurations hold no schedule or compute. The `Alpaca ETF Signal` and
-`Alpaca ETF Portfolio` Jobs declared in `.mainsequence/workflows/alpaca-connectors-api.yaml` run
-them: a run carries `--configuration-uid <uid>`, and each Job's daily scheduled run (00:30 and
-02:00 UTC) starts one such run per configuration whose `scheduled` flag is set (`--no-scheduled`
-clears it). The current CodeRepositoryBranch resolves Environment scope automatically; the user
-never supplies an Environment UID.
+An application registers the assets a portfolio needs this way, or through the registration
+routes, before it names them in weights.
 
-Create a reusable rebalance policy and one durable Portfolio Configuration:
+Create a reusable rebalance policy, then inspect, run and delete portfolios:
 
 ```bash
 alpaca-connectors portfolio rebalance create \
@@ -168,31 +150,26 @@ alpaca-connectors portfolio rebalance create \
   --session-label regular \
   --rebalance-event market_close \
   --rebalance-cadence every_session
-alpaca-connectors portfolio create \
-  --name "Daily IVV analytical portfolio" \
-  --signal-configuration-uid <SIGNAL_CONFIGURATION_UID> \
-  --bars-configuration-uid <BARS_CONFIGURATION_UID> \
-  --rebalance-configuration-uid <REBALANCE_CONFIGURATION_UID> \
-  --valuation-maximum-staleness-seconds 86400
+alpaca-connectors portfolio list
+alpaca-connectors portfolio get <PORTFOLIO_CONFIGURATION_UID>
 alpaca-connectors portfolio run <PORTFOLIO_CONFIGURATION_UID>
+alpaca-connectors portfolio runs <PORTFOLIO_CONFIGURATION_UID>
+alpaca-connectors portfolio delete <PORTFOLIO_CONFIGURATION_UID> --execute
 ```
 
-The Portfolio Configuration stores calculation intent and its scheduled flag only. Schedule,
-compute, image, and automatic-deployment state belong to the declared portfolio Job. Rebalances use actual persisted
-market events and the latest signal observed at or before each event; signal observations still do
-not claim exact point-in-time ETF holdings or live execution.
+No CLI command creates a portfolio or gives it weights: the application that owns it does, over
+HTTP ([API](#api)). `portfolio delete --execute` retires the portfolio's `Portfolio` before it
+deletes the configuration, and is refused while an account's target names it.
 
-Exact asset registration remains independently available:
-
-```bash
-alpaca-connectors asset register --account-uid <ACCOUNT_UID> --symbols NVDA,AAPL
-```
-
-Provider-derived constituent registration belongs to a configured Asset Universe. A Universe is
-the durable ETF holdings source used to resolve current constituents and weights. Run receives an
-Alpaca account as serialized signal-updater runtime configuration so scheduled execution can
-resolve its Secret names; the account is not stored on the Universe and does not change the final
-signal UID.
+The Portfolio Configuration stores calculation intent and its scheduled flag only. The
+`Alpaca Portfolio` Job declared in `.mainsequence/workflows/alpaca-connectors-api.yaml` runs it: a
+run carries `--configuration-uid <uid>`, and the daily scheduled run of its dispatcher (02:00 UTC)
+starts one such run per configuration whose `scheduled` flag is set (its owner clears it with
+`PATCH /v1/portfolio-configurations/{uid}` and `{"scheduled": false}`).
+Schedule, compute, image, and automatic-deployment state belong to the declared Jobs. The current
+CodeRepositoryBranch resolves Environment scope automatically; the user never supplies an
+Environment UID. Rebalances use actual persisted market events and the latest observation at or
+before each event; the portfolio is an analytical calculation, not live execution.
 
 ## API
 
@@ -204,12 +181,38 @@ For joint local debugging, launch **Debug Alpaca API + Command Center Site** fro
 FastAPI on port `8321`, the sibling Vite site on port `5421`, and opens Chrome with JavaScript
 debugging enabled. See [the development workflow](docs/operations/development.md).
 
-The API exposes `/v1/accounts`, account holdings, `/v1/assets`, `/v1/universe-sources`,
-`/v1/universes`, `/v1/market-data/bar-configurations`, `/v1/market-data/datasets`,
-`/v1/signal-jobs`, `/v1/portfolio-configurations`,
+The API exposes `/v1/accounts`, account holdings and orders, `/v1/assets`,
+`/v1/market-data/bar-configurations`, `/v1/market-data/datasets`, `/v1/portfolio-configurations`,
 `/v1/portfolio-rebalance-configurations`, `/v1/operations/job-runs/{job_run_uid}`, and
-`/v1/project-state`. Collections use
-authoritative `pageInfo`; selectable collections have separate resource-discovery endpoints.
+`/v1/project-state`. Collections use authoritative `pageInfo`; selectable collections have
+separate resource-discovery endpoints.
+
+An application creates a portfolio with its first weights, then gives it new weights whenever it
+chooses them ([Portfolios](docs/portfolios/portfolios.md)):
+
+```bash
+curl -X POST http://127.0.0.1:8321/v1/portfolio-configurations/provided-weights \
+  -H "Authorization: Bearer $(.venv/bin/mainsequence auth token)" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Two-stock basket",
+    "bars_configuration": {"name": "Basket bars", "account_uid": "<ACCOUNT_UID>"},
+    "rebalance_configuration_uid": "<REBALANCE_CONFIGURATION_UID>",
+    "observations": [
+      {"observed_at": "2026-11-17T21:00:00Z",
+       "weights": {"ALPACA::<ASSET_UUID_1>": 0.6, "ALPACA::<ASSET_UUID_2>": 0.4}}
+    ]
+  }'
+
+curl -X POST http://127.0.0.1:8321/v1/portfolio-configurations/<PORTFOLIO_CONFIGURATION_UID>/weights \
+  -H "Authorization: Bearer $(.venv/bin/mainsequence auth token)" \
+  -H "Content-Type: application/json" \
+  -d '{"observations": [{"observed_at": "2026-11-18T21:00:00Z",
+                         "weights": {"ALPACA::<ASSET_UUID_1>": 0.5, "ALPACA::<ASSET_UUID_3>": 0.5}}]}'
+```
+
+The caller owns the portfolio: only it gives weights, pauses or deletes it. An asset the new
+weights leave out is written at `0`, and an observation at or before the last one is refused.
 
 Every request needs a verified caller, `/health` included: the platform-signed caller assertion
 when hosted, a direct Bearer token checked against `MAINSEQUENCE_ENDPOINT` locally. `create_app()`

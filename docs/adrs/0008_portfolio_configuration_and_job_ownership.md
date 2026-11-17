@@ -16,6 +16,11 @@ compute owned by the workflow declaration.
 Amended on 2026-11-16 by [ADR 0024](0024_portfolios_from_provided_weights.md): a portfolio
 configuration references either an ETF Signal Configuration or provided weights (`weights_source`).
 
+Amended on 2026-11-17 by [ADR 0027](0027_one_portfolio_path.md): a portfolio configuration names
+provided weights only, never a Signal Configuration; its table is
+`alpaca_connectors__portfolio_configuration` and its Jobs are `alpaca-portfolio` and
+`alpaca-portfolio-dispatcher`.
+
 ## Context
 
 The project needs a durable definition for an analytical ETF portfolio assembled from an existing

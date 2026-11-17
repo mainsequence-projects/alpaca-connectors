@@ -2,6 +2,9 @@
 
 ## Status
 
+Superseded on 2026-11-17 by [ADR 0027](0027_one_portfolio_path.md): there are no signal
+configurations and no signal Job.
+
 Superseded in part by
 [ADR 0008](0008_portfolio_configuration_and_job_ownership.md). Schedule, compute, deployment, and
 execution-state ownership follows ADR 0008 and belongs only to the Main Sequence Job or JobRun.

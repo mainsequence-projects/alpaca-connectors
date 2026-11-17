@@ -52,6 +52,10 @@ Amended on 2026-11-17 by
 [ADR 0025](0025_markets_reads_the_instances_through_a_second_namespace.md): the Markets workload
 reads the signal weights instance through the `alpaca-connectors-markets` namespace.
 
+Amended on 2026-11-17 by [ADR 0027](0027_one_portfolio_path.md): provided weights are the only
+weights source, so `weights_source` and the ETF portfolios go, and every delete retires the
+`Portfolio`, which answers open question 5.
+
 ## Context
 
 ### What a portfolio is today

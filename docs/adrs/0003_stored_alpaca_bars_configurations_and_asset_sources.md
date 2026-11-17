@@ -7,6 +7,9 @@ Accepted — implemented in migration `0004`
 Amended on 2026-11-16 by [ADR 0024](0024_portfolios_from_provided_weights.md): a fourth asset
 source, `portfolios`, fetches every asset of the live portfolios that name the configuration.
 
+Amended on 2026-11-17 by [ADR 0027](0027_one_portfolio_path.md): the `universe` source goes, and
+revision `0028` drops `universe_uid`; `assets`, `account_holdings` and `portfolios` remain.
+
 ## Context
 
 Alpaca bars updates currently accept an output `dataset_uid` and construct an

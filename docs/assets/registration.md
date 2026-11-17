@@ -102,10 +102,10 @@ Slash and dash variants are also considered.
 alpaca-connectors asset register --account-uid <ACCOUNT_UID> --symbols AAPL,MSFT,NVDA
 ```
 
-The Assets command never expands ETF or provider seeds. A configured `AssetUniverse` owns source
-extraction and invokes the same reusable registration service with its explicit extracted symbols
-and the account selected for that Run before refreshing membership. The Universe itself remains
-account-independent.
+The Assets command registers exactly the symbols it is given and expands no list. An application
+that builds a portfolio registers the assets it needs the same way, through the registration
+routes, before it names them in weights
+([Portfolios](../portfolios/portfolios.md#observations)).
 
 ## Output Reporting
 

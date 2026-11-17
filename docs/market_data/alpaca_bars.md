@@ -89,20 +89,7 @@ alpaca-connectors market-data bar-configuration create \
   --adjustment all
 ```
 
-A `universe` source resolves current members of one active `AssetUniverse`:
-
-```bash
-alpaca-connectors market-data bar-configuration create \
-  --name "Daily managed universe" \
-  --account-uid <account-uid> \
-  --asset-source universe \
-  --universe-uid <asset-universe-uid> \
-  --frequency 1d \
-  --feed sip \
-  --adjustment all
-```
-
-An `account_holdings` source needs no asset list or universe. It selects the newest persisted
+An `account_holdings` source needs no asset list. It selects the newest persisted
 holdings set for the configured account inside the inclusive trailing 30-day UTC window, excludes
 cash and zero positions, and never captures holdings as a side effect:
 
@@ -116,10 +103,11 @@ alpaca-connectors market-data bar-configuration create \
   --adjustment all
 ```
 
-A `portfolios` source needs no asset list or universe either. It fetches every asset ever
-published by the live portfolios that name the configuration (deleted and retired portfolios
-excluded), read from the signal-asset table rather than the signal weights series
-([ADR 0024](../adrs/0024_portfolios_from_provided_weights.md)):
+A `portfolios` source needs no asset list either. It fetches every asset ever published by the
+live portfolios that name the configuration (deleted and retired portfolios excluded), read from
+the signal-asset table rather than the signal weights series
+([ADR 0024](../adrs/0024_portfolios_from_provided_weights.md),
+[Portfolios](../portfolios/portfolios.md#bars)):
 
 ```bash
 alpaca-connectors market-data bar-configuration create \

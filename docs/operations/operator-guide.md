@@ -28,8 +28,8 @@ instructions are `.tau/SYSTEM.md`; its tools and skills are described in
   Alpaca account, and the workflow never accepts credential values or global fallback credentials
 - dry run is the default; pass `--execute` only when you want to write missing assets into Main
   Sequence
-- use required `--symbols` for exact symbol registration; asset registration does not expand ETF
-  or other provider-derived seeds
+- use required `--symbols` for exact symbol registration; asset registration registers exactly
+  those symbols and expands no list
 - Alpaca's immutable asset UUID is authoritative: write
   `Asset.unique_identifier = ALPACA::<alpaca_asset_uuid>` and a required project-owned
   `AlpacaAssetDetails` row
@@ -40,52 +40,43 @@ instructions are `.tau/SYSTEM.md`; its tools and skills are described in
   unique registered identity are reported and not registered
 - Alpaca `status` and `tradable` are stored provider facts, not registration gates; resolve exact
   symbol sets from one all-status bulk catalog request, never one provider request per symbol
-- every registration, Universe sync and account sync links each asset to the trading calendar of
-  its Alpaca class: `NYSE` for US equities and options, `CRYPTO_24_7` for crypto
+- every registration and account sync links each asset to the trading calendar of its Alpaca
+  class: `NYSE` for US equities and options, `CRYPTO_24_7` for crypto
   ([ADR 0026](../adrs/0026_assets_are_registered_with_their_trading_calendar.md)); ms-markets 4
-  refuses a price update for an asset without one, and a missing calendar is stored first
+  refuses a price update for an asset without one, and a missing calendar is stored first, by the
+  connector's own `alpaca_connectors.assets.calendars.ensure_trading_calendar`
 - once per Environment after the ms-markets 4 release, link the assets registered before it:
   `alpaca-connectors asset link-calendars` reports each calendar's assets and how many have no
   calendar, and `--execute` links only those; an asset that has a calendar is never written
 
-## Asset Universes And Holdings Categories
+## Portfolios
 
-- maintain extraction targets with `alpaca-connectors universe-source` CRUD
-- treat source preview as read-only; it never creates or infers a registered universe
-- register an Asset Universe explicitly through `POST /v1/universes`; creation stores required
-  `source_uid` and `asset_category_uid` foreign keys and performs no extraction
-- use `alpaca-connectors universe run <UNIVERSE_UID>`
-- dry run is the default; its plan identifies missing Alpaca-backed assets as work to perform
-- Run follows the registered links and requires an Alpaca `account_uid` as execution input only;
-  it registers missing constituents and replaces category membership only after every extracted
-  symbol resolves through Alpaca, then publishes that exact extraction as one observation through
-  the connector-owned `AlpacaETFHoldingsSignal`
-- Run delegates category replacement to the `ms-markets>=1.0.3`
-  `AssetCategory.replace_memberships` API, which bulk-upserts the complete desired membership and
-  removes stale memberships with one delete; never execute one MetaTable request per constituent
-- never persist or infer an Alpaca account on `AssetUniverse`; it represents the ETF holdings
-  source and materialized weights, not a brokerage-account assignment
-- never store source identity or lifecycle state in `AssetCategory.metadata_json`, and never infer a
-  source, provider, universe, or category from another resource
-- resolve current-catalog misses through one set-based lookup of existing canonical Alpaca
-  Asset/detail rows; only symbols with neither a current catalog identity nor one unique registered
-  identity are blockers, and existing category membership remains unchanged for those blockers
-- `AlpacaETFHoldingsSignalConfig` contains exactly `universe_uid` and `account_uid`;
-  `universe_uid` defines the stable signal business identity while `account_uid` remains serialized
-  updater/runtime configuration and is excluded from `_signal_uid_payload()`
-- signal rows use the built-in `SignalWeightsStorage` grain
-  `(time_index, signal_uid, asset_identifier)`; neither account UID nor Universe UID is added as a
-  storage column or index dimension
-- every successful update publishes one complete batched observation, including when weights did
-  not change; its timestamp records when extraction observed the weights and does not assert their
-  exact economic effective time
+- a portfolio is built from weights an application provides
+  ([ADR 0024](../adrs/0024_portfolios_from_provided_weights.md),
+  [ADR 0027](../adrs/0027_one_portfolio_path.md)); only an application creates one, through
+  `POST /v1/portfolio-configurations/provided-weights`, and it owns the portfolio; no CLI command
+  or Agent tool creates one or gives it weights ([Portfolios](../portfolios/portfolios.md))
+- the application registers every asset before naming it in weights; an unregistered asset, or
+  one without Alpaca details, refuses the whole call
+- inspect with `alpaca-connectors portfolio list`, `get` and `runs`; `run` starts one run on the
+  `alpaca-portfolio` Job, and `update <uid> --no-scheduled` leaves a portfolio out of the
+  02:00 UTC dispatch
+- `alpaca-connectors portfolio delete <uid>` is a dry run; `--execute` retires the portfolio's
+  `Portfolio` before deleting the configuration, and is refused while an account's current target
+  names it: that account's owner changes the target first, never the connector
+- retiring deletes nothing: the `Portfolio`, its series and the history of every account that
+  referenced it stay
+- a portfolio's bars come from the bar configuration it names; a `portfolios` configuration
+  follows what its live portfolios hold, so new weights need no bars edit
+- after a new bars profile is migrated, run `alpaca-connectors portfolio prepare-interpolated-prices`,
+  then the same command with `--check-only`
 
 ## Price Updates From Alpaca
 
 - maintain reusable definitions with `alpaca-connectors market-data bar-configuration` CRUD
 - each definition selects one registered account, one migrated frequency/feed/adjustment profile,
-  and exactly one asset source: explicit `assets`, an active `universe`, recent
-  `account_holdings`, or `portfolios` (every asset of the live portfolios that name it, ADR 0024)
+  and exactly one asset source: explicit `assets`, recent `account_holdings`, or `portfolios`
+  (every asset of the live portfolios that name it, ADR 0024)
 - for account holdings, the configured Account UID resolves the newest stored holdings set inside
   the inclusive trailing 30-day window; the resolver never captures holdings as a side effect
 - run `alpaca-connectors market-data update --configuration-uid <CONFIGURATION_UID>` for a dry-run
@@ -162,7 +153,7 @@ Every Alpaca account's API key and secret key are stored in application-encrypte
 account table ([ADR 0017](../adrs/0017_encrypted_account_credentials.md), MetaTables ADR 0025).
 The connector seals and opens them with a keyring held by one Environment Secret,
 `ALPACA_CONNECTORS_DATA_KEY`, which the workflow files grant as `value_reader` to the API, the bars
-Jobs, the signal Job and the credential migration Job. A workload that cannot read it fails every
+Job and the credential migration Job. A workload that cannot read it fails every
 Alpaca call with `credential_key_unavailable`; nothing is ever written or read in plaintext.
 
 Create the Secret once per Environment, before the first push of these workflows to it. The
