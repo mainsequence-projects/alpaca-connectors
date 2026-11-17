@@ -11,6 +11,10 @@ change), and the portfolio and signal instances are recorded in the Markets data
 
 Interpolated prices are dynamic (one table per bars source); ``configured_alpaca_interpolated_prices
 _storage`` places them in this namespace the same way.
+
+Every instance is also in ``alpaca-connectors-markets`` (MetaTables ADR 0028), the namespace the
+Markets workload reads: ``share_with_markets`` declares it, and the next ``upgrade head`` adds the
+membership at finalization, with no revision.
 """
 
 from __future__ import annotations
@@ -19,7 +23,11 @@ from typing import Any
 
 from msm.settings import markets_configured_namespace
 
-from alpaca_connectors.settings import PROJECT_NAMESPACE, PROJECT_NAMESPACE_SLUG
+from alpaca_connectors.settings import (
+    MARKETS_INSTANCES_NAMESPACE,
+    PROJECT_NAMESPACE,
+    PROJECT_NAMESPACE_SLUG,
+)
 
 INSTANCE_KEY = "main"
 INSTANCE_NAMESPACE = markets_configured_namespace(PROJECT_NAMESPACE)
@@ -40,6 +48,16 @@ def _instance_kwargs() -> dict[str, Any]:
     }
 
 
+def share_with_markets(model: type[Any]) -> type[Any]:
+    """Declare ``model`` in the namespace the Markets workload reads, besides its own.
+
+    ``__metatable_namespaces__`` only adds (MetaTables ADR 0028); the ms-markets factories set
+    the one ``__metatable_namespace__``, so the second name is declared on the built class.
+    """
+    model.__metatable_namespaces__ = (MARKETS_INSTANCES_NAMESPACE,)
+    return model
+
+
 def _build() -> dict[str, type[Any]]:
     from msm.storage_instances import configured_time_index_instance
     from msm.time_index.execution.storage import OrdersStorage, TradesStorage
@@ -51,7 +69,7 @@ def _build() -> dict[str, type[Any]]:
         configured_signal_weights_storage,
     )
 
-    return {
+    instances = {
         "signal_weights": configured_signal_weights_storage(**_instance_kwargs()),
         "portfolios": configured_portfolios_storage(**_instance_kwargs()),
         "portfolio_weights": configured_portfolio_weights_storage(**_instance_kwargs()),
@@ -64,6 +82,7 @@ def _build() -> dict[str, type[Any]]:
         "orders": configured_time_index_instance(OrdersStorage, **_instance_kwargs()),
         "trades": configured_time_index_instance(TradesStorage, **_instance_kwargs()),
     }
+    return {name: share_with_markets(model) for name, model in instances.items()}
 
 
 _INSTANCES = _build()
@@ -130,4 +149,5 @@ __all__ = [
     "portfolio_instance_models",
     "portfolio_output_tables",
     "project_instance_models",
+    "share_with_markets",
 ]

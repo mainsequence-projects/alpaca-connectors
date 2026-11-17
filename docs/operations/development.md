@@ -73,8 +73,9 @@ ALPACA_CONNECTORS_TEST_POSTGRES_URL=postgresql://postgres:alpaca@127.0.0.1:5448/
   uv run pytest tests/test_postgresql_json_columns.py
 ```
 
-The project requires MetaTables 0.1.65 or later, which types JSON parameters as `json`
-(MetaTables#111). On an earlier client these tests fail with the hosted error,
+The project requires MetaTables 0.1.66 or later: tables in several namespaces
+([ADR 0025](../adrs/0025_markets_reads_the_instances_through_a_second_namespace.md)), and since
+0.1.65 JSON parameters typed as `json` (MetaTables#111). On an earlier client these tests fail with the hosted error,
 `cannot adapt type 'dict' using placeholder '%s'`: a list was bound as a PostgreSQL array.
 
 ## Live End-To-End Test

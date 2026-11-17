@@ -430,10 +430,11 @@ In each Environment where the project runs:
    | `alpaca-credential-migration` (one-off) | `data_writer` |
    | `alpaca-connectors-agent` | none: its tools run in the API |
 
-   The Markets workload holds `data_viewer` on `alpaca_connectors__portfoliosts__main`,
-   `alpaca_connectors__portfolioweightsts__main` and `alpaca_connectors__signalweightsts__main`,
-   which the Markets portfolio dataset catalog verifies and reads, and nothing else here: never a
-   role on `alpaca_connectors__acct_alpaca`, whose columns hold the application-encrypted keys.
+   The Markets contract instances are also in `alpaca-connectors-markets`
+   ([ADR 0025](../adrs/0025_markets_reads_the_instances_through_a_second_namespace.md)). The
+   migration Job holds `editor` on it, and the Markets workload holds `data_viewer` on it and
+   nothing on `alpaca-connectors`: never a role on `alpaca_connectors__acct_alpaca`, whose
+   columns hold the application-encrypted keys.
 
    Shared roles can stay on the Team, with its person owner as a member, so a recreated workload
    needs only membership. Grant the `editor` roles directly.

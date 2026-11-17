@@ -60,6 +60,13 @@ workload can use the project tables once they leave `mainsequence.markets`:
 
 No workload needs a role on `mainsequence.markets` once step 9 is done.
 
+The owner also creates the namespace `alpaca-connectors-markets`
+([ADR 0025](../adrs/0025_markets_reads_the_instances_through_a_second_namespace.md)) and grants
+`alpaca-connectors-migrate` `editor` on it: the migration adds every Markets contract instance
+to it, which needs `tables.create` there. The person who runs step 4 needs the same role. No
+other workload of this application needs a role on it, since each already reaches the instances
+through `alpaca-connectors`.
+
 ## 2. Hold The Scheduled Runs
 
 A signal run before step 6 publishes into an empty signal instance, and a portfolio run would
@@ -98,12 +105,30 @@ Revision 0021 already creates the tables of the two bars profiles, so no revisio
 
 ## 5. Let Markets Read The Instances
 
-The owner of `alpaca-connectors` grants the Markets workload `data_viewer` on exactly
-`alpaca_connectors__portfoliosts__main`, `alpaca_connectors__portfolioweightsts__main` and
-`alpaca_connectors__signalweightsts__main`, which the dataset catalog verifies and reconciles
-(ms-markets ADR 0047, decision 5). Never grant it a namespace role here, and never a role on
-`alpaca_connectors__acct_alpaca`: that table holds the application-encrypted account keys and is
-not `include`d by Markets.
+Every Markets contract instance of this application (signal weights, portfolios, portfolio
+weights, rebalance state, calendar events, orders, trades and the interpolated prices) is in two
+namespaces: `alpaca-connectors` and `alpaca-connectors-markets`
+([ADR 0025](../adrs/0025_markets_reads_the_instances_through_a_second_namespace.md), MetaTables
+0.1.66 or later). The code declares the second one, and the next `upgrade head` adds the
+memberships with no revision.
+
+The owner of `alpaca-connectors-markets` grants the Markets workload `data_viewer` on that
+namespace, once per Environment. The dataset catalog verifies and reads the instances with it
+(ms-markets ADR 0047, decision 5), and an instance added later is covered. Never grant the
+Markets workload a role on `alpaca-connectors`, and never one on `alpaca_connectors__acct_alpaca`:
+that table holds the application-encrypted account keys and is not `include`d by Markets.
+
+Check it as the owner, after the migration Job has run:
+
+```python
+from metatables import TimeIndexMetaTable
+
+from alpaca_connectors.instances import project_instance_models
+
+names = sorted(model.__table__.name for model in project_instance_models())
+for table in TimeIndexMetaTable.filter_by_body(physical_table_name__in=names, limit=100):
+    print(table.physical_table_name, sorted(item.name for item in table.namespaces))
+```
 
 ## 6. Move The History
 
@@ -155,9 +180,9 @@ msm series move alpaca_connectors.operations.instance_backfill:series_moves --ex
 Until this release the project mixins inherited the `mainsequence.markets` namespace from
 ms-markets, so all thirteen project tables were registered there. The mixins in
 `alpaca_connectors.metatables` now declare `alpaca-connectors`; tables that a fresh Environment
-creates are registered there directly. Existing tables are moved once with the MetaTables table
-patch (MetaTables 0.1.56 or later), which reassigns the namespace and identifier of a registered
-table:
+creates are registered there directly. Existing tables are moved once by adding them to
+`alpaca-connectors`, removing them from `mainsequence.markets` and patching their identifier
+(MetaTables 0.1.66 or later, its ADR 0028; the table patch no longer takes a namespace):
 
 - the table's `uid`, its physical name, its rows, its foreign keys and its update records do not
   change, and the account keys need no re-encryption (the keyring seals values, not catalog
@@ -196,9 +221,13 @@ suffixes physical names). No hosted resource sets it; never set it outside tests
 examples.
 
 Who runs it: a person who holds `editor` or `owner` on `mainsequence.markets` (or on each of the
-thirteen tables) and `editor` or `owner` on `alpaca-connectors`, or an Organization admin. The
-table patch refuses a caller without `tables.update` on the table or `tables.create` on the
-destination namespace.
+thirteen tables) and `editor` or `owner` on `alpaca-connectors`, or an Organization admin.
+Adding needs `tables.update` on the table and `tables.create` on `alpaca-connectors`; removing
+needs `tables.create` on `mainsequence.markets`.
+
+It must run before the first migration on MetaTables 0.1.66 or later. That migration removes a
+declared namespace the code no longer lists, the migration Job holds no role on
+`mainsequence.markets`, and its finalization is refused until these tables have left it.
 
 When: after step 1 has given the workloads their roles on `alpaca-connectors` (a moved table is
 covered by the roles of its new namespace only; table-level roles move with the table), and
@@ -222,11 +251,16 @@ models = {
 }
 tables = MetaTable.filter_by_body(physical_table_name__in=sorted(models), limit=100)
 assert len(tables) == len(models), "every project table must be registered exactly once"
-before = {table.physical_table_name: (table.uid, table.namespace, table.identifier) for table in tables}
+before = {
+    table.physical_table_name: (table.uid, [item.name for item in table.namespaces], table.identifier)
+    for table in tables
+}
 print(before)
 for table in tables:
     model = models[table.physical_table_name]
-    table.patch(namespace=model.__table__.info["namespace"], identifier=model.__metatable_identifier__)
+    table.add_to_namespace(model.__table__.info["namespace"])
+    table.remove_from_namespace("mainsequence.markets")
+    table.patch(identifier=model.__metatable_identifier__)
 after = MetaTable.filter_by_body(physical_table_name__in=sorted(models), limit=100)
 assert {table.physical_table_name: table.uid for table in after} == {
     name: uid for name, (uid, _, _) in before.items()
@@ -235,7 +269,8 @@ assert {table.physical_table_name: table.uid for table in after} == {
 
 Run it with `MSM_AUTO_REGISTER_NAMESPACE` unset, from a checkout of this release, against the
 Environment's MetaTables (`mainsequence` session of the person above). Keep the printed `before`
-mapping: patching each table back with its old namespace and identifier undoes the move.
+mapping: adding each table back to its old namespace, removing it from `alpaca-connectors` and
+patching its old identifier undoes the move.
 
 ## 8. Resume And Verify
 
