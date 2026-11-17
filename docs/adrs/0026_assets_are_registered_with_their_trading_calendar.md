@@ -2,9 +2,10 @@
 
 ## Status
 
-Implemented on 2026-11-17 on ms-markets 4.0.1 and etfhextractor 0.6.0. Not yet released: the
-lock waits for the etfhextractor `v0.6.0` tag, and each Environment needs one
-`alpaca-connectors asset link-calendars --execute` after the release (see [Rollout](#rollout)).
+Implemented and released on 2026-11-17 on ms-markets 4.0.1 and etfhextractor 0.6.0. In
+Production, `alpaca-connectors asset link-calendars --execute` linked all 513 Alpaca assets the
+same day, before the release: 512 to `NYSE` and 1 to `CRYPTO_24_7`; a dry run afterwards found
+none without a calendar (see [Rollout](#rollout)).
 
 ## Context
 

@@ -51,14 +51,14 @@ dev = [
 requires-dist = [
     { name = "alpaca-py", specifier = ">=0.45.0" },
     { name = "empyrical-reloaded", specifier = ">=0.5.12" },
-    { name = "etfhextractor", git = "https://github.com/mainsequence-projects/etfholdingextractor?tag=v0.5.6" },
+    { name = "etfhextractor", git = "https://github.com/mainsequence-projects/etfholdingextractor?tag=v0.6.0" },
     { name = "fastapi", specifier = ">=0.135.3" },
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "mainsequence", extras = ["mcp"], specifier = ">=9.0.38,<10" },
     { name = "mainsequence-metatable", specifier = ">=0.1.66,<0.2" },
     { name = "mkdocs", specifier = ">=1.6.1" },
     { name = "mkdocs-material", specifier = ">=9.7.6" },
-    { name = "ms-markets", specifier = ">=3.8.2,<4" },
+    { name = "ms-markets", specifier = ">=4.0.1,<5" },
     { name = "ms-tau-sdk", specifier = ">=2.0.26,<3" },
     { name = "playwright" },
     { name = "uvicorn", specifier = ">=0.52.4,<0.53" },
@@ -342,8 +342,8 @@ wheels = [
 
 [[package]]
 name = "etfhextractor"
-version = "0.5.6"
-source = { git = "https://github.com/mainsequence-projects/etfholdingextractor?tag=v0.5.6#5c618bbd3eb543f091659c56804d38e7d3e004c6" }
+version = "0.6.0"
+source = { git = "https://github.com/mainsequence-projects/etfholdingextractor?tag=v0.6.0#ccdd1a6842f50a712c5da75569c23bd5a97fec20" }
 dependencies = [
     { name = "certifi" },
     { name = "mainsequence" },
@@ -1095,7 +1095,7 @@ wheels = [
 
 [[package]]
 name = "ms-markets"
-version = "3.8.2"
+version = "4.0.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "alembic" },
@@ -1106,6 +1106,7 @@ dependencies = [
     { name = "mainsequence-metatable" },
     { name = "numpy" },
     { name = "pandas" },
+    { name = "pandas-market-calendars" },
     { name = "pip" },
     { name = "psycopg2" },
     { name = "pydantic" },
@@ -1115,9 +1116,9 @@ dependencies = [
     { name = "sqlalchemy" },
     { name = "uvicorn" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/24/f1/a866bc6521a763e1a44be3d51afa1e54ffadaa72e35aa3586e9085b799eb/ms_markets-3.8.2.tar.gz", hash = "sha256:56369fbb389679e04941cd374dc50b3cb0ac8e4f87fa0f2bcdd29450f83db272", size = 2761875, upload-time = "2026-11-17T08:38:35.846Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/25/ae/c658695bb0570d535b93ba2bf203dfb3f09cbe9e981fcb4ff2fbe4ced853/ms_markets-4.0.1.tar.gz", hash = "sha256:68af9b94904d669c237cc5605bf274eb2212f8a5b6d87066c46cbc8f346a28c3", size = 2883628, upload-time = "2026-11-17T14:38:00.246Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/b7/71/2897fe1f5a17bdc0b5b0e40e21d398ecf5c1eb619ae18694a22a26c850e7/ms_markets-3.8.2-py3-none-any.whl", hash = "sha256:504a555242c4b023f1c82bc582e17532875e4bf4578debb7cd7d8879f647bb22", size = 879292, upload-time = "2026-11-17T08:38:33.932Z" },
+    { url = "https://files.pythonhosted.org/packages/0c/69/5282fa058aee46379f67d808eb2dc97fd2b5f5bdbf289a45dcdf03ab82cf/ms_markets-4.0.1-py3-none-any.whl", hash = "sha256:8a32ffd7201baa90c9a8eaf5f73db2aa906fddcbb02c990d68b7250bf7b90bb8", size = 923967, upload-time = "2026-11-17T14:37:58.555Z" },
 ]
 
 [[package]]
