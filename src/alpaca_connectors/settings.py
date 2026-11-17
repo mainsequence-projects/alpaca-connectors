@@ -17,6 +17,12 @@ PROJECT_NAMESPACE_SLUG = "alpaca_connectors"
 # (ms-markets ``markets_configured_namespace``), so hosted resources never set that variable.
 PROJECT_NAMESPACE = "alpaca-connectors"
 
+# Second catalog namespace of every Markets contract instance this application owns (MetaTables
+# ADR 0028): the signal, portfolio, order and trade instances and the interpolated prices. The
+# Markets workload holds ``data_viewer`` on it and on nothing else of this application, so it
+# reads the instances and never the account keys or this application's own tables.
+MARKETS_INSTANCES_NAMESPACE = "alpaca-connectors-markets"
+
 # Market venue suffix for Alpaca account/asset identities (``<token>__ALPACA`` convention).
 ALPACA_VENUE = "ALPACA"
 

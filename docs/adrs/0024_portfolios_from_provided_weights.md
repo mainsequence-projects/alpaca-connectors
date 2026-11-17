@@ -48,6 +48,10 @@ It amends:
 - [ADR 0023](0023_account_sync_sizes_and_allocates_funds.md) section 4: its missing-weights case
   narrows.
 
+Amended on 2026-11-17 by
+[ADR 0025](0025_markets_reads_the_instances_through_a_second_namespace.md): the Markets workload
+reads the signal weights instance through the `alpaca-connectors-markets` namespace.
+
 ## Context
 
 ### What a portfolio is today

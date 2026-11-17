@@ -324,6 +324,35 @@ def test_producers_write_to_own_namespace_instances() -> None:
     assert interpolated.__table__.info["namespace"] == "alpaca-connectors"
 
 
+def test_markets_reads_every_contract_instance_through_a_second_namespace() -> None:
+    """ADR 0025: the instances, and nothing else, are also in `alpaca-connectors-markets`."""
+    from alpaca_connectors import instances
+    from alpaca_connectors.migrations import all_project_metatable_models
+    from alpaca_connectors.portfolios.interpolated_prices_schema import (
+        configured_alpaca_interpolated_prices_storage,
+    )
+    from metatables.sqlalchemy_contracts import _resolve_namespaces
+
+    both = ["alpaca-connectors", "alpaca-connectors-markets"]
+    shared = instances.project_instance_models()
+    assert len(shared) == 7
+    for model in shared:
+        assert _resolve_namespaces(model, namespace=None) == both, model.__table__.name
+    interpolated = configured_alpaca_interpolated_prices_storage(
+        source_time_index_meta_table_uid="11111111-1111-4111-8111-111111111111",
+        source_cadence="1d",
+    )
+    assert _resolve_namespaces(interpolated, namespace=None) == both
+
+    shared_names = {model.__table__.name for model in shared}
+    own = [m for m in all_project_metatable_models() if m.__table__.name not in shared_names]
+    assert "alpaca_connectors__acct_alpaca" in {model.__table__.name for model in own}
+    for model in own:
+        assert _resolve_namespaces(model, namespace=None) == ["alpaca-connectors"], (
+            model.__table__.name
+        )
+
+
 def test_signal_and_ledger_updaters_are_bound_to_own_instances(monkeypatch) -> None:
     from alpaca_connectors.execution.services import MarketsExecutionLedger
     from alpaca_connectors.instances import (
