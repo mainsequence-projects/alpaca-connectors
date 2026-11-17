@@ -403,11 +403,7 @@ def give_portfolio_weights(
     return publish_provided_weights(configuration, observations)
 
 
-def _upsert_portfolio_row(
-    configuration: AlpacaETFPortfolioConfiguration,
-    *,
-    first_observed_at: dt.datetime,
-) -> Any:
+def _upsert_portfolio_row(configuration: AlpacaETFPortfolioConfiguration) -> Any:
     from etfhextractor.calendars import ensure_trading_calendar
     from msm.api.portfolios import Portfolio
 
@@ -418,11 +414,7 @@ def _upsert_portfolio_row(
         raise LookupError(
             f"Rebalance configuration {configuration.rebalance_configuration_uid!s} does not exist."
         )
-    backtest_days = max((dt.date.today() - first_observed_at.date()).days, 0)
-    calendar_row = ensure_trading_calendar(
-        rebalance.calendar_identifier,
-        backtest_start_days=backtest_days,
-    )
+    calendar_row = ensure_trading_calendar(rebalance.calendar_identifier)
     return Portfolio.upsert(
         unique_identifier=provided_portfolio_unique_identifier(configuration.uid),
         calendar_uid=calendar_row.uid,
@@ -499,9 +491,7 @@ def create_provided_weights_portfolio(
         )
         ensure_provided_signal_metadata(configuration)
         published = _publish_validated(configuration, normalized, assets)
-        portfolio_row = _upsert_portfolio_row(
-            configuration, first_observed_at=published.first_observed_at
-        )
+        portfolio_row = _upsert_portfolio_row(configuration)
         configuration = update_portfolio_configuration_row(
             configuration.uid,
             values={"portfolio_uid": uuid.UUID(str(portfolio_row.uid))},

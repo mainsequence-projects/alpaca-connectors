@@ -39,6 +39,26 @@ def configure_register_parser(parser: argparse.ArgumentParser) -> None:
     parser.set_defaults(handler=run_register_command)
 
 
+def configure_link_calendars_parser(parser: argparse.ArgumentParser) -> None:
+    parser.description = (
+        "Once per Environment (ADR 0026): link the Alpaca assets this project registered that "
+        "have no trading calendar to the calendar of their class (NYSE, or CRYPTO_24_7 for "
+        "crypto). ms-markets 4 refuses a price update for an asset without one. An asset that has "
+        "a calendar is never written. Without --execute it only reports how many assets each "
+        "calendar has and how many have no calendar."
+    )
+    parser.add_argument("--execute", action="store_true", help="Write the missing links.")
+    parser.set_defaults(handler=run_link_calendars_command)
+
+
+def run_link_calendars_command(args: argparse.Namespace) -> int:
+    from alpaca_connectors.operations.asset_calendars import link_alpaca_asset_calendars
+
+    report = link_alpaca_asset_calendars(execute=args.execute)
+    print(json.dumps(report, indent=2, sort_keys=True, default=str))
+    return 0 if report.get("succeeded") else 1
+
+
 def _parse_symbols(raw_symbols: str | None) -> list[str] | None:
     if not raw_symbols:
         return None

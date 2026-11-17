@@ -136,6 +136,10 @@ class AlpacaAssetRegistrationTests(unittest.TestCase):
                 "msm.api.assets.AssetSnapshots.publish",
                 side_effect=lambda rows: markets_calls.append(("asset-snapshots", list(rows))),
             ),
+            patch(
+                "etfhextractor.calendars.ensure_trading_calendar",
+                side_effect=lambda key: markets_calls.append(("calendar", [key])),
+            ),
         ):
             result = _register_alpaca_assets_batch(assets, {})
 
@@ -148,8 +152,11 @@ class AlpacaAssetRegistrationTests(unittest.TestCase):
         )
         self.assertEqual(
             [(name, len(values)) for name, values in markets_calls],
-            [("asset-type", 1), ("asset", 2), ("asset-snapshots", 2)],
+            [("asset-type", 1), ("calendar", 1), ("asset", 2), ("asset-snapshots", 2)],
         )
+        # The class's calendar is stored once, then every Asset payload names it (ADR 0026).
+        self.assertEqual(markets_calls[1], ("calendar", ["NYSE"]))
+        self.assertEqual({row["calendar_identifier"] for row in markets_calls[2][1]}, {"NYSE"})
         figi_upsert_many.assert_not_called()
         (details_call,) = bulk_upsert_model.call_args_list
         self.assertIs(details_call.kwargs["model"], AlpacaAssetDetailsTable)
@@ -496,6 +503,7 @@ class AlpacaAssetRegistrationTests(unittest.TestCase):
             ) as alpaca_details_upsert,
             patch("msm.api.assets.OpenFigiDetails.upsert") as figi_details_upsert,
             patch("msm.api.assets.AssetSnapshots.publish") as snapshots_publish,
+            patch("etfhextractor.calendars.ensure_trading_calendar") as ensure_calendar,
         ):
             asset_uid = _register_alpaca_asset(asset_record, match)
 
@@ -505,6 +513,8 @@ class AlpacaAssetRegistrationTests(unittest.TestCase):
             asset_upsert.call_args.kwargs["unique_identifier"],
             build_alpaca_unique_identifier(AAPL_ID),
         )
+        ensure_calendar.assert_called_once_with("NYSE")
+        self.assertEqual(asset_upsert.call_args.kwargs["calendar_identifier"], "NYSE")
         self.assertEqual(
             alpaca_details_upsert.call_args.kwargs["values"]["alpaca_asset_id"], AAPL_ID
         )

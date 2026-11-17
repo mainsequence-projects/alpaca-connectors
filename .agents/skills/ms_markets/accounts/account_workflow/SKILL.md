@@ -26,6 +26,8 @@ Use these adjacent skills when the task crosses their boundary:
   `.agents/skills/ms_markets/assets/asset_indexed_updaters/SKILL.md`
 - Portfolio construction examples and portfolio calculation workflows:
   `.agents/skills/ms_markets/portfolios/portfolio_workflow/SKILL.md`
+- Calendars: getting, reading and correcting one:
+  `.agents/skills/ms_markets/calendars/calendar_workflow/SKILL.md`
 - Bootstrap/catalog registration:
   `.agents/skills/ms_markets/platform/bootstrap_registration/SKILL.md`
 
@@ -127,7 +129,11 @@ Rules:
   holdings snapshot. Don't chain `Asset.upsert`, `AssetSnapshots.publish`,
   `Account.upsert` and `AccountHoldingsSnapshots.publish` for this. The call is
   idempotent on `(account.unique_identifier, holdings_date)`. It never changes an
-  existing asset's `asset_type`; a different type is a conflict. A provider sidecar is
+  existing asset's `asset_type`; a different type is a conflict. Give each asset its
+  `calendar_identifier`, the `unique_identifier` of its stored trading calendar: an
+  asset with no trading calendar is linked in the same transaction, and one that has a
+  calendar keeps it (ADR 0057). The calendar must exist first; an unknown one refuses
+  the call. A provider sidecar is
   written afterwards by the provider, with the returned account uid.
 
 ## Runtime Attachment
@@ -144,8 +150,8 @@ msm.start_engine(
         "AssetType",
         "Asset",
         "Calendar",
-        "CalendarDate",
-        "CalendarSession",
+        "CalendarSessionRule",
+        "CalendarException",
         "IndexType",
         "Index",
         "AssetSnapshotsStorage",

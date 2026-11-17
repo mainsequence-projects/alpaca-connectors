@@ -40,6 +40,13 @@ instructions are `.tau/SYSTEM.md`; its tools and skills are described in
   unique registered identity are reported and not registered
 - Alpaca `status` and `tradable` are stored provider facts, not registration gates; resolve exact
   symbol sets from one all-status bulk catalog request, never one provider request per symbol
+- every registration, Universe sync and account sync links each asset to the trading calendar of
+  its Alpaca class: `NYSE` for US equities and options, `CRYPTO_24_7` for crypto
+  ([ADR 0026](../adrs/0026_assets_are_registered_with_their_trading_calendar.md)); ms-markets 4
+  refuses a price update for an asset without one, and a missing calendar is stored first
+- once per Environment after the ms-markets 4 release, link the assets registered before it:
+  `alpaca-connectors asset link-calendars` reports each calendar's assets and how many have no
+  calendar, and `--execute` links only those; an asset that has a calendar is never written
 
 ## Asset Universes And Holdings Categories
 

@@ -29,7 +29,7 @@ from .account import (
 from .account import (
     configure_update_parser as configure_account_update_parser,
 )
-from .asset import configure_register_parser
+from .asset import configure_link_calendars_parser, configure_register_parser
 from .bars import (
     configure_configuration_create_parser,
     configure_configuration_delete_parser,
@@ -148,6 +148,12 @@ def build_parser() -> argparse.ArgumentParser:
     asset_commands = asset_parser.add_subparsers(dest="asset_command")
     configure_register_parser(
         asset_commands.add_parser("register", help="Register Alpaca US equity assets.")
+    )
+    configure_link_calendars_parser(
+        asset_commands.add_parser(
+            "link-calendars",
+            help="Once per Environment: link each Alpaca asset to its trading calendar.",
+        )
     )
 
     market_data_parser = top_level.add_parser(
@@ -318,7 +324,11 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _looks_like_asset_price_update_command(argv: Sequence[str]) -> bool:
-    return len(argv) >= 2 and argv[0] == "asset" and argv[1] not in {"register", "-h", "--help"}
+    return (
+        len(argv) >= 2
+        and argv[0] == "asset"
+        and argv[1] not in {"register", "link-calendars", "-h", "--help"}
+    )
 
 
 def _run_safely(operation) -> int:

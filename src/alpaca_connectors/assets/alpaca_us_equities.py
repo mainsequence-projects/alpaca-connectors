@@ -958,6 +958,27 @@ def _asset_type_registration_values(alpaca_asset: AlpacaAssetRecord) -> dict[str
     }
 
 
+def _trading_calendar(alpaca_asset: AlpacaAssetRecord) -> str:
+    from alpaca_connectors.assets.alpaca_asset_details import trading_calendar_from_alpaca_class
+
+    return trading_calendar_from_alpaca_class(alpaca_asset.asset_class)
+
+
+def ensure_trading_calendars(alpaca_assets: Iterable[AlpacaAssetRecord]) -> list[str]:
+    """Store the trading calendar of every asset class in ``alpaca_assets`` once (ADR 0026).
+
+    A registration names each asset's calendar by ``unique_identifier``; ms-markets refuses a
+    calendar that is not stored. One ``Calendar.filter`` per distinct calendar, and one
+    ``Calendar.create_from_pandas_calendar`` for a missing one. Returns the calendars.
+    """
+    from etfhextractor.calendars import ensure_trading_calendar
+
+    calendars = sorted({_trading_calendar(asset) for asset in alpaca_assets})
+    for calendar_identifier in calendars:
+        ensure_trading_calendar(calendar_identifier)
+    return calendars
+
+
 def _alpaca_detail_registration_values(
     alpaca_asset: AlpacaAssetRecord,
     *,
@@ -1027,13 +1048,16 @@ def account_registration_asset(alpaca_asset: AlpacaAssetRecord) -> dict[str, Any
     """One held asset as ms-markets' account registration takes it (ADR 0051).
 
     Markets creates the asset with its type when it is missing, and writes the snapshot only when
-    it differs from the asset's latest one; the connector never compares snapshots itself.
+    it differs from the asset's latest one; the connector never compares snapshots itself. It
+    links the asset to its trading calendar when the asset has none (ms-markets ADR 0057); the
+    caller stores the calendars first with ``ensure_trading_calendars``.
     """
     from alpaca_connectors.assets.alpaca_asset_details import build_alpaca_unique_identifier
 
     return {
         "unique_identifier": build_alpaca_unique_identifier(alpaca_asset.alpaca_asset_id),
         "asset_type": _asset_type_registration_values(alpaca_asset),
+        "calendar_identifier": _trading_calendar(alpaca_asset),
         "snapshot": {
             "name": alpaca_asset.name or None,
             "ticker": alpaca_asset.symbol,
@@ -1127,10 +1151,12 @@ def _register_alpaca_asset(
 
     asset_type_values = _asset_type_registration_values(alpaca_asset)
     AssetType.upsert(**asset_type_values)
+    (calendar_identifier,) = ensure_trading_calendars([alpaca_asset])
     canonical_identifier = build_alpaca_unique_identifier(alpaca_asset.alpaca_asset_id)
     asset = Asset.upsert(
         unique_identifier=canonical_identifier,
         asset_type=asset_type_values["asset_type"],
+        calendar_identifier=calendar_identifier,
     )
     refreshed_at = dt.datetime.now(tz=dt.UTC).replace(microsecond=0)
     upsert_alpaca_asset_details(
@@ -1163,7 +1189,8 @@ def _register_alpaca_assets_batch(
 
     Asset types, Assets, OpenFIGI details and asset snapshots go to Markets as one bulk call each
     (``upsert_many`` / ``AssetSnapshots.publish``); this project's details are one bulk upsert on
-    its own table.
+    its own table. Each Asset payload names the trading calendar of its Alpaca class, so every
+    asset of the batch, new or already registered, is linked to it (ms-markets ADR 0057).
     """
     if not alpaca_assets:
         return {}
@@ -1177,11 +1204,13 @@ def _register_alpaca_assets_batch(
         for values in (_asset_type_registration_values(asset) for asset in alpaca_assets)
     }
     AssetType.upsert_many(list(asset_type_values_by_key.values()))
+    ensure_trading_calendars(alpaca_assets)
 
     asset_values = [
         {
             "unique_identifier": build_alpaca_unique_identifier(asset.alpaca_asset_id),
             "asset_type": _asset_type_registration_values(asset)["asset_type"],
+            "calendar_identifier": _trading_calendar(asset),
         }
         for asset in alpaca_assets
     ]

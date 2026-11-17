@@ -252,18 +252,13 @@ def build_portfolio_graph(resolved: ResolvedPortfolioConfiguration) -> Portfolio
     valuation_source = build_alpaca_interpolated_prices(
         source_time_index_meta_table_uid=resolved.source_time_index_meta_table_uid,
         asset_identifiers=list(resolved.asset_identifiers),
-        calendar_identifier=rebalance.calendar_identifier,
         upsample_frequency_id=configuration.upsample_frequency_id,
         intraday_bar_interpolation_rule=configuration.intraday_bar_interpolation_rule,
     )
-    backtest_days = max((dt.date.today() - resolved.signal_start_time.date()).days, 0)
-    calendar_row = ensure_trading_calendar(
-        rebalance.calendar_identifier,
-        backtest_start_days=backtest_days,
-    )
+    calendar_row = ensure_trading_calendar(rebalance.calendar_identifier)
     if str(calendar_row.unique_identifier) != rebalance.calendar_identifier:
         raise RuntimeError(
-            "The materialized Portfolio calendar does not match the rebalance configuration."
+            "The stored Portfolio calendar does not match the rebalance configuration."
         )
     calendar_events = PortfolioCalendarEvents(
         config=PortfolioCalendarEventsConfiguration(

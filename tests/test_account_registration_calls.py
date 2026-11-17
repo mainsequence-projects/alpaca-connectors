@@ -99,6 +99,16 @@ class MarketsDouble:
         self.calls.append(f"{resource}.{operation}")
         if (resource, operation) == ("account", "get_by_uid"):
             return self.account.model_dump(mode="json")
+        if (resource, operation) == ("calendar", "filter"):
+            # The held assets' trading calendar is stored (ADR 0026).
+            return [
+                {
+                    "uid": str(uuid.uuid4()),
+                    "unique_identifier": arguments["unique_identifier"],
+                    "display_name": "NYSE trading sessions",
+                    "calendar_type": "TRADING",
+                }
+            ]
         raise AssertionError(f"Unexpected Markets row call {resource}.{operation}.")
 
     def register_account(self, request: Any) -> Any:
@@ -226,14 +236,17 @@ def _known_account(own_tables: OwnTables) -> None:
 # ------------------------------------------------------------------------------------------------
 # How many calls
 # ------------------------------------------------------------------------------------------------
-def test_registering_a_known_account_is_one_markets_call(markets, own_tables) -> None:
+def test_registering_a_known_account_is_one_calendar_read_and_one_markets_call(
+    markets, own_tables
+) -> None:
     _known_account(own_tables)
     client = _client(_position("AAPL", AAPL_ID, "10"), _position("SPY", SPY_ID, "3", "short"))
 
     result = _register(client, owner=OWNER, account_name="Paper")
 
-    # The registration read, one registerAccount, the details-row write: nothing else.
-    assert markets.calls == ["account.registration"]
+    # The registration read, the held assets' calendar read, one registerAccount, the
+    # details-row write: nothing else.
+    assert markets.calls == ["calendar.filter", "account.registration"]
     assert own_tables.operations == [
         f"select {ACCOUNT_DETAILS}",
         f"select {ASSET_DETAILS}",
@@ -249,9 +262,10 @@ def test_a_sync_is_one_registration_read_and_one_markets_call(markets, own_table
 
     result = capture_alpaca_account_holdings(ACCOUNT_UID, snapshot_time=WHEN, client=client)
 
-    # One registration read (the Account and its details row), one registerAccount, no writes:
-    # no held asset is registered again and no cash asset is ensured.
-    assert markets.calls == ["account.get_by_uid", "account.registration"]
+    # One registration read (the Account and its details row), one read of the held assets'
+    # calendar, one registerAccount, no writes: no held asset is registered again and no cash
+    # asset is ensured.
+    assert markets.calls == ["account.get_by_uid", "calendar.filter", "account.registration"]
     assert own_tables.operations == [f"select {ACCOUNT_DETAILS}", f"select {ASSET_DETAILS}"]
     assert own_tables.writes == []
     assert result.holdings_rows == 3
@@ -264,7 +278,7 @@ def test_new_held_assets_get_their_details_rows_after_the_call(markets, own_tabl
 
     _register(client)
 
-    assert markets.calls == ["account.registration"]
+    assert markets.calls == ["calendar.filter", "account.registration"]
     assert own_tables.operations == [
         f"select {ACCOUNT_DETAILS}",
         f"select {ASSET_DETAILS}",
@@ -298,6 +312,8 @@ def test_the_call_carries_the_account_every_held_asset_cash_and_the_positions(
     assets = {asset.unique_identifier: asset for asset in request.assets}
     assert set(assets) == {AAPL, SPY}
     assert assets[AAPL].asset_type.asset_type == "equity"
+    # Each held asset names its class's trading calendar; Markets links the ones without one.
+    assert {asset.calendar_identifier for asset in request.assets} == {"NYSE"}
     assert assets[AAPL].snapshot.model_dump() == {
         "name": "AAPL Name",
         "ticker": "AAPL",
@@ -466,7 +482,12 @@ def test_sending_a_registration_again_succeeds_and_updates_the_same_row(
     second = _register(client)
 
     assert first.account_uid == second.account_uid == str(ACCOUNT_UID)
-    assert markets.calls == ["account.registration", "account.registration"]
+    assert markets.calls == [
+        "calendar.filter",
+        "account.registration",
+        "calendar.filter",
+        "account.registration",
+    ]
     # The same holdings_date: Markets writes nothing the second time (ADR 0051).
     assert markets.requests[0].holdings_date == markets.requests[1].holdings_date
     account_writes = [write for write in own_tables.writes if write["table"] == ACCOUNT_DETAILS]

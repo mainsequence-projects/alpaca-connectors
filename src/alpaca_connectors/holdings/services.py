@@ -173,10 +173,13 @@ def register_account_holdings(
 
     from alpaca_connectors.assets.alpaca_us_equities import (
         account_registration_asset,
+        ensure_trading_calendars,
         write_alpaca_asset_details,
     )
     from alpaca_connectors.markets_api import register_account
 
+    # Markets refuses the whole registration when an asset names a calendar it does not store.
+    ensure_trading_calendars(holdings.assets)
     try:
         response = register_account(
             {

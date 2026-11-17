@@ -30,6 +30,16 @@ ASSET_TYPE_BY_ALPACA_CLASS = {
     "crypto_perp": "crypto_perpetual",
 }
 
+# The stored ms-markets calendar each Alpaca class trades on (ADR 0026). ms-markets 4 computes an
+# asset's price bars from its linked calendar and refuses a price update for an asset with none.
+# US equities and US equity options trade NYSE sessions; crypto trades every day.
+TRADING_CALENDAR_BY_ALPACA_CLASS = {
+    "us_equity": "NYSE",
+    "us_option": "NYSE",
+    "crypto": "CRYPTO_24_7",
+    "crypto_perp": "CRYPTO_24_7",
+}
+
 
 def normalize_alpaca_asset_id(value: uuid.UUID | str) -> uuid.UUID:
     """Return a validated Alpaca UUID."""
@@ -55,6 +65,18 @@ def asset_type_from_alpaca_class(asset_class: str) -> str:
         return ASSET_TYPE_BY_ALPACA_CLASS[normalized]
     except KeyError as exc:
         supported = ", ".join(sorted(ASSET_TYPE_BY_ALPACA_CLASS))
+        raise ValueError(
+            f"Unsupported Alpaca asset_class {asset_class!r}. Supported values: {supported}."
+        ) from exc
+
+
+def trading_calendar_from_alpaca_class(asset_class: str) -> str:
+    """The ``unique_identifier`` of the stored calendar an Alpaca class trades on."""
+    normalized = str(asset_class).strip().lower()
+    try:
+        return TRADING_CALENDAR_BY_ALPACA_CLASS[normalized]
+    except KeyError as exc:
+        supported = ", ".join(sorted(TRADING_CALENDAR_BY_ALPACA_CLASS))
         raise ValueError(
             f"Unsupported Alpaca asset_class {asset_class!r}. Supported values: {supported}."
         ) from exc

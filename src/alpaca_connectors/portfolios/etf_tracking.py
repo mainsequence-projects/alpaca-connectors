@@ -207,27 +207,23 @@ def build_alpaca_interpolated_prices(
     *,
     source_time_index_meta_table_uid: str,
     asset_identifiers: list[str],
-    calendar_identifier: str,
     upsample_frequency_id: str = "1d",
     intraday_bar_interpolation_rule: str = "ffill",
 ) -> Any:
-    """Build calendar-aware InterpolatedPrices sourced from registered Alpaca bars."""
+    """Build InterpolatedPrices sourced from registered Alpaca bars.
+
+    Each asset's bars follow the stored trading calendar it is linked to (ms-markets ADR 0056),
+    which registration sets from its Alpaca class (ADR 0026); the scope carries identifiers only,
+    and ms-markets refuses the run when an asset in it has no calendar.
+    """
     from msm_portfolios.contrib.prices.updaters import (
         InterpolatedPrices,
         InterpolatedPricesConfig,
     )
 
-    normalized_calendar_identifier = calendar_identifier.strip()
-    if not normalized_calendar_identifier:
-        raise ValueError("calendar_identifier must not be empty.")
-    asset_scope = [
-        {
-            "asset_identifier": asset_identifier,
-            "calendar": normalized_calendar_identifier,
-        }
-        for asset_identifier in sorted(set(asset_identifiers))
-    ]
     from alpaca_connectors.instances import interpolated_prices_storage_kwargs
+
+    asset_scope = sorted(set(asset_identifiers))
 
     return InterpolatedPrices(
         interpolation_config=InterpolatedPricesConfig(
@@ -359,11 +355,10 @@ def build_alpaca_etf_tracking_portfolio(
         account_uid=config.account_uid,
         prepared_plan=plan.universe_run_plan,
     )
-    calendar_row = ensure_trading_calendar(config.calendar_key, backtest_start_days=0)
+    calendar_row = ensure_trading_calendar(config.calendar_key)
     valuation_source = build_alpaca_interpolated_prices(
         source_time_index_meta_table_uid=plan.source_time_index_meta_table_uid,
         asset_identifiers=plan.universe.asset_identifiers,
-        calendar_identifier=str(calendar_row.unique_identifier),
         upsample_frequency_id=config.upsample_frequency_id,
         intraday_bar_interpolation_rule=config.intraday_bar_interpolation_rule,
     )

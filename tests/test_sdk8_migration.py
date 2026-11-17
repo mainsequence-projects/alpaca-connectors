@@ -5,7 +5,6 @@ from importlib.metadata import version
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-from etfhextractor.calendars import required_calendar_window
 from etfhextractor.portfolio_signal import ETFHoldingsSignal, ETFHoldingsSignalConfig
 from msm_portfolios.time_index.signals.storage import SignalWeightsStorage
 from packaging.specifiers import SpecifierSet
@@ -26,7 +25,7 @@ from alpaca_connectors.portfolios.etf_tracking import (
 def test_runtime_dependency_versions_match_the_sdk9_metatables_stack() -> None:
     assert version("mainsequence") in SpecifierSet(">=9.0.2,<10")
     assert version("mainsequence-metatable") in SpecifierSet(">=0.1.6,<0.2")
-    assert version("ms-markets") in SpecifierSet(">=3,<4")
+    assert version("ms-markets") in SpecifierSet(">=4.0.1,<5")
 
 
 def test_alpaca_bars_node_declares_sdk8_output_table() -> None:
@@ -92,16 +91,6 @@ def test_migration_metadata_includes_fk_dependencies_but_manages_only_project_ta
     }
 
 
-def test_required_calendar_window_includes_backtest_and_operational_buffers() -> None:
-    start, end = required_calendar_window(
-        backtest_start_days=60,
-        today=dt.date(2026, 9, 2),
-    )
-
-    assert start == dt.date(2026, 6, 4)
-    assert end == dt.date(2027, 9, 3)
-
-
 def test_portfolio_price_source_resolves_the_migration_catalog_identity() -> None:
     output_table = SimpleNamespace(
         uid="121d5cee-431d-474d-8cc0-7d2a0020124d",
@@ -123,7 +112,7 @@ def test_portfolio_price_source_resolves_the_migration_catalog_identity() -> Non
     )
 
 
-def test_interpolated_prices_receive_explicit_asset_calendar_scope() -> None:
+def test_interpolated_prices_scope_is_identifiers_and_bars_follow_each_asset_calendar() -> None:
     node = object()
 
     with patch(
@@ -133,21 +122,13 @@ def test_interpolated_prices_receive_explicit_asset_calendar_scope() -> None:
         result = build_alpaca_interpolated_prices(
             source_time_index_meta_table_uid="source-table-uid",
             asset_identifiers=["ALPACA::asset-b", "ALPACA::asset-a", "ALPACA::asset-a"],
-            calendar_identifier="NYSE",
         )
 
     assert result is node
+    # ms-markets 4 refuses a calendar in the scope; each asset's bars follow the stored calendar
+    # registration linked it to (ADR 0026).
     interpolation_config = interpolated_prices.call_args.kwargs["interpolation_config"]
-    assert interpolation_config.asset_list == [
-        {
-            "asset_identifier": "ALPACA::asset-a",
-            "calendar": "NYSE",
-        },
-        {
-            "asset_identifier": "ALPACA::asset-b",
-            "calendar": "NYSE",
-        },
-    ]
+    assert interpolation_config.asset_list == ["ALPACA::asset-a", "ALPACA::asset-b"]
 
 
 def test_alpaca_portfolio_uses_connector_owned_universe_signal() -> None:
@@ -228,7 +209,6 @@ def test_alpaca_portfolio_uses_connector_owned_universe_signal() -> None:
     build_prices.assert_called_once_with(
         source_time_index_meta_table_uid="source-table-uid",
         asset_identifiers=["ALPACA::asset-uuid"],
-        calendar_identifier="NYSE",
         upsample_frequency_id="1d",
         intraday_bar_interpolation_rule="ffill",
     )
