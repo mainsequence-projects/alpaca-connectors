@@ -294,9 +294,9 @@ cheaply, so the resolution never reads it from there. Instead:
   names it, or none has published) fails its run with the existing "resolves to no assets" error,
   and the bars preflight reports it.
 - **Order of the day.** Bars run at 00:00 UTC and portfolios at 02:00 UTC, so weights given during
-  a day get their bars before the next scheduled portfolio run. A caller who runs the portfolio at
-  once after adding an asset should run the bars update first; otherwise the run fails on missing
-  prices when `fail_on_missing_prices` is set.
+  a day get their bars before the next scheduled portfolio run. Amended on 2026-11-18 (issue #39):
+  every portfolio run first runs its bars configuration's update, so a caller no longer runs it
+  first.
 
 A provided-weights portfolio may name any enabled bars configuration, as an ETF portfolio may
 today. The `portfolios` source is the one that covers whatever weights it is given.

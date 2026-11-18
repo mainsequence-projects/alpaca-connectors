@@ -13,6 +13,10 @@ portfolio that cannot be adopted keeps working as before, on its own signal and 
 feed it names, and `portfolio adopt` never ends a portfolio or deletes a bars configuration
 (decisions 9 and 10).
 
+Amended again on 2026-11-18: deleting a portfolio deletes the signal definition it followed once
+no other portfolio follows it (issue #38, decision 5), and a portfolio run first fetches the bars
+its signal needs (issue #39).
+
 It builds on [ADR 0027](0027_one_portfolio_path.md): every portfolio here is built from weights
 an application provides, the one kind that remains.
 
@@ -371,7 +375,7 @@ flowchart LR
 flowchart LR
     start(["Delete portfolio P"]) --> held{"Any account's current<br/>target holds P?"}
     held -- "yes" --> refused(["Refused: nothing changes"])
-    held -- "no" --> finish["Retire the Portfolio, then delete<br/>the portfolio configuration<br/>Its bars configuration cascades<br/>Its signal definition stays"]
+    held -- "no" --> finish["Retire the Portfolio, then delete<br/>the portfolio configuration<br/>Its bars configuration cascades<br/>Its signal definition goes once<br/>no portfolio follows it"]
 ```
 
 ### Delete an account

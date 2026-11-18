@@ -289,8 +289,11 @@ def delete_account(account_uid: Any) -> AccountDeletion:
             raise AccountDeleteRefused(preflight.blockers)
         _clear_own_target(normalized)
         for configuration in _account_portfolios(normalized):
-            end_portfolio_configuration(configuration)
+            removal = end_portfolio_configuration(configuration)
             deletion.ended_portfolio_count += 1
+            # Its definition went with it, and its signal too when nothing kept it (issue #38).
+            if removal.signal is not None and removal.signal.get("state") == "deleted":
+                deletion.deleted_signal_uids.append(str(removal.signal["uid"]))
         for definition in _account_definitions(normalized):
             signal_uid = definition_signal_uid(definition)
             if not signal_kept_by_ended_portfolio(signal_uid):

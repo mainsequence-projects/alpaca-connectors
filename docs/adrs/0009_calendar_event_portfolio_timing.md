@@ -4,6 +4,11 @@
 
 Accepted
 
+Amended on 2026-11-18 for
+[issue #39](https://github.com/mainsequence-projects/alpaca-connectors/issues/39): a portfolio run
+first runs its bars configuration's update, so a run started right after new weights has the new
+assets' prices. The rest of execution is as below.
+
 ## Context
 
 The first portfolio implementation used `ImmediateSignal`, relabeled daily valuation observations
@@ -96,7 +101,8 @@ rows.
 - Portfolio Configuration CRUD round-trips bounded valuation-alignment fields and stores no Job
   schedule values.
 - Execution explicitly updates interpolation, calendar events, rebalance state, weights, and
-  portfolio valuation without rerunning signal extraction or raw bars.
+  portfolio valuation without rerunning signal extraction or raw bars. (Amended for issue #39:
+  it first runs its bars configuration's update.)
 - New weights use persisted market-event timestamps and new portfolio values use valuation-source
   timestamps; neither uses midnight normalization.
 - The project migration upgrades existing configuration rows without losing their Job or Portfolio

@@ -274,21 +274,26 @@ GET|PATCH|DELETE /v1/portfolio-rebalance-configurations/{configuration_uid}
   it takes weights on its own signal, keyed by its configuration UID, runs on the feed it names,
   and that feed keeps pricing it. Nothing ends it.
 - **Deleting ends it.** `DELETE` retires the ms-markets `Portfolio` (ms-markets ADR 0049), then
-  deletes the configuration with its own bars configuration, and answers `portfolio: {uid,
-  unique_identifier, state: "retired", retired_at}`. While an account's current target names the
-  portfolio it answers `409 portfolio_in_account_target` and changes nothing. The `Portfolio`, its
-  series, its signal and account history stay, recorded under the account, whose delete deletes
-  them; a retired portfolio is no longer offered as a target and is no longer computed.
+  deletes the configuration with its own bars configuration, then the signal definition it
+  followed once no other portfolio of the account follows it (issue #38). It answers `portfolio:
+  {uid, unique_identifier, state: "retired", retired_at}`, `signal_definition: {uid, state:
+  "deleted" | "followed" | "failed"}` and `signal: {uid, state: "deleted" | "kept"}`. `failed`
+  means the portfolio is deleted but the definition's own delete did not complete; delete the
+  definition from the account's signals. While an account's current target names the portfolio it
+  answers `409 portfolio_in_account_target` and changes nothing. The `Portfolio`, its series, the signal's rows and account history stay, recorded under
+  the account, whose delete deletes them; a retired portfolio is no longer offered as a target
+  and is no longer computed.
 - **No schedule or compute is stored.** The configuration's only operational field is
   `scheduled`. `PATCH {"scheduled": false}` pauses a portfolio without validating its references.
-  A run also needs an allowed preflight: the portfolio must be adopted, its own bars configuration
-  must be enabled, its rebalance configuration must exist, and its signal must have at least one
-  observation.
+  A run also needs an allowed preflight: its bars configuration (its own, or the feed a portfolio
+  not yet adopted names) must exist and be enabled, its rebalance configuration must exist, and its
+  signal must have at least one observation.
 
 There is no Environment request field. A run selects its configuration with
-`--configuration-uid <uid>` and updates persistent interpolation, calendar events, rebalance state,
-executed weights, and valuation without rerunning the raw Bars producer. Rebalance rows use actual
-configured market-event timestamps and select the latest observation at or before each event.
+`--configuration-uid <uid>`, first runs its bars configuration's update (issue #39; a failed update
+leaves it to value with the prices already stored), then updates persistent interpolation, calendar
+events, rebalance state, executed weights, and valuation. Rebalance rows use actual configured
+market-event timestamps and select the latest observation at or before each event.
 
 The configuration detail `GET` accepts `observation_limit` from 1 through 5,000 (default 2,500). It
 returns the resolved Bars, Rebalance, Job, and canonical portfolio/calendar summaries (read through
@@ -310,9 +315,10 @@ A `portfolios` bars configuration fetches every asset ever published by the live
 name it: a deleted portfolio or one whose `Portfolio` is retired drops out, a paused one still
 counts. The list is derived at every resolution from the portfolio configurations and the
 signal-asset table (`alpaca_connectors__signal_asset`), never from the signal weights series; the
-`resolve` action shows it. Bars run at 00:00 UTC and portfolios at 02:00 UTC, so weights given
-during a day get their bars before the next scheduled run. Run the bars update first when running
-a portfolio at once after adding an asset.
+`resolve` action shows it. Bars run at 00:00 UTC and portfolios at 02:00 UTC, and every portfolio
+run first runs its own bars configuration's update, so a run started at once after new weights
+has the new asset's prices (issue #39). A failed update does not stop the run: it values with the
+prices already stored, and its summary says so.
 
 ## Account Sync
 

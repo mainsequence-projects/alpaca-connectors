@@ -69,8 +69,8 @@ owns UTC scheduling and compute; pausing leaves the portfolio out of that Job's 
 and resuming puts it back. Neither defines the portfolio's market rebalance time.
 
 A run needs the shared Job and an allowed preflight: enabled linked configurations and published
-weights. Submit an authorized `run`, then inspect `alpaca_get_job_run_status` with the returned
-UID. Do not claim success from submission or automatically resubmit a failed run.
+weights. It fetches the bars its weights need first, so it can run right after new weights. Submit
+an authorized `run`, then inspect `alpaca_get_job_run_status` with the returned UID. Do not claim success from submission or automatically resubmit a failed run.
 
 ```json
 {"tool":"alpaca_manage_portfolio","arguments":{"operation":"run","configuration_uid":"CONFIGURATION_UID"}}
@@ -83,9 +83,12 @@ UID. Do not claim success from submission or automatically resubmit a failed run
 ## Delete
 
 Deletion requires the person's exact `DELETE <uid>` confirmation. It retires the portfolio, then
-deletes its configuration; it is refused with `portfolio_in_account_target` while an account's
-target names the portfolio, so that account's owner changes the target first. Retiring keeps the
-portfolio's series and history until its Account is deleted.
+deletes its configuration, and the signal definition it followed once no other portfolio follows
+it; it is refused with `portfolio_in_account_target` while an account's target names the
+portfolio, so that account's owner changes the target first. Retiring keeps the portfolio's series,
+history and signal until its Account is deleted. A `signal_definition` state of `failed` means the
+portfolio is deleted but its definition stays: say so; the account's owner deletes it from the
+account's signals.
 
 Portfolio/rebalance list limits are 1–100 and offsets are multiples of the fixed limit.
 Detail observation limits are 1–5000; run-history limits are 1–100.

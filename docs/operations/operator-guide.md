@@ -170,7 +170,8 @@ Every Alpaca account's API key and secret key are stored in application-encrypte
 account table ([ADR 0017](../adrs/0017_encrypted_account_credentials.md), MetaTables ADR 0025).
 The connector seals and opens them with a keyring held by one Environment Secret,
 `ALPACA_CONNECTORS_DATA_KEY`, which the workflow files grant as `value_reader` to the API, the bars
-Job and the credential migration Job. A workload that cannot read it fails every
+Job, the portfolio Job (its run fetches its bars first, issue #39) and the credential migration
+Job. A workload that cannot read it fails every
 Alpaca call with `credential_key_unavailable`; nothing is ever written or read in plaintext.
 
 Create the Secret once per Environment, before the first push of these workflows to it. The

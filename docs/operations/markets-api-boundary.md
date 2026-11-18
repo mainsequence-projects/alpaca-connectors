@@ -50,7 +50,7 @@ workload can use the project tables once they leave `mainsequence.markets`:
 |---|---|---|
 | `alpaca-connectors-migrate` | `editor` (holds it already) | registers and changes the project tables |
 | `alpaca` (API) | `editor` | writes project rows; publishes provided weights; runs the orders and trades updaters in-process |
-| `alpaca-portfolio` | `editor` | runs the interpolation, calendar-event, rebalance, weights and values updaters |
+| `alpaca-portfolio` | `editor` | runs its bars configuration's update (issue #39), then the interpolation, calendar-event, rebalance, weights and values updaters |
 | `alpaca-bars-update` | `data_viewer`, plus its table `editor` on the two bars tables (table roles move with the tables) | read configurations; run the bars updater |
 | `alpaca-portfolio-dispatcher` | `data_viewer` | preflight reads |
 | `alpaca-bars-update-dispatcher` | `data_viewer` | read the enabled, scheduled bar configurations (ADR 0021) |

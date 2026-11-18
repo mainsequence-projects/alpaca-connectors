@@ -338,9 +338,15 @@ def test_execution_updates_each_released_stage_without_tree_walk() -> None:
         patch(
             "alpaca_connectors.portfolios.datasets.register_portfolio_datasets"
         ) as register_datasets,
+        patch(
+            "alpaca_connectors.portfolios.execution.update_portfolio_bars",
+            return_value={"updated": True},
+        ) as bars_update,
     ):
         result = execute_portfolio_configuration(CONFIGURATION_UID)
 
+    # Its bars first (issue #39), then the released stages.
+    bars_update.assert_called_once_with(resolved)
     start_engine.assert_called_once_with()
     assert manager.mock_calls[0].args == ()
     assert manager.mock_calls[0].kwargs == {"update_tree": False}

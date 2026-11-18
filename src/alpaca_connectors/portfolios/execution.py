@@ -9,8 +9,9 @@ names.
 from __future__ import annotations
 
 import datetime as dt
+import logging
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from alpaca_connectors.assets.calendars import ensure_trading_calendar
@@ -29,6 +30,8 @@ from alpaca_connectors.portfolios.signal_history import (
     read_signal_observation_bounds,
     read_signal_observation_matrix,
 )
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,12 +67,14 @@ class PortfolioExecutionResult:
     rebalance_result: Any
     portfolio_weights_result: Any
     portfolio_result: Any
+    bars_update: dict[str, Any] = field(default_factory=dict)
 
     def summary(self) -> dict[str, Any]:
         return {
             **self.resolved.summary(),
             "portfolio_uid": self.portfolio_uid,
             "portfolio_unique_identifier": self.portfolio_unique_identifier,
+            "bars_update": dict(self.bars_update),
             "interpolation": _summarize_run_result(self.interpolation_result),
             "calendar_events": _summarize_run_result(self.calendar_events_result),
             "rebalance": _summarize_run_result(self.rebalance_result),
@@ -326,6 +331,35 @@ def build_portfolio_graph(resolved: ResolvedPortfolioConfiguration) -> Portfolio
     )
 
 
+def update_portfolio_bars(resolved: ResolvedPortfolioConfiguration) -> dict[str, Any]:
+    """Fetch the bars the run values with, before it values (issue #39).
+
+    Without it, a run started at once after new weights lacks the prices of an asset the signal
+    just gained until the 00:00 UTC bars run, and fails on missing prices. This is the bars Job's
+    own update for the run's bars configuration (the portfolio's own, or the feed a portfolio not
+    yet adopted names), which prices every asset the signal has published, incrementally. A
+    failed update (keys removed, Alpaca unavailable) never stops the run: it values with the
+    prices already stored, as it did before, and the summary says the update failed.
+    """
+    from alpaca_connectors.market_data import execute_market_data_update
+
+    bars_uid = str(resolved.bars_configuration.uid)
+    try:
+        result = execute_market_data_update(configuration_uid=bars_uid)
+    except Exception as exc:  # noqa: BLE001 - the run keeps what worked before (issue #39)
+        # The type only: a provider message can carry request context.
+        logger.warning(
+            "The portfolio's bars update failed (%s); the run values with the stored prices.",
+            type(exc).__name__,
+        )
+        return {"bars_configuration_uid": bars_uid, "updated": False, "error": type(exc).__name__}
+    return {
+        "bars_configuration_uid": bars_uid,
+        "updated": True,
+        "rows_persisted": int(result.get("rows_persisted") or 0),
+    }
+
+
 def execute_portfolio_configuration(configuration_uid: Any) -> PortfolioExecutionResult:
     """Run stored inputs through the released temporal execution stages.
 
@@ -338,6 +372,7 @@ def execute_portfolio_configuration(configuration_uid: Any) -> PortfolioExecutio
     # portfolio model set before configuration readers can initialize a smaller app runtime.
     start_portfolio_job_engine()
     resolved = resolve_portfolio_configuration(configuration_uid)
+    bars_update = update_portfolio_bars(resolved)
     graph = build_portfolio_graph(resolved)
     interpolation_result = graph.valuation_source.run(update_tree=False)
     calendar_events_result = graph.calendar_events.run(update_tree=False)
@@ -373,6 +408,7 @@ def execute_portfolio_configuration(configuration_uid: Any) -> PortfolioExecutio
         rebalance_result=rebalance_result,
         portfolio_weights_result=portfolio_weights_result,
         portfolio_result=portfolio_result,
+        bars_update=bars_update,
     )
 
 

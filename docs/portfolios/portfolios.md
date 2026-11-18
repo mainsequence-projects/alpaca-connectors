@@ -19,8 +19,9 @@ The owner application:
    trading calendar;
 2. creates a signal definition on its account with its own key, and gives it weights;
 3. creates portfolios of the account that follow the signal, as many as it wants;
-4. gives the signal new weights whenever it chooses them, and deletes the portfolios and the
-   signal when it is done.
+4. gives the signal new weights whenever it chooses them, and deletes the portfolios when it is
+   done: the signal definition goes with the last portfolio that follows it. A definition no
+   portfolio ever followed is deleted with `DELETE /v1/signal-definitions/{uid}`.
 
 Everything else is the connector's: the bars, the daily run, the valuation and the account sync.
 
@@ -136,13 +137,15 @@ in, whose rows name no account ([Alpaca Bars](../market_data/alpaca_bars.md)):
   signal-asset table, never from the signal weights series. A portfolio whose `Portfolio` is
   retired prices nothing; a paused one still counts. The `resolve` action
   (`POST /v1/market-data/bar-configurations/{uid}/actions/resolve`) shows the list a run would use.
-- **New weights need no edit.** The next bars run picks up an asset the signal was just given.
+- **New weights need no edit.** The portfolio's next run, or the next bars run, picks up an asset
+  the signal was just given.
 - **Shared prices.** Two accounts' configurations on the same profile write the same table; a
   portfolio is valued from it whichever account fetched a price.
-- **The order of the day.** Bars run at 00:00 UTC and portfolios at 02:00 UTC, so weights given
-  during a day get their bars before the next scheduled run. Run the bars update first when
-  running a portfolio at once after giving it a new asset; otherwise the run fails on missing
-  prices when `fail_on_missing_prices` is set.
+- **The order of the day.** Bars run at 00:00 UTC and portfolios at 02:00 UTC. Every portfolio
+  run, the one `actions/run` starts included, first runs its bars configuration's update, so a
+  run started at once after new weights has the new asset's prices (issue #39). A failed update
+  (keys removed, Alpaca unavailable) does not stop the run: it values with the prices already
+  stored, and the run's summary reports `bars_update`.
 
 ## Rebalance Configurations
 
@@ -193,9 +196,10 @@ PortfolioWeights + InterpolatedPrices ──> PortfoliosUpdater ─> PortfoliosT
   written through the Markets API.
 - **The assets priced** are every asset the portfolio ever held, from the signal-asset table, so a
   history it started with is valued, including assets that history already dropped.
-- **No producer runs as a dependency.** A run requires a published observation, then updates the
+- **One producer runs first.** A run requires a published observation, then runs its bars
+  configuration's update, the bars Job's own, with the account's keys (issue #39), then updates the
   interpolated prices, the calendar events, the rebalance decisions, the executed weights and the
-  valuation with `update_tree=False`. The bars have their own Job and schedule.
+  valuation with `update_tree=False`. The bars keep their own Job and schedule.
 
 ## Valuation
 
@@ -240,13 +244,20 @@ defines it (ms-markets ADR 0049), and so does every other delete, the CLI's incl
 1. **Retire the `Portfolio`** through `MarketsClient.retire_portfolio`. Markets refuses while an
    account's current target names the portfolio: the call answers
    `409 portfolio_in_account_target`, names no account, and changes nothing.
-2. **Forget the signal's assets** in the signal-asset table.
-3. **Delete the configuration row.**
+2. **Record it under its account**, so the account's delete deletes the retired `Portfolio` and
+   its signal ([ADR 0028](../adrs/0028_every_portfolio_belongs_to_one_account.md), decision 8).
+3. **Delete the configuration row**, and its own bars configuration with it.
+4. **Delete the signal definition it followed** once no other portfolio of the account follows it
+   (issue #38). The signal's rows stay while the retired `Portfolio` follows the signal, and its
+   key cannot be given again while they do. A failure here never fails the delete, which could not
+   be repeated once the row is gone: the answer says `failed`.
 
 The answer is `{configuration_uid, deleted: true, portfolio: {uid, unique_identifier, state,
-retired_at}}`, with `state` `retired`, or `absent` for a configuration whose `Portfolio` no longer
-exists. Retiring a retired portfolio does nothing, so a call that failed after the retirement is
-safe to repeat.
+retired_at}, signal_definition: {uid, state}, signal: {uid, state}}`. The portfolio's `state` is
+`retired`, or `absent` for a configuration whose `Portfolio` no longer exists; the definition's is
+`deleted`, `followed` while another portfolio follows it, or `failed` when its own delete did not
+complete (delete it from the account's signals); the signal's is `kept` or `deleted`. A portfolio not yet adopted has no definition: both are `null`. Retiring a retired
+portfolio does nothing, so a call that failed after the retirement is safe to repeat.
 
 Retiring deletes nothing. The `Portfolio`, its series, its catalog registration and every
 account's history stay. A retired portfolio cannot be named by a new target, gets no virtual-fund

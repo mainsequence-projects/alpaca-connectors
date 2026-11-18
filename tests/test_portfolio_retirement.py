@@ -79,7 +79,16 @@ def _removal(row, *, retire=None):
             "alpaca_connectors.portfolios.signal_definitions.get_signal_definition",
             return_value=SimpleNamespace(signal_key=str(CONFIGURATION_UID)),
         ),
+        patch(
+            "alpaca_connectors.portfolios.signal_definitions.delete_signal_definition",
+            calls.definition,
+        ),
     )
+    calls.definition.return_value = {
+        "uid": str(DEFINITION_UID),
+        "deleted": True,
+        "signal": {"uid": provided_signal_uid(CONFIGURATION_UID), "state": "kept"},
+    }
     return calls, patches
 
 
@@ -95,16 +104,17 @@ def _recorded():
 
 def test_the_owner_retires_the_portfolio_then_deletes_its_configuration() -> None:
     calls, patches = _removal(configuration())
-    with patches[0], patches[1], patches[2], patches[3], patches[4]:
+    with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5]:
         removal = delete_provided_weights_portfolio(CONFIGURATION_UID, owner=OWNER)
 
     # Retired first, so a refusal leaves everything as it was; recorded under its account, so the
-    # account's delete deletes the Portfolio and its signal (ADR 0028). The signal's rows stay:
-    # they belong to the definition, which other portfolios of the account may follow.
+    # account's delete deletes the Portfolio and its signal (ADR 0028). Then the definition it
+    # followed goes with it (issue #38); its signal's rows stay with the retired Portfolio.
     assert calls.mock_calls == [
         call.retire(str(PORTFOLIO_UID)),
         _recorded(),
         call.delete(CONFIGURATION_UID),
+        call.definition(str(DEFINITION_UID)),
     ]
     assert removal.summary() == {
         "configuration_uid": str(CONFIGURATION_UID),
@@ -115,7 +125,53 @@ def test_the_owner_retires_the_portfolio_then_deletes_its_configuration() -> Non
             "state": "retired",
             "retired_at": RETIRED_AT,
         },
+        "signal_definition": {"uid": str(DEFINITION_UID), "state": "deleted"},
+        "signal": {"uid": provided_signal_uid(CONFIGURATION_UID), "state": "kept"},
     }
+
+
+def test_a_definition_another_portfolio_follows_stays() -> None:
+    from alpaca_connectors.portfolios.signal_definitions import SignalDefinitionError
+
+    calls, patches = _removal(configuration())
+    calls.definition.side_effect = SignalDefinitionError(
+        "signal_followed", "Portfolios follow this signal; delete them first.", status_code=409
+    )
+    with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5]:
+        removal = delete_provided_weights_portfolio(CONFIGURATION_UID, owner=OWNER)
+
+    assert removal.summary()["signal_definition"] == {
+        "uid": str(DEFINITION_UID),
+        "state": "followed",
+    }
+    assert removal.summary()["signal"] is None
+
+
+def test_a_definition_whose_delete_fails_never_fails_the_portfolio_delete() -> None:
+    # The configuration row is gone by then, so a raised error could not be retried: say it.
+    calls, patches = _removal(configuration())
+    calls.definition.side_effect = ConnectionError("Markets is unavailable")
+    with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5]:
+        removal = delete_provided_weights_portfolio(CONFIGURATION_UID, owner=OWNER)
+
+    assert calls.delete.call_args == call(CONFIGURATION_UID)
+    assert removal.summary()["portfolio"]["state"] == "retired"
+    assert removal.summary()["signal_definition"] == {
+        "uid": str(DEFINITION_UID),
+        "state": "failed",
+    }
+    assert removal.summary()["signal"] is None
+
+
+def test_a_portfolio_not_yet_adopted_has_no_definition_to_delete() -> None:
+    calls, patches = _removal(
+        configuration(account_uid=None, signal_definition_uid=None, bars_configuration_uid=None)
+    )
+    with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5]:
+        removal = delete_provided_weights_portfolio(CONFIGURATION_UID, owner=OWNER)
+
+    calls.definition.assert_not_called()
+    assert removal.summary()["signal_definition"] is None
 
 
 def test_a_portfolio_an_account_targets_is_refused_and_nothing_changes() -> None:
@@ -127,6 +183,7 @@ def test_a_portfolio_an_account_targets_is_refused_and_nothing_changes() -> None
         patches[2],
         patches[3],
         patches[4],
+        patches[5],
         pytest.raises(ProvidedWeightsError) as raised,
     ):
         delete_provided_weights_portfolio(CONFIGURATION_UID, owner=OWNER)
@@ -146,6 +203,7 @@ def test_only_the_owner_ends_it() -> None:
         patches[2],
         patches[3],
         patches[4],
+        patches[5],
         pytest.raises(PortfolioOwnedByAnotherError),
     ):
         delete_provided_weights_portfolio(
@@ -157,7 +215,7 @@ def test_only_the_owner_ends_it() -> None:
 
 def test_a_configuration_without_a_portfolio_is_deleted_without_retiring() -> None:
     calls, patches = _removal(configuration(portfolio_uid=None))
-    with patches[0], patches[1], patches[2], patches[3], patches[4]:
+    with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5]:
         removal = delete_provided_weights_portfolio(CONFIGURATION_UID, owner=OWNER)
 
     calls.retire.assert_not_called()
@@ -211,6 +269,7 @@ def test_delete_route_retires_the_portfolio(api_client, local_caller) -> None:
         patches[2],
         patches[3],
         patches[4],
+        patches[5],
     ):
         response = api_client.delete(f"/v1/portfolio-configurations/{CONFIGURATION_UID}")
 
@@ -232,6 +291,7 @@ def test_delete_route_answers_409_while_an_account_targets_it(api_client, local_
         patches[2],
         patches[3],
         patches[4],
+        patches[5],
     ):
         response = api_client.delete(f"/v1/portfolio-configurations/{CONFIGURATION_UID}")
 
@@ -275,6 +335,7 @@ def test_the_cli_ends_any_portfolio_for_the_operator() -> None:
         patches[2],
         patches[3],
         patches[4],
+        patches[5],
     ):
         assert (
             run_delete_command(Namespace(configuration_uid=str(CONFIGURATION_UID), execute=True))
@@ -285,4 +346,5 @@ def test_the_cli_ends_any_portfolio_for_the_operator() -> None:
         call.retire(str(PORTFOLIO_UID)),
         _recorded(),
         call.delete(CONFIGURATION_UID),
+        call.definition(str(DEFINITION_UID)),
     ]

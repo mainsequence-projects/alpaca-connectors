@@ -20,6 +20,7 @@ publishes to its own signal, keyed by its configuration UID, and runs on the bar
 from __future__ import annotations
 
 import datetime as dt
+import logging
 import math
 import numbers
 import uuid
@@ -40,6 +41,8 @@ PROVIDED_PORTFOLIO_PREFIX = "ALPACA_PORTFOLIO__"
 OWN_BARS_SOURCE = "portfolios"
 OWN_BARS_SUFFIX = " prices"
 UTC = dt.timezone.utc
+
+logger = logging.getLogger(__name__)
 
 
 class ProvidedWeightsError(Exception):
@@ -347,6 +350,13 @@ class PortfolioRemoval:
     portfolio_unique_identifier: str
     portfolio_state: str
     retired_at: dt.datetime | None
+    # The definition it followed: ``deleted`` with it, ``followed`` by another portfolio, or
+    # ``failed``: the portfolio is deleted, and the definition's own delete did not complete.
+    signal_definition_uid: str | None = None
+    signal_definition_state: str | None = None
+    # Its signal's rows, when the definition went: ``deleted``, or ``kept`` while a retired
+    # `Portfolio` still follows the signal.
+    signal: dict[str, Any] | None = None
 
     def summary(self) -> dict[str, Any]:
         return {
@@ -358,6 +368,12 @@ class PortfolioRemoval:
                 "state": self.portfolio_state,
                 "retired_at": self.retired_at,
             },
+            "signal_definition": (
+                {"uid": self.signal_definition_uid, "state": self.signal_definition_state}
+                if self.signal_definition_uid is not None
+                else None
+            ),
+            "signal": self.signal,
         }
 
 
@@ -379,6 +395,49 @@ def ended_portfolio_account_uid(configuration: AlpacaPortfolioConfiguration) -> 
     return str(bars.account_uid)
 
 
+def _end_followed_definition(
+    configuration: AlpacaPortfolioConfiguration,
+) -> tuple[str | None, str | None, dict[str, Any] | None]:
+    """Delete the definition the ended portfolio followed once no portfolio follows it.
+
+    Issue #38: a portfolio is the connector's, and so is what it is made of, so the application
+    does not delete the definition in a second call. Its signal's rows go as
+    ``delete_signal_rows`` decides: kept while a retired `Portfolio` still follows the signal,
+    which the one just retired does, else deleted. A definition another portfolio of the account
+    still follows stays, and goes with the last of them. Answers ``(uid, state, signal)``.
+
+    The portfolio is already deleted when this runs, so a failure here never fails its delete,
+    which a retry could not repeat: the answer says ``failed``, and the definition, which no
+    portfolio follows any more, is deleted from the account's signals.
+    """
+    from alpaca_connectors.portfolios.signal_definitions import (
+        SignalDefinitionError,
+        delete_signal_definition,
+    )
+
+    if configuration.signal_definition_uid is None:
+        return None, None, None
+    uid = str(configuration.signal_definition_uid)
+    try:
+        result = delete_signal_definition(uid)
+    except SignalDefinitionError as exc:
+        if exc.code == "signal_followed":
+            return uid, "followed", None
+        reason = exc.code
+    except LookupError:
+        return uid, "deleted", None  # An earlier, interrupted attempt deleted it.
+    except Exception as exc:  # noqa: BLE001 - reported, never raised: the portfolio is gone
+        reason = type(exc).__name__
+    else:
+        return uid, "deleted", result["signal"]
+    logger.warning(
+        "The portfolio is deleted, but its signal definition's delete failed (%s); delete the "
+        "definition from the account's signals.",
+        reason,
+    )
+    return uid, "failed", None
+
+
 def end_portfolio_configuration(
     configuration: AlpacaPortfolioConfiguration,
 ) -> PortfolioRemoval:
@@ -389,9 +448,10 @@ def end_portfolio_configuration(
     ``409 portfolio_in_account_target`` and nothing changes. A configuration whose `Portfolio` no
     longer exists answers ``absent``. The retired `Portfolio` and the signal it followed are
     recorded under the account, which deletes them when it is deleted; then the configuration
-    row is deleted, and its own bars configuration with it. The `Portfolio`, its series, its
-    signal and account history stay. Retiring a retired portfolio does nothing, so a retry after
-    a partial failure is safe. It checks no owner: its callers do.
+    row is deleted, and its own bars configuration with it, then the signal definition it
+    followed once no other portfolio follows it (issue #38). The `Portfolio`, its series, its
+    signal's rows and account history stay. Retiring a retired portfolio does nothing, so a retry
+    after a partial failure is safe. It checks no owner: its callers do.
     """
     from msm.api.remote import MarketsConflictError
 
@@ -428,12 +488,16 @@ def end_portfolio_configuration(
                 signal_uid=portfolio_signal_uid(configuration),
             )
     delete_portfolio_configuration_row(configuration.uid)
+    definition_uid, definition_state, signal = _end_followed_definition(configuration)
     return PortfolioRemoval(
         configuration_uid=str(configuration.uid),
         portfolio_uid=portfolio_uid,
         portfolio_unique_identifier=provided_portfolio_unique_identifier(configuration.uid),
         portfolio_state=state,
         retired_at=retired_at,
+        signal_definition_uid=definition_uid,
+        signal_definition_state=definition_state,
+        signal=signal,
     )
 
 

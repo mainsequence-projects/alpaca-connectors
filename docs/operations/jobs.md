@@ -142,10 +142,12 @@ alpaca-connectors portfolio run <PORTFOLIO_CONFIGURATION_UID>
 alpaca-connectors portfolio runs <PORTFOLIO_CONFIGURATION_UID>
 ```
 
-Execution reads the portfolio's published observations, updates the configuration-derived
-persistent `InterpolatedPrices`, and calculates `PortfoliosUpdater` with dependency traversal
-disabled. It does not rerun the raw Bars updater. Revision `0010` and the configuration-derived
-interpolation storage must be migrated before the first live run. See
+Execution first runs its bars configuration's update, so an asset the signal just gained is priced
+(issue #39); a failed update leaves the run to value with the prices already stored. It then reads
+the portfolio's published observations, updates the configuration-derived persistent
+`InterpolatedPrices`, and calculates `PortfoliosUpdater` with dependency traversal disabled.
+Revision `0010` and the configuration-derived interpolation storage must be migrated before the
+first live run. See
 [ADR 0008](../adrs/0008_portfolio_configuration_and_job_ownership.md).
 
 Prepare that dynamic storage through the supported migration wrapper:

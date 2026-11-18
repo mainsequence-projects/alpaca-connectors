@@ -250,6 +250,11 @@ class AgentArtifactsTests(unittest.TestCase):
             resources["alpaca-connectors-agent"]["access"],
             {"resources": [{"key": "alpaca", "policy": "user"}]},
         )
+        # A portfolio run fetches its bars first with the account's keys (issue #39).
+        self.assertEqual(
+            resources["alpaca-portfolio"]["access"]["secrets"],
+            [{"name": "ALPACA_CONNECTORS_DATA_KEY", "policy": "value_reader"}],
+        )
 
     def test_agent_workflow_disables_generic_tool_sources(self) -> None:
         workflow = yaml.safe_load(WORKFLOW_PATH.read_text(encoding="utf-8"))

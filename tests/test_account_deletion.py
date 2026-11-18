@@ -45,10 +45,12 @@ def _run(
     registration=True,
     registration_values=None,
     priced=(),
+    ended_signal=None,
 ):
     """Delete the account with Markets and storage replaced; return the recorder."""
     calls = MagicMock()
     calls.secrets.return_value = (["ALPACA_CONNECTORS__API_KEY"], [])
+    calls.end_portfolio.return_value = SimpleNamespace(signal=ended_signal)
     portfolio = SimpleNamespace(uid=CONFIGURATION, portfolio_uid=PORTFOLIO)
     definitions = [
         SimpleNamespace(uid="definition-followed", signal_key="followed"),
@@ -159,6 +161,13 @@ def test_the_account_and_all_it_owns_go_in_the_order_markets_keys_impose() -> No
     assert result.deleted_portfolio_uids == [str(PORTFOLIO)]
     assert "signal-kept" in result.kept_signal_uids
     assert {"signal-free", "signal-followed"} <= set(result.deleted_signal_uids)
+
+
+@pytest.mark.parametrize(("state", "reported"), [("deleted", True), ("kept", False)])
+def test_a_signal_its_portfolio_delete_deleted_is_reported(state, reported) -> None:
+    # Ending a portfolio deletes its definition, and the signal once nothing keeps it (#38).
+    result, _ = _run(ended_signal={"uid": "signal-ended", "state": state})
+    assert ("signal-ended" in result.deleted_signal_uids) is reported
 
 
 @pytest.mark.parametrize(

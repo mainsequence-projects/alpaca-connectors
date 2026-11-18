@@ -1150,3 +1150,50 @@ def test_the_scheduled_run_includes_portfolios_not_yet_adopted() -> None:
     # Only the scheduled flag decides (ADR 0028, as amended 2026-11-18).
     assert "scheduled IS true" in " ".join(where.split())
     assert "account_uid" not in where and "signal_definition_uid" not in where
+
+
+def test_a_run_fetches_the_bars_its_signal_needs_before_it_values() -> None:
+    # Issue #39: a run started at once after new weights brings its prices itself.
+    from alpaca_connectors.portfolios import execution
+
+    resolved = SimpleNamespace(bars_configuration=SimpleNamespace(uid=BARS_UID))
+    with patch(
+        "alpaca_connectors.market_data.execute_market_data_update",
+        return_value={"rows_persisted": 12},
+    ) as update:
+        assert execution.update_portfolio_bars(resolved) == {
+            "bars_configuration_uid": str(BARS_UID),
+            "updated": True,
+            "rows_persisted": 12,
+        }
+    update.assert_called_once_with(configuration_uid=str(BARS_UID))
+
+    # A failed update never stops the run: it values with the stored prices, as before.
+    with patch(
+        "alpaca_connectors.market_data.execute_market_data_update",
+        side_effect=RuntimeError("Alpaca said no with secret context"),
+    ):
+        answer = execution.update_portfolio_bars(resolved)
+    assert answer == {
+        "bars_configuration_uid": str(BARS_UID),
+        "updated": False,
+        "error": "RuntimeError",
+    }
+
+
+def test_the_bars_update_comes_before_the_valuation() -> None:
+    from alpaca_connectors.portfolios import execution
+
+    order = MagicMock()
+    resolved = SimpleNamespace(bars_configuration=SimpleNamespace(uid=BARS_UID))
+    order.resolve.return_value = resolved
+    order.graph.side_effect = RuntimeError("stop after the order is known")
+    with (
+        patch("alpaca_connectors.runtime.start_portfolio_job_engine"),
+        patch.object(execution, "resolve_portfolio_configuration", order.resolve),
+        patch.object(execution, "update_portfolio_bars", order.bars),
+        patch.object(execution, "build_portfolio_graph", order.graph),
+        pytest.raises(RuntimeError, match="stop after"),
+    ):
+        execution.execute_portfolio_configuration(CONFIGURATION_UID)
+    assert [name for name, *_ in order.mock_calls] == ["resolve", "bars", "graph"]

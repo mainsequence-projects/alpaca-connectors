@@ -130,12 +130,17 @@ resources:
 # migration; its launcher's schema gate (ADR 0012) covers that gap.
 - key: alpaca-portfolio
   kind: job
+  # A run first fetches the bars its signal needs with its account's stored keys (issue #39,
+  # ADR 0017), so it reads the keyring Secret as the bars Job does.
   access:
     branches:
     - repository: MetaTables
       policy: reader
     - repository: MainSequenceMarkets
       policy: reader
+    secrets:
+    - name: ALPACA_CONNECTORS_DATA_KEY
+      policy: value_reader
   spec:
     name: Alpaca Portfolio
     description: Run one portfolio configuration (--configuration-uid).
