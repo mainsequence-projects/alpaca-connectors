@@ -272,13 +272,11 @@ class ProviderAccountDetails(ProjectStorageNameMixin, AlpacaMarketsMetaTableMixi
             ),
         },
     )
-    # The four Secret reference columns of ADR 0011 (superseded by ADR 0017) are no longer mapped:
-    # nothing reads or writes them, and revision 0030 drops them (issue #13).
+    # Revision 0030 dropped the four Secret reference columns of ADR 0011 (issue #13).
     credential_source: Mapped[str] = mapped_column(
         String(16),
         nullable=False,
-        # Every write names it; revision 0030 replaces this transition default (issue #13).
-        server_default=text("'external'"),
+        # Every write names it; revision 0030 dropped the transition default (issue #13).
         info={
             "label": "Credential source",
             "description": (

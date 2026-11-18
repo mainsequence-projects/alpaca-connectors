@@ -17,7 +17,8 @@ Implementation status: implemented in the connector. The transition ended on 202
 credential migration ran in the Environment `main` deploys to on 2026-11-04, which now holds no
 registration to migrate (operator guide, "Rollout record"). The migration, its Job, its command,
 `account/legacy_secrets.py` and the `external` credential source were then removed, and nothing
-maps the four Secret reference columns; revision `0030` drops them once that release is serving.
+maps the four Secret reference columns; revision `0030`, shipped in the release after, drops
+them and the `'external'` default of `credential_source`.
 `platform_secrets.py` stays: importing keys from Secrets named by the CLI or the Agent reads them
 (`imported`), and the CLI and the Agent take no key values (see [Transition](#transition)).
 

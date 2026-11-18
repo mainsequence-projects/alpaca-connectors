@@ -232,5 +232,6 @@ Checked on 2026-11-18 in the Environment `main` deploys to (issue #12):
 - No registration is left to migrate or review: the Environment holds none, and no Secret with
   the `ALPACA_CONNECTORS__` prefix remains. The ADR 0019 owner review has nothing to check.
 
-The credential migration, its Job and its command were then removed (issue #13); revision `0030`
-drops the four Secret reference columns once the release that no longer reads them is serving.
+The credential migration, its Job and its command were then removed (issue #13), and revision
+`0030`, in the release after the one that stopped reading them, drops the four Secret reference
+columns. It refuses to run while a registration keeps its keys only in Secrets.
