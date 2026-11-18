@@ -736,7 +736,6 @@ def test_workflow_declares_one_job_and_one_dispatcher_per_kind_outside_the_steps
     # No other configuration Job is declared any more (ADR 0027).
     assert {key for key in resources if key not in {"alpaca", "alpaca-connectors-agent"}} == {
         "alpaca-connectors-migrate",
-        "alpaca-credential-migration",
         "alpaca-portfolio",
         "alpaca-portfolio-dispatcher",
     }

@@ -249,29 +249,6 @@ error and does no work. Do not weaken a launcher or move a configuration into an
 variable to work around a missing argument; repeat the smoke test with a real configuration
 instead.
 
-## Credential Migration Job
-
-The API workflow also declares the one-off `alpaca-credential-migration` Job
-(`src/jobs/migrate_account_credentials.py`, [ADR 0017](../adrs/0017_encrypted_account_credentials.md)).
-No step references it and it has no schedule. After revision `0018` has been applied and the
-`ALPACA_CONNECTORS_DATA_KEY` Secret exists, an operator runs it once per Environment: first as a
-dry run, then with `--execute`, which copies every registration's keys from its Main Sequence
-Secrets into the encrypted account columns and deletes the Secrets this application created.
-The launcher starts with the schema gate, prints counts, Secret names and reasons (never a key
-value), and exits non-zero when a registration is blocked:
-
-```bash
-mainsequence code-repository jobs run <JOB_UID>
-```
-
-```bash
-mainsequence code-repository jobs run <JOB_UID> -- --execute
-```
-
-Like the API and the bars Job, it declares `value_reader` on the Secret in its
-`access.secrets`; the schema migration Job, the portfolio Job and the dispatchers do not read keys
-and have no such grant.
-
 ## API Invocation And Observation
 
 The FastAPI update action performs a read-only resolution preflight and submits the canonical Job:
@@ -353,7 +330,6 @@ In each Environment where the project runs:
    | `alpaca-portfolio` | `editor` |
    | `alpaca-bars-update` | `data_viewer`, plus table `editor` on `alpaca_connectors__bars_1d_sip_all` and `alpaca_connectors__bars_1d_iex_raw` |
    | `alpaca-portfolio-dispatcher`, `alpaca-bars-update-dispatcher` | `data_viewer` |
-   | `alpaca-credential-migration` (one-off) | `data_writer` |
    | `alpaca-connectors-agent` | none: its tools run in the API |
 
    The Markets contract instances are also in `alpaca-connectors-markets`
@@ -381,7 +357,7 @@ selects ms-markets' remote row backend (`alpaca_connectors.runtime.use_markets_a
 its own `alpaca-connectors` tables, and reads and writes Markets registries with `msm.api` row
 calls, `AccountHoldingsSnapshots`, `AssetSnapshots` and `PortfolioDatasets`. In each Environment
 the workflows grant every resource that calls Markets (the API, the portfolio Job and its
-dispatcher, the bars Job and its dispatcher, and the credential migration) `reader` on the
+dispatcher, and the bars Job and its dispatcher) `reader` on the
 `MainSequenceMarkets` branch, which lets them find the Markets API and write through it; the
 migration Job and the Agent do not call it.
 

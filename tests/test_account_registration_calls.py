@@ -22,7 +22,6 @@ from test_account_services import (
     EXTERNAL_NAMES,
     StubTradingClient,
     _imported,
-    _legacy_registration,
     _stub_account,
 )
 from test_alpaca_us_equities import alpaca_catalog_asset
@@ -454,22 +453,6 @@ def test_another_owners_account_is_refused_before_any_markets_call(markets, own_
 
     assert markets.calls == []
     assert own_tables.operations == [f"select {ACCOUNT_DETAILS}"]
-
-
-def test_the_one_registration_read_finds_legacy_secret_references(markets, own_tables) -> None:
-    own_tables.account_details = {
-        **_legacy_registration(),
-        "account_unique_identifier": UNIQUE_IDENTIFIER,
-    }
-
-    with patch(
-        "alpaca_connectors.account.services.delete_legacy_managed_secrets", return_value=([], [])
-    ) as delete_legacy:
-        _register(_client(_position("AAPL", AAPL_ID, "10")))
-
-    assert own_tables.operations.count(f"select {ACCOUNT_DETAILS}") == 1
-    (references,) = delete_legacy.call_args.args
-    assert references.api_key_secret_uid == "managed-api-uid"
 
 
 def test_sending_a_registration_again_succeeds_and_updates_the_same_row(

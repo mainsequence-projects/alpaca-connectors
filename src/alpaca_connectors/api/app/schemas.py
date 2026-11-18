@@ -315,10 +315,9 @@ class AccountResponse(BaseModel):
     account_name: str
     is_paper: bool
     account_is_active: bool
-    credential_source: Literal["managed", "imported", "external"] = "external"
-    # False after the owner removed the keys (``credentials_removed``) or for a registration made
-    # before revision 0018 that the credential migration has not copied yet; the keys themselves
-    # are never part of a response.
+    credential_source: Literal["managed", "imported"] = "managed"
+    # False after the owner removed the keys (``credentials_removed``); the keys themselves are
+    # never part of a response.
     credentials_stored: bool = True
     credentials_removed: bool = False
     credentials_updated_at: Any | None = None

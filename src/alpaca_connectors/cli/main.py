@@ -18,9 +18,6 @@ from .account import (
     configure_list_parser as configure_account_list_parser,
 )
 from .account import (
-    configure_migrate_credentials_parser as configure_account_migrate_credentials_parser,
-)
-from .account import (
     configure_refresh_parser as configure_account_refresh_parser,
 )
 from .account import (
@@ -157,12 +154,6 @@ def build_parser() -> argparse.ArgumentParser:
     )
     configure_account_delete_parser(
         account_commands.add_parser("delete", help="Delete an account and everything it owns.")
-    )
-    configure_account_migrate_credentials_parser(
-        account_commands.add_parser(
-            "migrate-credentials",
-            help="One-time: copy account keys from Main Sequence Secrets into the account row.",
-        )
     )
     configure_account_backfill_listing_fields_parser(
         account_commands.add_parser(

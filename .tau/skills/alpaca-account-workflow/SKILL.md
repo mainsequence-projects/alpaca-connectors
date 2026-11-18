@@ -16,8 +16,7 @@ call `alpaca_project_state` with empty arguments. No shell or direct table-write
   The person enters keys on the Alpaca site, not in chat.
 - Existing Main Sequence Secret names the person gives you are supported: the API reads both
   Secrets once, stores the keys encrypted on the Account, and keeps no name. There is no tool
-  that lists Secrets; never guess a name. Names beginning `ALPACA_CONNECTORS__` cannot be
-  imported.
+  that lists Secrets; never guess a name.
 - `environment: paper | live` is Alpaca brokerage access, not an Organization Environment
   selector. Platform Environment resolution is automatic.
 - Creation always registers missing position Assets, the canonical ms-markets currency Asset if

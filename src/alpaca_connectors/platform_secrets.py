@@ -96,23 +96,10 @@ def read_platform_secret_value(secret_name: str) -> str:
     )
 
 
-def delete_platform_secret(secret_uid: str, *, secret_name: str) -> None:
-    """Delete one Secret by UID."""
-    import mainsequence.client as msc
-
-    try:
-        msc.Secret.destroy_by_uid(secret_uid)
-    except Exception as exc:
-        raise PlatformSecretAccessError(
-            f"Main Sequence Secret {secret_name!r} could not be deleted by this runtime."
-        ) from exc
-
-
 __all__ = [
     "PlatformSecretAccessError",
     "PlatformSecretNotFoundError",
     "PlatformSecretValueMissingError",
-    "delete_platform_secret",
     "read_platform_secret_value",
     "read_platform_secret_value_by_uid",
     "resolve_platform_secret_uid",

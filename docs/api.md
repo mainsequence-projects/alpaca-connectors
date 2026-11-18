@@ -474,11 +474,9 @@ for example after a client timeout, succeeds; a held asset that Markets stores w
 type answers `409 action_conflict` and writes nothing.
 Responses expose `credential_source`, `credentials_stored`, `credentials_removed` and
 `credentials_updated_at`/`_by_user_uid`; never values, Secret names or the key fingerprint.
-`credentials_removed` is true once the owner removed the keys; `credentials_stored` is false
-then, and for a registration made before revision `0018` that the credential migration has not
-copied yet. Removing the keys and deleting the account report `deleted_secrets` and `warnings`,
-empty unless the registration predated revision `0018`
-([below](#removing-keys-and-deleting-an-account)).
+`credentials_removed` is true once the owner removed the keys, and `credentials_stored` is false
+then ([below](#removing-keys-and-deleting-an-account)). `credential_source` is `managed` or
+`imported`.
 
 Alpaca rejecting the keys returns `400 alpaca_credentials_rejected` without provider text. A
 registration whose keys have not been migrated yet returns `409 account_credentials_missing`; an

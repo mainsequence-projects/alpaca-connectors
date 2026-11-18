@@ -45,9 +45,7 @@ REGISTRATION = {
     "account_name": "Paper",
     "is_paper": True,
     "account_is_active": True,
-    "credential_source": "external",
-    "api_key_secret_name": "ALPACA_API_KEY",
-    "secret_key_secret_name": "ALPACA_SECRET_KEY",
+    "credential_source": "imported",
 }
 EXTERNAL_CREDENTIALS = {
     "source": "external",

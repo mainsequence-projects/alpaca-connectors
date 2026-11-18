@@ -12,12 +12,10 @@ from alpaca_connectors.account import api_key_fingerprint
 from alpaca_connectors.account.credentials import (
     CREDENTIAL_SOURCE_IMPORTED,
     CREDENTIAL_SOURCE_MANAGED,
-    LEGACY_SECRET_REFERENCE_COLUMNS,
     AlpacaCredentialsRejectedError,
     AlpacaSecretNames,
     ResolvedAlpacaCredentials,
 )
-from alpaca_connectors.account.legacy_secrets import LegacySecretReferences
 from alpaca_connectors.account.services import (
     build_account_balance_values,
     build_account_detail_values,
@@ -94,21 +92,17 @@ def _stub_registration() -> dict[str, object]:
         "credential_source": CREDENTIAL_SOURCE_MANAGED,
         "credentials_stored": True,
         "api_key_fingerprint": "abc123",
-        **{column: None for column in LEGACY_SECRET_REFERENCE_COLUMNS},
         "is_paper": True,
     }
 
 
-def _legacy_registration() -> dict[str, object]:
-    """A registration made before revision 0018 that still references managed Secrets."""
-    return {
-        **_stub_registration(),
-        "credentials_stored": False,
-        "api_key_secret_name": "ALPACA_CONNECTORS__010203ABCD__ALPACA_PAPER__API_KEY",
-        "secret_key_secret_name": "ALPACA_CONNECTORS__010203ABCD__ALPACA_PAPER__SECRET_KEY",
-        "api_key_secret_uid": "managed-api-uid",
-        "secret_key_secret_uid": "managed-secret-uid",
-    }
+# The Secret reference columns of ADR 0011: no write names them any more (issue #13).
+LEGACY_REFERENCE_COLUMNS = (
+    "api_key_secret_name",
+    "secret_key_secret_name",
+    "api_key_secret_uid",
+    "secret_key_secret_uid",
+)
 
 
 EXTERNAL_NAMES = AlpacaSecretNames(
@@ -645,8 +639,8 @@ class RegisterAlpacaAccountTests(unittest.TestCase):
         )
         self.assertEqual(detail_kwargs["values"]["credential_source"], CREDENTIAL_SOURCE_IMPORTED)
         self.assertEqual(detail_kwargs["values"]["credentials_updated_by_user_uid"], "user-uid")
-        for column in LEGACY_SECRET_REFERENCE_COLUMNS:
-            self.assertIsNone(detail_kwargs["values"][column])
+        for column in LEGACY_REFERENCE_COLUMNS:
+            self.assertNotIn(column, detail_kwargs["values"])
         self.assertNotIn("ALPACA_PAPER_API_KEY", str(detail_kwargs["values"]))
         self.assertEqual(result.credential_source, CREDENTIAL_SOURCE_IMPORTED)
         self.assertFalse(hasattr(result, "api_key_secret_name"))
@@ -813,9 +807,6 @@ class RegisterAlpacaAccountTests(unittest.TestCase):
                 return_value=candidate_client,
             ) as build_client,
             patch("alpaca_connectors.account.services.write_stored_credentials") as write,
-            patch(
-                "alpaca_connectors.account.services.delete_legacy_managed_secrets"
-            ) as delete_legacy,
         ):
             update_account_registration(
                 "acc-uid-1",
@@ -838,11 +829,8 @@ class RegisterAlpacaAccountTests(unittest.TestCase):
                 "api_key_fingerprint": api_key_fingerprint("rotated"),
                 "credential_source": CREDENTIAL_SOURCE_IMPORTED,
                 "credentials_updated_by_user_uid": "user-uid",
-                **{column: None for column in LEGACY_SECRET_REFERENCE_COLUMNS},
             },
         )
-        # A migrated registration references no Secret, so nothing is deleted.
-        delete_legacy.assert_not_called()
 
 
 class _RejectingTradingClient(StubTradingClient):
@@ -853,17 +841,6 @@ class _RejectingTradingClient(StubTradingClient):
             '{"message": "forbidden"}',
             http_error=SimpleNamespace(response=SimpleNamespace(status_code=403)),
         )
-
-
-def _legacy_managed_references() -> LegacySecretReferences:
-    legacy = _legacy_registration()
-    return LegacySecretReferences(
-        api_key_secret_name=str(legacy["api_key_secret_name"]),
-        secret_key_secret_name=str(legacy["secret_key_secret_name"]),
-        api_key_secret_uid="managed-api-uid",
-        secret_key_secret_uid="managed-secret-uid",
-        credential_source=CREDENTIAL_SOURCE_MANAGED,
-    )
 
 
 class ManagedCredentialRegistrationTests(unittest.TestCase):
@@ -898,10 +875,6 @@ class ManagedCredentialRegistrationTests(unittest.TestCase):
                 "alpaca_connectors.account.services._existing_registration",
                 return_value=patches.get("existing"),
             ),
-            patch(
-                "alpaca_connectors.account.services.delete_legacy_managed_secrets",
-                return_value=patches.get("deleted", ([], [])),
-            ) as delete_legacy,
             patch("alpaca_connectors.platform_secrets.read_platform_secret_value") as read_secret,
         ):
             outcome: object
@@ -914,29 +887,28 @@ class ManagedCredentialRegistrationTests(unittest.TestCase):
                 )
             except Exception as exc:  # noqa: BLE001 - returned for assertions
                 outcome = exc
-        return outcome, events, register_holdings, upsert_model, delete_legacy, read_secret
+        return outcome, events, register_holdings, upsert_model, read_secret
 
     def test_managed_registration_stores_the_keys_after_alpaca_and_holdings_checks(self) -> None:
         client = StubTradingClient(_stub_account(), [], raw={"cash": "1000.50"})
-        result, events, _, upsert_model, delete_legacy, read_secret = self._register(client)
+        result, events, _, upsert_model, read_secret = self._register(client)
 
         self.assertEqual(events, ["holdings", "account", "detail"])
         read_secret.assert_not_called()
-        delete_legacy.assert_not_called()
         values = upsert_model.call_args.kwargs["values"]
         self.assertEqual(values["credential_source"], CREDENTIAL_SOURCE_MANAGED)
         self.assertEqual(values["api_key"], "PKSUBMITTED")
         self.assertEqual(values["secret_key"], "SKSUBMITTED")
         self.assertEqual(values["api_key_fingerprint"], api_key_fingerprint("PKSUBMITTED"))
         self.assertEqual(values["credentials_updated_by_user_uid"], "user-uid")
-        for column in LEGACY_SECRET_REFERENCE_COLUMNS:
-            self.assertIsNone(values[column])
+        for column in LEGACY_REFERENCE_COLUMNS:
+            self.assertNotIn(column, values)
         self.assertEqual(result.credential_source, CREDENTIAL_SOURCE_MANAGED)
         self.assertNotIn("PKSUBMITTED", str(result))
 
     def test_rejected_credentials_write_nothing(self) -> None:
         client = _RejectingTradingClient(_stub_account(), [], raw={})
-        outcome, events, register_holdings, upsert_model, _, _ = self._register(client)
+        outcome, events, register_holdings, upsert_model, _ = self._register(client)
 
         self.assertIsInstance(outcome, AlpacaCredentialsRejectedError)
         self.assertEqual(events, [])
@@ -948,26 +920,12 @@ class ManagedCredentialRegistrationTests(unittest.TestCase):
             raise RuntimeError("account write failed")
 
         client = StubTradingClient(_stub_account(), [], raw={})
-        outcome, _, _, upsert_model, _, _ = self._register(
+        outcome, _, _, upsert_model, _ = self._register(
             client, register_holdings=failing_registration
         )
 
         self.assertIsInstance(outcome, RuntimeError)
         upsert_model.assert_not_called()
-
-    def test_reregistering_a_legacy_identity_deletes_the_secrets_it_still_referenced(self) -> None:
-        client = StubTradingClient(_stub_account(), [], raw={})
-        result, _, _, upsert_model, delete_legacy, _ = self._register(
-            client,
-            existing=_legacy_registration(),
-            deleted=([], ["Managed Secret 'X' could not be deleted."]),
-        )
-
-        delete_legacy.assert_called_once_with(_legacy_managed_references())
-        self.assertEqual(result.warnings, ["Managed Secret 'X' could not be deleted."])
-        # The new keys replace the references whatever happened to the old Secrets.
-        values = upsert_model.call_args.kwargs["values"]
-        self.assertIsNone(values["api_key_secret_uid"])
 
 
 class RegistrationSealingTests(unittest.TestCase):
@@ -1055,19 +1013,15 @@ class AccountCredentialUpdateTests(unittest.TestCase):
             ) as build_client,
             _imported(ResolvedAlpacaCredentials(api_key="PKNEW", secret_key="SKNEW")),
             patch("alpaca_connectors.account.services.write_stored_credentials") as write,
-            patch(
-                "alpaca_connectors.account.services.delete_legacy_managed_secrets",
-                return_value=([], []),
-            ) as delete_legacy,
         ):
             try:
                 outcome: object = update_account_registration("acc-uid-1", **kwargs)
             except Exception as exc:  # noqa: BLE001 - returned for assertions
                 outcome = exc
-        return outcome, build_client, write, delete_legacy
+        return outcome, build_client, write
 
     def test_managed_rotation_validates_then_replaces_the_stored_keys(self) -> None:
-        _, build_client, write, delete_legacy = self._update(
+        _, build_client, write = self._update(
             _stub_registration(),
             credential_values=SUBMITTED,
             actor_user_uid="user-uid",
@@ -1079,22 +1033,9 @@ class AccountCredentialUpdateTests(unittest.TestCase):
         self.assertEqual(values["credential_source"], CREDENTIAL_SOURCE_MANAGED)
         self.assertEqual(values["api_key_fingerprint"], api_key_fingerprint("PKSUBMITTED"))
         self.assertEqual(values["credentials_updated_by_user_uid"], "user-uid")
-        delete_legacy.assert_not_called()
-
-    def test_rotating_a_legacy_registration_deletes_its_managed_secrets(self) -> None:
-        _, _, write, delete_legacy = self._update(
-            _legacy_registration(),
-            credential_values=SUBMITTED,
-        )
-
-        values = write.call_args.kwargs["values"]
-        for column in LEGACY_SECRET_REFERENCE_COLUMNS:
-            self.assertIsNone(values[column])
-        delete_legacy.assert_called_once()
-        self.assertEqual(delete_legacy.call_args.args[0], _legacy_managed_references())
 
     def test_rotation_to_another_alpaca_account_writes_nothing(self) -> None:
-        outcome, _, write, _ = self._update(
+        outcome, _, write = self._update(
             _stub_registration(),
             alpaca_account_id="someone-else",
             credential_values=SUBMITTED,
@@ -1105,7 +1046,7 @@ class AccountCredentialUpdateTests(unittest.TestCase):
         write.assert_not_called()
 
     def test_importing_from_secrets_records_the_imported_source(self) -> None:
-        _, _, write, _ = self._update(
+        _, _, write = self._update(
             _stub_registration(),
             credential_secret_names=AlpacaSecretNames("NEW_API_KEY", "NEW_SECRET_KEY"),
         )
@@ -1116,7 +1057,7 @@ class AccountCredentialUpdateTests(unittest.TestCase):
         self.assertNotIn("NEW_API_KEY", str(values))
 
     def test_credential_values_and_secret_names_cannot_be_combined(self) -> None:
-        outcome, build_client, write, _ = self._update(
+        outcome, build_client, write = self._update(
             _stub_registration(),
             credential_values=SUBMITTED,
             credential_secret_names=AlpacaSecretNames("NEW_API_KEY", "NEW_SECRET_KEY"),
@@ -1150,16 +1091,12 @@ class AccountKeyRemovalTests(unittest.TestCase):
                 "alpaca_connectors.account.credentials.write_stored_credentials",
                 new=calls.write,
             ),
-            patch(
-                "alpaca_connectors.account.services.delete_legacy_managed_secrets",
-                return_value=(["A", "B"], []),
-            ) as delete_legacy,
         ):
             result = remove_account_keys("acc-uid-1", actor_user_uid="person")
-        return result, calls, delete_legacy
+        return result, calls
 
     def test_removing_keys_clears_only_the_keys(self) -> None:
-        result, calls, delete_legacy = self._remove(_stub_registration())
+        result, calls = self._remove(_stub_registration())
 
         calls.write.assert_called_once()
         written = calls.write.call_args.kwargs["values"]
@@ -1171,15 +1108,7 @@ class AccountKeyRemovalTests(unittest.TestCase):
         calls.delete_model.assert_not_called()
         calls.disable_bars.assert_not_called()
         calls.Account.update.assert_not_called()
-        delete_legacy.assert_not_called()
-        self.assertTrue(result["keys_removed"])
-        self.assertEqual(result["deleted_secrets"], [])
-
-    def test_removing_the_keys_of_a_legacy_registration_deletes_its_managed_secrets(self) -> None:
-        result, _, delete_legacy = self._remove(_legacy_registration())
-
-        delete_legacy.assert_called_once_with(_legacy_managed_references())
-        self.assertEqual(result["deleted_secrets"], ["A", "B"])
+        self.assertEqual(result, {"account_uid": "acc-uid-1", "keys_removed": True})
 
     def test_removing_the_keys_of_a_missing_registration_is_refused(self) -> None:
         with self.assertRaises(LookupError):

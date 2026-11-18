@@ -26,27 +26,12 @@ logger = logging.getLogger(__name__)
 
 # Keys a person entered through the API or the site.
 CREDENTIAL_SOURCE_MANAGED = "managed"
-# Keys copied once from Main Sequence Secrets selected by name (CLI, Agent, or the migration).
+# Keys copied once from Main Sequence Secrets selected by name (CLI or Agent).
 CREDENTIAL_SOURCE_IMPORTED = "imported"
-# Transition only: a registration made before revision 0018 whose keys still live in Secrets.
-CREDENTIAL_SOURCE_EXTERNAL = "external"
-CREDENTIAL_SOURCES = (
-    CREDENTIAL_SOURCE_MANAGED,
-    CREDENTIAL_SOURCE_IMPORTED,
-    CREDENTIAL_SOURCE_EXTERNAL,
-)
+CREDENTIAL_SOURCES = (CREDENTIAL_SOURCE_MANAGED, CREDENTIAL_SOURCE_IMPORTED)
 
-# Names of the Secrets this application created before ADR 0017; never a valid import source.
-MANAGED_SECRET_PREFIX = "ALPACA_CONNECTORS__"
-
-# The encrypted columns, and the transition columns the first stored keys clear.
+# The encrypted columns.
 STORED_CREDENTIAL_COLUMNS = ("api_key", "secret_key")
-LEGACY_SECRET_REFERENCE_COLUMNS = (
-    "api_key_secret_name",
-    "secret_key_secret_name",
-    "api_key_secret_uid",
-    "secret_key_secret_uid",
-)
 
 _MAX_CREDENTIAL_VALUE_LENGTH = 256
 
@@ -59,12 +44,12 @@ class AlpacaCredentialsRejectedError(ValueError):
 
 
 class AccountCredentialsMissingError(LookupError):
-    """A registration has no stored keys: made before revision 0018 and not migrated yet."""
+    """A registration has no stored keys: its owner removed them (ADR 0028)."""
 
     def __init__(self, account_uid: str) -> None:
         super().__init__(
-            f"Alpaca account registration {account_uid!s} has no stored keys yet. Run the "
-            "Alpaca credential migration Job, or rotate the account's keys."
+            f"Alpaca account registration {account_uid!s} has no stored keys. Its owner stores "
+            "the account's keys again."
         )
 
 
@@ -145,15 +130,6 @@ def import_alpaca_credentials_from_secrets(names: AlpacaSecretNames) -> Resolved
     """Read both named Secrets once, as this workload; the names are never stored."""
     from alpaca_connectors.platform_secrets import read_platform_secret_value
 
-    for name in (names.api_key_secret_name, names.secret_key_secret_name):
-        if name.startswith(MANAGED_SECRET_PREFIX):
-            # Secrets this application created before ADR 0017 belong to the registration the
-            # credential migration copies them into; importing one elsewhere would copy a key
-            # the migration then deletes.
-            raise ValueError(
-                f"Secret {name!r} uses the reserved {MANAGED_SECRET_PREFIX!r} prefix; it belongs "
-                "to the registration the credential migration copies it into."
-            )
     return submitted_alpaca_credentials(
         api_key=read_platform_secret_value(names.api_key_secret_name),
         secret_key=read_platform_secret_value(names.secret_key_secret_name),
@@ -179,7 +155,7 @@ def stored_credential_values(
     """``ProviderAccountDetails`` column values that store these keys.
 
     The values are plaintext here and are encrypted by the model's column type when the
-    statement that carries them is compiled; the transition Secret references end with them.
+    statement that carries them is compiled.
     """
     from alpaca_connectors.account import api_key_fingerprint
 
@@ -192,7 +168,6 @@ def stored_credential_values(
         "credential_source": source,
         "credentials_updated_at": updated_at,
         "credentials_updated_by_user_uid": actor_user_uid,
-        **{column: None for column in LEGACY_SECRET_REFERENCE_COLUMNS},
     }
 
 
@@ -209,24 +184,19 @@ def cleared_credential_values(
         **{column: None for column in STORED_CREDENTIAL_COLUMNS},
         "credentials_updated_at": updated_at,
         "credentials_updated_by_user_uid": actor_user_uid,
-        **{column: None for column in LEGACY_SECRET_REFERENCE_COLUMNS},
     }
 
 
 def credential_state_columns(table: Any) -> list[Any]:
     """The read-only key flags of a registration read, computed without selecting the keys.
 
-    ``credentials_stored``: both keys are stored. ``credentials_removed``: no key is stored and
-    no Secret of a registration made before revision 0018 is named either, which only removing
-    the keys leaves (ADR 0028); a registration still awaiting the credential migration is
-    neither.
+    ``credentials_stored``: both keys are stored. ``credentials_removed``: they are not, which
+    only removing the keys leaves (ADR 0028): a registration is always made with its keys.
     """
     stored = table.c.api_key.isnot(None) & table.c.secret_key.isnot(None)
-    legacy_names = (table.c.api_key_secret_name, table.c.secret_key_secret_name)
-    awaiting_migration = legacy_names[0].isnot(None) & legacy_names[1].isnot(None)
     return [
         stored.label("credentials_stored"),
-        (~stored & ~awaiting_migration).label("credentials_removed"),
+        (~stored).label("credentials_removed"),
     ]
 
 
@@ -380,11 +350,8 @@ def build_alpaca_historical_data_client(*, credentials: ResolvedAlpacaCredential
 __all__ = [
     "CREDENTIAL_SECRET_NAME",
     "CREDENTIAL_SOURCES",
-    "CREDENTIAL_SOURCE_EXTERNAL",
     "CREDENTIAL_SOURCE_IMPORTED",
     "CREDENTIAL_SOURCE_MANAGED",
-    "LEGACY_SECRET_REFERENCE_COLUMNS",
-    "MANAGED_SECRET_PREFIX",
     "STORED_CREDENTIAL_COLUMNS",
     "cleared_credential_values",
     "AccountCredentialsMissingError",

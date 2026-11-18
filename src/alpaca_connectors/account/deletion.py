@@ -81,8 +81,6 @@ class AccountDeletion:
     kept_portfolio_uids: list[str] = field(default_factory=list)
     deleted_signal_uids: list[str] = field(default_factory=list)
     kept_signal_uids: list[str] = field(default_factory=list)
-    deleted_secrets: list[str] = field(default_factory=list)
-    warnings: list[str] = field(default_factory=list)
     markets: dict[str, Any] | None = None
 
     def summary(self) -> dict[str, Any]:
@@ -94,8 +92,6 @@ class AccountDeletion:
             "kept_portfolio_uids": list(self.kept_portfolio_uids),
             "deleted_signal_uids": list(self.deleted_signal_uids),
             "kept_signal_uids": list(self.kept_signal_uids),
-            "deleted_secrets": list(self.deleted_secrets),
-            "warnings": list(self.warnings),
             "markets": self.markets,
         }
 
@@ -265,10 +261,6 @@ def delete_account(account_uid: Any) -> AccountDeletion:
     """
     from msm.api.remote import MarketsConflictError
 
-    from alpaca_connectors.account.legacy_secrets import (
-        delete_legacy_managed_secrets,
-        legacy_secret_references,
-    )
     from alpaca_connectors.account.services import get_account_registration
     from alpaca_connectors.markets_api import delete_account as delete_markets_account
     from alpaca_connectors.portfolios.provided_weights import end_portfolio_configuration
@@ -304,10 +296,6 @@ def delete_account(account_uid: Any) -> AccountDeletion:
             deletion.markets = delete_markets_account(normalized)
         except MarketsConflictError as exc:
             raise AccountDeleteRefused([str(exc)]) from exc
-        references = legacy_secret_references(registration)
-        if references is not None:
-            # Reported by name, never raised: the account is already gone (step 5).
-            deletion.deleted_secrets, deletion.warnings = delete_legacy_managed_secrets(references)
     # Steps 6 and 7 also finish what an earlier, interrupted attempt left.
     signals = _finish_portfolios(normalized, deletion)
     _finish_signals(signals, deletion)

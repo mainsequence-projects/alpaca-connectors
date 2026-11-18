@@ -324,7 +324,6 @@ def test_every_resource_that_uses_metatables_declares_its_branch() -> None:
     assert declared == {
         "alpaca": True,
         "alpaca-connectors-migrate": True,
-        "alpaca-credential-migration": True,
         "alpaca-portfolio": True,
         "alpaca-portfolio-dispatcher": True,
         "alpaca-bars-update": True,

@@ -54,7 +54,6 @@ workload can use the project tables once they leave `mainsequence.markets`:
 | `alpaca-bars-update` | `data_viewer`, plus its table `editor` on the two bars tables (table roles move with the tables) | read configurations; run the bars updater |
 | `alpaca-portfolio-dispatcher` | `data_viewer` | preflight reads |
 | `alpaca-bars-update-dispatcher` | `data_viewer` | read the enabled, scheduled bar configurations (ADR 0021) |
-| `alpaca-credential-migration` (one-off) | `data_writer` | reads and seals the account keys |
 
 No workload needs a role on `mainsequence.markets` once step 9 is done.
 

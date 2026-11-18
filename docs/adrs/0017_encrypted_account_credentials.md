@@ -12,9 +12,14 @@ The identity rules of ADR 0014 and the site key-entry flow of ADR 0015 are uncha
 Amended on 2026-11-18 by [ADR 0028](0028_every_portfolio_belongs_to_one_account.md): removing keys
 clears them and keeps the row and its owner; deleting an account deletes it (decision 8).
 
-Implementation status: implemented in the connector; the credential migration Job has to run once
-per Environment after revision `0018`, and a later revision drops the transition columns (see
-[Transition](#transition)).
+Implementation status: implemented in the connector. The transition ended on 2026-11-18
+([issue #13](https://github.com/mainsequence-projects/alpaca-connectors/issues/13)): the
+credential migration ran in the Environment `main` deploys to on 2026-11-04, which now holds no
+registration to migrate (operator guide, "Rollout record"). The migration, its Job, its command,
+`account/legacy_secrets.py` and the `external` credential source were then removed, and nothing
+maps the four Secret reference columns; revision `0030` drops them once that release is serving.
+`platform_secrets.py` stays: importing keys from Secrets named by the CLI or the Agent reads them
+(`imported`), and the CLI and the Agent take no key values (see [Transition](#transition)).
 
 ## Context
 
@@ -156,6 +161,9 @@ with `--execute`.
 Until the migration has run, a registration made before `0018` cannot build an Alpaca client:
 its Alpaca calls fail with `account_credentials_missing`. Rotating such a registration stores the
 new keys and deletes the managed Secrets it referenced, so rotation is the other way out.
+
+Ended on 2026-11-18 (issue #13), as the status above records. The Secret-name import path stays;
+only the transition's code is gone.
 
 ## Consequences
 

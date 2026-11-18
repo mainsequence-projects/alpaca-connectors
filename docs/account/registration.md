@@ -29,8 +29,7 @@ API, the Admin, the Analyst, SQL and the database only ever see envelopes. The r
 - a non-reversible API-key fingerprint, which no response exposes;
 - `credentials_stored` and `credentials_removed`, read-only flags in every response:
   `credentials_stored` is false once the owner removed the keys, when `credentials_removed` is
-  true, and for a registration made before revision `0018` that the credential migration has not
-  copied yet.
+  true.
 
 **Managed** keys come from the static site or the API's `managed` credential shape. The user types
 both keys; the API checks them against Alpaca and stores them encrypted. Rotation replaces them in
@@ -39,8 +38,7 @@ place, removing the keys clears them, and deleting the account deletes the row w
 **Imported** keys come from two existing Main Sequence Secrets named through the CLI, the Agent's
 MCP tools, or the API's `external` credential shape. The API reads both Secrets once as its
 workload, checks the values against Alpaca and stores them encrypted; it keeps neither the names
-nor the UIDs and never modifies or deletes the Secrets. Names with the reserved
-`ALPACA_CONNECTORS__` prefix cannot be imported: they belong to the credential migration.
+nor the UIDs and never modifies or deletes the Secrets.
 
 The keys are opened immediately before an Alpaca client is constructed, in the process that
 holds the Secret. Values are not cached, returned, logged, or persisted anywhere else. Only the
@@ -113,18 +111,8 @@ it takes one at its next key registration. Bars feeds and ADR 0024's routes keep
 before ADR 0028: another owner's account is refused, and one without an owner stays open. An external person cannot claim an account without an owner while enabled
 configurations run with its keys.
 
-Registrations created before revision `0018` still hold their keys in Main Sequence Secrets. The
-one-off `alpaca-credential-migration` Job, or this command, copies them into the encrypted
-columns, deletes the Secrets this application created and keeps external ones; until it has run,
-such a registration cannot build an Alpaca client and reports `account_credentials_missing`:
-
-```bash
-alpaca-connectors account migrate-credentials
-alpaca-connectors account migrate-credentials --execute
-```
-
-The output carries counts, Secret names and reasons, never a key value. See the
-[operator guide](../operations/operator-guide.md#account-key-secret) for the Secret itself.
+See the [operator guide](../operations/operator-guide.md#account-key-secret) for the Secret that
+seals the keys.
 
 ## Holdings
 

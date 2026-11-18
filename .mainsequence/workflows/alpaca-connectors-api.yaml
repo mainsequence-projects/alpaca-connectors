@@ -186,33 +186,6 @@ resources:
     automatic_redeployment:
       enabled: true
       tag_regex: null
-# One-off: after revision 0018, copies every registration's keys from the Main Sequence Secrets it
-# referenced into the encrypted account columns and deletes the Secrets this application created
-# (ADR 0017). No step references it and it has no schedule; an operator runs it once per
-# Environment with `--execute` after a dry run. It is removed with the revision that drops the
-# legacy Secret columns.
-- key: alpaca-credential-migration
-  kind: job
-  access:
-    branches:
-    - repository: MetaTables
-      policy: reader
-    - repository: MainSequenceMarkets
-      policy: reader
-    secrets:
-    - name: ALPACA_CONNECTORS_DATA_KEY
-      policy: value_reader
-  spec:
-    name: Alpaca Credential Migration
-    description: One-off copy of registered Alpaca account keys from Main Sequence Secrets into the encrypted account columns (--execute writes).
-    execution_path: src/jobs/migrate_account_credentials.py
-    cpu_request: '0.25'
-    memory_request: '0.5'
-    max_runtime_seconds: 1800
-    spot: false
-    automatic_redeployment:
-      enabled: true
-      tag_regex: null
 # The migration Job runs from the API's candidate image. The API deploys only after it succeeds,
 # and the Agent deploys from its own image only after the API whose MCP it uses.
 execution:

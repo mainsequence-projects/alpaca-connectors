@@ -121,8 +121,6 @@ instructions are `.tau/SYSTEM.md`; its tools and skills are described in
   them, `imported` when they were copied once from Main Sequence Secrets selected by name; live
   holdings and price updates open them at execution time with the
   [account key Secret](#account-key-secret)
-- registrations that predate revision `0018` need the one-off `alpaca-credential-migration` Job
-  (or `alpaca-connectors account migrate-credentials --execute`) once per Environment
 - account registration and holdings capture resolve the whole position set from one Alpaca catalog
   request and write the account, the held assets Markets lacks and the holdings in one Markets
   `registerAccount` call, which needs ms-markets 3.4.0 or later on the Markets API
@@ -170,8 +168,7 @@ Every Alpaca account's API key and secret key are stored in application-encrypte
 account table ([ADR 0017](../adrs/0017_encrypted_account_credentials.md), MetaTables ADR 0025).
 The connector seals and opens them with a keyring held by one Environment Secret,
 `ALPACA_CONNECTORS_DATA_KEY`, which the workflow files grant as `value_reader` to the API, the bars
-Job, the portfolio Job (its run fetches its bars first, issue #39) and the credential migration
-Job. A workload that cannot read it fails every
+Job and the portfolio Job (its run fetches its bars first, issue #39). A workload that cannot read it fails every
 Alpaca call with `credential_key_unavailable`; nothing is ever written or read in plaintext.
 
 Create the Secret once per Environment, before the first push of these workflows to it. The
@@ -220,8 +217,20 @@ still under old keys):
 Finally store the ring without the old key. A lost keyring loses every stored key: the platform's
 Secret backup is the recovery path, and the keys can always be entered again on the site.
 
-Registrations made before revision `0018` keep their keys in the Main Sequence Secrets they
-referenced until the one-off `alpaca-credential-migration` Job runs. Start it with a dry run, read
-its summary (counts, Secret names and reasons, never values), then run it with `--execute`; it is
-idempotent and retries the deletion of managed Secrets it could not delete. A registration it
-blocks (fingerprint mismatch, unreadable Secret) is repaired by rotating its keys on the site.
+### Rollout record (ADR 0017, ADR 0019)
+
+Checked on 2026-11-18 in the Environment `main` deploys to (issue #12):
+
+- `ALPACA_CONNECTORS_DATA_KEY` exists (Secret `a3e1a85d-a9a6-41c8-b66f-ac30d413e533`), and
+  pushes since have deployed the Jobs that declare `value_reader` on it.
+- Revision `0018` was first applied by migration run `c99a1851-ac28-474e-82a8-255f525a5a2f`
+  (2026-10-27, `be5bce2`), and `0022` by run `fad727ee-bc26-4eb9-8d4b-94ffbcc15b10` (2026-11-07,
+  `36483da`).
+- The credential migration ran twice on 2026-11-04 with success, runs
+  `1dfc702c-a6b3-4ac4-ac7f-7e94117917b3` and `f04b94b0-e09f-4d4f-9f74-02df003513fe` (`6b8c35e`).
+  Their logs have expired, so which one carried `--execute` is not recorded.
+- No registration is left to migrate or review: the Environment holds none, and no Secret with
+  the `ALPACA_CONNECTORS__` prefix remains. The ADR 0019 owner review has nothing to check.
+
+The credential migration, its Job and its command were then removed (issue #13); revision `0030`
+drops the four Secret reference columns once the release that no longer reads them is serving.

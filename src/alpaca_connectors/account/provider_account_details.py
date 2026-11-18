@@ -178,8 +178,6 @@ class ProviderAccountDetails(ProjectStorageNameMixin, AlpacaMarketsMetaTableMixi
         Index(None, "account_unique_identifier", unique=True),
         Index(None, "alpaca_account_id", unique=True),
         Index(None, "api_key_fingerprint"),
-        Index(None, "api_key_secret_name"),
-        Index(None, "secret_key_secret_name"),
         Index(None, "owner_gateway_uid", "owner_user_uid"),
     )
 
@@ -274,65 +272,18 @@ class ProviderAccountDetails(ProjectStorageNameMixin, AlpacaMarketsMetaTableMixi
             ),
         },
     )
-    # Transition columns (ADR 0011, superseded by ADR 0017): the Main Sequence Secrets a
-    # registration resolved before its keys were stored here. Null once the credential migration
-    # Job has copied and, for managed Secrets, deleted them; a later revision drops the columns.
-    api_key_secret_name: Mapped[str | None] = mapped_column(
-        String(255),
-        nullable=True,
-        info={
-            "label": "Legacy API key secret name",
-            "description": (
-                "Name of the Main Sequence Secret that held the Alpaca API key ID before the keys "
-                "were stored encrypted on this row; null once migrated."
-            ),
-        },
-    )
-    secret_key_secret_name: Mapped[str | None] = mapped_column(
-        String(255),
-        nullable=True,
-        info={
-            "label": "Legacy secret key secret name",
-            "description": (
-                "Name of the Main Sequence Secret that held the Alpaca secret key before the keys "
-                "were stored encrypted on this row; null once migrated."
-            ),
-        },
-    )
-    api_key_secret_uid: Mapped[str | None] = mapped_column(
-        String(64),
-        nullable=True,
-        info={
-            "label": "Legacy API key secret UID",
-            "description": (
-                "UID of the Main Sequence Secret that held the Alpaca API key ID before the keys "
-                "were stored encrypted on this row; null once migrated."
-            ),
-        },
-    )
-    secret_key_secret_uid: Mapped[str | None] = mapped_column(
-        String(64),
-        nullable=True,
-        info={
-            "label": "Legacy secret key secret UID",
-            "description": (
-                "UID of the Main Sequence Secret that held the Alpaca secret key before the keys "
-                "were stored encrypted on this row; null once migrated."
-            ),
-        },
-    )
+    # The four Secret reference columns of ADR 0011 (superseded by ADR 0017) are no longer mapped:
+    # nothing reads or writes them, and revision 0030 drops them (issue #13).
     credential_source: Mapped[str] = mapped_column(
         String(16),
         nullable=False,
-        # Rows written before ADR 0011, or by a release without this column, selected Secrets by name.
+        # Every write names it; revision 0030 replaces this transition default (issue #13).
         server_default=text("'external'"),
         info={
             "label": "Credential source",
             "description": (
                 "managed when a person entered the keys through the API or the site; imported "
-                "when they were copied once from Main Sequence Secrets selected by name; external "
-                "on a registration made before revision 0018 whose keys the credential migration "
-                "has not copied yet."
+                "when they were copied once from Main Sequence Secrets selected by name."
             ),
         },
     )

@@ -17,7 +17,6 @@ from alpaca_connectors.account.credentials import (
     CREDENTIAL_SECRET_NAME,
     CREDENTIAL_SOURCE_IMPORTED,
     CREDENTIAL_SOURCE_MANAGED,
-    LEGACY_SECRET_REFERENCE_COLUMNS,
     AccountCredentialsMissingError,
     AlpacaCredentialsRejectedError,
     AlpacaSecretNames,
@@ -35,6 +34,14 @@ from alpaca_connectors.account.credentials import (
 )
 from alpaca_connectors.account.provider_account_details import ProviderAccountDetails
 from alpaca_connectors.platform_secrets import PlatformSecretAccessError
+
+# The Secret reference columns of ADR 0011: no write or read names them any more (issue #13).
+LEGACY_REFERENCE_COLUMNS = (
+    "api_key_secret_name",
+    "secret_key_secret_name",
+    "api_key_secret_uid",
+    "secret_key_secret_uid",
+)
 from metatables.compiled_sql.v1 import compile_sqlalchemy_statement
 from metatables.encryption import (
     EncryptionError,
@@ -79,9 +86,12 @@ def test_registration_reads_leave_the_key_columns_out() -> None:
     assert "credentials_stored" in keys
     assert "credentials_removed" in keys
     assert "api_key_fingerprint" in keys
+    # The model no longer maps the transition columns, so no read selects them (issue #13).
+    assert not keys & set(LEGACY_REFERENCE_COLUMNS)
+    assert not set(ProviderAccountDetails.__table__.columns.keys()) & set(LEGACY_REFERENCE_COLUMNS)
 
 
-def test_the_key_flags_tell_removed_keys_from_a_registration_awaiting_migration() -> None:
+def test_the_key_flags_tell_stored_keys_from_removed_ones() -> None:
     import sqlalchemy as sa
 
     from alpaca_connectors.account.credentials import credential_state_columns
@@ -91,14 +101,9 @@ def test_the_key_flags_tell_removed_keys_from_a_registration_awaiting_migration(
         "registration",
         metadata,
         sa.Column("name", sa.String, primary_key=True),
-        *(
-            sa.Column(column, sa.String)
-            for column in ("api_key", "secret_key", "api_key_secret_name", "secret_key_secret_name")
-        ),
+        *(sa.Column(column, sa.String) for column in ("api_key", "secret_key")),
     )
-    empty = dict.fromkeys(
-        ("api_key", "secret_key", "api_key_secret_name", "secret_key_secret_name")
-    )
+    empty = dict.fromkeys(("api_key", "secret_key"))
     engine = sa.create_engine("sqlite://")
     metadata.create_all(engine)
     with engine.begin() as connection:
@@ -107,12 +112,6 @@ def test_the_key_flags_tell_removed_keys_from_a_registration_awaiting_migration(
             [
                 {**empty, "name": "stored", "api_key": "sealed", "secret_key": "sealed"},
                 {**empty, "name": "removed"},
-                {
-                    **empty,
-                    "name": "awaiting",
-                    "api_key_secret_name": "A",
-                    "secret_key_secret_name": "B",
-                },
             ],
         )
         rows = connection.execute(sa.select(table.c.name, *credential_state_columns(table)))
@@ -120,10 +119,11 @@ def test_the_key_flags_tell_removed_keys_from_a_registration_awaiting_migration(
             row.name: (bool(row.credentials_stored), bool(row.credentials_removed)) for row in rows
         }
 
-    assert flags == {"stored": (True, False), "removed": (False, True), "awaiting": (False, False)}
+    # A registration is always made with its keys, so no keys means its owner removed them.
+    assert flags == {"stored": (True, False), "removed": (False, True)}
 
 
-def test_stored_values_carry_the_fingerprint_and_clear_the_legacy_references() -> None:
+def test_stored_values_carry_the_fingerprint_and_name_no_legacy_reference() -> None:
     values = stored_credential_values(
         ResolvedAlpacaCredentials(RAW_API_KEY, RAW_SECRET_KEY),
         source=CREDENTIAL_SOURCE_MANAGED,
@@ -135,7 +135,7 @@ def test_stored_values_carry_the_fingerprint_and_clear_the_legacy_references() -
     assert values["api_key_fingerprint"] == api_key_fingerprint(RAW_API_KEY)
     assert values["credential_source"] == CREDENTIAL_SOURCE_MANAGED
     assert values["credentials_updated_by_user_uid"] == "user-uid"
-    assert all(values[column] is None for column in LEGACY_SECRET_REFERENCE_COLUMNS)
+    assert not set(values) & set(LEGACY_REFERENCE_COLUMNS)
     with pytest.raises(ValueError):
         stored_credential_values(
             ResolvedAlpacaCredentials(RAW_API_KEY, RAW_SECRET_KEY),
@@ -183,8 +183,8 @@ def test_writes_leave_the_process_sealed(keyring) -> None:
     assert TABLE.c.api_key.type.process_result_value(api_key_envelope, None) == RAW_API_KEY
     with pytest.raises(EncryptionError):
         TABLE.c.secret_key.type.process_result_value(api_key_envelope, None)
-    # Clearing the legacy references travels as NULLs in the same statement.
-    assert all(parameters[column] is None for column in LEGACY_SECRET_REFERENCE_COLUMNS)
+    # The statement names no transition column (issue #13).
+    assert not set(parameters) & set(LEGACY_REFERENCE_COLUMNS)
     assert "UPDATE" in operation.statement.sql.upper()
 
 
@@ -262,8 +262,8 @@ def test_a_read_selects_only_the_two_key_columns(keyring) -> None:
     assert [column.name for column in statement.selected_columns] == ["api_key", "secret_key"]
 
 
-def test_a_registration_without_stored_keys_points_to_the_migration(keyring) -> None:
-    with pytest.raises(AccountCredentialsMissingError, match="credential migration"):
+def test_a_registration_without_stored_keys_asks_its_owner_for_them(keyring) -> None:
+    with pytest.raises(AccountCredentialsMissingError, match="stores the account's keys again"):
         _read({"api_key": None, "secret_key": None})
     with pytest.raises(LookupError, match="does not exist"):
         _read(None)
@@ -342,16 +342,6 @@ def test_importing_from_secrets_reads_by_exact_name_and_keeps_no_name() -> None:
         credentials, source=source, updated_at=WHEN, actor_user_uid=None
     )
     assert "API_KEY_NAME" not in str(values)
-
-
-def test_importing_a_legacy_managed_secret_is_refused() -> None:
-    with pytest.raises(ValueError, match="reserved"):
-        import_alpaca_credentials_from_secrets(
-            AlpacaSecretNames(
-                "ALPACA_CONNECTORS__010203ABCD__ALPACA__API_KEY",
-                "ALPACA_CONNECTORS__010203ABCD__ALPACA__SECRET_KEY",
-            )
-        )
 
 
 def test_an_unreadable_import_secret_is_reported_by_name() -> None:

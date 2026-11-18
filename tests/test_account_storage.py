@@ -48,9 +48,14 @@ class AccountStorageTests(unittest.TestCase):
             self.assertIsInstance(table.columns[column].type, EncryptedString)
             self.assertEqual(table.columns[column].type.secret, "ALPACA_CONNECTORS_DATA_KEY")
             self.assertTrue(table.columns[column].nullable)
-        # Transition columns from ADR 0011 stay nullable until a later revision drops them.
-        for column in ("api_key_secret_name", "secret_key_secret_name"):
-            self.assertTrue(table.columns[column].nullable)
+        # The Secret reference columns of ADR 0011 are no longer mapped; revision 0030 drops them.
+        for column in (
+            "api_key_secret_name",
+            "secret_key_secret_name",
+            "api_key_secret_uid",
+            "secret_key_secret_uid",
+        ):
+            self.assertNotIn(column, table.columns)
 
     def test_details_has_current_financials_as_numeric_columns(self) -> None:
         # Current account financials live on the detail row (no bespoke time-series table); the

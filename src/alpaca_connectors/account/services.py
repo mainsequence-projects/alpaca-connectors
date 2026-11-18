@@ -33,10 +33,6 @@ from alpaca_connectors.account.credentials import (
     stored_credential_values,
     write_stored_credentials,
 )
-from alpaca_connectors.account.legacy_secrets import (
-    delete_legacy_managed_secrets,
-    legacy_secret_references,
-)
 from alpaca_connectors.account.ownership import (
     OWNER_GATEWAY_COLUMN,
     OWNER_USER_COLUMN,
@@ -592,11 +588,6 @@ def register_alpaca_account(
         conflict_columns=("account_uid",),
     )
 
-    warnings: list[str] = []
-    previous_references = legacy_secret_references(existing) if existing is not None else None
-    if previous_references is not None:
-        _, warnings = delete_legacy_managed_secrets(previous_references)
-
     return AlpacaAccountRegistrationResult(
         account_unique_identifier=unique_identifier,
         account_uid=str(account.uid),
@@ -604,7 +595,6 @@ def register_alpaca_account(
         detail_table=ProviderAccountDetails.__metatable_identifier__,
         holdings_rows=len(holdings.positions),
         credential_source=credential_source,
-        warnings=warnings,
         registration=_written_registration(account, existing, detail_values),
     )
 
@@ -1055,9 +1045,6 @@ def update_account_registration(
                 actor_user_uid=actor_user_uid,
             ),
         )
-        previous_references = legacy_secret_references(current)
-        if previous_references is not None:
-            delete_legacy_managed_secrets(previous_references)
 
     updated = get_account_registration(account_uid)
     if updated is None:
@@ -1069,9 +1056,7 @@ def remove_account_keys(account_uid: str, *, actor_user_uid: str | None = None) 
     """Clear the account's keys; its owner, account, history, portfolios and feeds stay.
 
     Nothing is disabled or blocked: a run without keys fails with the ordinary error until the
-    owner registers keys again (ADR 0028, decision 8). A registration that still referenced Main
-    Sequence Secrets from before revision 0018 has its managed ones deleted; external ones are
-    kept.
+    owner registers keys again (ADR 0028, decision 8).
     """
     from alpaca_connectors.account.credentials import (
         cleared_credential_values,
@@ -1091,17 +1076,7 @@ def remove_account_keys(account_uid: str, *, actor_user_uid: str | None = None) 
             actor_user_uid=actor_user_uid,
         ),
     )
-    deleted_secrets: list[str] = []
-    warnings: list[str] = []
-    previous_references = legacy_secret_references(current)
-    if previous_references is not None:
-        deleted_secrets, warnings = delete_legacy_managed_secrets(previous_references)
-    return {
-        "account_uid": str(account_uid),
-        "keys_removed": True,
-        "deleted_secrets": deleted_secrets,
-        "warnings": warnings,
-    }
+    return {"account_uid": str(account_uid), "keys_removed": True}
 
 
 def build_registered_account_client(registration: dict[str, Any]):

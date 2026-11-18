@@ -129,21 +129,6 @@ class CliTests(unittest.TestCase):
             account_name=None,
         )
 
-    def test_account_migrate_credentials_is_a_dry_run_by_default(self) -> None:
-        stdout = io.StringIO()
-        with (
-            patch(
-                "alpaca_connectors.account.credential_migration.migrate_account_credentials",
-                return_value={"execute": False, "registrations": 0},
-            ) as migrate,
-            contextlib.redirect_stdout(stdout),
-        ):
-            exit_code = main(["account", "migrate-credentials"])
-
-        self.assertEqual(exit_code, 0)
-        migrate.assert_called_once_with(execute=False)
-        self.assertNotIn("backfill-secret-uids", str(build_parser().format_help()))
-
     def test_account_update_imports_keys_only_from_both_secret_names(self) -> None:
         from alpaca_connectors.account.credentials import AlpacaSecretNames
 

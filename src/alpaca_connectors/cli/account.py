@@ -90,16 +90,6 @@ def configure_delete_parser(parser: argparse.ArgumentParser) -> None:
     parser.set_defaults(handler=run_account_delete_command)
 
 
-def configure_migrate_credentials_parser(parser: argparse.ArgumentParser) -> None:
-    parser.description = (
-        "Copy the keys of registrations made before revision 0018 from their Main Sequence "
-        "Secrets into the encrypted account columns and delete the Secrets this application "
-        "created (ADR 0017). Dry run by default; the output never carries a key value."
-    )
-    parser.add_argument("--execute", action="store_true")
-    parser.set_defaults(handler=run_account_migrate_credentials_command)
-
-
 def configure_backfill_listing_fields_parser(parser: argparse.ArgumentParser) -> None:
     parser.description = (
         "Copy each registration's account name and active flag from Markets onto its account "
@@ -241,22 +231,3 @@ def run_account_delete_command(args: argparse.Namespace) -> int:
         return 0
     _print(delete_account(args.account_uid).summary())
     return 0
-
-
-def run_account_migrate_credentials_command(args: argparse.Namespace) -> int:
-    from alpaca_connectors.account.credential_migration import migrate_account_credentials
-
-    _print(migrate_account_credentials(execute=args.execute))
-    return 0
-
-
-__all__ = [
-    "configure_backfill_listing_fields_parser",
-    "configure_get_parser",
-    "configure_list_parser",
-    "configure_migrate_credentials_parser",
-    "configure_refresh_parser",
-    "configure_register_parser",
-    "configure_remove_parser",
-    "configure_update_parser",
-]
