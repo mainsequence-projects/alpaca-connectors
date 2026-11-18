@@ -15,6 +15,9 @@ from typing import Any
 
 MAX_SIGNAL_OBSERVATIONS = 100
 MAX_SIGNAL_OBSERVATION_ROWS = 100_000
+# The MetaTables API refuses a request for more than 10,000 rows with a 422 (issue #40), so the
+# history is read in requests of this many rows.
+SIGNAL_OBSERVATION_PAGE_ROWS = 10_000
 SIGNAL_OBSERVATION_QUERY_TIMEOUT_MS = 30_000
 
 
@@ -161,7 +164,9 @@ def read_signal_observation_matrix(
 
     A signal observation is one distinct ``time_index``. The limit is applied inside a
     timestamp CTE before constituent rows are joined, so an observation is never truncated
-    merely because it contains many assets.
+    merely because it contains many assets. The rows are read in requests of
+    ``SIGNAL_OBSERVATION_PAGE_ROWS``, the most the MetaTables API accepts, up to
+    ``MAX_SIGNAL_OBSERVATION_ROWS`` in all.
     """
     from msm.api.base import operation_result_rows
     from msm.repositories.base import compile_markets_statement, execute_markets_operation
@@ -177,13 +182,6 @@ def read_signal_observation_matrix(
     normalized_signal_uid = _normalize_signal_uid(signal_uid)
     normalized_limit = _normalize_observation_limit(observation_limit)
     runtime = start_markets_engine()
-    query_context = replace(
-        runtime.context,
-        limits={
-            "max_rows": MAX_SIGNAL_OBSERVATION_ROWS,
-            "statement_timeout_ms": SIGNAL_OBSERVATION_QUERY_TIMEOUT_MS,
-        },
-    )
     latest_observations = (
         select(SignalWeightsStorage.time_index)
         .where(SignalWeightsStorage.signal_uid == normalized_signal_uid)
@@ -219,21 +217,37 @@ def read_signal_observation_matrix(
             SignalWeightsStorage.asset_identifier.asc(),
         )
     )
-    operation = compile_markets_statement(
-        statement,
-        context=query_context,
-        operation="select",
-    )
-    result = execute_markets_operation(operation, context=query_context)
-    if bool(result.get("truncated")):
+
+    def read_page(offset: int) -> dict[str, Any]:
+        page_context = replace(
+            runtime.context,
+            limits={
+                "max_rows": SIGNAL_OBSERVATION_PAGE_ROWS,
+                "offset": offset,
+                "statement_timeout_ms": SIGNAL_OBSERVATION_QUERY_TIMEOUT_MS,
+            },
+        )
+        operation = compile_markets_statement(
+            statement,
+            context=page_context,
+            operation="select",
+        )
+        return execute_markets_operation(operation, context=page_context)
+
+    # One statement read in pages, not a call per item: its order is total within one signal,
+    # so the offset pages are stable.
+    rows: list[dict[str, Any]] = []
+    for _ in range(MAX_SIGNAL_OBSERVATION_ROWS // SIGNAL_OBSERVATION_PAGE_ROWS):
+        result = read_page(len(rows))
+        rows.extend(operation_result_rows(result))
+        if not bool(result.get("truncated")):
+            break
+    else:
         raise RuntimeError(
             "Signal observation history exceeds the bounded API read limit of "
             f"{MAX_SIGNAL_OBSERVATION_ROWS:,} rows."
         )
-    return _matrix_from_rows(
-        signal_uid=normalized_signal_uid,
-        rows=operation_result_rows(result),
-    )
+    return _matrix_from_rows(signal_uid=normalized_signal_uid, rows=rows)
 
 
 def read_signal_observation_bounds(*, signal_uid: str) -> SignalObservationBounds:

@@ -86,14 +86,58 @@ def test_signal_history_reads_all_assets_for_the_latest_distinct_observations_on
     assert "LIMIT" in compiled_sql
     assert set(statement.compile().params.values()) >= {"signal-123", 2}
     query_context = compile_statement.call_args.kwargs["context"]
+    # At most what the MetaTables API accepts in one request (issue #40).
     assert query_context.limits == {
-        "max_rows": 100_000,
+        "max_rows": 10_000,
+        "offset": 0,
         "statement_timeout_ms": 30_000,
     }
     execute_operation.assert_called_once_with(
         "signal-history-query",
         context=query_context,
     )
+
+
+def test_signal_history_reads_a_long_history_in_requests_the_api_accepts() -> None:
+    """A history above one request's rows is read page by page, never asked for at once."""
+    observed = dt.datetime(2026, 9, 3, 14, tzinfo=dt.UTC)
+
+    def row(asset: str) -> dict[str, object]:
+        return {
+            "time_index": observed,
+            "asset_identifier": f"ALPACA::{asset}",
+            "signal_weight": 0.25,
+            "symbol": asset.upper(),
+            "name": asset,
+        }
+
+    pages = [
+        {"rows": [row("a"), row("b")], "truncated": True},
+        {"rows": [row("c")], "truncated": True},
+        {"rows": [row("d")], "truncated": False},
+    ]
+    context = MarketsRepositoryContext()
+    with (
+        patch(
+            "alpaca_connectors.runtime.start_markets_engine",
+            return_value=SimpleNamespace(context=context),
+        ),
+        patch(
+            "msm.repositories.base.compile_markets_statement",
+            return_value="signal-history-query",
+        ) as compile_statement,
+        patch(
+            "msm.repositories.base.execute_markets_operation",
+            side_effect=pages,
+        ) as execute_operation,
+    ):
+        matrix = read_signal_observation_matrix(signal_uid="signal-123")
+
+    assert [asset.symbol for asset in matrix.assets] == ["A", "B", "C", "D"]
+    assert execute_operation.call_count == 3
+    limits = [call.kwargs["context"].limits for call in compile_statement.call_args_list]
+    assert [page["offset"] for page in limits] == [0, 2, 3]
+    assert {page["max_rows"] for page in limits} == {10_000}
 
 
 def test_signal_history_refuses_a_truncated_constituent_result() -> None:
@@ -110,10 +154,12 @@ def test_signal_history_refuses_a_truncated_constituent_result() -> None:
         patch(
             "msm.repositories.base.execute_markets_operation",
             return_value={"rows": [], "truncated": True},
-        ),
+        ) as execute_operation,
         pytest.raises(RuntimeError, match="100,000 rows"),
     ):
         read_signal_observation_matrix(signal_uid="signal-123")
+    # Ten requests of 10,000 rows, then the refusal.
+    assert execute_operation.call_count == 10
 
 
 def test_signal_observation_bounds_use_one_aggregate_query() -> None:

@@ -45,7 +45,7 @@ exception text. Besides the codes each section below names, every route can answ
 | Status | Code | When |
 |---|---|---|
 | `503` | `dependency_starting` | A Main Sequence release the work needs (the Markets API, the MetaTables API) is still starting. `retryable: true` and `Retry-After` (seconds): send the request again then ([ADR 0020](adrs/0020_dependencies_that_are_starting.md)). |
-| `503` | `dependency_unavailable` | Anything unexpected; the API logs it. `retryable: true`. |
+| `503` | `dependency_unavailable` | Anything unexpected; the API logs it, with the field and limit when a dependency refused the request's shape (never the value sent). `retryable: true`. |
 | `502` | `provider_failure` | Alpaca failed, or answered with data the connector cannot read (the log names the fields, never their values). |
 | `409` | `action_conflict` | A conflict the connector finds itself, in its own words. |
 

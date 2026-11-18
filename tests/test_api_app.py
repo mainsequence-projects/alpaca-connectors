@@ -891,3 +891,49 @@ class ApiAppTests(unittest.TestCase):
         )
         self.assertEqual(asset_type_column["value_path"], "asset_type")
         self.assertEqual(asset_type_column["data_type"], "text")
+
+
+def test_a_refused_request_shape_logs_the_field_and_limit_but_not_the_value(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A dependency's 422 names the field and limit in the log (issue #40), never the value."""
+    import json
+    import logging
+
+    import requests
+
+    from alpaca_connectors.api.app.errors import api_http_error, upstream_failure
+    from mainsequence.client.exceptions import ApiError, raise_for_response
+
+    response = requests.Response()
+    response.status_code = 422
+    response.url = "https://metatables.example.test/meta-tables/execute-operation/"
+    response.request = requests.Request("POST", response.url).prepare()
+    response._content = json.dumps(
+        {
+            "detail": [
+                {
+                    "type": "less_than_equal",
+                    "loc": ["body", "limits", "max_rows"],
+                    "msg": "Input should be less than or equal to 10000",
+                    "input": 123456,
+                    "ctx": {"le": 10000},
+                }
+            ]
+        }
+    ).encode()
+    with pytest.raises(ApiError) as refused:
+        raise_for_response(response)
+
+    refusal = "body.limits.max_rows: Input should be less than or equal to 10000 (less_than_equal)"
+    found = upstream_failure(refused.value)
+    assert found["upstream_refusal"] == refusal
+    assert "123456" not in str(found)
+
+    with caplog.at_level(logging.ERROR, logger="alpaca_connectors.api.app.errors"):
+        api_http_error(refused.value)
+    message = caplog.records[-1].getMessage()
+    assert message == (
+        "Unhandled API dependency failure: POST /meta-tables/execute-operation/ "
+        f"answered 422 (ApiError): {refusal}"
+    )

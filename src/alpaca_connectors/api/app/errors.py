@@ -59,12 +59,31 @@ def _identifier(value: object) -> str | None:
     return None
 
 
+def _refused_fields(detail: object) -> str | None:
+    """Which fields a dependency's request validation refused, and why (issue #40).
+
+    A FastAPI ``422`` lists one error per field. Each error's path, message and type are kept, as
+    in ``body.limits.max_rows: Input should be less than or equal to 10000 (less_than_equal)``;
+    its ``input``, the value sent, never is.
+    """
+    if not isinstance(detail, list):
+        return None
+    refused = [
+        f"{'.'.join(str(part) for part in error.get('loc') or ())}: "
+        f"{error.get('msg')} ({error.get('type')})"
+        for error in detail
+        if isinstance(error, dict)
+    ]
+    return "; ".join(refused) or None
+
+
 def upstream_failure(exc: BaseException) -> dict[str, object]:
     """What a refused Main Sequence call answered, for the log (issue #27).
 
     The status, method, URL path and public error code of the first SDK ``ApiError`` in the
-    exception's chain. Never the answer's text or the request's values, which can quote the data
-    sent.
+    exception's chain, and the fields its request validation refused (``upstream_refusal``,
+    issue #40) when it answered those. Never the rest of the answer's text or the request's
+    values, which can quote the data sent.
     """
     from urllib.parse import urlsplit
 
@@ -80,13 +99,17 @@ def upstream_failure(exc: BaseException) -> dict[str, object]:
             code = _identifier(body.get("code")) or _identifier(
                 detail.get("code") if isinstance(detail, dict) else detail
             )
-            return {
+            found: dict[str, object] = {
                 "upstream_status": cause.status_code,
                 "upstream_method": cause.method,
                 "upstream_path": urlsplit(str(cause.url)).path if cause.url else None,
                 "upstream_code": code,
                 "upstream_error": type(cause).__name__,
             }
+            refusal = _refused_fields(detail)
+            if refusal is not None:
+                found["upstream_refusal"] = refusal
+            return found
         cause = cause.__cause__ or cause.__context__
     return {"upstream_error": type(exc).__name__}
 
@@ -190,12 +213,14 @@ def api_http_error(exc: Exception) -> HTTPException:
         )
     if not isinstance(exc, (HTTPException, LookupError, TypeError)):
         upstream = upstream_failure(exc)
+        refusal = upstream.get("upstream_refusal")
         logger.exception(
-            "Unhandled API dependency failure: %s %s answered %s (%s)",
+            "Unhandled API dependency failure: %s %s answered %s (%s)%s",
             upstream.get("upstream_method"),
             upstream.get("upstream_path"),
             upstream.get("upstream_status"),
             upstream.get("upstream_code") or upstream["upstream_error"],
+            f": {refusal}" if refusal else "",
             extra=upstream,
         )
     return markets_api_http_error(exc)
