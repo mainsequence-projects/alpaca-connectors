@@ -542,7 +542,7 @@ class BarConfigurationCreateRequest(BaseModel):
             "portfolio's own configuration is created with the portfolio instead (ADR 0028)."
         )
     )
-    asset_source: Literal["assets", "account_holdings"]
+    asset_source: Literal["assets", "account_holdings", "portfolios"]
     asset_uids: list[str] = Field(default_factory=list)
     frequency_id: str
     feed: str
@@ -552,7 +552,7 @@ class BarConfigurationCreateRequest(BaseModel):
     def validate_source(self) -> "BarConfigurationCreateRequest":
         if self.asset_source == "assets" and not self.asset_uids:
             raise ValueError("assets source requires asset_uids.")
-        if self.asset_source == "account_holdings" and self.asset_uids:
+        if self.asset_source in {"account_holdings", "portfolios"} and self.asset_uids:
             raise ValueError(f"{self.asset_source} source forbids asset_uids.")
         return self
 
@@ -888,7 +888,7 @@ class PortfolioCreateRequest(_ConfigurationRequest):
 
 
 class ProvidedWeightsPortfolioCreateRequest(_ConfigurationRequest):
-    """Create a portfolio from weights the caller provides (ADR 0024's route, kept for now).
+    """Create a portfolio from weights the caller provides (ADR 0024's route).
 
     The portfolio belongs to the account of the bars configuration given inline or named, and
     follows a signal definition of its own whose key is its configuration UID (ADR 0028).
@@ -972,8 +972,9 @@ class PortfolioConfigurationResponse(BaseModel):
     adopted: bool = Field(
         default=True,
         description=(
-            "False for a portfolio created before accounts owned portfolios that the rollout "
-            "has not given an account yet; it neither runs nor takes weights."
+            "False for a portfolio created before accounts owned portfolios whose owner does not "
+            "own its bars' account; it works as before, on its own signal and the bars feed it "
+            "names."
         ),
     )
     signal_uid: str

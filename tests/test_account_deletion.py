@@ -7,6 +7,7 @@ of its calls, which the ``RESTRICT`` keys of ms-markets impose.
 from __future__ import annotations
 
 import uuid
+from contextlib import ExitStack
 from types import SimpleNamespace
 from unittest.mock import MagicMock, call, patch
 
@@ -43,6 +44,7 @@ def _run(
     refuse_markets=False,
     registration=True,
     registration_values=None,
+    priced=(),
 ):
     """Delete the account with Markets and storage replaced; return the recorder."""
     calls = MagicMock()
@@ -61,7 +63,8 @@ def _run(
     )
     calls.blockers.side_effect = lambda uid: ["held"] if uid == str(KEPT_PORTFOLIO) else []
     kept_signals = {"signal-followed", "signal-kept"}
-    with (
+    # More patches than one `with` statement may nest: an ExitStack enters them.
+    patches = [
         patch("alpaca_connectors.runtime.start_markets_engine", return_value=SimpleNamespace()),
         patch(
             "alpaca_connectors.account.services.get_account_registration",
@@ -93,7 +96,14 @@ def _run(
         patch(f"{CONFIGURATIONS}.forget_ended_portfolio", calls.forget_record),
         patch(
             "alpaca_connectors.market_data.configurations.bar_configurations_for_account",
-            return_value=[object()],
+            return_value=[
+                SimpleNamespace(uid=uuid.UUID(int=30), asset_source="account_holdings"),
+                SimpleNamespace(uid=uuid.UUID(int=31), asset_source="portfolios"),
+            ],
+        ),
+        patch(
+            f"{CONFIGURATIONS}.portfolio_configurations_naming_bars",
+            side_effect=lambda uid: list(priced) if uid == uuid.UUID(int=31) else [],
         ),
         patch.object(deletion, "_account_definitions", return_value=definitions),
         patch(
@@ -117,7 +127,10 @@ def _run(
         ),
         patch.object(deletion, "delete_account_orders_and_trades", calls.orders),
         patch.object(deletion, "delete_portfolio_series", calls.series),
-    ):
+    ]
+    with ExitStack() as stack:
+        for item in patches:
+            stack.enter_context(item)
         result = delete_account(ACCOUNT_UID)
     return result, calls
 
@@ -200,6 +213,15 @@ def test_a_migrated_registration_names_no_secret_to_delete() -> None:
     calls.secrets.assert_not_called()
     assert result.summary()["deleted_secrets"] == []
     assert result.summary()["warnings"] == []
+
+
+def test_a_portfolio_not_yet_adopted_its_portfolios_feed_prices_ends_with_the_account() -> None:
+    # It runs with the account's keys: the account's too, delete means delete.
+    unadopted = SimpleNamespace(uid=uuid.UUID(int=22), portfolio_uid=None)
+    result, calls = _run(priced=[unadopted])
+    ended = [entry.args[0].uid for entry in calls.end_portfolio.call_args_list]
+    assert ended == [CONFIGURATION, unadopted.uid]
+    assert result.ended_portfolio_count == 2
 
 
 def test_markets_refusing_the_account_delete_is_reported() -> None:

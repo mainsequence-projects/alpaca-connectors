@@ -245,11 +245,12 @@ def test_only_the_owner_configures_the_accounts_feeds(vouching) -> None:
             service.assert_called_once()
 
 
-def test_nobody_configures_an_account_without_an_owner(vouching) -> None:
+def test_an_account_without_an_owner_stays_open_to_bars_feeds(vouching) -> None:
+    # ADR 0022, kept by ADR 0028 as amended on 2026-11-18: nothing that worked before is blocked.
     answers, services = _call(vouching, None, vouching.headers())
-    assert set(answers.values()) == {409}, answers
+    assert set(answers.values()) == {400}, answers
     for service in services:
-        service.assert_not_called()
+        service.assert_called_once()
 
 
 def test_an_owner_refusal_names_the_code_not_the_owner(vouching) -> None:

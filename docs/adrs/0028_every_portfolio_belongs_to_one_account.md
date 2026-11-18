@@ -5,8 +5,13 @@
 Accepted by the owner on 2026-11-18; the decisions marked (owner) were made on 2026-11-17 and
 2026-11-18. Implemented on the branch `account-owned-portfolios`: revision `0029`, the signal
 definitions, the account delete and the removal of keys, and the `portfolio adopt` rollout
-command (decision 10). A later revision makes each portfolio's account and signal definition
-required and drops its former bars key.
+command (decision 10).
+
+Amended by the owner on 2026-11-18, after the release: nothing that worked before this ADR is
+blocked. ADR 0024's routes stay, with the rules they had, because Hunch uses them (decision 3). A
+portfolio that cannot be adopted keeps working as before, on its own signal and the `portfolios`
+feed it names, and `portfolio adopt` never ends a portfolio or deletes a bars configuration
+(decisions 9 and 10).
 
 It builds on [ADR 0027](0027_one_portfolio_path.md): every portfolio here is built from weights
 an application provides, the one kind that remains.
@@ -144,7 +149,7 @@ names.
 | 8 | Row renamed `ProviderAccountDetails` in code; the owner stays when the keys are removed | `alpaca_connectors__acct_alpaca`, kept until the keys are re-encrypted (open question 1) | `ms_markets__account.uid`, one to one | `CASCADE`, as today | The provider sidecar of ms-markets ADR 0047 (decision 7). |
 | 9 | Table: an ended portfolio's account, `Portfolio` and signal, with no key | `alpaca_connectors__ended_portfolio` | nothing | | Lets an account delete finish its retired `Portfolio`s and signals (open question 2). |
 | 10 | Signal identity: the `ApplicationWeights` key is the account's UID with the application's key | | | | No other account can produce the signal (decision 5). |
-| 11 | API rule: only the account's owner creates, changes or deletes its portfolios, signal definitions and bars configurations | | | | Ownership (decisions 3 to 5). |
+| 11 | API rule: only the account's owner creates its signal definitions, and its portfolios through the new route; bars feeds and ADR 0024's routes keep ADR 0022's rules (amended 2026-11-18) | | | | Ownership (decisions 3 to 5). |
 | 12 | The ordered calls of the account delete and of a signal's delete | | | | Delete means delete, in the order ms-markets' keys allow (decisions 5 and 8). |
 
 Rebalance configurations get nothing: they stay independent (decision 6).
@@ -215,8 +220,11 @@ flowchart BT
   `ms_markets__account.uid` with `RESTRICT`.
 - The ms-markets `Portfolio` stays account-free. The ownership is this connector's rule.
 - Other accounts may still hold the portfolio in their targets and virtual funds (owner).
-- Only the account's owner creates portfolios on it, and nobody creates one on an account without
-  an owner until it takes one at its next key registration (ADR 0019 section 8) (owner).
+- Only the account's owner creates portfolios on it through `POST /v1/portfolio-configurations`,
+  and nobody does on an account without an owner until it takes one at its next key registration
+  (ADR 0019 section 8) (owner). ADR 0024's create keeps the rules it had: the caller owns the
+  portfolio, a named feed is not checked, and an inline one needs an account the caller may
+  configure (ADR 0022) (owner, amended 2026-11-18).
 - `RESTRICT`, not `CASCADE`: a cascade would delete this connector's rows inside ms-markets'
   account delete without retiring the `Portfolio` (the state of
   [issue #33](https://github.com/mainsequence-projects/alpaca-connectors/issues/33)) and without
@@ -228,7 +236,7 @@ flowchart BT
 | Kind | Names | Delete action | Keys | What it prices |
 | --- | --- | --- | --- | --- |
 | A portfolio's bars configuration | its portfolio configuration | `CASCADE` | its portfolio's account | that portfolio's assets |
-| A bars feed | its `Account` | `CASCADE` | its account | explicit assets or the account's holdings, into the shared price table |
+| A bars feed | its `Account` | `CASCADE` | its account | explicit assets, the account's holdings, or the portfolios not yet adopted that name it (`portfolios`, amended), into the shared price table |
 
 - A check allows exactly one of the two names. Each portfolio has one bars configuration of its
   own (owner); the portfolio configuration no longer names one.
@@ -296,7 +304,9 @@ before the signal it follows.
 2. The account's own current target also names its portfolios, and ms-markets refuses to retire
    a portfolio that any current target names, so that target is cleared first.
 3. Each portfolio ends the way ADR 0027 (decision 4) ends every portfolio: the `Portfolio` is
-   retired, and the portfolio configuration is deleted with its bars configuration.
+   retired, and the portfolio configuration is deleted with its bars configuration. A portfolio
+   not yet adopted that a `portfolios` feed of the account prices runs with the account's keys,
+   so it ends too (amended 2026-11-18).
 4. This connector deletes the account's orders and trades in its own instances, whose
    `RESTRICT` keys would refuse the next step.
 5. ms-markets' `Account.delete` deletes the account with its whole history.
@@ -314,14 +324,16 @@ ADR 0027's drain has ended the portfolios it removes before this decision runs. 
 portfolios that remain:
 
 - One whose bars configuration's account is not owned by the portfolio's owner cannot be given
-  one owning account, and is deleted the way decision 8 step 3 ends a portfolio.
+  one owning account. It stays as it is and keeps working as before: it publishes to its own
+  signal, keyed by its configuration UID, runs on the `portfolios` feed it names, and that feed
+  keeps pricing it (owner, amended 2026-11-18; it was to be ended).
 - One that stays belongs to its bars configuration's account. It gets a signal definition on that
   account that keeps its current signal: the definition's ms-markets key stays its configuration's
   UID, today's key, so its signal and weights history continue. No other account can produce
   that key.
-- Each one that stays gets a bars configuration of its own, with the profile of the one it names.
-  A `portfolios` bars configuration is then deleted, and every other one becomes a feed of its
-  account.
+- Each one adopted gets a bars configuration of its own, with the profile of the one it names.
+  Every bars configuration that existed stays a feed of its account; a `portfolios` feed keeps
+  pricing the portfolios not yet adopted that name it, and nothing deletes it (amended).
 
 ### 10. Rollout
 
@@ -335,11 +347,11 @@ drop later (ADR 0012, `AGENTS.md`).
   the release still serving during the rollout writes. In the database, it adopts every portfolio
   its own owner can own (decision 9).
 - **`alpaca-connectors portfolio adopt`**, a dry run and then `--execute`, adopts what the
-  previous release wrote meanwhile and ends the rest. Ending retires the `Portfolio` through
-  Markets, so it is a rollout command, as ADR 0026's calendar links were, not a revision.
-- **A later revision** refuses to run while a portfolio is not adopted, makes the account and the
-  signal definition required, and drops the former bars key. ADR 0024's routes go once the
-  applications use the new ones.
+  previous release wrote meanwhile, and what becomes adoptable later, and leaves the rest as they
+  are. It never ends a portfolio or deletes a bars configuration (amended 2026-11-18).
+- **No revision** refuses to run while a portfolio is not adopted: the account and the signal
+  definition stay nullable while any portfolio is, and so does the former bars key. ADR 0024's
+  routes stay supported (amended 2026-11-18).
 
 ## Reference
 
@@ -427,14 +439,14 @@ Paths are under `src/alpaca_connectors/`.
   and its whole ms-markets history. It is refused while another account currently holds one of
   its portfolios. A `Portfolio` that another account's history names stays retired, with its
   signal.
-- No portfolio depends on another owner's account or signal. Rebalance configurations stay
-  shared rules (decision 6).
+- A portfolio created through `POST /v1/portfolio-configurations` depends on no other owner's
+  account or signal. Rebalance configurations stay shared rules (decision 6).
 - Applications publish to a signal definition by their own key, and several portfolios of the
-  same account can follow it. The provided-weights API changes for every application that calls
-  it, Hunch included.
+  same account can follow it. ADR 0024's routes keep their rules, so Hunch needs no change.
 - ADR 0022's removal behaviour, its owner checks on the configuration routes and its claim refusal
   are withdrawn or restated.
-- Every portfolio whose bars run on another owner's account is deleted (decision 9).
+- A portfolio whose bars run on another owner's account stays unadopted and keeps working
+  (decision 9, amended).
 
 ## Open Questions
 

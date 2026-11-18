@@ -2,7 +2,8 @@
 
 Every portfolio belongs to one account and follows the ``ApplicationWeights`` signal of one of its
 account's signal definitions, the weights the application provides (ADR 0024, ADR 0027, ADR 0028).
-A portfolio not yet adopted does not run.
+A portfolio not yet adopted runs as it did before ADR 0028: on its own signal and the bars feed it
+names.
 """
 
 from __future__ import annotations
@@ -110,18 +111,23 @@ def resolve_portfolio_configuration(
     configuration_uid: Any,
 ) -> ResolvedPortfolioConfiguration:
     """Resolve stored calculation inputs and require an existing signal observation."""
-    from alpaca_connectors.market_data.configurations import portfolio_bar_configuration
-    from alpaca_connectors.portfolios.provided_weights import portfolio_signal_uid, require_adopted
+    from alpaca_connectors.market_data.configurations import (
+        get_bar_configuration,
+        portfolio_bar_configuration,
+    )
+    from alpaca_connectors.portfolios.provided_weights import portfolio_signal_uid
     from alpaca_connectors.portfolios.signal_assets import assets_for_signals
 
     configuration = get_portfolio_configuration(configuration_uid)
     if configuration is None:
         raise LookupError(f"Portfolio configuration {configuration_uid!s} does not exist.")
-    require_adopted(configuration)
     rebalance_configuration = validate_portfolio_references(
         rebalance_configuration_uid=configuration.rebalance_configuration_uid,
     )
     bars_configuration = portfolio_bar_configuration(configuration.uid)
+    if bars_configuration is None and configuration.bars_configuration_uid is not None:
+        # A portfolio not yet adopted is priced by the bars feed it names, as before ADR 0028.
+        bars_configuration = get_bar_configuration(configuration.bars_configuration_uid)
     if bars_configuration is None:
         raise LookupError(
             f"Portfolio configuration {configuration_uid!s} has no bars configuration."

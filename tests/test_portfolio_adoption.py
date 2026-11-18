@@ -65,23 +65,14 @@ OWNERS = {
 }
 
 
-def _run(*, execute: bool, remaining=()):
+def _run(*, execute: bool):
     unadopted = [
         configuration(OWNED, FEED),
         configuration(FOREIGN, OTHER_FEED),
         configuration(HELD, OTHER_FEED),
     ]
-
-    def end(row):
-        if row.uid == HELD:
-            raise ProvidedWeightsError("portfolio_in_account_target", "held", status_code=409)
-
-    listings = [unadopted, list(remaining)]
     with (
-        patch(
-            f"{CONFIGURATIONS}.unadopted_portfolio_configurations",
-            side_effect=lambda: listings.pop(0),
-        ),
+        patch(f"{CONFIGURATIONS}.unadopted_portfolio_configurations", return_value=unadopted),
         patch(f"{BARS}.get_bar_configuration", side_effect=lambda uid: FEEDS.get(uid)),
         patch(
             "alpaca_connectors.account.services.get_account_registration",
@@ -89,42 +80,38 @@ def _run(*, execute: bool, remaining=()):
         ),
         patch("alpaca_connectors.portfolios.adoption.adopt_portfolio") as adopt,
         patch(
-            "alpaca_connectors.portfolios.provided_weights.end_portfolio_configuration",
-            side_effect=end,
+            "alpaca_connectors.portfolios.provided_weights.end_portfolio_configuration"
         ) as end_portfolio,
-        patch(
-            f"{BARS}.list_bar_configurations",
-            return_value=([SimpleNamespace(uid=OTHER_FEED), SimpleNamespace(uid=UNNAMED_FEED)], 2),
-        ) as feeds,
         patch(f"{BARS}.delete_bar_configuration") as delete_feed,
     ):
         report = run_adoption(execute=execute)
-    return report, adopt, end_portfolio, delete_feed, feeds
+    return report, adopt, end_portfolio, delete_feed
 
 
 def test_a_dry_run_reports_and_changes_nothing() -> None:
-    report, adopt, end_portfolio, delete_feed, _ = _run(execute=False)
+    report, adopt, end_portfolio, delete_feed = _run(execute=False)
 
     assert report.adopt == [str(OWNED)]
-    assert report.end == [str(FOREIGN), str(HELD)]
+    assert report.left == [str(FOREIGN), str(HELD)]
     adopt.assert_not_called()
     end_portfolio.assert_not_called()
     delete_feed.assert_not_called()
 
 
-def test_a_run_adopts_ends_and_reports_what_a_target_holds() -> None:
-    held = configuration(HELD, OTHER_FEED)
-    report, adopt, end_portfolio, delete_feed, feeds = _run(execute=True, remaining=[held])
+def test_a_run_adopts_what_it_can_and_never_ends_or_deletes_anything() -> None:
+    report, adopt, end_portfolio, delete_feed = _run(execute=True)
 
     # Its owner owns the bars' account: the portfolio belongs to that account.
     [(adopted, bars, account)] = [entry.args for entry in adopt.call_args_list]
     assert (adopted.uid, bars.uid, account) == (OWNED, FEED, ACCOUNT)
-    # Another owner's account: the portfolio ends; one a current target names is refused.
-    assert [entry.args[0].uid for entry in end_portfolio.call_args_list] == [FOREIGN, HELD]
-    assert (report.end, report.refused) == ([str(FOREIGN)], [str(HELD)])
-    # The `portfolios` feed the held portfolio still names stays; the unnamed one goes.
-    assert feeds.call_args.kwargs["portfolio_owned"] is False
-    delete_feed.assert_called_once_with(UNNAMED_FEED)
+    # Another owner's account: the portfolio stays as it is and keeps working (amended 2026-11-18).
+    assert report.summary() == {
+        "execute": True,
+        "adopt": [str(OWNED)],
+        "left": [str(FOREIGN), str(HELD)],
+    }
+    end_portfolio.assert_not_called()
+    delete_feed.assert_not_called()
 
 
 def test_adopting_keeps_the_signal_and_retries_safely() -> None:

@@ -354,27 +354,19 @@ def create_provided_configuration(
     *,
     owner: AccountOwner,
 ) -> ProvidedWeightsPortfolioCreateResponse:
-    """Create a portfolio by ADR 0024's route, kept until the applications move (ADR 0028).
+    """Create a portfolio by ADR 0024's route, with the rules it had before ADR 0028.
 
-    The portfolio belongs to the account of the bars configuration given inline or named, so
-    that account must be the acting owner's.
+    Hunch creates its portfolios this way. The acting owner owns the portfolio, which belongs to
+    the account of the bars configuration given inline or named. An inline one runs with its
+    account's keys, so its account must be one the owner may configure (ADR 0022): an account
+    without an owner stays open to every caller.
     """
-    from alpaca_connectors.market_data.configurations import get_bar_configuration
-
-    from .accounts import require_account_owned_by
+    from .accounts import require_owner_may_configure_account
 
     values = request.model_dump(exclude={"observations", "bars_configuration"})
     if request.bars_configuration is not None:
-        require_account_owned_by(request.bars_configuration.account_uid, owner)
+        require_owner_may_configure_account(request.bars_configuration.account_uid, owner)
         values["bars_configuration"] = request.bars_configuration.model_dump()
-    else:
-        named = get_bar_configuration(request.bars_configuration_uid)
-        if named is None:
-            raise LookupError(
-                f"Bars configuration {request.bars_configuration_uid} does not exist."
-            )
-        if named.account_uid is not None:
-            require_account_owned_by(named.account_uid, owner)
     created = create_provided_weights_portfolio(
         owner=owner,
         observations=[observation.model_dump() for observation in request.observations],

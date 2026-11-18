@@ -55,15 +55,15 @@ instructions are `.tau/SYSTEM.md`; its tools and skills are described in
   ([ADR 0024](../adrs/0024_portfolios_from_provided_weights.md),
   [ADR 0027](../adrs/0027_one_portfolio_path.md)); it belongs to one account and follows one of
   that account's signal definitions
-  ([ADR 0028](../adrs/0028_every_portfolio_belongs_to_one_account.md)); only the account's owner
-  creates them, through `POST /v1/signal-definitions` and `POST /v1/portfolio-configurations`
-  (or ADR 0024's `.../provided-weights` until the applications move); no CLI command or Agent tool
-  creates one or gives it weights ([Portfolios](../portfolios/portfolios.md))
-- once per Environment after the ADR 0028 release, `alpaca-connectors portfolio adopt` reports
-  each portfolio not yet adopted: the ones it would give their account, a signal definition that
-  keeps their signal and their own bars configuration, and the ones it would end because their
-  bars run on an account their owner does not own; `--execute` does it, deletes the `portfolios`
-  feeds nothing names any more, and reports any portfolio an account's current target holds
+  ([ADR 0028](../adrs/0028_every_portfolio_belongs_to_one_account.md)); applications create them
+  through `POST /v1/signal-definitions` and `POST /v1/portfolio-configurations` (the account's
+  owner) or ADR 0024's `.../provided-weights`, which Hunch uses with its pre-ADR 0028 rules; no CLI
+  command or Agent tool creates one or gives it weights ([Portfolios](../portfolios/portfolios.md))
+- `alpaca-connectors portfolio adopt` reports each portfolio not yet adopted: the ones it would
+  give their account, a signal definition that keeps their signal and their own bars
+  configuration, and the ones it leaves as they are because their owner does not own their bars'
+  account; `--execute` adopts. It never ends a portfolio or deletes a bars configuration, and a
+  portfolio left unadopted keeps running and taking weights as before
 - the application registers every asset before naming it in weights; an unregistered asset, or
   one without Alpaca details, refuses the whole call
 - inspect with `alpaca-connectors portfolio list` (`--account-uid`, `--signal-definition-uid`),

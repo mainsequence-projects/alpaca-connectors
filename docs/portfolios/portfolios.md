@@ -54,7 +54,7 @@ every venue's connector to serve the same ones (Hunch ADR 0030, decision 7).
 | `GET /v1/signal-definitions/{uid}/weights` | its latest observations: their times and each asset's weight at each time | the account's owner, or any Main Sequence caller |
 | `PATCH`, `DELETE /v1/signal-definitions/{uid}` | rename it; delete it once no portfolio follows it | the account's owner |
 | `POST /v1/portfolio-configurations` | create a portfolio of the account that follows one of its signals | the account's owner, who becomes its owner |
-| `POST /v1/portfolio-configurations/provided-weights` | ADR 0024's create, with its first observations, until the applications move | the owner of the bars configuration's account |
+| `POST /v1/portfolio-configurations/provided-weights` | ADR 0024's create, with its first observations; Hunch uses it | any caller, who becomes its owner; an inline feed needs an account the caller may configure |
 | `POST`, `GET /v1/portfolio-configurations/{uid}/weights` | ADR 0024's weights routes, on the signal the portfolio follows | its owner; reading, anyone |
 | `PATCH /v1/portfolio-configurations/{uid}` | change its settings; pause or resume it with `scheduled` | its owner |
 | `DELETE /v1/portfolio-configurations/{uid}` | retire its `Portfolio`, then delete it ([Ending A Portfolio](#ending-a-portfolio)) | its owner |
@@ -77,17 +77,21 @@ that order, and a refused create leaves no row. It answers the configuration, th
 (`portfolio_uid`, and `portfolio_unique_identifier` `ALPACA_PORTFOLIO__<uid hex>`) and its bars
 configuration.
 
-**ADR 0024's create** stays until the applications move. It takes either `bars_configuration_uid`
-(a feed of the account) or `bars_configuration` (`name`, `description?`, `account_uid`,
-`frequency_id`, `feed`, `adjustment`, `scheduled?`), the rebalance, valuation and fee settings and
-`observations`. The portfolio belongs to that account, gets its own bars configuration with that
-profile, and a signal definition of its own whose key is its configuration UID, as its signal's key
-was; the observations are published to it.
+**ADR 0024's create** is supported with the rules it had before ADR 0028; Hunch creates its takes
+this way. It takes either `bars_configuration_uid` (a feed of the account) or `bars_configuration`
+(`name`, `description?`, `account_uid`, `frequency_id`, `feed`, `adjustment`, `scheduled?`), the
+rebalance, valuation and fee settings and `observations`. The caller owns the portfolio. A named
+feed is not checked; an inline one needs an account the caller may configure: another owner's
+account is refused, and one without an owner stays open (ADR 0022). The portfolio belongs to that
+account, gets its own bars configuration with that profile, and a signal definition of its own
+whose key is its configuration UID, as its signal's key was; the observations are published to it.
 
 **Not adopted yet.** A portfolio created before ADR 0028 that revision 0029 could not give an
 account (its bars ran on an account without an owner, or on another owner's) answers
-`adopted: false`. It neither runs nor takes weights until `alpaca-connectors portfolio adopt
---execute` gives it one or ends it.
+`adopted: false` and works exactly as before: it takes weights on its own signal, keyed by its
+configuration UID, runs on the `portfolios` feed it names, and that feed keeps pricing it.
+`alpaca-connectors portfolio adopt --execute` adopts the ones whose owner later owns the account
+and leaves the rest as they are; nothing ends them.
 
 ## Observations
 

@@ -107,8 +107,10 @@ Removing keys and deleting an account are separate actions
 
 Without `--execute`, each only reports what it would do.
 
-Only the account's owner creates or changes its bars feeds, signal definitions and portfolios,
-and nobody does on an account without an owner until it takes one at its next key registration. An external person cannot claim an account without an owner while enabled
+Only the account's owner creates or changes its signal definitions and creates portfolios on it
+through `POST /v1/portfolio-configurations`, and nobody does on an account without an owner until
+it takes one at its next key registration. Bars feeds and ADR 0024's routes keep their rules from
+before ADR 0028: another owner's account is refused, and one without an owner stays open. An external person cannot claim an account without an owner while enabled
 configurations run with its keys.
 
 Registrations created before revision `0018` still hold their keys in Main Sequence Secrets. The

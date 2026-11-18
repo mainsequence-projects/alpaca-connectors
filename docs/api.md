@@ -64,7 +64,7 @@ before its work finds the Markets API starting as well.
 | Holdings | list/get and capture under `/v1/accounts/{account_uid}/holdings`; `/latest` lists only the newest immutable snapshot; the [account sync](#account-sync) at `POST /v1/accounts/{account_uid}/actions/sync` |
 | Execution | submit (with preflight), sync and cancel order batches, and list recorded orders, under `/v1/accounts/{account_uid}/orders` |
 | Market Data | configuration CRUD and resolve/update actions under `/v1/market-data/bar-configurations`; dataset list/get and bounded observations under `/v1/market-data/datasets` |
-| Portfolios | an account's signals under `/v1/signal-definitions`, with their weights at `/{uid}/weights`; the account's portfolios that follow them: create at `POST /v1/portfolio-configurations`, list/get/`PATCH`/`DELETE`, and run and JobRun-history actions on the portfolio Job under `/v1/portfolio-configurations`; ADR 0024's routes `POST /v1/portfolio-configurations/provided-weights` and `/{uid}/weights` until the applications move; reusable calendar-event policies under `/v1/portfolio-rebalance-configurations` |
+| Portfolios | an account's signals under `/v1/signal-definitions`, with their weights at `/{uid}/weights`; the account's portfolios that follow them: create at `POST /v1/portfolio-configurations`, list/get/`PATCH`/`DELETE`, and run and JobRun-history actions on the portfolio Job under `/v1/portfolio-configurations`; ADR 0024's routes `POST /v1/portfolio-configurations/provided-weights` and `/{uid}/weights`, supported with their former rules (Hunch uses them); reusable calendar-event policies under `/v1/portfolio-rebalance-configurations` |
 | Operations | poll an accepted Alpaca bars or portfolio JobRun under `GET /v1/operations/job-runs/{job_run_uid}`; read an account sync again at `GET /v1/operations/{operation_uid}` |
 
 Market-data writes are configuration-oriented. A bar configuration has exactly one parent
@@ -247,12 +247,15 @@ GET|PATCH|DELETE /v1/portfolio-rebalance-configurations/{configuration_uid}
   `scheduled?`. Only the account's owner creates it. It answers the configuration, the `Portfolio`
   (`portfolio_uid`, `portfolio_unique_identifier` `ALPACA_PORTFOLIO__<uid hex>`) and its bars
   configuration. A refused create leaves no row.
-- **ADR 0024's create** (`POST /v1/portfolio-configurations/provided-weights`) stays until the
-  applications move: it takes either `bars_configuration_uid` (a feed) or `bars_configuration`
+- **ADR 0024's create** (`POST /v1/portfolio-configurations/provided-weights`) is supported, and
+  Hunch uses it: it takes either `bars_configuration_uid` (a feed) or `bars_configuration`
   (`name`, `account_uid`, `frequency_id`, `feed`, `adjustment`, `scheduled?`), and the
-  `observations`. The portfolio belongs to that account, which the caller must own, gets its own
-  bars configuration with that profile, and a signal definition whose key is its configuration
-  UID, as its signal's key was. Its `/{uid}/weights` routes publish to that definition.
+  `observations`. It keeps the rules it had before ADR 0028: the caller owns the portfolio, a named
+  feed is not checked, and an inline one needs an account the caller may configure (another
+  owner's answers `409 account_owned_by_another`; one without an owner stays open, ADR 0022). The
+  portfolio belongs to that account, gets its own bars configuration with that profile, and a
+  signal definition whose key is its configuration UID, as its signal's key was. Its
+  `/{uid}/weights` routes publish to the signal the portfolio follows.
 - **An observation** is `{observed_at, weights: {<ALPACA::uuid>: <weight>}}`. `observed_at` needs a
   timezone. Each observation is the whole set: an asset the previous one held and this one leaves
   out is written at `0`. Weights are stored as given, negatives included. Several observations in
@@ -261,13 +264,15 @@ GET|PATCH|DELETE /v1/portfolio-rebalance-configurations/{configuration_uid}
 - **Assets** must be registered Alpaca assets: `422 unknown_asset` or `422 asset_not_alpaca`
   otherwise. Other refusals are `422 invalid_observation` and `422 empty_observations`. No error
   names an asset, a weight or an owner.
-- **The owner.** The acting owner at creation, the account's owner, owns the portfolio. Only that
-  owner gives it weights, changes, pauses or deletes it; anyone else gets `403
+- **The owner.** The acting owner at creation owns the portfolio: the account's owner on
+  `POST /v1/portfolio-configurations`, the caller on ADR 0024's create. Only that owner gives it
+  weights, changes, pauses or deletes it; anyone else gets `403
   portfolio_owned_by_another`. Reads and runs stay open. Responses never carry the owner, but carry
   `account_uid`, `signal_definition_uid` and `adopted`.
 - **Not adopted yet.** A portfolio created before ADR 0028 that revision 0029 could not give an
-  account answers `adopted: false`; it neither runs nor takes weights (`409
-  portfolio_not_adopted`) until the `portfolio adopt` rollout gives it one or ends it.
+  account (its owner does not own its bars' account) answers `adopted: false` and works as before:
+  it takes weights on its own signal, keyed by its configuration UID, runs on the feed it names,
+  and that feed keeps pricing it. Nothing ends it.
 - **Deleting ends it.** `DELETE` retires the ms-markets `Portfolio` (ms-markets ADR 0049), then
   deletes the configuration with its own bars configuration, and answers `portfolio: {uid,
   unique_identifier, state: "retired", retired_at}`. While an account's current target names the
@@ -517,11 +522,15 @@ API believes it only from a caller listed in `ALPACA_CONNECTORS_VOUCHING_CALLERS
 - A call for an external person reaches only that person's accounts: every route that names an
   account, in its path, body or options, answers `404` for anyone else's, and `GET /v1/accounts`
   lists only theirs. Account key requests are refused for them (`400`). Other calls are unchanged.
-- Only an account's owner creates, changes or deletes its bars feeds, signal definitions and
-  portfolios ([ADR 0028](adrs/0028_every_portfolio_belongs_to_one_account.md)); a portfolio's own
-  bars configuration is changed by the portfolio's owner. Anyone else gets `409
-  account_owned_by_another`, and an external person `404`. Nobody acts on an account without an
-  owner (`409 account_without_owner`) until it takes one at its next key registration.
+- Only an account's owner creates, changes or deletes its signal definitions and creates portfolios
+  on it through `POST /v1/portfolio-configurations`
+  ([ADR 0028](adrs/0028_every_portfolio_belongs_to_one_account.md)): anyone else gets `409
+  account_owned_by_another`, and nobody does on an account without an owner (`409
+  account_without_owner`) until it takes one at its next key registration. Bars feeds and ADR
+  0024's routes keep the rules they had before ADR 0028 (ADR 0022): a feed may not run with another
+  owner's account (`409 account_owned_by_another`), an account without an owner stays open, and
+  deleting a feed checks no owner. A portfolio's own bars configuration is changed by the
+  portfolio's owner. An external person gets `404` for anyone else's account.
 - An external person's registration of an account without an owner answers `409 account_in_use`
   while enabled bar configurations run with its keys. It names none of them.
 - `GET /v1/accounts` filters by `owner_gateway_uid` and `owner_user_uid`, given together.
@@ -538,7 +547,8 @@ Two separate actions, both for the account's owner only
   with the ordinary error until the owner registers keys again.
 - **Delete**, `DELETE /v1/accounts/{account_uid}?confirm=DELETE%20<account_uid>`, deletes the
   account and everything that belongs to it: its portfolios (retired, then deleted unless another
-  account's history names them), their bars configurations, its bars feeds, its signal
+  account's history names them), with those not yet adopted that its `portfolios` feeds price,
+  their bars configurations, its bars feeds, its signal
   definitions and their signals, its orders and trades, and its whole Markets history. A request
   without the exact confirmation changes nothing. It is refused with `409 account_delete_refused`,
   before anything changes, while ms-markets' preflight reports a blocker or another account's

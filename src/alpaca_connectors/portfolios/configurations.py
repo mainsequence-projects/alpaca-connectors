@@ -222,9 +222,9 @@ class AlpacaPortfolioConfigurationTable(
     """One analytical portfolio of one account, following one of its account's signals.
 
     The account (ADR 0028, decision 3) and the signal definition it follows (decision 5) are
-    nullable only until revision 0029's adoption and the ``portfolio adopt`` rollout command
-    have given every existing portfolio one; a later revision makes them required. A row without
-    an account is not adopted: it is listed and can be deleted, but it does not run.
+    null for a portfolio created before ADR 0028 that revision 0029 and the ``portfolio adopt``
+    command could not give one, because its owner does not own its bars' account. Such a row is
+    not adopted and works as before: it follows its own signal and runs on the bars feed it names.
     """
 
     __project_storage_concept__ = "portfolio_configuration"
@@ -1182,7 +1182,7 @@ def update_portfolio_configuration(
 def scheduled_portfolio_configurations() -> list[AlpacaPortfolioConfiguration]:
     """Return every portfolio configuration the portfolio Job's scheduled run includes.
 
-    A portfolio not yet adopted (no account, ADR 0028) does not run.
+    A portfolio not yet adopted runs as every other one does (ADR 0028, as amended).
     """
     from msm.bootstrap import resolve_runtime
     from msm.repositories.base import compile_markets_statement, execute_markets_operation
@@ -1192,13 +1192,7 @@ def scheduled_portfolio_configurations() -> list[AlpacaPortfolioConfiguration]:
     _start_runtime()
     runtime = resolve_runtime(models=[table], row_model_name="AlpacaPortfolioConfiguration")
     operation = compile_markets_statement(
-        select(table)
-        .where(
-            table.scheduled.is_(True),
-            table.account_uid.is_not(None),
-            table.signal_definition_uid.is_not(None),
-        )
-        .order_by(table.name.asc(), table.uid.asc()),
+        select(table).where(table.scheduled.is_(True)).order_by(table.name.asc(), table.uid.asc()),
         context=runtime.context,
         operation="select",
     )
@@ -1230,6 +1224,30 @@ def portfolio_configurations_of_account(
         rows.extend(page)
         if not page or len(rows) >= total:
             return rows
+
+
+def portfolio_configurations_naming_bars(
+    bars_configuration_uid: uuid.UUID | str,
+) -> list[AlpacaPortfolioConfiguration]:
+    """The portfolios that name a bars feed: those not yet adopted, priced by it (ADR 0024)."""
+    from msm.bootstrap import resolve_runtime
+    from msm.repositories.base import compile_markets_statement, execute_markets_operation
+    from sqlalchemy import select
+
+    table = AlpacaPortfolioConfigurationTable
+    _start_runtime()
+    runtime = resolve_runtime(models=[table], row_model_name="AlpacaPortfolioConfiguration")
+    operation = compile_markets_statement(
+        select(table).where(table.bars_configuration_uid == uuid.UUID(str(bars_configuration_uid))),
+        context=runtime.context,
+        operation="select",
+    )
+    return [
+        AlpacaPortfolioConfiguration.model_validate(row)
+        for row in operation_result_rows(
+            execute_markets_operation(operation, context=runtime.context)
+        )
+    ]
 
 
 def unadopted_portfolio_configurations() -> list[AlpacaPortfolioConfiguration]:
@@ -1355,6 +1373,7 @@ __all__ = [
     "portfolio_configurations_of_account",
     "portfolio_counts_by_definition",
     "record_ended_portfolio",
+    "portfolio_configurations_naming_bars",
     "unadopted_portfolio_configurations",
     "PortfolioRebalanceConfiguration",
     "PortfolioRebalanceConfigurationTable",

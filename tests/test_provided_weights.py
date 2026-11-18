@@ -30,7 +30,6 @@ from alpaca_connectors.portfolios.configurations import (
 )
 from alpaca_connectors.portfolios.execution import portfolio_unique_identifier
 from alpaca_connectors.portfolios.provided_weights import (
-    PortfolioNotAdoptedError,
     PortfolioOwnedByAnotherError,
     ProvidedWeightsError,
     normalize_observations,
@@ -324,7 +323,7 @@ def test_signal_refusals_become_codes_that_quote_nothing(error, stored_after, co
     assert "ALPACA::" not in str(raised.value)
 
 
-def test_a_portfolio_publishes_to_its_definition_and_only_once_adopted() -> None:
+def test_a_portfolio_publishes_to_its_definition_or_before_adoption_to_its_own_signal() -> None:
     published = provided_weights.PublishedWeights("signal-a", 1, 1, MONDAY, MONDAY)
     observations = [{"observed_at": MONDAY, "weights": {NVDA: 1.0}}]
     with (
@@ -333,14 +332,19 @@ def test_a_portfolio_publishes_to_its_definition_and_only_once_adopted() -> None
             return_value=definition(),
         ) as read,
         patch.object(provided_weights, "publish_definition_weights", return_value=published) as pub,
+        patch.object(provided_weights, "require_alpaca_assets"),
+        patch.object(provided_weights, "_publish_validated", return_value=published) as own,
     ):
         assert publish_provided_weights(provided_configuration(), observations) is published
-        with pytest.raises(PortfolioNotAdoptedError):
-            publish_provided_weights(
-                provided_configuration(account_uid=None, signal_definition_uid=None), observations
-            )
+        # Not yet adopted, it keeps taking weights on its own signal, as before ADR 0028.
+        unadopted = provided_configuration(
+            account_uid=None, signal_definition_uid=None, bars_configuration_uid=BARS_UID
+        )
+        assert publish_provided_weights(unadopted, observations) is published
     read.assert_called_once_with(DEFINITION_UID)
     pub.assert_called_once_with(definition(), observations)
+    assert own.call_args.args[0] == legacy_signal_key(CONFIGURATION_UID) == str(CONFIGURATION_UID)
+    assert list(own.call_args.args[1]) == [MONDAY]
 
 
 # ------------------------------------------------------------------------------------------------
@@ -500,9 +504,11 @@ def test_only_a_portfolios_own_bars_price_its_portfolio() -> None:
         validate_configuration_scope(
             asset_source="portfolios", asset_uids=[uuid.uuid4()], portfolio_owned=True
         )
-    # A feed belongs to its account and prices explicit assets or its holdings (ADR 0028).
-    with pytest.raises(ValueError, match="bars feed"):
-        validate_configuration_scope(asset_source="portfolios", asset_uids=None)
+    # A `portfolios` feed of an account stays valid: it prices the portfolios that name it.
+    assert validate_configuration_scope(asset_source="portfolios", asset_uids=None) == (
+        "portfolios",
+        [],
+    )
     with pytest.raises(ValueError, match="portfolio's own"):
         validate_configuration_scope(
             asset_source="assets", asset_uids=[uuid.uuid4()], portfolio_owned=True
@@ -613,18 +619,32 @@ def test_a_retired_portfolios_bars_price_nothing() -> None:
     assert scope.asset_identifiers == ()
 
 
-def test_a_feed_or_an_unadopted_portfolios_former_bars_have_no_portfolio_of_their_own() -> None:
+def test_a_portfolios_feed_prices_the_portfolios_not_yet_adopted_that_name_it() -> None:
     bars = "alpaca_connectors.market_data.configurations.get_bar_configuration"
-    with patch(bars, return_value=SimpleNamespace(portfolio_configuration_uid=None)):
+    naming = f"{CONFIGURATIONS}.portfolio_configurations_naming_bars"
+    unadopted = provided_configuration(
+        account_uid=None, signal_definition_uid=None, bars_configuration_uid=BARS_UID
+    )
+    # A feed of holdings or explicit assets prices no portfolio here.
+    feed = SimpleNamespace(asset_source="account_holdings", portfolio_configuration_uid=None)
+    with patch(bars, return_value=feed):
         assert bars_scope._owning_configurations(BARS_UID) == []
+    # A `portfolios` feed keeps pricing the portfolios that name it, as before ADR 0028.
+    shared = SimpleNamespace(asset_source="portfolios", portfolio_configuration_uid=None)
+    with patch(bars, return_value=shared), patch(naming, return_value=[unadopted]) as named:
+        assert bars_scope._owning_configurations(BARS_UID) == [unadopted]
+    named.assert_called_once_with(BARS_UID)
+    # A portfolio's own prices its portfolio.
+    own = SimpleNamespace(asset_source="portfolios", portfolio_configuration_uid=CONFIGURATION_UID)
     with (
-        patch(bars, return_value=SimpleNamespace(portfolio_configuration_uid=CONFIGURATION_UID)),
+        patch(bars, return_value=own),
         patch(
-            f"{CONFIGURATIONS}.get_portfolio_configuration",
-            return_value=provided_configuration(account_uid=None, signal_definition_uid=None),
+            f"{CONFIGURATIONS}.get_portfolio_configuration", return_value=provided_configuration()
         ),
     ):
-        assert bars_scope._owning_configurations(BARS_UID) == []
+        assert [row.uid for row in bars_scope._owning_configurations(BARS_UID)] == [
+            CONFIGURATION_UID
+        ]
 
 
 def test_a_portfolio_retired_later_still_counts() -> None:
@@ -732,29 +752,57 @@ def test_create_route_needs_exactly_one_bars_configuration(api_client) -> None:
     assert response.status_code == 422
 
 
-def test_inline_bars_need_an_account_the_caller_may_configure(api_client) -> None:
-    from alpaca_connectors.account.ownership import AccountOwnedByAnotherError
+def _create_with(api_client, bars: dict) -> object:
+    return api_client.post(
+        "/v1/portfolio-configurations/provided-weights",
+        json={
+            "name": "Thesis basket",
+            **bars,
+            "rebalance_configuration_uid": str(REBALANCE_UID),
+            "observations": [{"observed_at": MONDAY.isoformat(), "weights": {NVDA: 1.0}}],
+        },
+    )
 
+
+def test_inline_bars_need_an_account_the_caller_may_configure(api_client) -> None:
+    # ADR 0022, unchanged by ADR 0028: another owner's account is refused, one without an owner
+    # stays open to every caller.
+    registration = "alpaca_connectors.api.app.services.accounts.get_account_registration"
+    inline = {"bars_configuration": {"name": "Prices", "account_uid": str(ACCOUNT_UID)}}
     with (
-        patch(
-            "alpaca_connectors.api.app.services.accounts.require_account_owned_by",
-            side_effect=AccountOwnedByAnotherError(),
-        ),
+        patch(registration, return_value=_owned_by("someone-else")),
         patch(f"{SERVICES}.create_provided_weights_portfolio") as create,
     ):
-        response = api_client.post(
-            "/v1/portfolio-configurations/provided-weights",
-            json={
-                "name": "Thesis basket",
-                "bars_configuration": {"name": "Prices", "account_uid": str(uuid.uuid4())},
-                "rebalance_configuration_uid": str(REBALANCE_UID),
-                "observations": [{"observed_at": MONDAY.isoformat(), "weights": {NVDA: 1.0}}],
-            },
-        )
-
-    assert response.status_code == 409
-    assert response.json()["detail"]["code"] == "account_owned_by_another"
+        refused = _create_with(api_client, inline)
+    assert refused.status_code == 409
+    assert refused.json()["detail"]["code"] == "account_owned_by_another"
     create.assert_not_called()
+
+    ownerless = {**_owned_by("x"), "owner_gateway_uid": None, "owner_user_uid": None}
+    with (
+        patch(registration, return_value=ownerless),
+        patch(
+            f"{SERVICES}.create_provided_weights_portfolio", side_effect=LookupError("stop")
+        ) as create,
+    ):
+        assert _create_with(api_client, inline).status_code == 404
+    create.assert_called_once()
+
+
+def test_a_named_feed_of_any_account_creates_as_before(api_client) -> None:
+    # Hunch names the feed its takes are priced with; the route checks no owner (ADR 0024).
+    with (
+        patch(
+            "alpaca_connectors.api.app.services.accounts.get_account_registration",
+            return_value=_owned_by("someone-else"),
+        ),
+        patch(
+            f"{SERVICES}.create_provided_weights_portfolio", side_effect=LookupError("stop")
+        ) as create,
+    ):
+        response = _create_with(api_client, {"bars_configuration_uid": str(BARS_UID)})
+    assert response.status_code == 404
+    assert create.call_args.kwargs["bars_configuration_uid"] == str(BARS_UID)
 
 
 def test_another_caller_cannot_give_weights_pause_or_delete(api_client, local_caller) -> None:
@@ -1030,3 +1078,75 @@ def test_the_portfolio_run_resolves_the_provided_signal() -> None:
     assert resolved.asset_identifiers == (AAPL, JPM, NVDA)
     assert resolved.signal_start_time == MONDAY
     assert set(resolved.summary()).isdisjoint({"weights_source", "signal_configuration_uid"})
+
+
+def test_a_portfolio_not_yet_adopted_runs_on_the_feed_it_names() -> None:
+    from alpaca_connectors.portfolios import execution
+    from alpaca_connectors.portfolios.signal_history import (
+        SignalObservationAsset,
+        SignalObservationMatrix,
+    )
+
+    unadopted = provided_configuration(
+        account_uid=None, signal_definition_uid=None, bars_configuration_uid=BARS_UID
+    )
+    signal_uid = signal_uid_for_key(legacy_signal_key(CONFIGURATION_UID))
+    matrix = SignalObservationMatrix(
+        signal_uid=signal_uid,
+        time_indexes=(WEDNESDAY,),
+        assets=(
+            SignalObservationAsset(asset_identifier=NVDA, symbol="NVDA", name=None, weights=(1.0,)),
+        ),
+    )
+    feed = SimpleNamespace(
+        uid=BARS_UID, enabled=True, frequency_id="1d", feed="sip", adjustment="all"
+    )
+    with (
+        patch.object(execution, "get_portfolio_configuration", return_value=unadopted),
+        patch.object(
+            execution,
+            "validate_portfolio_references",
+            return_value=Mock(uid=REBALANCE_UID, strategy="calendar_event_signal"),
+        ),
+        patch(
+            "alpaca_connectors.market_data.configurations.portfolio_bar_configuration",
+            return_value=None,
+        ),
+        patch(
+            "alpaca_connectors.market_data.configurations.get_bar_configuration",
+            return_value=feed,
+        ) as named,
+        patch.object(execution, "read_signal_observation_matrix", return_value=matrix),
+        patch.object(
+            execution,
+            "read_signal_observation_bounds",
+            return_value=SignalObservationBounds(signal_uid, MONDAY, WEDNESDAY),
+        ),
+        patch.object(execution, "resolve_alpaca_bars_time_index_meta_table_uid", return_value="t"),
+        patch("alpaca_connectors.portfolios.signal_assets.assets_for_signals", return_value=[NVDA]),
+    ):
+        resolved = execution.resolve_portfolio_configuration(CONFIGURATION_UID)
+
+    named.assert_called_once_with(BARS_UID)
+    assert resolved.bars_configuration is feed
+    assert resolved.signal_uid == signal_uid
+
+
+def test_the_scheduled_run_includes_portfolios_not_yet_adopted() -> None:
+    from alpaca_connectors.portfolios import configurations
+
+    with (
+        patch.object(configurations, "_start_runtime"),
+        patch("msm.bootstrap.resolve_runtime", return_value=SimpleNamespace(context="ctx")),
+        patch(
+            "msm.repositories.base.compile_markets_statement", return_value="select"
+        ) as compile_statement,
+        patch("msm.repositories.base.execute_markets_operation", return_value={"rows": []}),
+    ):
+        assert configurations.scheduled_portfolio_configurations() == []
+
+    statement = compile_statement.call_args.args[0]
+    where = str(statement.compile(compile_kwargs={"literal_binds": True})).split("WHERE", 1)[1]
+    # Only the scheduled flag decides (ADR 0028, as amended 2026-11-18).
+    assert "scheduled IS true" in " ".join(where.split())
+    assert "account_uid" not in where and "signal_definition_uid" not in where

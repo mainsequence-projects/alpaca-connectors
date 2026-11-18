@@ -67,10 +67,11 @@ def _add_configuration_values(parser: argparse.ArgumentParser, *, required: bool
     parser.add_argument("--description")
     parser.add_argument("--account-uid", required=required)
     # A feed of an account; a portfolio's own configuration is made with the portfolio (ADR 0028).
+    # A `portfolios` feed prices the portfolios not yet adopted that name it, as before.
     parser.add_argument(
         "--asset-source",
         required=required,
-        choices=("assets", "account_holdings"),
+        choices=("assets", "account_holdings", "portfolios"),
     )
     parser.add_argument("--asset-uids", help="Comma-separated Asset UIDs for the assets source.")
     parser.add_argument("--frequency", required=required)

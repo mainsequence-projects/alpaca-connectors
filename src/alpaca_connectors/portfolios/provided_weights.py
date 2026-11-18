@@ -7,12 +7,14 @@ definition's ``signal_key``, bound to this application's ``AlpacaSignalWeightsSt
 Each call that gives weights publishes one or more observations to that signal; ms-markets
 writes a dropped asset at ``0`` and refuses an observation at or before the last one.
 
-Only the account's owner creates its portfolios and signals, gives them weights, changes,
-pauses or deletes them. Errors carry a code and never name an asset, a weight or an owner.
+Only a portfolio's owner gives it weights, changes, pauses or deletes it. Errors carry a code and
+never name an asset, a weight or an owner.
 
-The routes of ADR 0024 stay until the applications move: ``create_provided_weights_portfolio``
-creates the portfolio with a definition of its own whose key is the configuration UID, as its
-signal's key was, and ``give_portfolio_weights`` publishes to the portfolio's definition.
+The routes of ADR 0024 are supported, with the rules they had before ADR 0028; Hunch uses them.
+``create_provided_weights_portfolio`` creates the portfolio with a definition of its own whose key
+is the configuration UID, as its signal's key was, and ``give_portfolio_weights`` publishes to the
+signal the portfolio follows. A portfolio not yet adopted keeps working as before ADR 0028: it
+publishes to its own signal, keyed by its configuration UID, and runs on the bars feed it names.
 """
 
 from __future__ import annotations
@@ -56,17 +58,6 @@ class PortfolioOwnedByAnotherError(ProvidedWeightsError):
             "portfolio_owned_by_another",
             "This portfolio belongs to another owner.",
             status_code=403,
-        )
-
-
-class PortfolioNotAdoptedError(ProvidedWeightsError):
-    def __init__(self) -> None:
-        super().__init__(
-            "portfolio_not_adopted",
-            "This portfolio was created before accounts owned portfolios and has no account yet; "
-            "it does not run or take weights until the portfolio adopt rollout gives it one or "
-            "ends it.",
-            status_code=409,
         )
 
 
@@ -142,12 +133,6 @@ def require_portfolio_owner(
     """Refuse a change to a portfolio by anyone but its owner (ADR 0024, decision 6)."""
     if not is_owner(configuration, owner):
         raise PortfolioOwnedByAnotherError()
-
-
-def require_adopted(configuration: AlpacaPortfolioConfiguration) -> None:
-    """Refuse to run or give weights to a portfolio that has no account yet (ADR 0028)."""
-    if not configuration.adopted:
-        raise PortfolioNotAdoptedError()
 
 
 def _invalid(message: str) -> ProvidedWeightsError:
@@ -270,10 +255,27 @@ def publish_provided_weights(
     configuration: AlpacaPortfolioConfiguration,
     observations: Sequence[Mapping[str, Any]],
 ) -> PublishedWeights:
-    """Publish to the signal definition the portfolio follows (the routes of ADR 0024)."""
+    """Publish to the signal the portfolio follows (the routes of ADR 0024).
+
+    A portfolio adopted by an account follows its signal definition. One not yet adopted publishes
+    to its own signal, keyed by its configuration UID, as it did before ADR 0028; adopting it
+    later keeps that signal.
+    """
     from alpaca_connectors.portfolios.signal_definitions import get_signal_definition
 
-    require_adopted(configuration)
+    if configuration.signal_definition_uid is None:
+        normalized = normalize_observations(observations)
+        assets = _observation_assets(normalized)
+        require_alpaca_assets(assets)
+        return _publish_validated(
+            legacy_signal_key(configuration.uid),
+            normalized,
+            assets,
+            description=configuration.description,
+            metadata_description=(
+                f"Weights the application provides for the portfolio {configuration.name!r}."
+            ),
+        )
     definition = get_signal_definition(configuration.signal_definition_uid)
     if definition is None:
         raise LookupError(
@@ -718,7 +720,6 @@ def create_provided_weights_portfolio(
 __all__ = [
     "OWN_BARS_SOURCE",
     "PROVIDED_PORTFOLIO_PREFIX",
-    "PortfolioNotAdoptedError",
     "PortfolioOwnedByAnotherError",
     "PortfolioRemoval",
     "ProvidedPortfolioCreation",
@@ -739,7 +740,6 @@ __all__ = [
     "provided_signal_uid",
     "publish_definition_weights",
     "publish_provided_weights",
-    "require_adopted",
     "require_alpaca_assets",
     "require_portfolio_owner",
 ]

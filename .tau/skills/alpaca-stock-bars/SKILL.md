@@ -17,13 +17,15 @@ and `observations`. Discover the Account, Asset scope and migrated frequency/fee
 profile before `alpaca_manage_bar_configuration` operations `create`/`update`.
 Never invent profiles or dynamically create schemas.
 
-A stored configuration belongs to one Account (a feed) or to one portfolio. Only the Account's
-owner creates or changes a feed, which selects exactly one source:
+A stored configuration belongs to one Account (a feed) or to one portfolio. A feed may not run
+with another owner's Account; one without an owner stays open. A feed selects exactly one source:
 
 - `assets`: non-empty registered `asset_uids`.
 - `account_holdings`: no explicit Assets. The configured Account resolves its newest stored
   holdings inside the inclusive trailing 30-day window; resolution is read-only and never
   captures holdings.
+- `portfolios`: no explicit Assets. Every asset of the portfolios not yet adopted that name the
+  feed, as before Account ownership.
 
 A portfolio's own configuration, source `portfolios`, is made and deleted with the portfolio: every
 asset its signal ever gave a weight, fetched with the portfolio's Account's keys; a new asset joins

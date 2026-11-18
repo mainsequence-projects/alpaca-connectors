@@ -77,16 +77,19 @@ identifiers, never raw SQL, and return both identities on every observation.
 A bar configuration has exactly one parent
 ([ADR 0028](../adrs/0028_every_portfolio_belongs_to_one_account.md), decision 4):
 
-- **A bars feed** belongs to an account: its keys fetch an explicit asset list or the account's
-  holdings, and it is deleted with the account. Only the account's owner creates or changes one.
+- **A bars feed** belongs to an account: its keys fetch an explicit asset list, the account's
+  holdings, or, as before ADR 0028, the assets of the portfolios not yet adopted that name it
+  (`portfolios`), and it is deleted with the account. It may not run with another owner's account;
+  an account without an owner stays open (ADR 0022).
 - **A portfolio's own configuration** belongs to its portfolio: it fetches every asset the
   portfolio's signal ever published, read from the signal-asset table rather than the signal
   weights series, with the portfolio's account's keys, and it is created and deleted with the
-  portfolio ([Portfolios](../portfolios/portfolios.md#bars)). Its source is `portfolios`; a feed
-  cannot have it.
+  portfolio ([Portfolios](../portfolios/portfolios.md#bars)). Its source is `portfolios`.
 
 Either kind writes the one shared price table of its bar profile, whose rows are keyed by time and
-asset and name no account; deleting an account deletes its configurations, never price rows.
+asset and name no account; deleting an account deletes its configurations, never price rows. A
+feed that portfolios not yet adopted name is not deleted while they do (`409 action_conflict`), as
+their key to it refused before ADR 0028.
 
 An `assets` source stores normalized membership rows. Create and update operations write the full
 set with one bulk upsert and remove stale rows with one delete; they never issue one MetaTable

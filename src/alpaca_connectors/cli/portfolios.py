@@ -44,9 +44,9 @@ def configure_delete_parser(parser: argparse.ArgumentParser) -> None:
 
 def configure_adopt_parser(parser: argparse.ArgumentParser) -> None:
     parser.description = (
-        "Rollout of ADR 0028: give every portfolio not yet adopted its account, a signal "
-        "definition that keeps its signal and its own bars configuration, or end the ones whose "
-        "bars run on an account their owner does not own. Dry run without --execute."
+        "ADR 0028: give every portfolio not yet adopted whose owner owns its bars' account that "
+        "account, a signal definition that keeps its signal and its own bars configuration. "
+        "Every other portfolio is left as it is and keeps working. Dry run without --execute."
     )
     parser.add_argument("--execute", action="store_true")
     parser.set_defaults(handler=run_adopt_command)

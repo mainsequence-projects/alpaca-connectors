@@ -79,9 +79,10 @@ from both Secret names), `refresh` (provider state), and `capture_holdings` (pub
 the complete position set, registering only Assets Markets lacks). Send one capture, never one
 request per position.
 
-Only an Account's owner removes its keys or deletes it, and only the owner creates or changes its
-bars feeds: another owner's Account answers `account_owned_by_another`, an Account without an
-owner `account_without_owner`. To delete an Account, first call `plan_delete` and tell the person
+Only an Account's owner removes its keys or deletes it: another owner's Account answers
+`account_owned_by_another`, an Account without an owner `account_without_owner`. A bars feed may
+not run with another owner's Account (`account_owned_by_another`); an Account without an owner
+stays open to feeds. To delete an Account, first call `plan_delete` and tell the person
 what it reports: its portfolios, bars feeds and signals, and its whole Markets history, all go;
 nothing comes back. Then ask for their exact `DELETE <account_uid>` confirmation. Deletion is
 refused (`account_delete_refused`) while another account's current target holds one of its

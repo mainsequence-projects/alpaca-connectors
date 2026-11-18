@@ -1,19 +1,16 @@
-"""The ``portfolio adopt`` rollout: every existing portfolio gets one owning account (ADR 0028).
+"""The ``portfolio adopt`` command: give existing portfolios their owning account (ADR 0028).
 
 Revision 0029 adopts, in the database, every portfolio its own owner can own. This command does
-the same for a portfolio written after it, by the release that served during the rollout, and
-ends the rest, which retires their ``Portfolio`` through Markets and so cannot run in a revision
-(decision 9):
+the same for a portfolio written after it. It never ends a portfolio and never deletes a bars
+configuration (ADR 0028, as amended 2026-11-18):
 
 - **Adopt.** A portfolio whose bars configuration's account its owner owns belongs to that
   account. It gets a signal definition on the account that keeps its signal (the key is its
   configuration UID, as before) and a bars configuration of its own with the profile of the one
   it named.
-- **End.** A portfolio whose bars run on an account without an owner, or on another owner's
-  account, cannot be given one owning account and ends as every portfolio does (ADR 0027). One
-  that an account's current target names is refused, changed nothing, and is reported.
-- **Feeds.** A ``portfolios`` bars configuration that no portfolio names any more is deleted;
-  every other one stays as its account's feed.
+- **Leave.** A portfolio whose bars run on an account without an owner, or on another owner's
+  account, stays as it is. It keeps working as before ADR 0028: it follows its own signal and runs
+  on the feed it names, which keeps pricing it.
 
 Without ``execute`` it only reports what it would do.
 """
@@ -28,18 +25,10 @@ from typing import Any
 class AdoptionReport:
     execute: bool
     adopt: list[str] = field(default_factory=list)
-    end: list[str] = field(default_factory=list)
-    refused: list[str] = field(default_factory=list)
-    deleted_feeds: list[str] = field(default_factory=list)
+    left: list[str] = field(default_factory=list)
 
     def summary(self) -> dict[str, Any]:
-        return {
-            "execute": self.execute,
-            "adopt": list(self.adopt),
-            "end": list(self.end),
-            "refused": list(self.refused),
-            "deleted_portfolios_feeds": list(self.deleted_feeds),
-        }
+        return {"execute": self.execute, "adopt": list(self.adopt), "left": list(self.left)}
 
 
 def _adoptable_account(configuration: Any, bars: Any) -> Any | None:
@@ -101,49 +90,10 @@ def adopt_portfolio(configuration: Any, bars: Any, account_uid: Any) -> None:
     )
 
 
-def _delete_unnamed_portfolios_feeds(report: AdoptionReport) -> None:
-    from alpaca_connectors.market_data.configurations import (
-        delete_bar_configuration,
-        list_bar_configurations,
-    )
-    from alpaca_connectors.markets_api import MARKETS_BATCH_SIZE
-    from alpaca_connectors.portfolios.configurations import unadopted_portfolio_configurations
-
-    # After a run, what is still unadopted (refused) still names its feed; a dry run counts
-    # every portfolio it would adopt or end as gone.
-    remaining = unadopted_portfolio_configurations() if report.execute else []
-    named = {
-        str(configuration.bars_configuration_uid)
-        for configuration in remaining
-        if configuration.bars_configuration_uid is not None
-    }
-    feeds: list[Any] = []
-    while True:
-        page, total = list_bar_configurations(
-            limit=MARKETS_BATCH_SIZE,
-            offset=len(feeds),
-            asset_source="portfolios",
-            portfolio_owned=False,
-        )
-        feeds.extend(page)
-        if not page or len(feeds) >= total:
-            break
-    for feed in feeds:
-        if str(feed.uid) in named:
-            continue
-        report.deleted_feeds.append(str(feed.uid))
-        if report.execute:
-            delete_bar_configuration(feed.uid)
-
-
 def run_adoption(*, execute: bool) -> AdoptionReport:
-    """Adopt or end every portfolio not yet adopted; without ``execute``, only report."""
+    """Adopt every portfolio its owner can own and leave the rest as they are."""
     from alpaca_connectors.market_data.configurations import get_bar_configuration
     from alpaca_connectors.portfolios.configurations import unadopted_portfolio_configurations
-    from alpaca_connectors.portfolios.provided_weights import (
-        ProvidedWeightsError,
-        end_portfolio_configuration,
-    )
 
     report = AdoptionReport(execute=execute)
     for configuration in unadopted_portfolio_configurations():
@@ -154,23 +104,12 @@ def run_adoption(*, execute: bool) -> AdoptionReport:
         )
         account_uid = _adoptable_account(configuration, bars)
         uid = str(configuration.uid)
-        if account_uid is not None:
-            report.adopt.append(uid)
-            if execute:
-                adopt_portfolio(configuration, bars, account_uid)
+        if account_uid is None:
+            report.left.append(uid)
             continue
-        if not execute:
-            report.end.append(uid)
-            continue
-        try:
-            end_portfolio_configuration(configuration)
-        except ProvidedWeightsError as exc:
-            if exc.code != "portfolio_in_account_target":
-                raise
-            report.refused.append(uid)
-        else:
-            report.end.append(uid)
-    _delete_unnamed_portfolios_feeds(report)
+        report.adopt.append(uid)
+        if execute:
+            adopt_portfolio(configuration, bars, account_uid)
     return report
 
 

@@ -41,7 +41,9 @@ from metatables import schema_table_name
 AssetSource = Literal["assets", "account_holdings", "portfolios"]
 ASSET_SOURCES: tuple[AssetSource, ...] = ("assets", "account_holdings", "portfolios")
 # A bars feed's sources; a portfolio's own configuration prices its portfolio (`portfolios`).
-FEED_ASSET_SOURCES: tuple[AssetSource, ...] = ("assets", "account_holdings")
+# A feed of an account may also be a ``portfolios`` feed, which prices the portfolios not yet
+# adopted that name it, as before ADR 0028.
+FEED_ASSET_SOURCES: tuple[AssetSource, ...] = ("assets", "account_holdings", "portfolios")
 UTC = dt.timezone.utc
 _UNSET = object()
 # Named by its physical name: the portfolio tables import this module (ADR 0028, decision 4).
@@ -331,8 +333,9 @@ def validate_configuration_scope(
 ) -> tuple[AssetSource, list[uuid.UUID]]:
     """Normalize and validate the mutually exclusive source shapes.
 
-    A bars feed of an account prices explicit assets or the account's holdings; a portfolio's own
-    configuration prices that portfolio's assets, the ``portfolios`` source (ADR 0028).
+    A portfolio's own configuration prices that portfolio's assets, the ``portfolios`` source
+    (ADR 0028). A bars feed of an account prices explicit assets, the account's holdings, or, as
+    before ADR 0028, the portfolios not yet adopted that name it.
     """
     normalized_source = asset_source.strip().lower()
     if normalized_source not in ASSET_SOURCES:
@@ -341,11 +344,6 @@ def validate_configuration_scope(
         )
     if portfolio_owned and normalized_source != "portfolios":
         raise ValueError("A portfolio's own bars configuration prices its portfolio's assets.")
-    if not portfolio_owned and normalized_source not in FEED_ASSET_SOURCES:
-        raise ValueError(
-            "A bars feed prices explicit assets or its account's holdings; a portfolio's "
-            "own bars configuration is created with the portfolio."
-        )
     normalized_asset_uids = list(
         dict.fromkeys(uuid.UUID(str(asset_uid)) for asset_uid in (asset_uids or []))
     )
@@ -793,12 +791,12 @@ def scheduled_bar_configuration_uids() -> list[uuid.UUID]:
 
     A configuration is updated daily when it is both enabled and scheduled (ADR 0021): an
     unscheduled one still runs on demand, and a disabled one runs neither way. A ``portfolios``
-    feed that only portfolios not yet adopted name prices nothing and is left out (ADR 0028).
-    Ordered by name, then UID.
+    feed prices the portfolios not yet adopted that name it, as before ADR 0028. Ordered by name,
+    then UID.
     """
     from msm.bootstrap import resolve_runtime
     from msm.repositories.base import compile_markets_statement, execute_markets_operation
-    from sqlalchemy import or_, select
+    from sqlalchemy import select
 
     from alpaca_connectors.runtime import account_runtime_models, start_markets_engine
 
@@ -807,11 +805,7 @@ def scheduled_bar_configuration_uids() -> list[uuid.UUID]:
     runtime = resolve_runtime(models=[table], row_model_name="AlpacaBarsConfiguration")
     operation = compile_markets_statement(
         select(table.uid)
-        .where(
-            table.enabled.is_(True),
-            table.scheduled.is_(True),
-            or_(table.asset_source != "portfolios", table.portfolio_configuration_uid.is_not(None)),
-        )
+        .where(table.enabled.is_(True), table.scheduled.is_(True))
         .order_by(table.name.asc(), table.uid.asc()),
         context=runtime.context,
         operation="select",
@@ -927,6 +921,14 @@ def delete_bar_configuration(configuration_uid: uuid.UUID | str) -> dict[str, An
     if current.portfolio_configuration_uid is not None:
         raise ValueError(
             "This bars configuration belongs to a portfolio; it is deleted with the portfolio."
+        )
+    from alpaca_connectors.portfolios.configurations import portfolio_configurations_naming_bars
+
+    if portfolio_configurations_naming_bars(configuration_uid):
+        # Their key to it refused this delete before ADR 0028; it prices them.
+        raise ValueError(
+            "Portfolios not yet adopted name this bars feed, which prices them; it stays while "
+            "they do."
         )
     return AlpacaBarsConfiguration.delete(configuration_uid)
 

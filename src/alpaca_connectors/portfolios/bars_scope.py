@@ -1,15 +1,16 @@
-"""The assets a portfolio's own bars configuration fetches (ADR 0024 decision 5, ADR 0028).
+"""The assets a ``portfolios`` bars configuration fetches (ADR 0024 decision 5, ADR 0028).
 
 The asset list is stored nowhere. Each resolution derives it in bounded reads, none of them over a
 time series:
 
-1. the bars configuration and the portfolio configuration it belongs to;
-2. that portfolio's `Portfolio` row in one Markets read, for ``retired_at``; the signal UID is
-   computed from its signal definition's key;
-3. every asset that signal ever published, from the signal-asset table by primary key.
+1. the bars configuration and its portfolios: the one a portfolio's own configuration belongs
+   to, or, for a ``portfolios`` feed of an account, the portfolios not yet adopted that name it,
+   as before ADR 0028;
+2. their `Portfolio` rows in one Markets read, for ``retired_at``; each signal UID is computed
+   from its signal definition's key, or from the configuration UID before adoption;
+3. every asset those signals ever published, from the signal-asset table by primary key.
 
-A bars feed of an account, or a ``portfolios`` configuration a portfolio not yet adopted still
-names, has no portfolio of its own and resolves to nothing. A portfolio whose `Portfolio` is
+A feed of explicit assets or holdings resolves to nothing here. A portfolio whose `Portfolio` is
 retired at or before the resolution time is left out. A paused one still counts, and so does one
 whose `Portfolio` does not exist yet.
 """
@@ -42,17 +43,20 @@ class PortfolioBarsScope:
 
 
 def _owning_configurations(bars_configuration_uid: uuid.UUID) -> list[Any]:
-    """The adopted portfolio configuration the bars configuration belongs to, if any."""
+    """The portfolios the bars configuration prices: its own portfolio, or those naming the feed."""
     from alpaca_connectors.market_data.configurations import get_bar_configuration
-    from alpaca_connectors.portfolios.configurations import get_portfolio_configuration
+    from alpaca_connectors.portfolios.configurations import (
+        get_portfolio_configuration,
+        portfolio_configurations_naming_bars,
+    )
 
     bars = get_bar_configuration(bars_configuration_uid)
-    if bars is None or bars.portfolio_configuration_uid is None:
+    if bars is None or bars.asset_source != "portfolios":
         return []
+    if bars.portfolio_configuration_uid is None:
+        return portfolio_configurations_naming_bars(bars_configuration_uid)
     configuration = get_portfolio_configuration(bars.portfolio_configuration_uid)
-    if configuration is None or not configuration.adopted:
-        return []
-    return [configuration]
+    return [] if configuration is None else [configuration]
 
 
 def retired_portfolio_uids(portfolio_uids: Sequence[str], *, at: dt.datetime) -> set[str]:
@@ -82,7 +86,7 @@ def resolve_portfolio_bars_scope(
     *,
     at: dt.datetime | None = None,
 ) -> PortfolioBarsScope:
-    """Every asset ever published by the signal of the live portfolio that owns the configuration."""
+    """Every asset ever published by the signals of the live portfolios the configuration prices."""
     from alpaca_connectors.portfolios.provided_weights import portfolio_signal_uid
     from alpaca_connectors.portfolios.signal_assets import assets_for_signals
 

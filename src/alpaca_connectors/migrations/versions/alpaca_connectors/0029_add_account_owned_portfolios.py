@@ -122,8 +122,8 @@ def adoptable_portfolios(bind: sa.Connection) -> list[sa.RowMapping]:
     """Portfolios not yet adopted whose bars configuration's account their own owner owns.
 
     A portfolio whose bars run on an account without an owner, or on another owner's account,
-    cannot be given one owning account; it stays unadopted until the ``portfolio adopt`` rollout
-    command ends it (ADR 0028, decision 9).
+    cannot be given one owning account; it stays unadopted and keeps working as before (ADR 0028,
+    decision 9, as amended 2026-11-18).
     """
     portfolios, bars, details, _ = _tables()
     query = (

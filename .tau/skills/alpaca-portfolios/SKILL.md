@@ -21,8 +21,8 @@ so plainly and suggest asking the application that owns the portfolio.
 - Each observation of its weights is the whole set at its time; an asset left out is held at zero.
 - It rebalances to the latest observation at its rebalance rule's next calendar event and is
   valued with the daily Alpaca prices its own bars configuration fetches with its Account's keys.
-- A portfolio answering `adopted: false` predates Account ownership; it neither runs nor takes
-  weights until the operator's rollout gives it an Account or ends it. Report it, do not run it.
+- A portfolio answering `adopted: false` predates Account ownership; it works as before, on its own
+  signal and the bars feed it names, and runs like any other.
 - Pausing, resuming and deleting are done only for its owner. Another owner's portfolio answers
   `portfolio_owned_by_another`; report it and stop.
 

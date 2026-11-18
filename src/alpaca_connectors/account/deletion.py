@@ -9,7 +9,9 @@ follows.
    ADR 0049: retiring is refused while any current target names the portfolio).
 2. The account's own current target is cleared, since it also names its portfolios.
 3. Each portfolio ends as every portfolio does (ADR 0027): its ``Portfolio`` is retired and
-   recorded under the account, and the configuration goes with its own bars configuration.
+   recorded under the account, and the configuration goes with its own bars configuration. A
+   portfolio not yet adopted that a ``portfolios`` feed of the account prices runs with the
+   account's keys, so it is the account's too and ends with it.
    A signal definition whose signal no retired ``Portfolio`` follows has its signal deleted now.
 4. The account's orders and trades in this application's instances are deleted: their
    ``RESTRICT`` keys would refuse the next step.
@@ -156,20 +158,33 @@ def _account_definitions(account_uid: str) -> list[Any]:
             return rows
 
 
+def _account_portfolios(account_uid: str) -> list[Any]:
+    """The account's portfolios, and those not yet adopted that its ``portfolios`` feeds price."""
+    from alpaca_connectors.market_data.configurations import bar_configurations_for_account
+    from alpaca_connectors.portfolios.configurations import (
+        portfolio_configurations_naming_bars,
+        portfolio_configurations_of_account,
+    )
+
+    rows = {str(row.uid): row for row in portfolio_configurations_of_account(account_uid)}
+    for feed in bar_configurations_for_account(account_uid):
+        if feed.asset_source == "portfolios":
+            for row in portfolio_configurations_naming_bars(feed.uid):
+                rows.setdefault(str(row.uid), row)
+    return list(rows.values())
+
+
 def preflight_account_delete(account_uid: Any) -> AccountDeletePreflight:
     """What deleting the account would delete and what refuses it; nothing changes."""
     from alpaca_connectors.market_data.configurations import bar_configurations_for_account
     from alpaca_connectors.markets_api import account_delete_preflight, current_target_account_uids
-    from alpaca_connectors.portfolios.configurations import (
-        ended_portfolios_of_account,
-        portfolio_configurations_of_account,
-    )
+    from alpaca_connectors.portfolios.configurations import ended_portfolios_of_account
 
     normalized = str(uuid.UUID(str(account_uid)))
     markets = account_delete_preflight(normalized) or {}
     blockers = [str(blocker) for blocker in markets.get("blockers") or []]
     warnings = [str(warning) for warning in markets.get("warnings") or []]
-    portfolios = portfolio_configurations_of_account(normalized)
+    portfolios = _account_portfolios(normalized)
     held = sum(
         1
         for configuration in portfolios
@@ -256,7 +271,6 @@ def delete_account(account_uid: Any) -> AccountDeletion:
     )
     from alpaca_connectors.account.services import get_account_registration
     from alpaca_connectors.markets_api import delete_account as delete_markets_account
-    from alpaca_connectors.portfolios.configurations import portfolio_configurations_of_account
     from alpaca_connectors.portfolios.provided_weights import end_portfolio_configuration
     from alpaca_connectors.portfolios.signal_definitions import (
         definition_signal_uid,
@@ -274,7 +288,7 @@ def delete_account(account_uid: Any) -> AccountDeletion:
         if not preflight.allowed:
             raise AccountDeleteRefused(preflight.blockers)
         _clear_own_target(normalized)
-        for configuration in portfolio_configurations_of_account(normalized):
+        for configuration in _account_portfolios(normalized):
             end_portfolio_configuration(configuration)
             deletion.ended_portfolio_count += 1
         for definition in _account_definitions(normalized):

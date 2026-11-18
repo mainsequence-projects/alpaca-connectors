@@ -90,7 +90,7 @@ def test_api_service_projects_typed_configuration_rows_for_create_get_and_update
             return_value=row,
         ),
         patch(
-            "alpaca_connectors.api.app.services.bar_configurations.require_account_owned_by"
+            "alpaca_connectors.api.app.services.bar_configurations.require_owner_may_configure_account"
         ) as require_owner,
     ):
         created = create_api_configuration(create_request, owner=OWNER)
@@ -198,8 +198,11 @@ def test_scope_validation_owns_the_exclusive_source_shapes() -> None:
     assert validate_configuration_scope(
         asset_source="portfolios", asset_uids=None, portfolio_owned=True
     ) == ("portfolios", [])
-    with pytest.raises(ValueError, match="bars feed"):
-        validate_configuration_scope(asset_source="portfolios", asset_uids=None)
+    # A `portfolios` feed of an account stays valid, as before ADR 0028 (amended 2026-11-18).
+    assert validate_configuration_scope(asset_source="portfolios", asset_uids=None) == (
+        "portfolios",
+        [],
+    )
     with pytest.raises(ValueError, match="requires"):
         validate_configuration_scope(asset_source="assets", asset_uids=None)
     with pytest.raises(ValueError, match="forbids"):
@@ -512,7 +515,9 @@ def test_api_create_defaults_to_scheduled_and_passes_the_flag_through() -> None:
             "alpaca_connectors.api.app.services.bar_configurations.create_bar_configuration",
             return_value=row,
         ) as create,
-        patch("alpaca_connectors.api.app.services.bar_configurations.require_account_owned_by"),
+        patch(
+            "alpaca_connectors.api.app.services.bar_configurations.require_owner_may_configure_account"
+        ),
     ):
         created = create_api_configuration(
             BarConfigurationCreateRequest(**values, scheduled=False), owner=OWNER
@@ -600,3 +605,57 @@ def test_the_list_filters_on_scheduled() -> None:
     page = compile_statement.call_args_list[0].args[0]
     sql = " ".join(str(page.compile(compile_kwargs={"literal_binds": True})).split())
     assert f"{AlpacaBarsConfigurationTable.__table__.name}.scheduled = false" in sql
+
+
+def test_a_portfolios_feed_is_created_and_deleted_as_before() -> None:
+    # ADR 0028 as amended on 2026-11-18: nothing that worked before is blocked.
+    values = {
+        "name": "Portfolio prices",
+        "account_uid": str(uuid.uuid4()),
+        "asset_source": "portfolios",
+        "frequency_id": "1d",
+        "feed": "sip",
+        "adjustment": "all",
+    }
+    assert BarConfigurationCreateRequest(**values).asset_source == "portfolios"
+    with pytest.raises(ValidationError):
+        BarConfigurationCreateRequest(**values, asset_uids=[str(uuid.uuid4())])
+
+    from alpaca_connectors.api.app.services import bar_configurations as service
+
+    feed = SimpleNamespace(portfolio_configuration_uid=None, account_uid=uuid.uuid4())
+    with (
+        patch.object(service, "get_bar_configuration", return_value=feed),
+        patch.object(service, "require_owner_may_configure_account") as checked,
+        patch.object(service, "delete_bar_configuration", return_value={"deleted": True}) as delete,
+    ):
+        assert service.delete_configuration("feed", owner=AccountOwner.main_sequence_user("u")) == {
+            "deleted": True
+        }
+    # A feed's delete checks no owner, as before ADR 0028.
+    checked.assert_not_called()
+    delete.assert_called_once_with("feed")
+
+
+def test_a_feed_that_portfolios_name_stays_while_they_do() -> None:
+    # Their key refused this delete before ADR 0028; the connector keeps refusing it.
+    from alpaca_connectors.market_data import configurations
+
+    feed = SimpleNamespace(portfolio_configuration_uid=None)
+    naming = "alpaca_connectors.portfolios.configurations.portfolio_configurations_naming_bars"
+    with (
+        patch.object(configurations, "get_bar_configuration", return_value=feed),
+        patch(naming, return_value=[object()]),
+        patch.object(configurations.AlpacaBarsConfiguration, "delete") as delete,
+        pytest.raises(ValueError, match="name this bars feed"),
+    ):
+        configurations.delete_bar_configuration(uuid.uuid4())
+    delete.assert_not_called()
+
+    with (
+        patch.object(configurations, "get_bar_configuration", return_value=feed),
+        patch(naming, return_value=[]),
+        patch.object(configurations.AlpacaBarsConfiguration, "delete", return_value={}) as delete,
+    ):
+        configurations.delete_bar_configuration("feed")
+    delete.assert_called_once_with("feed")
