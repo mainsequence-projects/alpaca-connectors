@@ -39,10 +39,12 @@ from sqlalchemy.types import Uuid
 from alpaca_connectors.metatables import AlpacaMarketsMetaTableMixin, ProjectStorageNameMixin
 from alpaca_connectors.portfolios.signal_definitions import SignalDefinitionTable
 
-RebalanceStrategy = Literal["calendar_event_signal"]
+# calendar_event_signal trades at the configured calendar events; immediate_signal trades at each
+# signal observation's own time, and its calendar only gives the portfolio its calendar.
+RebalanceStrategy = Literal["calendar_event_signal", "immediate_signal"]
 RebalanceEvent = Literal["market_open", "market_close"]
 RebalanceCadence = Literal["every_session", "weekly"]
-REBALANCE_STRATEGIES: tuple[RebalanceStrategy, ...] = ("calendar_event_signal",)
+REBALANCE_STRATEGIES: tuple[RebalanceStrategy, ...] = ("calendar_event_signal", "immediate_signal")
 REBALANCE_EVENTS: tuple[RebalanceEvent, ...] = ("market_open", "market_close")
 REBALANCE_CADENCES: tuple[RebalanceCadence, ...] = ("every_session", "weekly")
 DEFAULT_PORTFOLIO_CALENDAR_IDENTIFIER = "NYSE"
@@ -65,15 +67,16 @@ class PortfolioRebalanceConfigurationTable(
     __markets_base_identifier__ = "PortfolioRebalanceConfiguration"
     __metatable_description__ = (
         "One row per portfolio rebalance rule. When an analytical portfolio trades to its "
-        "signal's target weights: at a market calendar's session open or close, every session "
-        "or weekly, optionally offset in time, using the latest weights observed at or before "
-        "that moment; created by operators of the Alpaca Connectors application."
+        "signal's target weights: at each new set of weights as it is observed, or at a market "
+        "calendar's session open or close, every session or weekly, optionally offset in time, "
+        "using the latest weights observed at or before that moment; created by operators of "
+        "the Alpaca Connectors application."
     )
     __metatable_labels__ = ["portfolios", "rebalancing", "configuration", "alpaca"]
     __table_args__ = markets_table_args(
         "PortfolioRebalanceConfiguration",
         CheckConstraint(
-            "strategy = 'calendar_event_signal'",
+            "strategy IN ('calendar_event_signal', 'immediate_signal')",
             name="ck_portfolio_rebalance_configuration_strategy",
         ),
         CheckConstraint(
@@ -129,8 +132,9 @@ class PortfolioRebalanceConfigurationTable(
         info={
             "label": "Strategy",
             "description": (
-                "Rebalance strategy code, always calendar_event_signal: trade to the latest "
-                "signal weights observed at or before each selected calendar event."
+                "Rebalance strategy code: calendar_event_signal trades to the latest signal "
+                "weights observed at or before each selected calendar event, immediate_signal "
+                "trades to each signal observation at its own time."
             ),
         },
     )
@@ -662,7 +666,7 @@ def normalize_rebalance_strategy(value: str) -> RebalanceStrategy:
     normalized = str(value or "").strip().lower()
     if normalized not in REBALANCE_STRATEGIES:
         raise ValueError(
-            "This connector supports only the calendar_event_signal rebalance strategy."
+            "The rebalance strategy must be calendar_event_signal or immediate_signal."
         )
     return normalized  # type: ignore[return-value]
 

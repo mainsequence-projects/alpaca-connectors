@@ -82,10 +82,22 @@ class ProvidedPortfolioCreation:
     bars_configuration_created: bool
     bars_configuration_uid: str
     signal_definition: SignalDefinition
+    rebalance_configuration_created: bool = False
 
 
 def provided_portfolio_unique_identifier(configuration_uid: Any) -> str:
     return f"{PROVIDED_PORTFOLIO_PREFIX}{str(configuration_uid).replace('-', '').upper()}"
+
+
+def configuration_uid_from_portfolio_identifier(unique_identifier: str) -> uuid.UUID | None:
+    """The configuration UID a portfolio's ``unique_identifier`` was made from, or None."""
+    value = str(unique_identifier or "")
+    if not value.startswith(PROVIDED_PORTFOLIO_PREFIX):
+        return None
+    try:
+        return uuid.UUID(hex=value[len(PROVIDED_PORTFOLIO_PREFIX) :])
+    except ValueError:
+        return None
 
 
 def provided_signal_uid(configuration_uid: Any) -> str:
@@ -673,21 +685,29 @@ def _discard_failed_creation(
     configuration: AlpacaPortfolioConfiguration | None,
     definition: SignalDefinition | None,
     portfolio_row: Any,
+    rebalance: Any = None,
 ) -> None:
     """Delete what a failed create stored, so nothing of it stays (issue #37).
 
-    The configuration goes first, with its own bars configuration; then the `Portfolio` row when
-    it was created, which nothing references yet; then the signal's rows and its definition. The
-    signal is this call's alone: its key is the new configuration UID. A step that fails is logged
-    and the next still runs, so the caller gets the error that ended the create.
+    The configuration goes first, with its own bars configuration; then the rebalance
+    configuration the request gave inline, which only that configuration named; then the
+    `Portfolio` row when it was created, which nothing references yet; then the signal's rows and
+    its definition. The signal is this call's alone: its key is the new configuration UID. A step
+    that fails is logged and the next still runs, so the caller gets the error that ended the
+    create.
     """
     from alpaca_connectors.markets_api import delete_portfolio
-    from alpaca_connectors.portfolios.configurations import delete_portfolio_configuration_row
+    from alpaca_connectors.portfolios.configurations import (
+        delete_portfolio_configuration_row,
+        delete_rebalance_configuration,
+    )
     from alpaca_connectors.portfolios.signal_definitions import delete_signal_rows
 
     steps: list[Callable[[], Any]] = []
     if configuration is not None:
         steps.append(lambda: delete_portfolio_configuration_row(configuration.uid))
+    if rebalance is not None:
+        steps.append(lambda: delete_rebalance_configuration(rebalance.uid))
     if portfolio_row is not None:
         steps.append(lambda: delete_portfolio(str(portfolio_row.uid)))
     if definition is not None:
@@ -704,8 +724,9 @@ def create_provided_weights_portfolio(
     *,
     owner: AccountOwner,
     name: str,
-    rebalance_configuration_uid: Any,
     observations: Sequence[Mapping[str, Any]],
+    rebalance_configuration_uid: Any | None = None,
+    rebalance_configuration: Mapping[str, Any] | None = None,
     bars_configuration_uid: Any | None = None,
     bars_configuration: Mapping[str, Any] | None = None,
     description: str | None = None,
@@ -726,10 +747,14 @@ def create_provided_weights_portfolio(
     its definition and its own bars configuration, publish, then create the `Portfolio` row. A
     failure after a row was stored deletes everything this call stored, its signal's rows included
     (issue #37), so a retry starts clean.
+
+    The rebalance configuration is named, or given inline and created first, as the bars
+    configuration is; an inline one is a rebalance configuration like any other.
     """
     from alpaca_connectors.market_data.configurations import get_bar_configuration
     from alpaca_connectors.portfolios.configurations import (
         create_portfolio_configuration_row,
+        create_rebalance_configuration,
         update_portfolio_configuration_row,
     )
     from alpaca_connectors.portfolios.signal_definitions import (
@@ -741,6 +766,11 @@ def create_provided_weights_portfolio(
         raise ProvidedWeightsError(
             "invalid_bars_configuration",
             "Give either bars_configuration_uid or bars_configuration, not both.",
+        )
+    if (rebalance_configuration_uid is None) == (rebalance_configuration is None):
+        raise ProvidedWeightsError(
+            "invalid_rebalance_configuration",
+            "Give either rebalance_configuration_uid or rebalance_configuration, not both.",
         )
     normalized = normalize_observations(observations)
     assets = _observation_assets(normalized)
@@ -774,7 +804,11 @@ def create_provided_weights_portfolio(
     configuration: AlpacaPortfolioConfiguration | None = None
     definition: SignalDefinition | None = None
     portfolio_row: Any = None
+    rebalance: Any = None
     try:
+        if rebalance_configuration is not None:
+            rebalance = create_rebalance_configuration(**dict(rebalance_configuration))
+            rebalance_configuration_uid = rebalance.uid
         configuration = create_portfolio_configuration_row(
             name=name,
             description=description,
@@ -817,7 +851,7 @@ def create_provided_weights_portfolio(
             values={"portfolio_uid": uuid.UUID(str(portfolio_row.uid))},
         )
     except Exception:
-        _discard_failed_creation(configuration, definition, portfolio_row)
+        _discard_failed_creation(configuration, definition, portfolio_row, rebalance)
         raise
     return ProvidedPortfolioCreation(
         configuration=configuration,
@@ -827,6 +861,7 @@ def create_provided_weights_portfolio(
         bars_configuration_created=True,
         bars_configuration_uid=str(own_bars.uid),
         signal_definition=definition,
+        rebalance_configuration_created=rebalance is not None,
     )
 
 
@@ -849,6 +884,7 @@ __all__ = [
     "normalize_observations",
     "portfolio_signal_key",
     "portfolio_signal_uid",
+    "configuration_uid_from_portfolio_identifier",
     "provided_portfolio_unique_identifier",
     "provided_signal_uid",
     "publish_definition_weights",

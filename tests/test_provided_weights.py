@@ -535,6 +535,85 @@ def test_a_refused_publication_leaves_no_row_behind() -> None:
     ]
 
 
+IMMEDIATE = {"name": "Thesis immediate", "strategy": "immediate_signal"}
+
+
+def _create_with_inline_rebalance(order: MagicMock, **patches):
+    """Create with an inline rebalance configuration; ``patches`` replaces the defaults below."""
+    published = provided_weights.PublishedWeights("signal-a", 1, 2, MONDAY, MONDAY)
+    portfolio_row = SimpleNamespace(uid=uuid.UUID(int=7), unique_identifier="ALPACA_PORTFOLIO__X")
+    defaults = {
+        "publish": {"return_value": published},
+        "update": {"side_effect": [provided_configuration(), provided_configuration()]},
+    }
+    defaults.update(patches)
+    with (
+        patch.object(provided_weights, "require_alpaca_assets"),
+        patch(
+            f"{CONFIGURATIONS}.create_rebalance_configuration",
+            return_value=SimpleNamespace(uid=REBALANCE_UID),
+        ) as create_rebalance,
+        patch(
+            f"{CONFIGURATIONS}.create_portfolio_configuration_row",
+            return_value=provided_configuration(signal_definition_uid=None),
+        ) as create_row,
+        patch(f"{DEFINITIONS}.create_signal_definition", return_value=definition()),
+        patch(f"{CONFIGURATIONS}.update_portfolio_configuration_row", **defaults["update"]),
+        patch(
+            "alpaca_connectors.market_data.configurations.create_portfolio_bar_configuration",
+            return_value=SimpleNamespace(uid=BARS_UID),
+        ),
+        patch.object(provided_weights, "_publish_validated", **defaults["publish"]),
+        patch.object(provided_weights, "_upsert_portfolio_row", return_value=portfolio_row),
+        patch(f"{CONFIGURATIONS}.delete_portfolio_configuration_row", order.delete_row),
+        patch(f"{CONFIGURATIONS}.delete_rebalance_configuration", order.delete_rebalance),
+        patch(f"{DEFINITIONS}.delete_signal_rows", order.delete_signal),
+        patch.object(SignalDefinition, "delete", order.delete_definition),
+        patch("alpaca_connectors.markets_api.delete_portfolio", order.delete_portfolio),
+    ):
+        created = _create(rebalance_configuration_uid=None, rebalance_configuration=IMMEDIATE)
+    return created, create_rebalance, create_row
+
+
+def test_an_inline_rebalance_configuration_is_created_with_the_portfolio() -> None:
+    created, create_rebalance, create_row = _create_with_inline_rebalance(MagicMock())
+
+    # Created first, as POST /v1/portfolio-rebalance-configurations would, and the portfolio
+    # names it.
+    create_rebalance.assert_called_once_with(**IMMEDIATE)
+    assert create_row.call_args.kwargs["rebalance_configuration_uid"] == REBALANCE_UID
+    assert created.rebalance_configuration_created is True
+
+
+def test_a_failed_create_deletes_the_inline_rebalance_configuration_too() -> None:
+    order = MagicMock()
+    with pytest.raises(ProvidedWeightsError):
+        _create_with_inline_rebalance(
+            order, publish={"side_effect": ProvidedWeightsError("unknown_asset", "refused")}
+        )
+
+    # After the configuration that named it, before the signal's rows (issue #37).
+    assert order.mock_calls == [
+        call.delete_row(CONFIGURATION_UID),
+        call.delete_rebalance(REBALANCE_UID),
+        call.delete_signal(signal_uid_for_key(str(CONFIGURATION_UID))),
+        call.delete_definition(DEFINITION_UID),
+    ]
+
+
+@pytest.mark.parametrize(
+    "rebalance",
+    [
+        {"rebalance_configuration_uid": None},
+        {"rebalance_configuration_uid": REBALANCE_UID, "rebalance_configuration": IMMEDIATE},
+    ],
+)
+def test_a_create_names_one_rebalance_configuration(rebalance) -> None:
+    with pytest.raises(ProvidedWeightsError) as raised:
+        _create(**rebalance)
+    assert raised.value.code == "invalid_rebalance_configuration"
+
+
 def test_a_create_that_fails_after_its_portfolio_exists_deletes_everything() -> None:
     order = MagicMock()
     order.delete_row.side_effect = RuntimeError("storage unavailable")

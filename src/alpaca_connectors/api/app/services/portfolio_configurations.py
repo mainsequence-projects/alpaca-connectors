@@ -363,10 +363,14 @@ def create_provided_configuration(
     """
     from .accounts import require_owner_may_configure_account
 
-    values = request.model_dump(exclude={"observations", "bars_configuration"})
+    values = request.model_dump(
+        exclude={"observations", "bars_configuration", "rebalance_configuration"}
+    )
     if request.bars_configuration is not None:
         require_owner_may_configure_account(request.bars_configuration.account_uid, owner)
         values["bars_configuration"] = request.bars_configuration.model_dump()
+    if request.rebalance_configuration is not None:
+        values["rebalance_configuration"] = request.rebalance_configuration.model_dump()
     created = create_provided_weights_portfolio(
         owner=owner,
         observations=[observation.model_dump() for observation in request.observations],
@@ -377,6 +381,7 @@ def create_provided_configuration(
         portfolio_uid=created.portfolio_uid,
         portfolio_unique_identifier=created.portfolio_unique_identifier,
         bars_configuration_created=created.bars_configuration_created,
+        rebalance_configuration_created=created.rebalance_configuration_created,
         weights=_published_response(created.configuration.uid, created.published),
     )
 

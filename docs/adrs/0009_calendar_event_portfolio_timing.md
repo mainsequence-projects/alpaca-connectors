@@ -9,6 +9,16 @@ Amended on 2026-11-18 for
 first runs its bars configuration's update, so a run started right after new weights has the new
 assets' prices. The rest of execution is as below.
 
+Amended on 2026-11-18 for
+[issue #41](https://github.com/mainsequence-projects/alpaca-connectors/issues/41): a rebalance
+configuration chooses its strategy, `calendar_event_signal` as below or `immediate_signal`.
+`immediate_signal` is ms-markets' `ImmediateSignal` as released, executing each signal observation
+at its original timestamp with no calendar-event dependency, not the relabelled implementation
+this ADR removed: a portfolio created with weights an application provides has weights from its
+first run, instead of none until its first calendar event. Valuation is unchanged: portfolio values
+stay at the valuation source's timestamps. Revision 0031 widens the strategy check, and the
+provided-weights create can give its rebalance configuration inline.
+
 ## Context
 
 The first portfolio implementation used `ImmediateSignal`, relabeled daily valuation observations
@@ -88,12 +98,16 @@ rows.
 
 - signal observation, rebalance execution, and valuation timestamps have separate owners;
 - a signal observed after the configured close becomes eligible at the next configured event;
+- a portfolio has no weights before its first configured event at or after its first signal
+  observation; a run before it succeeds and its summary gives the event's time, and a sync's
+  `portfolio_weights_missing` gives it too (amended for issue #41);
 - early closes are represented by their actual persisted close times;
 - Job crontab timezone cannot change portfolio economic timestamps;
 - no connector code monkeypatches or subclasses canonical ms-markets portfolio valuation logic;
 - `PortfolioRebalanceStateStorage`, `PortfolioWeightsStorage`, and `PortfoliosStorage` are distinct
   stages that can be inspected independently; and
-- `ImmediateSignal` is no longer exposed by this connector workflow.
+- `ImmediateSignal` is no longer exposed by this connector workflow (superseded by the issue #41
+  amendment: it is exposed again, as released by ms-markets, as `immediate_signal`).
 
 ## Acceptance Criteria
 

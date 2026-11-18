@@ -19,8 +19,10 @@ signals their weights; you never create a portfolio or a signal or give weights.
 so plainly and suggest asking the application that owns the portfolio.
 
 - Each observation of its weights is the whole set at its time; an asset left out is held at zero.
-- It rebalances to the latest observation at its rebalance rule's next calendar event and is
-  valued with the daily Alpaca prices its own bars configuration fetches with its Account's keys.
+- Its rebalance rule decides when it trades: at each set of weights as observed
+  (`immediate_signal`), or to the latest observation at the rule's next calendar event
+  (`calendar_event_signal`). It is valued with the daily Alpaca prices its own bars configuration
+  fetches with its Account's keys.
 - A portfolio answering `adopted: false` predates Account ownership; it works as before, on its own
   signal and the bars feed it names, and runs like any other.
 - Pausing, resuming and deleting are done only for its owner. Another owner's portfolio answers
@@ -30,9 +32,11 @@ so plainly and suggest asking the application that owns the portfolio.
 
 Use `alpaca_query_rebalance_configurations` operations `list`/`get` and
 `alpaca_manage_rebalance_configuration` operations `create`/`update`/`delete`.
-The supported strategy is `calendar_event_signal`. It owns market calendar, session,
-open/close event, offset and cadence. Do not substitute midnight timestamps or a UTC Job cron
-for actual market-calendar events.
+The strategy is `immediate_signal` or `calendar_event_signal`. `immediate_signal` trades each set
+of weights at its own time and uses only the calendar identifier. `calendar_event_signal` owns
+market calendar, session, open/close event, offset and cadence. Do not substitute midnight
+timestamps or a UTC Job cron for actual market-calendar events. Changing a rule's strategy gives
+every portfolio that uses it a new rebalance history.
 
 Offsets are seconds relative to the event: negative before, positive after. Weekly cadence uses
 weekday 0 (Monday) through 6 (Sunday); every-session cadence follows trading sessions.

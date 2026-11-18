@@ -87,7 +87,7 @@ def configure_rebalance_create_parser(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--description")
     parser.add_argument(
         "--strategy",
-        choices=("calendar_event_signal",),
+        choices=("calendar_event_signal", "immediate_signal"),
         default="calendar_event_signal",
     )
     parser.add_argument("--calendar-identifier", default="NYSE")
@@ -111,7 +111,7 @@ def configure_rebalance_update_parser(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("configuration_uid")
     parser.add_argument("--name")
     parser.add_argument("--description")
-    parser.add_argument("--strategy", choices=("calendar_event_signal",))
+    parser.add_argument("--strategy", choices=("calendar_event_signal", "immediate_signal"))
     parser.add_argument("--calendar-identifier")
     parser.add_argument("--session-label")
     parser.add_argument("--rebalance-event", choices=("market_open", "market_close"))

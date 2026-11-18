@@ -249,8 +249,13 @@ GET|PATCH|DELETE /v1/portfolio-rebalance-configurations/{configuration_uid}
   configuration. A refused create leaves no row.
 - **ADR 0024's create** (`POST /v1/portfolio-configurations/provided-weights`) is supported, and
   Hunch uses it: it takes either `bars_configuration_uid` (a feed) or `bars_configuration`
-  (`name`, `account_uid`, `frequency_id`, `feed`, `adjustment`, `scheduled?`), and the
-  `observations`. It keeps the rules it had before ADR 0028: the caller owns the portfolio, a named
+  (`name`, `account_uid`, `frequency_id`, `feed`, `adjustment`, `scheduled?`), either
+  `rebalance_configuration_uid` or `rebalance_configuration` (the body of
+  `POST /v1/portfolio-rebalance-configurations`, created with the portfolio and deleted with a
+  refused create; the response says `rebalance_configuration_created`), and the `observations`.
+  So one call creates a portfolio that rebalances at each set of weights:
+  `"rebalance_configuration": {"name": "...", "strategy": "immediate_signal"}`. It keeps the rules
+  it had before ADR 0028: the caller owns the portfolio, a named
   feed is not checked, and an inline one needs an account the caller may configure (another
   owner's answers `409 account_owned_by_another`; one without an owner stays open, ADR 0022). The
   portfolio belongs to that account, gets its own bars configuration with that profile, and a
@@ -326,6 +331,12 @@ run first runs its own bars configuration's update, so a run started at once aft
 has the new asset's prices (issue #39). A failed update does not stop the run: it values with the
 prices already stored, and its summary says so.
 
+A portfolio rebalances at the events of its rebalance configuration (NYSE `market_close` by
+default) and has weights only from its first rebalance: the first configured event at or after
+its first provided weights. A run before that event succeeds with no weights. Its summary's
+`first_rebalance` says so, with the time (`rebalanced: false`, `first_rebalance_at`, `message`),
+and its log carries the message (issue #41).
+
 ## Account Sync
 
 Every venue connector answers an application's request for an account's holdings the same way
@@ -390,7 +401,9 @@ inside the request and answers `200` with a terminal
 - A step that fails after the capture leaves the snapshot published. The operation is `failed`
   with `current_step` naming the step, and the next sync captures again. Its codes are
   `account_equity_missing`, `portfolio_weights_missing` (a portfolio of the target has no
-  weights in this connector at `T`), `asset_unresolved`, `asset_price_missing`,
+  weights in this connector at `T`; for a portfolio before its first rebalance, the message
+  gives that rebalance's time, and says whether it is after the sync or not yet recorded by a
+  run, issue #41), `asset_unresolved`, `asset_price_missing`,
   `invalid_account_target`, and the Markets refusals `not_found`, `target_after_snapshot`,
   `invalid_sized_targets`, `plan_changed`, `allocation_exists`, `policy_version_mismatch` and
   `portfolio_retired`. `target_after_snapshot`, `plan_changed` and `policy_version_mismatch`

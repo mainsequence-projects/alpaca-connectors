@@ -342,9 +342,17 @@ def test_execution_updates_each_released_stage_without_tree_walk() -> None:
             "alpaca_connectors.portfolios.execution.update_portfolio_bars",
             return_value={"updated": True},
         ) as bars_update,
+        patch(
+            "alpaca_connectors.portfolios.execution.first_rebalance_state",
+            return_value={"rebalanced": True, "first_rebalance_at": "2026-11-18T21:00:00+00:00"},
+        ) as first_rebalance,
     ):
         result = execute_portfolio_configuration(CONFIGURATION_UID)
 
+    # The summary says whether the run reached the first rebalance (issue #41).
+    assert first_rebalance.call_args.args == (resolved.rebalance_configuration,)
+    assert first_rebalance.call_args.kwargs["starts_at"] == resolved.signal_start_time
+    assert result.first_rebalance == first_rebalance.return_value
     # Its bars first (issue #39), then the released stages.
     bars_update.assert_called_once_with(resolved)
     start_engine.assert_called_once_with()
@@ -374,3 +382,80 @@ def test_execution_updates_each_released_stage_without_tree_walk() -> None:
     # The run registers and reconciles the portfolio's Markets catalog row.
     register_datasets.assert_called_once_with(str(PORTFOLIO_UID))
     assert result.portfolio_uid == str(PORTFOLIO_UID)
+
+
+def test_an_immediate_rebalance_builds_immediate_signal_and_no_calendar_events() -> None:
+    """immediate_signal trades each set of weights at its own time and reads no calendar."""
+    from msm_portfolios.rebalance_strategy import ImmediateSignal
+
+    from alpaca_connectors.portfolios.execution import build_portfolio_graph
+
+    def graph(strategy: str):
+        rebalance = rebalance_configuration().model_copy(update={"strategy": strategy})
+        resolved = resolved_configuration()
+        resolved = ResolvedPortfolioConfiguration(
+            **{
+                **{name: getattr(resolved, name) for name in resolved.__slots__},
+                "rebalance_configuration": rebalance,
+            }
+        )
+        updater = Mock()
+        updater.return_value.dependencies.return_value = {"portfolio_weights": Mock()}
+        with (
+            patch(
+                "alpaca_connectors.portfolios.signal_definitions.weights_signal",
+                return_value=Mock(signal_uid="signal-uid"),
+            ),
+            patch(
+                "alpaca_connectors.portfolios.provided_weights.portfolio_signal_key",
+                return_value="signal-key",
+            ),
+            patch(
+                "alpaca_connectors.portfolios.execution.build_alpaca_interpolated_prices",
+                return_value=Mock(),
+            ),
+            patch(
+                "alpaca_connectors.portfolios.execution.ensure_trading_calendar",
+                return_value=SimpleNamespace(uid="calendar-uid", unique_identifier="NYSE"),
+            ),
+            patch("msm_portfolios.time_index.PortfolioCalendarEvents") as calendar_events,
+            patch("msm_portfolios.rebalance_strategy.CalendarEventSignal") as calendar_signal,
+            patch("msm_portfolios.configuration.BacktestingWeightsConfig") as weights_config,
+            patch("msm_portfolios.configuration.PortfolioBuildConfiguration"),
+            patch("msm_portfolios.configuration.PortfolioConfiguration"),
+            patch("msm_portfolios.configuration.PortfolioMarketsConfig"),
+            patch("msm_portfolios.configuration.FrontEndDetails") as front_end,
+            patch("msm_portfolios.time_index.PortfoliosUpdater", updater),
+            patch("msm.api.portfolios.Portfolio.upsert", return_value=Mock()),
+            patch("alpaca_connectors.instances.portfolio_output_tables", return_value={}),
+        ):
+            built = build_portfolio_graph(resolved)
+        return SimpleNamespace(
+            built=built,
+            calendar_events=calendar_events,
+            calendar_signal=calendar_signal,
+            strategy=weights_config.call_args.kwargs["rebalance_strategy_instance"],
+            name=front_end.call_args.kwargs["rebalance_strategy_name"],
+        )
+
+    immediate = graph("immediate_signal")
+    assert type(immediate.strategy) is ImmediateSignal
+    assert immediate.built.calendar_events is None
+    immediate.calendar_events.assert_not_called()
+    immediate.calendar_signal.assert_not_called()
+    assert immediate.name == "ImmediateSignal"
+
+    calendar = graph("calendar_event_signal")
+    assert calendar.strategy is calendar.calendar_signal.return_value
+    assert calendar.built.calendar_events is calendar.calendar_events.return_value
+    assert calendar.calendar_signal.call_args.kwargs["calendar_events_instance"] is (
+        calendar.calendar_events.return_value
+    )
+    assert calendar.calendar_signal.call_args.kwargs["rebalance_event"] == "market_close"
+
+
+def test_both_rebalance_strategies_are_accepted() -> None:
+    assert normalize_rebalance_strategy("immediate_signal") == "immediate_signal"
+    assert normalize_rebalance_strategy("calendar_event_signal") == "calendar_event_signal"
+    with pytest.raises(ValueError, match="calendar_event_signal or immediate_signal"):
+        normalize_rebalance_strategy("time_weighted")

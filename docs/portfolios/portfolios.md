@@ -149,16 +149,27 @@ in, whose rows name no account ([Alpaca Bars](../market_data/alpaca_bars.md)):
 
 ## Rebalance Configurations
 
-A rebalance configuration is a reusable calendar-event policy, shared by any number of portfolios
-([ADR 0009](../adrs/0009_calendar_event_portfolio_timing.md)). The supported strategy is
-`calendar_event_signal` (`CalendarEventSignal`). It stores the persisted calendar identifier
-(`NYSE` by default), the session label, the event (`market_open` or `market_close`), an offset in
-seconds, and the cadence (`every_session`, or `weekly` on one weekday).
+A rebalance configuration is a reusable rebalance policy, shared by any number of portfolios
+([ADR 0009](../adrs/0009_calendar_event_portfolio_timing.md)). Its `strategy` is one of two
+ms-markets strategies:
 
-At each eligible calendar event the portfolio rebalances to the latest observation at or before
-that event, so weights given after a close are first used at the next configured event. Early
-closes use their actual persisted close times; they are not normalised to midnight or a nominal
-close.
+- `immediate_signal` (`ImmediateSignal`): the portfolio rebalances to each set of weights at the
+  time it was observed, so a portfolio has weights from the run after its first weights. It reads
+  no calendar event; the calendar identifier only gives the `Portfolio` row its calendar. Use it
+  for weights an application provides and expects to hold at once.
+- `calendar_event_signal` (`CalendarEventSignal`, the default): it stores the persisted calendar
+  identifier (`NYSE` by default), the session label, the event (`market_open` or `market_close`),
+  an offset in seconds, and the cadence (`every_session`, or `weekly` on one weekday). At each
+  eligible calendar event the portfolio rebalances to the latest observation at or before that
+  event, so weights given after a close are first used at the next configured event, and a new
+  portfolio has no weights before its first event. Early closes use their actual persisted close
+  times; they are not normalised to midnight or a nominal close.
+
+The strategy is part of the portfolio's identity in ms-markets: pointing a portfolio at a
+rebalance configuration of the other strategy, or changing that configuration's strategy, gives it
+a new rebalance and weights history. `POST /v1/portfolio-configurations/provided-weights` can
+create the rebalance configuration in the same call (`rebalance_configuration`), as it does the
+bars configuration.
 
 ```text
 GET|POST         /v1/portfolio-rebalance-configurations

@@ -26,6 +26,7 @@ from alpaca_connectors.portfolios.interpolated_prices import (
     build_alpaca_interpolated_prices,
     resolve_alpaca_bars_time_index_meta_table_uid,
 )
+from alpaca_connectors.portfolios.rebalance_schedule import first_rebalance_state
 from alpaca_connectors.portfolios.signal_history import (
     read_signal_observation_bounds,
     read_signal_observation_matrix,
@@ -68,6 +69,7 @@ class PortfolioExecutionResult:
     portfolio_weights_result: Any
     portfolio_result: Any
     bars_update: dict[str, Any] = field(default_factory=dict)
+    first_rebalance: dict[str, Any] = field(default_factory=dict)
 
     def summary(self) -> dict[str, Any]:
         return {
@@ -75,6 +77,7 @@ class PortfolioExecutionResult:
             "portfolio_uid": self.portfolio_uid,
             "portfolio_unique_identifier": self.portfolio_unique_identifier,
             "bars_update": dict(self.bars_update),
+            "first_rebalance": dict(self.first_rebalance),
             "interpolation": _summarize_run_result(self.interpolation_result),
             "calendar_events": _summarize_run_result(self.calendar_events_result),
             "rebalance": _summarize_run_result(self.rebalance_result),
@@ -98,6 +101,7 @@ class PortfolioPreflight:
 @dataclass(frozen=True, slots=True)
 class PortfolioExecutionGraph:
     valuation_source: Any
+    # None for immediate_signal, which trades at the signal's own times and reads no calendar.
     calendar_events: Any
     portfolio_rebalance: Any
     portfolio_weights: Any
@@ -204,7 +208,7 @@ def build_portfolio_graph(resolved: ResolvedPortfolioConfiguration) -> Portfolio
         PortfolioMarketsConfig,
         ValuationAlignmentPolicy,
     )
-    from msm_portfolios.rebalance_strategy import CalendarEventSignal
+    from msm_portfolios.rebalance_strategy import CalendarEventSignal, ImmediateSignal
     from msm_portfolios.time_index import (
         PortfolioCalendarEvents,
         PortfolioCalendarEventsConfiguration,
@@ -220,8 +224,8 @@ def build_portfolio_graph(resolved: ResolvedPortfolioConfiguration) -> Portfolio
 
     configuration = resolved.configuration
     rebalance = resolved.rebalance_configuration
-    if rebalance.strategy != "calendar_event_signal":
-        raise ValueError("Portfolio execution requires CalendarEventSignal.")
+    if rebalance.strategy not in ("calendar_event_signal", "immediate_signal"):
+        raise ValueError("Portfolio execution requires CalendarEventSignal or ImmediateSignal.")
     signal = weights_signal(portfolio_signal_key(configuration))
     # `ApplicationWeights.get_asset_list()` reads the whole signal weights table; the resolved
     # scope is the same set, from the signal-asset table. The class path, and so the UID, stay.
@@ -240,15 +244,37 @@ def build_portfolio_graph(resolved: ResolvedPortfolioConfiguration) -> Portfolio
         raise RuntimeError(
             "The stored Portfolio calendar does not match the rebalance configuration."
         )
-    calendar_events = PortfolioCalendarEvents(
-        config=PortfolioCalendarEventsConfiguration(
-            offset_start=resolved.signal_start_time,
+    if rebalance.strategy == "immediate_signal":
+        # Each set of weights is traded at its own observation time (ms-markets ImmediateSignal);
+        # no calendar event is read. The calendar above is the `Portfolio` row's.
+        calendar_events = None
+        rebalance_strategy = ImmediateSignal()
+        rebalance_strategy_description = (
+            "Trade to each set of weights the application provides, at the time it was observed."
+        )
+    else:
+        calendar_events = PortfolioCalendarEvents(
+            config=PortfolioCalendarEventsConfiguration(
+                offset_start=resolved.signal_start_time,
+                calendar_identifier=rebalance.calendar_identifier,
+                session_label=rebalance.session_label,
+                event_types=(rebalance.rebalance_event,),
+            ),
+            output_table=AlpacaPortfolioCalendarEventsStorage,
+        )
+        rebalance_strategy = CalendarEventSignal(
+            calendar_events_instance=calendar_events,
             calendar_identifier=rebalance.calendar_identifier,
             session_label=rebalance.session_label,
-            event_types=(rebalance.rebalance_event,),
-        ),
-        output_table=AlpacaPortfolioCalendarEventsStorage,
-    )
+            rebalance_event=rebalance.rebalance_event,
+            event_offset=dt.timedelta(seconds=rebalance.event_offset_seconds),
+            rebalance_cadence=rebalance.rebalance_cadence,
+            rebalance_weekday=rebalance.rebalance_weekday,
+        )
+        rebalance_strategy_description = (
+            "Select the latest signal observed at or before the configured persisted "
+            f"{rebalance.calendar_identifier} {rebalance.rebalance_event} event."
+        )
     description = configuration.description or (
         "Analytical portfolio following weights its owner application provides, valued with "
         "persistent interpolated Alpaca bars."
@@ -272,15 +298,7 @@ def build_portfolio_graph(resolved: ResolvedPortfolioConfiguration) -> Portfolio
                 commission_fee=configuration.commission_fee
             ),
             backtesting_weights_configuration=BacktestingWeightsConfig(
-                rebalance_strategy_instance=CalendarEventSignal(
-                    calendar_events_instance=calendar_events,
-                    calendar_identifier=rebalance.calendar_identifier,
-                    session_label=rebalance.session_label,
-                    rebalance_event=rebalance.rebalance_event,
-                    event_offset=dt.timedelta(seconds=rebalance.event_offset_seconds),
-                    rebalance_cadence=rebalance.rebalance_cadence,
-                    rebalance_weekday=rebalance.rebalance_weekday,
-                ),
+                rebalance_strategy_instance=rebalance_strategy,
                 signal_weights_instance=signal,
             ),
         ),
@@ -290,11 +308,8 @@ def build_portfolio_graph(resolved: ResolvedPortfolioConfiguration) -> Portfolio
                 description=description,
                 signal_name=signal_name,
                 signal_description=signal_description,
-                rebalance_strategy_name="CalendarEventSignal",
-                rebalance_strategy_description=(
-                    "Select the latest signal observed at or before the configured persisted "
-                    f"{rebalance.calendar_identifier} {rebalance.rebalance_event} event."
-                ),
+                rebalance_strategy_name=type(rebalance_strategy).__name__,
+                rebalance_strategy_description=rebalance_strategy_description,
             ),
         ),
     )
@@ -375,11 +390,15 @@ def execute_portfolio_configuration(configuration_uid: Any) -> PortfolioExecutio
     bars_update = update_portfolio_bars(resolved)
     graph = build_portfolio_graph(resolved)
     interpolation_result = graph.valuation_source.run(update_tree=False)
-    calendar_events_result = graph.calendar_events.run(update_tree=False)
+    calendar_events_result = (
+        None if graph.calendar_events is None else graph.calendar_events.run(update_tree=False)
+    )
     signal_weights = graph.portfolio_node.signal_weights
     signal_statistics = signal_weights.get_update_statistics()
     signal_statistics.filter_identity_level(level=1, filters=[resolved.signal_uid])
     signal_weights.update_statistics = signal_statistics
+    # The rebalance reads the events up to its own start, so it reaches at least this time.
+    rebalanced_through = dt.datetime.now(dt.UTC)
     rebalance_result = graph.portfolio_rebalance.run(update_tree=False)
     portfolio_weights_result = graph.portfolio_weights.run(update_tree=False)
     portfolio_result = graph.portfolio_node.run(update_tree=False, update_pointers=True)
@@ -399,6 +418,14 @@ def execute_portfolio_configuration(configuration_uid: Any) -> PortfolioExecutio
     from alpaca_connectors.portfolios.datasets import register_portfolio_datasets
 
     register_portfolio_datasets(portfolio_uid)
+    first_rebalance = first_rebalance_state(
+        resolved.rebalance_configuration,
+        starts_at=resolved.signal_start_time,
+        at=rebalanced_through,
+    )
+    if not first_rebalance["rebalanced"]:
+        # Issue #41: a run before the first configured event writes no weights.
+        logger.warning("%s", first_rebalance["message"])
     return PortfolioExecutionResult(
         resolved=resolved,
         portfolio_uid=portfolio_uid,
@@ -409,6 +436,7 @@ def execute_portfolio_configuration(configuration_uid: Any) -> PortfolioExecutio
         portfolio_weights_result=portfolio_weights_result,
         portfolio_result=portfolio_result,
         bars_update=bars_update,
+        first_rebalance=first_rebalance,
     )
 
 

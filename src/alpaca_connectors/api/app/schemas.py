@@ -761,7 +761,7 @@ class PortfolioRebalanceConfigurationCreateRequest(BaseModel):
 
     name: str = Field(min_length=1, max_length=255)
     description: str | None = None
-    strategy: Literal["calendar_event_signal"] = "calendar_event_signal"
+    strategy: Literal["calendar_event_signal", "immediate_signal"] = "calendar_event_signal"
     calendar_identifier: str = Field(default="NYSE", min_length=1, max_length=255)
     session_label: str = Field(default="regular", min_length=1, max_length=64)
     rebalance_event: Literal["market_open", "market_close"] = "market_close"
@@ -786,7 +786,7 @@ class PortfolioRebalanceConfigurationUpdateRequest(BaseModel):
 
     name: str | None = Field(default=None, min_length=1, max_length=255)
     description: str | None = None
-    strategy: Literal["calendar_event_signal"] | None = None
+    strategy: Literal["calendar_event_signal", "immediate_signal"] | None = None
     calendar_identifier: str | None = Field(default=None, min_length=1, max_length=255)
     session_label: str | None = Field(default=None, min_length=1, max_length=64)
     rebalance_event: Literal["market_open", "market_close"] | None = None
@@ -807,7 +807,7 @@ class PortfolioRebalanceConfigurationResponse(BaseModel):
     uid: str
     name: str
     description: str | None
-    strategy: Literal["calendar_event_signal"]
+    strategy: Literal["calendar_event_signal", "immediate_signal"]
     calendar_identifier: str
     session_label: str
     rebalance_event: Literal["market_open", "market_close"]
@@ -897,7 +897,15 @@ class ProvidedWeightsPortfolioCreateRequest(_ConfigurationRequest):
     description: str | None = None
     bars_configuration_uid: str | None = Field(default=None, min_length=1)
     bars_configuration: InlinePortfolioBarsConfigurationRequest | None = None
-    rebalance_configuration_uid: str = Field(min_length=1)
+    rebalance_configuration_uid: str | None = Field(default=None, min_length=1)
+    rebalance_configuration: PortfolioRebalanceConfigurationCreateRequest | None = Field(
+        default=None,
+        description=(
+            "A new rebalance configuration, created with the portfolio, in place of "
+            "rebalance_configuration_uid: strategy immediate_signal trades each set of weights "
+            "at its own time, calendar_event_signal at the configured calendar events."
+        ),
+    )
     upsample_frequency_id: Literal["1d"] = "1d"
     intraday_bar_interpolation_rule: Literal["ffill"] = "ffill"
     valuation_column: str = Field(default="close", min_length=1, max_length=64)
@@ -911,6 +919,8 @@ class ProvidedWeightsPortfolioCreateRequest(_ConfigurationRequest):
     def one_bars_configuration(self) -> "ProvidedWeightsPortfolioCreateRequest":
         if (self.bars_configuration_uid is None) == (self.bars_configuration is None):
             raise ValueError("Give either bars_configuration_uid or bars_configuration.")
+        if (self.rebalance_configuration_uid is None) == (self.rebalance_configuration is None):
+            raise ValueError("Give either rebalance_configuration_uid or rebalance_configuration.")
         return self
 
 
@@ -984,7 +994,7 @@ class PortfolioConfigurationResponse(BaseModel):
         ),
     )
     rebalance_configuration_uid: str
-    rebalance_strategy: Literal["calendar_event_signal"]
+    rebalance_strategy: Literal["calendar_event_signal", "immediate_signal"]
     portfolio_uid: str | None
     scheduled: bool
     job_uid: str | None
@@ -1023,7 +1033,7 @@ class PortfolioLinkedRebalanceResponse(BaseModel):
 
     name: str
     description: str | None
-    strategy: Literal["calendar_event_signal"]
+    strategy: Literal["calendar_event_signal", "immediate_signal"]
     calendar_identifier: str
     session_label: str
     rebalance_event: Literal["market_open", "market_close"]
@@ -1099,6 +1109,7 @@ class ProvidedWeightsPortfolioCreateResponse(BaseModel):
     portfolio_uid: str
     portfolio_unique_identifier: str
     bars_configuration_created: bool
+    rebalance_configuration_created: bool = False
     weights: PublishedWeightsResponse
 
 

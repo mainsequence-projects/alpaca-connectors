@@ -272,6 +272,14 @@ def size_account_target(
     exposures = account_exposures(positions)
     portfolio_identifiers = [e.identifier for e in exposures if e.target_type == "portfolio"]
     weights = read_portfolio_weights(portfolio_identifiers, at=valuation_time)
+    missing = [identifier for identifier in portfolio_identifiers if not weights.get(identifier)]
+    if missing:
+        from alpaca_connectors.portfolios.rebalance_schedule import missing_weights_message
+
+        # Issue #41: say when the portfolio's first rebalance is, not only that it has no weights.
+        message = missing_weights_message(missing[0], at=valuation_time)
+        if message is not None:
+            raise FundAllocationError("portfolio_weights_missing", message)
     asset_identifiers = sorted(
         {e.identifier for e in exposures if e.target_type == "asset"}
         | {identifier for legs in weights.values() for identifier in legs}
