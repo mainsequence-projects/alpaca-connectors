@@ -8,6 +8,7 @@ changed, paused, given weights or deleted only by its owner, the account's owner
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from dataclasses import asdict
 from typing import Any
@@ -61,6 +62,8 @@ from ..schemas import (
 from .common import collection_response
 from .configuration_jobs import accepted_run, job_fields
 
+logger = logging.getLogger(__name__)
+
 
 def _responses(rows: list[Any]) -> list[PortfolioConfigurationResponse]:
     from alpaca_connectors.market_data.configurations import portfolio_bar_configurations
@@ -83,6 +86,7 @@ def _responses(rows: list[Any]) -> list[PortfolioConfigurationResponse]:
         # The owner pair stays internal: it can name a gateway's person (ADR 0019).
         values = row.model_dump(mode="json", exclude={"owner_gateway_uid", "owner_user_uid"})
         bars = own_bars.get(str(row.uid))
+        definition = definitions.get(str(row.signal_definition_uid))
         responses.append(
             PortfolioConfigurationResponse.model_validate(
                 {
@@ -92,6 +96,7 @@ def _responses(rows: list[Any]) -> list[PortfolioConfigurationResponse]:
                         str(bars.uid) if bars is not None else values["bars_configuration_uid"]
                     ),
                     "signal_uid": portfolio_signal_uid(row, definitions=definitions),
+                    "key": definition.key if definition is not None else None,
                     "rebalance_strategy": rebalance_configuration.strategy,
                     **job_fields(
                         state.job,
@@ -112,6 +117,7 @@ def list_configurations(
     ordering: str,
     account_uid: str | None = None,
     signal_definition_uid: str | None = None,
+    key: str | None = None,
 ):
     rows, total = list_portfolio_configurations(
         limit=limit,
@@ -119,6 +125,7 @@ def list_configurations(
         search=search,
         account_uids=[account_uid] if account_uid is not None else None,
         signal_definition_uid=signal_definition_uid,
+        key=key,
         ordering=ordering,
     )
     return collection_response(
@@ -364,7 +371,7 @@ def create_provided_configuration(
     from .accounts import require_owner_may_configure_account
 
     values = request.model_dump(
-        exclude={"observations", "bars_configuration", "rebalance_configuration"}
+        exclude={"observations", "bars_configuration", "rebalance_configuration", "run"}
     )
     if request.bars_configuration is not None:
         require_owner_may_configure_account(request.bars_configuration.account_uid, owner)
@@ -376,14 +383,42 @@ def create_provided_configuration(
         observations=[observation.model_dump() for observation in request.observations],
         **values,
     )
+    run, run_error = None, None
+    if request.run and created.created:
+        run, run_error = _start_first_run(created.configuration.uid)
     return ProvidedWeightsPortfolioCreateResponse(
         configuration=_responses([created.configuration])[0],
         portfolio_uid=created.portfolio_uid,
         portfolio_unique_identifier=created.portfolio_unique_identifier,
+        created=created.created,
         bars_configuration_created=created.bars_configuration_created,
         rebalance_configuration_created=created.rebalance_configuration_created,
-        weights=_published_response(created.configuration.uid, created.published),
+        weights=(
+            _published_response(created.configuration.uid, created.published)
+            if created.published is not None
+            else None
+        ),
+        run=run,
+        run_error=run_error,
     )
+
+
+def _start_first_run(
+    configuration_uid: Any,
+) -> tuple[PortfolioJobRunAcceptedResponse | None, str | None]:
+    """Start a new portfolio's first run, as actions/run does (issue #43).
+
+    The portfolio already exists, so a run that does not start never fails the create: the answer
+    says why, in the connector's own words, and the scheduled run covers it.
+    """
+    try:
+        return run_configuration(str(configuration_uid)), None
+    except (LookupError, ValueError) as exc:
+        reason = str(exc)
+    except Exception as exc:  # noqa: BLE001 - the portfolio exists; the answer says why
+        reason = f"The portfolio Job could not be started ({type(exc).__name__})."
+    logger.warning("A created portfolio's first run did not start: %s", reason)
+    return None, f"{reason} The scheduled run covers it."
 
 
 def _published_response(configuration_uid: Any, published: Any) -> PublishedWeightsResponse:

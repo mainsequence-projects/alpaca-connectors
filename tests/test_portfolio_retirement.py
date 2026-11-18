@@ -14,7 +14,10 @@ import pytest
 from msm.api.remote import MarketsConflictError
 
 from alpaca_connectors.account.ownership import AccountOwner
-from alpaca_connectors.portfolios.configurations import AlpacaPortfolioConfiguration
+from alpaca_connectors.portfolios.configurations import (
+    AlpacaPortfolioConfiguration,
+    PortfolioRebalanceConfiguration,
+)
 from alpaca_connectors.portfolios.provided_weights import (
     PortfolioOwnedByAnotherError,
     ProvidedWeightsError,
@@ -83,6 +86,8 @@ def _removal(row, *, retire=None):
             "alpaca_connectors.portfolios.signal_definitions.delete_signal_definition",
             calls.definition,
         ),
+        # A shared rebalance rule: none was created with this portfolio (issue #42).
+        patch.object(PortfolioRebalanceConfiguration, "filter", return_value=[]),
     )
     calls.definition.return_value = {
         "uid": str(DEFINITION_UID),
@@ -104,7 +109,7 @@ def _recorded():
 
 def test_the_owner_retires_the_portfolio_then_deletes_its_configuration() -> None:
     calls, patches = _removal(configuration())
-    with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5]:
+    with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6]:
         removal = delete_provided_weights_portfolio(CONFIGURATION_UID, owner=OWNER)
 
     # Retired first, so a refusal leaves everything as it was; recorded under its account, so the
@@ -127,6 +132,8 @@ def test_the_owner_retires_the_portfolio_then_deletes_its_configuration() -> Non
         },
         "signal_definition": {"uid": str(DEFINITION_UID), "state": "deleted"},
         "signal": {"uid": provided_signal_uid(CONFIGURATION_UID), "state": "kept"},
+        # A shared rule stays: none was created with this portfolio (issue #42).
+        "rebalance_configuration": None,
     }
 
 
@@ -137,7 +144,7 @@ def test_a_definition_another_portfolio_follows_stays() -> None:
     calls.definition.side_effect = SignalDefinitionError(
         "signal_followed", "Portfolios follow this signal; delete them first.", status_code=409
     )
-    with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5]:
+    with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6]:
         removal = delete_provided_weights_portfolio(CONFIGURATION_UID, owner=OWNER)
 
     assert removal.summary()["signal_definition"] == {
@@ -151,7 +158,7 @@ def test_a_definition_whose_delete_fails_never_fails_the_portfolio_delete() -> N
     # The configuration row is gone by then, so a raised error could not be retried: say it.
     calls, patches = _removal(configuration())
     calls.definition.side_effect = ConnectionError("Markets is unavailable")
-    with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5]:
+    with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6]:
         removal = delete_provided_weights_portfolio(CONFIGURATION_UID, owner=OWNER)
 
     assert calls.delete.call_args == call(CONFIGURATION_UID)
@@ -167,7 +174,7 @@ def test_a_portfolio_not_yet_adopted_has_no_definition_to_delete() -> None:
     calls, patches = _removal(
         configuration(account_uid=None, signal_definition_uid=None, bars_configuration_uid=None)
     )
-    with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5]:
+    with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6]:
         removal = delete_provided_weights_portfolio(CONFIGURATION_UID, owner=OWNER)
 
     calls.definition.assert_not_called()
@@ -215,7 +222,7 @@ def test_only_the_owner_ends_it() -> None:
 
 def test_a_configuration_without_a_portfolio_is_deleted_without_retiring() -> None:
     calls, patches = _removal(configuration(portfolio_uid=None))
-    with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5]:
+    with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6]:
         removal = delete_provided_weights_portfolio(CONFIGURATION_UID, owner=OWNER)
 
     calls.retire.assert_not_called()
@@ -348,3 +355,63 @@ def test_the_cli_ends_any_portfolio_for_the_operator() -> None:
         call.delete(CONFIGURATION_UID),
         call.definition(str(DEFINITION_UID)),
     ]
+
+
+# ------------------------------------------------------------------------------------------------
+# A rebalance configuration created inline with the portfolio goes with it (issue #42)
+# ------------------------------------------------------------------------------------------------
+REBALANCE_UID = uuid.UUID("88888888-8888-4888-8888-888888888888")
+
+
+def _end_with_inline_rebalance(*, named_by_another: bool = False, delete_error=None):
+    calls, patches = _removal(configuration())
+    calls.delete_rebalance.side_effect = delete_error
+    with (
+        patches[0],
+        patches[1],
+        patches[2],
+        patches[3],
+        patches[4],
+        patches[5],
+        patch.object(
+            PortfolioRebalanceConfiguration,
+            "filter",
+            calls.rebalances,
+        ),
+        patch.object(
+            AlpacaPortfolioConfiguration,
+            "filter",
+            calls.portfolios,
+        ),
+        patch(f"{CONFIGURATIONS}.delete_rebalance_configuration", calls.delete_rebalance),
+    ):
+        calls.rebalances.return_value = [SimpleNamespace(uid=REBALANCE_UID)]
+        calls.portfolios.return_value = [object()] if named_by_another else []
+        removal = delete_provided_weights_portfolio(CONFIGURATION_UID, owner=OWNER)
+    return calls, removal.summary()["rebalance_configuration"]
+
+
+def test_an_inline_rebalance_configuration_is_deleted_with_its_portfolio() -> None:
+    calls, rebalance = _end_with_inline_rebalance()
+
+    # Found by the portfolio it was created with, after the configuration row is gone.
+    calls.rebalances.assert_called_once_with(portfolio_configuration_uid=CONFIGURATION_UID, limit=1)
+    calls.portfolios.assert_called_once_with(rebalance_configuration_uid=REBALANCE_UID, limit=1)
+    calls.delete_rebalance.assert_called_once_with(str(REBALANCE_UID))
+    assert rebalance == {"uid": str(REBALANCE_UID), "state": "deleted"}
+    names = [entry[0] for entry in calls.mock_calls]
+    assert names.index("delete") < names.index("delete_rebalance")
+
+
+def test_an_inline_rebalance_configuration_another_portfolio_names_stays() -> None:
+    calls, rebalance = _end_with_inline_rebalance(named_by_another=True)
+
+    calls.delete_rebalance.assert_not_called()
+    assert rebalance == {"uid": str(REBALANCE_UID), "state": "followed"}
+
+
+def test_a_failed_rebalance_delete_never_fails_the_portfolio_s_delete() -> None:
+    calls, rebalance = _end_with_inline_rebalance(delete_error=RuntimeError("storage unavailable"))
+
+    calls.delete.assert_called_once_with(CONFIGURATION_UID)
+    assert rebalance == {"uid": str(REBALANCE_UID), "state": "failed"}

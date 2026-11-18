@@ -102,6 +102,7 @@ class PortfolioRebalanceConfigurationTable(
         Index(None, "name"),
         Index(None, "strategy"),
         Index(None, "calendar_identifier"),
+        Index(None, "portfolio_configuration_uid"),
     )
 
     uid: Mapped[uuid.UUID] = mapped_column(
@@ -200,6 +201,20 @@ class PortfolioRebalanceConfigurationTable(
             "description": (
                 "Local weekday of the session used by a weekly cadence, 0 for Monday to 6 for "
                 "Sunday; ignored by every_session."
+            ),
+        },
+    )
+    # No foreign key: the portfolio configuration already references this rule, and the rule
+    # outlives that row by one step when the portfolio ends (issue #42).
+    portfolio_configuration_uid: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        nullable=True,
+        info={
+            "label": "Created with portfolio",
+            "description": (
+                "For a rule created inline with a portfolio, the UID of that portfolio "
+                "configuration; the rule is deleted when that portfolio ends and no other "
+                "portfolio names it. Null for a shared rule created on its own."
             ),
         },
     )
@@ -579,6 +594,7 @@ class PortfolioRebalanceConfiguration(MarketsMetaTableRow):
     event_offset_seconds: int
     rebalance_cadence: RebalanceCadence
     rebalance_weekday: int
+    portfolio_configuration_uid: uuid.UUID | None = None
     created_at: dt.datetime
     updated_at: dt.datetime
 
@@ -717,7 +733,10 @@ def create_rebalance_configuration(
     rebalance_cadence: str = "every_session",
     rebalance_weekday: int = 0,
     uid: uuid.UUID | str | None = None,
+    portfolio_configuration_uid: uuid.UUID | str | None = None,
 ) -> PortfolioRebalanceConfiguration:
+    """Store a rebalance rule; ``portfolio_configuration_uid`` names the portfolio it is created
+    with, inline, and goes with (issue #42). A rule created on its own is shared and has none."""
     from msm.bootstrap import resolve_runtime
     from msm.repositories.crud import create_model
 
@@ -749,6 +768,11 @@ def create_rebalance_configuration(
             "event_offset_seconds": int(event_offset_seconds),
             "rebalance_cadence": normalize_rebalance_cadence(rebalance_cadence),
             "rebalance_weekday": _rebalance_weekday(rebalance_weekday),
+            "portfolio_configuration_uid": (
+                uuid.UUID(str(portfolio_configuration_uid))
+                if portfolio_configuration_uid is not None
+                else None
+            ),
             "created_at": now,
             "updated_at": now,
         },
@@ -1026,8 +1050,11 @@ def list_portfolio_configurations(
     search: str | None = None,
     account_uids: Sequence[uuid.UUID | str] | None = None,
     signal_definition_uid: uuid.UUID | str | None = None,
+    key: str | None = None,
     ordering: str = "name",
 ) -> tuple[list[AlpacaPortfolioConfiguration], int]:
+    """A page of portfolio configurations; ``key`` keeps those whose signal definition has it,
+    the key a provided-weights create was given (issue #43)."""
     from msm.bootstrap import resolve_runtime
     from msm.repositories.base import compile_markets_statement, execute_markets_operation
     from sqlalchemy import func, or_, select
@@ -1047,6 +1074,12 @@ def list_portfolio_configurations(
         statement = statement.where(
             AlpacaPortfolioConfigurationTable.signal_definition_uid
             == uuid.UUID(str(signal_definition_uid))
+        )
+    if key is not None:
+        statement = statement.where(
+            AlpacaPortfolioConfigurationTable.signal_definition_uid.in_(
+                select(SignalDefinitionTable.uid).where(SignalDefinitionTable.key == key)
+            )
         )
     if search:
         pattern = f"%{search.strip()}%"

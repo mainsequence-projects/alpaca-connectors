@@ -814,6 +814,13 @@ class PortfolioRebalanceConfigurationResponse(BaseModel):
     event_offset_seconds: int
     rebalance_cadence: Literal["every_session", "weekly"]
     rebalance_weekday: int
+    portfolio_configuration_uid: str | None = Field(
+        default=None,
+        description=(
+            "The portfolio this rule was created inline with, and is deleted with (issue #42); "
+            "null for a shared rule."
+        ),
+    )
     created_at: dt.datetime
     updated_at: dt.datetime
 
@@ -895,6 +902,23 @@ class ProvidedWeightsPortfolioCreateRequest(_ConfigurationRequest):
 
     name: str = Field(min_length=1, max_length=255)
     description: str | None = None
+    key: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=255,
+        description=(
+            "Makes the create repeatable (issue #43): unique in the account of the bars "
+            "configuration. A key the account already used answers that portfolio with created "
+            "false, creates nothing and ignores the observations."
+        ),
+    )
+    run: bool = Field(
+        default=False,
+        description=(
+            "Start the portfolio's first run with the create; the answer carries it, or why it "
+            "did not start, which never fails the create (issue #43)."
+        ),
+    )
     bars_configuration_uid: str | None = Field(default=None, min_length=1)
     bars_configuration: InlinePortfolioBarsConfigurationRequest | None = None
     rebalance_configuration_uid: str | None = Field(default=None, min_length=1)
@@ -977,6 +1001,13 @@ class PortfolioConfigurationResponse(BaseModel):
     )
     signal_definition_uid: str | None = Field(
         default=None, description="The account's signal definition the portfolio follows."
+    )
+    key: str | None = Field(
+        default=None,
+        description=(
+            "Its signal definition's key, unique in the account: the key a provided-weights "
+            "create was given, else the configuration UID (issue #43)."
+        ),
     )
     adopted: bool = Field(
         default=True,
@@ -1108,9 +1139,23 @@ class ProvidedWeightsPortfolioCreateResponse(BaseModel):
     configuration: PortfolioConfigurationResponse
     portfolio_uid: str
     portfolio_unique_identifier: str
+    created: bool = Field(
+        default=True,
+        description="False when the key was already used: this is that portfolio (issue #43).",
+    )
     bars_configuration_created: bool
     rebalance_configuration_created: bool = False
-    weights: PublishedWeightsResponse
+    weights: PublishedWeightsResponse | None = Field(
+        default=None, description="The weights published; null when created is false."
+    )
+    run: PortfolioJobRunAcceptedResponse | None = Field(
+        default=None,
+        description="The first run the create started, as actions/run answers it (run: true).",
+    )
+    run_error: str | None = Field(
+        default=None,
+        description="Why the asked first run did not start; the scheduled run covers it.",
+    )
 
 
 class PortfolioCreateResponse(BaseModel):

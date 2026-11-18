@@ -251,11 +251,25 @@ GET|PATCH|DELETE /v1/portfolio-rebalance-configurations/{configuration_uid}
   Hunch uses it: it takes either `bars_configuration_uid` (a feed) or `bars_configuration`
   (`name`, `account_uid`, `frequency_id`, `feed`, `adjustment`, `scheduled?`), either
   `rebalance_configuration_uid` or `rebalance_configuration` (the body of
-  `POST /v1/portfolio-rebalance-configurations`, created with the portfolio and deleted with a
-  refused create; the response says `rebalance_configuration_created`), and the `observations`.
-  So one call creates a portfolio that rebalances at each set of weights:
-  `"rebalance_configuration": {"name": "...", "strategy": "immediate_signal"}`. It keeps the rules
-  it had before ADR 0028: the caller owns the portfolio, a named
+  `POST /v1/portfolio-rebalance-configurations`, created with the portfolio and deleted with it or
+  with a refused create, issue #42; the response says `rebalance_configuration_created`), and the
+  `observations`. So one call creates a portfolio that rebalances at each set of weights:
+  `"rebalance_configuration": {"name": "...", "strategy": "immediate_signal"}`. Two optional
+  fields make that call the whole build (issue #43):
+  - `key` makes it repeatable. It is the portfolio's signal definition key, unique in the account
+    of the bars configuration, readable as the configuration's `key` and filtered on by
+    `GET /v1/portfolio-configurations?key=…`. A key the account already used answers that
+    portfolio with `created: false` and `weights: null`, creates nothing and ignores the repeated
+    `observations`; another owner's answers `403 portfolio_owned_by_another`, and a key that no
+    finished portfolio follows (a create with it still running, or a signal made on its own)
+    `409 signal_key_exists`. Of two concurrent creates with one key, one creates the portfolio and
+    the other answers it. Once the portfolio is deleted, its key can be used again. Without a key,
+    the definition's key is the configuration UID.
+  - `run: true` starts the portfolio's first run with the create, as `actions/run` does: the
+    answer's `run` carries it, or `run_error` says why it did not start, which never fails the
+    create (the scheduled run covers it). A repeated create starts no run.
+
+  It keeps the rules it had before ADR 0028: the caller owns the portfolio, a named
   feed is not checked, and an inline one needs an account the caller may configure (another
   owner's answers `409 account_owned_by_another`; one without an owner stays open, ADR 0022). The
   portfolio belongs to that account, gets its own bars configuration with that profile, and a
@@ -290,7 +304,10 @@ GET|PATCH|DELETE /v1/portfolio-rebalance-configurations/{configuration_uid}
   {uid, unique_identifier, state: "retired", retired_at}`, `signal_definition: {uid, state:
   "deleted" | "followed" | "failed"}` and `signal: {uid, state: "deleted" | "kept"}`. `failed`
   means the portfolio is deleted but the definition's own delete did not complete; delete the
-  definition from the account's signals. While an account's current target names the portfolio it
+  definition from the account's signals. A rebalance configuration created inline with it goes
+  too, unless another portfolio names it by then (issue #42): `rebalance_configuration: {uid,
+  state: "deleted" | "followed" | "failed"}`, or `null` for a shared rule, which is never touched.
+  The account delete ends its portfolios the same way. While an account's current target names the portfolio it
   answers `409 portfolio_in_account_target` and changes nothing. The `Portfolio`, its series, the signal's rows and account history stay, recorded under
   the account, whose delete deletes them; a retired portfolio is no longer offered as a target
   and is no longer computed.

@@ -28,6 +28,8 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
+from msm.base import new_markets_uid
+
 from alpaca_connectors.account.ownership import AccountOwner
 from alpaca_connectors.portfolios.configurations import AlpacaPortfolioConfiguration
 from alpaca_connectors.portfolios.signal_definitions import (
@@ -83,6 +85,9 @@ class ProvidedPortfolioCreation:
     bars_configuration_uid: str
     signal_definition: SignalDefinition
     rebalance_configuration_created: bool = False
+    # False when a create named a key the account already used: the portfolio created with it
+    # is answered and nothing is created or published (issue #43).
+    created: bool = True
 
 
 def provided_portfolio_unique_identifier(configuration_uid: Any) -> str:
@@ -389,6 +394,10 @@ class PortfolioRemoval:
     # Its signal's rows, when the definition went: ``deleted``, or ``kept`` while a retired
     # `Portfolio` still follows the signal.
     signal: dict[str, Any] | None = None
+    # The rebalance configuration created inline with it (issue #42): ``deleted`` with it,
+    # ``followed`` while another portfolio names it, or ``failed``. None for a shared rule.
+    rebalance_configuration_uid: str | None = None
+    rebalance_configuration_state: str | None = None
 
     def summary(self) -> dict[str, Any]:
         return {
@@ -406,6 +415,14 @@ class PortfolioRemoval:
                 else None
             ),
             "signal": self.signal,
+            "rebalance_configuration": (
+                {
+                    "uid": self.rebalance_configuration_uid,
+                    "state": self.rebalance_configuration_state,
+                }
+                if self.rebalance_configuration_uid is not None
+                else None
+            ),
         }
 
 
@@ -470,6 +487,51 @@ def _end_followed_definition(
     return uid, "failed", None
 
 
+def _end_inline_rebalance(
+    configuration: AlpacaPortfolioConfiguration,
+) -> tuple[str | None, str | None]:
+    """Delete the rebalance configuration created inline with the ended portfolio (issue #42).
+
+    It goes unless another portfolio names it by then, which keeps it as a rule like any other. A
+    rule created on its own names no portfolio and is never touched. As with the definition, the
+    portfolio is already deleted when this runs: a failure answers ``failed`` and never fails the
+    portfolio's delete. Answers ``(uid, state)``.
+    """
+    from alpaca_connectors.portfolios.configurations import (
+        AlpacaPortfolioConfiguration,
+        PortfolioRebalanceConfiguration,
+        delete_rebalance_configuration,
+    )
+
+    try:
+        rows = PortfolioRebalanceConfiguration.filter(
+            portfolio_configuration_uid=uuid.UUID(str(configuration.uid)), limit=1
+        )
+    except Exception as exc:  # noqa: BLE001 - reported, never raised: the portfolio is gone
+        logger.warning(
+            "The portfolio is deleted, but its rebalance configuration was not read (%s).",
+            type(exc).__name__,
+        )
+        return None, None
+    if not rows:
+        return None, None
+    uid = str(rows[0].uid)
+    try:
+        if AlpacaPortfolioConfiguration.filter(rebalance_configuration_uid=rows[0].uid, limit=1):
+            return uid, "followed"
+        delete_rebalance_configuration(uid)
+    except LookupError:
+        return uid, "deleted"  # An earlier, interrupted attempt deleted it.
+    except Exception as exc:  # noqa: BLE001 - reported, never raised: the portfolio is gone
+        logger.warning(
+            "The portfolio is deleted, but its rebalance configuration's delete failed (%s); "
+            "delete it from the rebalance configurations.",
+            type(exc).__name__,
+        )
+        return uid, "failed"
+    return uid, "deleted"
+
+
 def end_portfolio_configuration(
     configuration: AlpacaPortfolioConfiguration,
 ) -> PortfolioRemoval:
@@ -521,6 +583,7 @@ def end_portfolio_configuration(
             )
     delete_portfolio_configuration_row(configuration.uid)
     definition_uid, definition_state, signal = _end_followed_definition(configuration)
+    rebalance_uid, rebalance_state = _end_inline_rebalance(configuration)
     return PortfolioRemoval(
         configuration_uid=str(configuration.uid),
         portfolio_uid=portfolio_uid,
@@ -530,6 +593,8 @@ def end_portfolio_configuration(
         signal_definition_uid=definition_uid,
         signal_definition_state=definition_state,
         signal=signal,
+        rebalance_configuration_uid=rebalance_uid,
+        rebalance_configuration_state=rebalance_state,
     )
 
 
@@ -720,11 +785,54 @@ def _discard_failed_creation(
             logger.warning("A failed portfolio create left a row behind (%s).", type(exc).__name__)
 
 
+def _portfolio_created_with_key(
+    account_uid: Any,
+    key: str,
+    *,
+    owner: AccountOwner,
+) -> ProvidedPortfolioCreation | None:
+    """The portfolio an earlier create made with ``key`` in the account, or None (issue #43).
+
+    The key is its signal definition's, unique per account. A definition with the key that no
+    finished portfolio follows (one made on its own, or a create still running) is refused; so is
+    another owner's portfolio.
+    """
+    from alpaca_connectors.market_data.configurations import portfolio_bar_configuration
+    from alpaca_connectors.portfolios.configurations import list_portfolio_configurations
+    from alpaca_connectors.portfolios.signal_definitions import account_signal_definition
+
+    definition = account_signal_definition(account_uid, key)
+    if definition is None:
+        return None
+    rows, _ = list_portfolio_configurations(limit=1, offset=0, signal_definition_uid=definition.uid)
+    configuration = rows[0] if rows else None
+    if configuration is None or configuration.portfolio_uid is None:
+        raise ProvidedWeightsError(
+            "signal_key_exists",
+            "This account already has a signal with this key, and no finished portfolio follows "
+            "it. If a create with this key is still running, ask again when it has ended.",
+            status_code=409,
+        )
+    require_portfolio_owner(configuration, owner)
+    bars = portfolio_bar_configuration(configuration.uid)
+    return ProvidedPortfolioCreation(
+        configuration=configuration,
+        published=None,
+        portfolio_uid=str(configuration.portfolio_uid),
+        portfolio_unique_identifier=provided_portfolio_unique_identifier(configuration.uid),
+        bars_configuration_created=False,
+        bars_configuration_uid=str(bars.uid) if bars is not None else "",
+        signal_definition=definition,
+        created=False,
+    )
+
+
 def create_provided_weights_portfolio(
     *,
     owner: AccountOwner,
     name: str,
     observations: Sequence[Mapping[str, Any]],
+    key: str | None = None,
     rebalance_configuration_uid: Any | None = None,
     rebalance_configuration: Mapping[str, Any] | None = None,
     bars_configuration_uid: Any | None = None,
@@ -749,7 +857,12 @@ def create_provided_weights_portfolio(
     (issue #37), so a retry starts clean.
 
     The rebalance configuration is named, or given inline and created first, as the bars
-    configuration is; an inline one is a rebalance configuration like any other.
+    configuration is; an inline one goes with the portfolio (issue #42).
+
+    ``key`` makes the create repeatable (issue #43): it is the portfolio's signal definition key,
+    unique in the account. A key the account already used answers the portfolio created with it
+    (``created`` false) and creates and publishes nothing: the repeated ``observations`` are
+    ignored. Without a key, the definition's key is the configuration UID, as before.
     """
     from alpaca_connectors.market_data.configurations import get_bar_configuration
     from alpaca_connectors.portfolios.configurations import (
@@ -800,16 +913,28 @@ def create_provided_weights_portfolio(
         raise ProvidedWeightsError(
             "invalid_bars_configuration", "The bars configuration must name its account."
         )
+    if key is not None:
+        from alpaca_connectors.portfolios.signal_definitions import normalize_key
+
+        key = normalize_key(key)
+        existing = _portfolio_created_with_key(account_uid, key, owner=owner)
+        if existing is not None:
+            return existing
 
     configuration: AlpacaPortfolioConfiguration | None = None
     definition: SignalDefinition | None = None
     portfolio_row: Any = None
     rebalance: Any = None
+    # Fixed first, so an inline rebalance configuration records the portfolio it goes with.
+    configuration_uid = new_markets_uid()
     try:
         if rebalance_configuration is not None:
-            rebalance = create_rebalance_configuration(**dict(rebalance_configuration))
+            rebalance = create_rebalance_configuration(
+                **dict(rebalance_configuration), portfolio_configuration_uid=configuration_uid
+            )
             rebalance_configuration_uid = rebalance.uid
         configuration = create_portfolio_configuration_row(
+            uid=configuration_uid,
             name=name,
             description=description,
             account_uid=account_uid,
@@ -825,13 +950,16 @@ def create_provided_weights_portfolio(
             commission_fee=commission_fee,
             scheduled=scheduled,
         )
-        key = legacy_signal_key(configuration.uid)
+        # The signal keeps the configuration UID as its key; the definition takes the caller's
+        # key when one is given (issue #43). The account's unique key is what makes a concurrent
+        # create with the same key fail here.
+        signal_key = legacy_signal_key(configuration.uid)
         definition = create_signal_definition(
             account_uid=account_uid,
-            key=key,
+            key=key if key is not None else signal_key,
             name=configuration.name,
             description=description,
-            signal_key=key,
+            signal_key=signal_key,
         )
         configuration = update_portfolio_configuration_row(
             configuration.uid,
@@ -852,6 +980,14 @@ def create_provided_weights_portfolio(
         )
     except Exception:
         _discard_failed_creation(configuration, definition, portfolio_row, rebalance)
+        if key is not None and definition is None:
+            from alpaca_connectors.portfolios.signal_definitions import account_signal_definition
+
+            # Two creates with one key: the one that lost answers the other's portfolio.
+            if account_signal_definition(account_uid, key) is not None:
+                existing = _portfolio_created_with_key(account_uid, key, owner=owner)
+                if existing is not None:
+                    return existing
         raise
     return ProvidedPortfolioCreation(
         configuration=configuration,

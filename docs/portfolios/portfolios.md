@@ -169,7 +169,9 @@ The strategy is part of the portfolio's identity in ms-markets: pointing a portf
 rebalance configuration of the other strategy, or changing that configuration's strategy, gives it
 a new rebalance and weights history. `POST /v1/portfolio-configurations/provided-weights` can
 create the rebalance configuration in the same call (`rebalance_configuration`), as it does the
-bars configuration.
+bars configuration; that one records the portfolio and is deleted with it (issue #42). With
+`key` the same call is repeatable, and with `run: true` it also starts the first run (issue #43,
+[API](../api.md)).
 
 ```text
 GET|POST         /v1/portfolio-rebalance-configurations
@@ -262,9 +264,14 @@ defines it (ms-markets ADR 0049), and so does every other delete, the CLI's incl
    (issue #38). The signal's rows stay while the retired `Portfolio` follows the signal, and its
    key cannot be given again while they do. A failure here never fails the delete, which could not
    be repeated once the row is gone: the answer says `failed`.
+5. **Delete the rebalance configuration created inline with it** (issue #42), which records the
+   portfolio it was created with, unless another portfolio names it by then. A shared rule,
+   created on its own, records none and is never touched. As for the definition, a failure here
+   answers `failed` and never fails the delete.
 
 The answer is `{configuration_uid, deleted: true, portfolio: {uid, unique_identifier, state,
-retired_at}, signal_definition: {uid, state}, signal: {uid, state}}`. The portfolio's `state` is
+retired_at}, signal_definition: {uid, state}, signal: {uid, state}, rebalance_configuration:
+{uid, state} | null}`; the rebalance configuration's state is `deleted`, `followed` or `failed`. The portfolio's `state` is
 `retired`, or `absent` for a configuration whose `Portfolio` no longer exists; the definition's is
 `deleted`, `followed` while another portfolio follows it, or `failed` when its own delete did not
 complete (delete it from the account's signals); the signal's is `kept` or `deleted`. A portfolio not yet adopted has no definition: both are `null`. Retiring a retired

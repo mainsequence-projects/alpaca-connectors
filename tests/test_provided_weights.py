@@ -578,9 +578,12 @@ def _create_with_inline_rebalance(order: MagicMock, **patches):
 def test_an_inline_rebalance_configuration_is_created_with_the_portfolio() -> None:
     created, create_rebalance, create_row = _create_with_inline_rebalance(MagicMock())
 
-    # Created first, as POST /v1/portfolio-rebalance-configurations would, and the portfolio
-    # names it.
-    create_rebalance.assert_called_once_with(**IMMEDIATE)
+    # Created first, as POST /v1/portfolio-rebalance-configurations would, recording the portfolio
+    # it goes with (issue #42), and the portfolio names it.
+    configuration_uid = create_row.call_args.kwargs["uid"]
+    create_rebalance.assert_called_once_with(
+        **IMMEDIATE, portfolio_configuration_uid=configuration_uid
+    )
     assert create_row.call_args.kwargs["rebalance_configuration_uid"] == REBALANCE_UID
     assert created.rebalance_configuration_created is True
 
@@ -1364,3 +1367,134 @@ def test_the_bars_update_comes_before_the_valuation() -> None:
     ):
         execution.execute_portfolio_configuration(CONFIGURATION_UID)
     assert [name for name, *_ in order.mock_calls] == ["resolve", "bars", "graph"]
+
+
+# ------------------------------------------------------------------------------------------------
+# A key makes the create repeatable (issue #43)
+# ------------------------------------------------------------------------------------------------
+def test_a_new_key_is_the_portfolio_s_definition_key() -> None:
+    order = MagicMock()
+    with (
+        patch(f"{DEFINITIONS}.account_signal_definition", return_value=None),
+        patch(f"{DEFINITIONS}.create_signal_definition", return_value=definition()) as create,
+        patch.object(provided_weights, "require_alpaca_assets"),
+        patch(
+            f"{CONFIGURATIONS}.create_portfolio_configuration_row",
+            return_value=provided_configuration(signal_definition_uid=None),
+        ),
+        patch(
+            f"{CONFIGURATIONS}.update_portfolio_configuration_row",
+            side_effect=[provided_configuration(), provided_configuration()],
+        ),
+        patch(
+            "alpaca_connectors.market_data.configurations.create_portfolio_bar_configuration",
+            return_value=SimpleNamespace(uid=BARS_UID),
+        ),
+        patch.object(
+            provided_weights,
+            "_publish_validated",
+            return_value=provided_weights.PublishedWeights("signal-a", 1, 2, MONDAY, MONDAY),
+        ),
+        patch.object(
+            provided_weights,
+            "_upsert_portfolio_row",
+            return_value=SimpleNamespace(uid=uuid.UUID(int=7), unique_identifier="X"),
+        ),
+        patch(f"{CONFIGURATIONS}.delete_portfolio_configuration_row", order.delete_row),
+    ):
+        created = _create(key="hunch-portfolio-17")
+
+    # The definition takes the caller's key; its signal keeps the configuration UID as its key.
+    assert create.call_args.kwargs["key"] == "hunch-portfolio-17"
+    assert create.call_args.kwargs["signal_key"] == str(CONFIGURATION_UID)
+    assert created.created is True
+
+
+def _existing(**overrides):
+    return provided_configuration(portfolio_uid=uuid.UUID(int=7), **overrides)
+
+
+def test_a_used_key_answers_its_portfolio_and_creates_nothing() -> None:
+    with (
+        patch(f"{DEFINITIONS}.account_signal_definition", return_value=definition()) as read,
+        patch(
+            f"{CONFIGURATIONS}.list_portfolio_configurations", return_value=([_existing()], 1)
+        ) as listed,
+        patch(
+            "alpaca_connectors.market_data.configurations.portfolio_bar_configuration",
+            return_value=SimpleNamespace(uid=BARS_UID),
+        ),
+        patch.object(provided_weights, "require_alpaca_assets"),
+        patch(f"{CONFIGURATIONS}.create_portfolio_configuration_row") as create_row,
+        patch(f"{CONFIGURATIONS}.create_rebalance_configuration") as create_rebalance,
+        patch.object(provided_weights, "_publish_validated") as publish,
+    ):
+        created = _create(key="hunch-portfolio-17")
+
+    read.assert_called_once_with(ACCOUNT_UID, "hunch-portfolio-17")
+    assert listed.call_args.kwargs["signal_definition_uid"] == DEFINITION_UID
+    # Nothing is created or published; the repeated observations are ignored.
+    create_row.assert_not_called()
+    create_rebalance.assert_not_called()
+    publish.assert_not_called()
+    assert created.created is False
+    assert created.published is None
+    assert (created.bars_configuration_created, created.rebalance_configuration_created) == (
+        False,
+        False,
+    )
+    assert created.portfolio_uid == str(uuid.UUID(int=7))
+    assert created.bars_configuration_uid == str(BARS_UID)
+
+
+def test_a_used_key_of_another_owner_s_portfolio_is_refused() -> None:
+    other = _existing(owner_gateway_uid="someone-else", owner_user_uid="someone-else")
+    with (
+        patch(f"{DEFINITIONS}.account_signal_definition", return_value=definition()),
+        patch(f"{CONFIGURATIONS}.list_portfolio_configurations", return_value=([other], 1)),
+        patch.object(provided_weights, "require_alpaca_assets"),
+        pytest.raises(PortfolioOwnedByAnotherError),
+    ):
+        _create(key="hunch-portfolio-17")
+
+
+@pytest.mark.parametrize("rows", [[], [provided_configuration(portfolio_uid=None)]])
+def test_a_key_no_finished_portfolio_follows_is_refused(rows) -> None:
+    with (
+        patch(f"{DEFINITIONS}.account_signal_definition", return_value=definition()),
+        patch(f"{CONFIGURATIONS}.list_portfolio_configurations", return_value=(rows, len(rows))),
+        patch.object(provided_weights, "require_alpaca_assets"),
+        pytest.raises(ProvidedWeightsError) as raised,
+    ):
+        _create(key="hunch-portfolio-17")
+    assert (raised.value.code, raised.value.status_code) == ("signal_key_exists", 409)
+
+
+def test_two_creates_with_one_key_make_one_portfolio() -> None:
+    """The create that loses the account's unique key discards its rows and answers the other's."""
+    order = MagicMock()
+    unique = RuntimeError("duplicate key value violates unique constraint")
+    with (
+        # Not there when this create looked; there once the other create wrote it.
+        patch(
+            f"{DEFINITIONS}.account_signal_definition",
+            side_effect=[None, definition(), definition()],
+        ),
+        patch(f"{CONFIGURATIONS}.list_portfolio_configurations", return_value=([_existing()], 1)),
+        patch(
+            "alpaca_connectors.market_data.configurations.portfolio_bar_configuration",
+            return_value=SimpleNamespace(uid=BARS_UID),
+        ),
+        patch(f"{DEFINITIONS}.create_signal_definition", side_effect=unique),
+        patch.object(provided_weights, "require_alpaca_assets"),
+        patch(
+            f"{CONFIGURATIONS}.create_portfolio_configuration_row",
+            return_value=provided_configuration(signal_definition_uid=None),
+        ),
+        patch(f"{CONFIGURATIONS}.delete_portfolio_configuration_row", order.delete_row),
+    ):
+        created = _create(key="hunch-portfolio-17")
+
+    order.delete_row.assert_called_once_with(CONFIGURATION_UID)
+    assert created.created is False
+    assert created.portfolio_uid == str(uuid.UUID(int=7))

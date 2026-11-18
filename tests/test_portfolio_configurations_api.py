@@ -215,7 +215,7 @@ def test_portfolio_response_resolves_linked_metatables_with_bulk_uid_queries() -
         ) as rebalances_by_uids,
         patch(
             "alpaca_connectors.portfolios.signal_definitions.signal_definitions_by_uids",
-            return_value={DEFINITION_UID: SimpleNamespace(signal_key="account/key")},
+            return_value={DEFINITION_UID: SimpleNamespace(key="key", signal_key="account/key")},
         ) as definitions_by_uids,
         patch(
             "alpaca_connectors.market_data.configurations.portfolio_bar_configurations",
@@ -234,6 +234,8 @@ def test_portfolio_response_resolves_linked_metatables_with_bulk_uid_queries() -
     own_bars.assert_called_once_with([row.uid])
     assert result[0].bars_configuration_uid == BARS_CONFIGURATION_UID
     assert (result[0].account_uid, result[0].adopted) == (ACCOUNT_UID, True)
+    # Its definition's key, readable on the configuration (issue #43).
+    assert result[0].key == "key"
 
 
 def test_rebalance_crud_serializes_storage_domain_models(api_client) -> None:
@@ -562,3 +564,76 @@ def test_only_the_accounts_owner_creates_its_portfolio(api_client, local_caller)
     assert (kwargs["account_uid"], kwargs["signal_definition_uid"]) == (ACCOUNT_UID, DEFINITION_UID)
     assert (kwargs["bars"]["feed"], kwargs["bars"]["adjustment"]) == ("iex", "raw")
     assert "bars_configuration_uid" not in kwargs
+
+
+# ------------------------------------------------------------------------------------------------
+# The create starts the first run when asked (issue #43)
+# ------------------------------------------------------------------------------------------------
+def _create_and_run(*, run: bool, created: bool = True, run_error=None):
+    from alpaca_connectors.account.ownership import AccountOwner
+    from alpaca_connectors.api.app.schemas import ProvidedWeightsPortfolioCreateRequest
+    from alpaca_connectors.api.app.services import portfolio_configurations as service
+
+    creation = SimpleNamespace(
+        configuration=SimpleNamespace(uid=uuid.UUID(CONFIGURATION_UID)),
+        published=None,
+        portfolio_uid="77777777-7777-4777-8777-000000000007",
+        portfolio_unique_identifier="ALPACA_PORTFOLIO__X",
+        created=created,
+        bars_configuration_created=created,
+        rebalance_configuration_created=False,
+    )
+    accepted = PortfolioJobRunAcceptedResponse(
+        configuration_uid=CONFIGURATION_UID,
+        job_uid=JOB_UID,
+        job_run_uid=JOB_RUN_UID,
+        status="PENDING",
+        status_url=f"/v1/operations/job-runs/{JOB_RUN_UID}",
+    )
+    request = ProvidedWeightsPortfolioCreateRequest.model_validate(
+        {**create_request(), "key": "hunch-17", "run": run}
+    )
+    owner = AccountOwner.main_sequence_user("owner-uid")
+    with (
+        patch.object(service, "create_provided_weights_portfolio", return_value=creation) as make,
+        patch.object(service, "_responses", return_value=["configuration"]),
+        patch.object(
+            service, "run_configuration", side_effect=run_error, return_value=accepted
+        ) as start,
+        # The answer's fields, without validating the stand-in configuration.
+        patch.object(service, "ProvidedWeightsPortfolioCreateResponse", SimpleNamespace),
+    ):
+        response = service.create_provided_configuration(request, owner=owner)
+    return make, start, response, accepted
+
+
+def test_the_create_starts_the_first_run_and_answers_it() -> None:
+    make, start, response, accepted = _create_and_run(run=True)
+
+    # The key reaches the create; run is the API's, not the package's.
+    assert make.call_args.kwargs["key"] == "hunch-17"
+    assert "run" not in make.call_args.kwargs
+    start.assert_called_once_with(CONFIGURATION_UID)
+    assert (response.run, response.run_error, response.created) == (accepted, None, True)
+
+
+def test_a_run_that_does_not_start_never_fails_the_create() -> None:
+    _, _, response, _ = _create_and_run(
+        run=True, run_error=ValueError("Portfolio preflight is blocked: no prices.")
+    )
+    assert response.run is None
+    assert response.run_error == (
+        "Portfolio preflight is blocked: no prices. The scheduled run covers it."
+    )
+
+    _, _, response, _ = _create_and_run(run=True, run_error=RuntimeError("secret detail"))
+    assert response.run_error == (
+        "The portfolio Job could not be started (RuntimeError). The scheduled run covers it."
+    )
+
+
+def test_no_run_is_started_unasked_or_for_a_portfolio_not_created_again() -> None:
+    for run, created in ((False, True), (True, False)):
+        _, start, response, _ = _create_and_run(run=run, created=created)
+        start.assert_not_called()
+        assert (response.run, response.run_error, response.weights) == (None, None, None)

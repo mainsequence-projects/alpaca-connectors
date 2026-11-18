@@ -459,3 +459,34 @@ def test_both_rebalance_strategies_are_accepted() -> None:
     assert normalize_rebalance_strategy("calendar_event_signal") == "calendar_event_signal"
     with pytest.raises(ValueError, match="calendar_event_signal or immediate_signal"):
         normalize_rebalance_strategy("time_weighted")
+
+
+def test_the_list_filters_on_the_key_a_create_was_given() -> None:
+    """GET /v1/portfolio-configurations?key=… : one statement, through the signal definitions."""
+    from sqlalchemy.dialects import postgresql
+
+    from alpaca_connectors.portfolios.configurations import list_portfolio_configurations
+
+    statements = []
+
+    def compile_statement(statement, **_):
+        statements.append(statement)
+        return statement
+
+    with (
+        patch.object(configurations, "_start_runtime"),
+        patch("msm.bootstrap.resolve_runtime", return_value=SimpleNamespace(context=None)),
+        patch("msm.repositories.base.compile_markets_statement", side_effect=compile_statement),
+        patch(
+            "msm.repositories.base.execute_markets_operation",
+            side_effect=[{"rows": []}, {"rows": [{"count": 0}]}],
+        ),
+    ):
+        rows, total = list_portfolio_configurations(key="hunch-17")
+
+    assert (rows, total) == ([], 0)
+    page = statements[0].compile(dialect=postgresql.dialect())
+    sql = str(page)
+    assert "signal_definition_uid IN (SELECT" in sql
+    assert "alpaca_connectors__signal_definition.key = " in sql
+    assert "hunch-17" in page.params.values()

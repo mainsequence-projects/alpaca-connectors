@@ -59,6 +59,12 @@ def portfolio_configurations_list(
     search: str | None = None,
     account_uid: str | None = None,
     signal_definition_uid: str | None = None,
+    key: str | None = Query(
+        default=None,
+        min_length=1,
+        max_length=255,
+        description="Only the portfolio a provided-weights create made with this key.",
+    ),
     ordering: str = "name",
 ) -> ResourceCollection:
     validate_page_window(limit=limit, offset=offset)
@@ -70,6 +76,7 @@ def portfolio_configurations_list(
             search=search,
             account_uid=account_uid,
             signal_definition_uid=signal_definition_uid,
+            key=key,
             ordering=ordering,
         )
     except Exception as exc:
