@@ -24,7 +24,7 @@ import logging
 import math
 import numbers
 import uuid
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -229,6 +229,27 @@ def ensure_signal_metadata(signal_key: str, *, description: str) -> str:
     return str(signal.signal_uid)
 
 
+def _bind_signal_table(signal_uid: str) -> None:
+    """Bind the signal to this application's signal-weights instance before its rows exist.
+
+    Markets refuses a table its workload cannot see (issue #37, ADR 0025). The caller then gets
+    the connector's words, never Markets' message, which names the table, and nothing is stored.
+    Binding a bound signal again changes nothing.
+    """
+    from alpaca_connectors.portfolios.datasets import register_signal_dataset
+
+    try:
+        register_signal_dataset(signal_uid)
+    except LookupError as exc:
+        logger.warning("Markets refused to bind a signal to its table (%s).", type(exc).__name__)
+        raise ProvidedWeightsError(
+            "signal_not_registered",
+            "Markets could not register the signal's table, so no weights were stored. An "
+            "operator checks that Markets can read this application's instances.",
+            status_code=503,
+        ) from exc
+
+
 def _signal_description(definition: SignalDefinition) -> str:
     return f"Weights the application provides for the signal {definition.name!r}."
 
@@ -298,9 +319,11 @@ def _publish_validated(
     """Publish observations whose shape and assets were already validated.
 
     Refuse an observation at or before the last stored one, register the signal in Markets on its
-    first publication (its rows reference it), record the assets (ADR 0024 decision 5), then
-    publish. ms-markets repeats its own checks. Which of its refusals is a time conflict is
-    decided from the stored last time, not from the wording of its message.
+    first publication (its rows reference it), bind it to this application's signal-weights
+    instance, record the assets (ADR 0024 decision 5), then publish. Binding comes before any row
+    is written, so a refused binding stores nothing (issue #37). ms-markets repeats its own
+    checks. Which of its refusals is a time conflict is decided from the stored last time, not
+    from the wording of its message.
     """
     signal = weights_signal(signal_key)
     signal_uid = str(signal.signal_uid)
@@ -310,6 +333,7 @@ def _publish_validated(
         raise _not_after_last()
     if last_stored is None:
         ensure_signal_metadata(signal_key, description=metadata_description)
+    _bind_signal_table(signal_uid)
 
     from alpaca_connectors.portfolios.signal_assets import record_signal_assets
 
@@ -329,10 +353,6 @@ def _publish_validated(
             "The observations were refused: an empty set with nothing to close, or a value the "
             "signal cannot store."
         ) from exc
-
-    from alpaca_connectors.portfolios.datasets import register_signal_dataset
-
-    register_signal_dataset(signal_uid)
     times = list(normalized)
     return PublishedWeights(
         signal_uid=signal_uid,
@@ -649,6 +669,37 @@ def create_portfolio(
     )
 
 
+def _discard_failed_creation(
+    configuration: AlpacaPortfolioConfiguration | None,
+    definition: SignalDefinition | None,
+    portfolio_row: Any,
+) -> None:
+    """Delete what a failed create stored, so nothing of it stays (issue #37).
+
+    The configuration goes first, with its own bars configuration; then the `Portfolio` row when
+    it was created, which nothing references yet; then the signal's rows and its definition. The
+    signal is this call's alone: its key is the new configuration UID. A step that fails is logged
+    and the next still runs, so the caller gets the error that ended the create.
+    """
+    from alpaca_connectors.markets_api import delete_portfolio
+    from alpaca_connectors.portfolios.configurations import delete_portfolio_configuration_row
+    from alpaca_connectors.portfolios.signal_definitions import delete_signal_rows
+
+    steps: list[Callable[[], Any]] = []
+    if configuration is not None:
+        steps.append(lambda: delete_portfolio_configuration_row(configuration.uid))
+    if portfolio_row is not None:
+        steps.append(lambda: delete_portfolio(str(portfolio_row.uid)))
+    if definition is not None:
+        steps.append(lambda: delete_signal_rows(signal_uid_for_key(definition.signal_key)))
+        steps.append(lambda: SignalDefinition.delete(definition.uid))
+    for step in steps:
+        try:
+            step()
+        except Exception as exc:  # noqa: BLE001 - the create's own error is the one raised
+            logger.warning("A failed portfolio create left a row behind (%s).", type(exc).__name__)
+
+
 def create_provided_weights_portfolio(
     *,
     owner: AccountOwner,
@@ -673,12 +724,12 @@ def create_provided_weights_portfolio(
     that profile, and a signal definition of that account whose key is its configuration UID, as
     its signal's key was (ADR 0028). Order: validate the observations and assets, store the row,
     its definition and its own bars configuration, publish, then create the `Portfolio` row. A
-    failure after a row was stored deletes the rows this call stored.
+    failure after a row was stored deletes everything this call stored, its signal's rows included
+    (issue #37), so a retry starts clean.
     """
     from alpaca_connectors.market_data.configurations import get_bar_configuration
     from alpaca_connectors.portfolios.configurations import (
         create_portfolio_configuration_row,
-        delete_portfolio_configuration_row,
         update_portfolio_configuration_row,
     )
     from alpaca_connectors.portfolios.signal_definitions import (
@@ -722,6 +773,7 @@ def create_provided_weights_portfolio(
 
     configuration: AlpacaPortfolioConfiguration | None = None
     definition: SignalDefinition | None = None
+    portfolio_row: Any = None
     try:
         configuration = create_portfolio_configuration_row(
             name=name,
@@ -765,10 +817,7 @@ def create_provided_weights_portfolio(
             values={"portfolio_uid": uuid.UUID(str(portfolio_row.uid))},
         )
     except Exception:
-        if configuration is not None:
-            delete_portfolio_configuration_row(configuration.uid)
-        if definition is not None:
-            SignalDefinition.delete(definition.uid)
+        _discard_failed_creation(configuration, definition, portfolio_row)
         raise
     return ProvidedPortfolioCreation(
         configuration=configuration,

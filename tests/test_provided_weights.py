@@ -230,7 +230,7 @@ def _publish_patches(*, last_stored=None, details=None, assets=None):
     )
 
 
-def test_publish_records_the_assets_before_the_signal_publishes() -> None:
+def test_publish_binds_the_signal_then_records_the_assets_then_publishes() -> None:
     order = MagicMock()
     signal = Mock(signal_uid="signal-a")
     signal.publish.side_effect = lambda *args, **kwargs: order.publish()
@@ -245,16 +245,24 @@ def test_publish_records_the_assets_before_the_signal_publishes() -> None:
             "alpaca_connectors.portfolios.signal_assets.record_signal_assets",
             side_effect=lambda *args, **kwargs: order.record(*args),
         ),
-        patch("alpaca_connectors.portfolios.datasets.register_signal_dataset") as register,
+        patch(
+            "alpaca_connectors.portfolios.datasets.register_signal_dataset",
+            side_effect=lambda signal_uid: order.register(signal_uid),
+        ) as register,
     ):
         published = publish_definition_weights(
             definition(),
             [{"observed_at": WEDNESDAY, "weights": {NVDA: 0.5, AAPL: 0.5}}],
         )
 
-    # The signal has observations, so Markets already knows it.
+    # The signal has observations, so Markets already knows it. It is bound before any row is
+    # written, so a refused binding stores nothing (issue #37).
     ensure.assert_not_called()
-    assert order.mock_calls == [call.record("signal-a", [AAPL, NVDA]), call.publish()]
+    assert order.mock_calls == [
+        call.register("signal-a"),
+        call.record("signal-a", [AAPL, NVDA]),
+        call.publish(),
+    ]
     signal.publish.assert_called_once_with({WEDNESDAY: {NVDA: 0.5, AAPL: 0.5}}, description=None)
     register.assert_called_once_with("signal-a")
     assert (published.observation_count, published.asset_count) == (1, 2)
@@ -293,6 +301,37 @@ def test_publish_refuses_before_writing_anything(kwargs, code, status) -> None:
     assert "ALPACA::" not in str(raised.value)
 
 
+def test_a_refused_binding_stores_nothing_and_names_no_table() -> None:
+    # Markets cannot see the table (issue #37). Its message names the table; the caller's never.
+    signal = Mock(signal_uid="signal-a")
+    assets, details, bounds = _publish_patches(last_stored=None)
+    refusal = LookupError(
+        "SignalWeightsTS instance '1081d765-e0eb-4a7d-9f3a-e8335cf1e85b' is not a visible "
+        "TimeIndexMetaTable"
+    )
+    with (
+        assets,
+        details,
+        bounds,
+        patch.object(provided_weights, "weights_signal", return_value=signal),
+        patch.object(provided_weights, "ensure_signal_metadata") as ensure,
+        patch("alpaca_connectors.portfolios.signal_assets.record_signal_assets") as record,
+        patch("alpaca_connectors.portfolios.datasets.register_signal_dataset", side_effect=refusal),
+        pytest.raises(ProvidedWeightsError) as raised,
+    ):
+        publish_definition_weights(
+            definition(),
+            [{"observed_at": WEDNESDAY, "weights": {NVDA: 0.5, AAPL: 0.5}}],
+        )
+
+    assert (raised.value.code, raised.value.status_code) == ("signal_not_registered", 503)
+    assert "1081d765" not in str(raised.value)
+    # Its first publication registers the signal, which binding needs; no row is written.
+    ensure.assert_called_once()
+    record.assert_not_called()
+    signal.publish.assert_not_called()
+
+
 @pytest.mark.parametrize(
     ("error", "stored_after", "code"),
     [
@@ -313,12 +352,15 @@ def test_signal_refusals_become_codes_that_quote_nothing(error, stored_after, co
         patch.object(provided_weights, "weights_signal", return_value=signal),
         patch.object(provided_weights, "ensure_signal_metadata") as ensure,
         patch("alpaca_connectors.portfolios.signal_assets.record_signal_assets"),
+        patch("alpaca_connectors.portfolios.datasets.register_signal_dataset") as register,
         pytest.raises(ProvidedWeightsError) as raised,
     ):
         publish_definition_weights(definition(), [{"observed_at": MONDAY, "weights": {NVDA: 1.0}}])
 
-    # A first publication registers the signal in Markets before its rows reference it.
+    # A first publication registers the signal in Markets, and binds it to its table, before its
+    # rows reference it.
     ensure.assert_called_once_with(str(CONFIGURATION_UID), description=ANY)
+    register.assert_called_once_with("signal-a")
     assert raised.value.code == code
     assert "ALPACA::" not in str(raised.value)
 
@@ -458,6 +500,7 @@ def test_create_gives_the_portfolio_its_account_a_definition_and_its_own_bars() 
 
 
 def test_a_refused_publication_leaves_no_row_behind() -> None:
+    order = MagicMock()
     refused = ProvidedWeightsError("unknown_asset", "refused")
     with (
         patch.object(provided_weights, "require_alpaca_assets"),
@@ -474,16 +517,61 @@ def test_a_refused_publication_leaves_no_row_behind() -> None:
             "alpaca_connectors.market_data.configurations.create_portfolio_bar_configuration",
             return_value=SimpleNamespace(uid=BARS_UID),
         ),
-        patch(f"{CONFIGURATIONS}.delete_portfolio_configuration_row") as delete_row,
-        patch.object(SignalDefinition, "delete") as delete_definition,
+        patch(f"{CONFIGURATIONS}.delete_portfolio_configuration_row", order.delete_row),
+        patch(f"{DEFINITIONS}.delete_signal_rows", order.delete_signal),
+        patch.object(SignalDefinition, "delete", order.delete_definition),
+        patch("alpaca_connectors.markets_api.delete_portfolio", order.delete_portfolio),
         patch.object(provided_weights, "_publish_validated", side_effect=refused),
         pytest.raises(ProvidedWeightsError),
     ):
         _create()
 
-    # The configuration goes first, with its own bars configuration; then its definition.
-    delete_row.assert_called_once_with(CONFIGURATION_UID)
-    delete_definition.assert_called_once_with(DEFINITION_UID)
+    # The configuration goes first, with its own bars configuration; then its signal's rows,
+    # which a publication may have started (issue #37), and its definition. No Portfolio existed.
+    assert order.mock_calls == [
+        call.delete_row(CONFIGURATION_UID),
+        call.delete_signal(signal_uid_for_key(str(CONFIGURATION_UID))),
+        call.delete_definition(DEFINITION_UID),
+    ]
+
+
+def test_a_create_that_fails_after_its_portfolio_exists_deletes_everything() -> None:
+    order = MagicMock()
+    order.delete_row.side_effect = RuntimeError("storage unavailable")
+    portfolio_row = SimpleNamespace(uid=uuid.UUID(int=7), unique_identifier="ALPACA_PORTFOLIO__X")
+    published = provided_weights.PublishedWeights("signal-a", 1, 2, MONDAY, MONDAY)
+    with (
+        patch.object(provided_weights, "require_alpaca_assets"),
+        patch(
+            f"{CONFIGURATIONS}.create_portfolio_configuration_row",
+            return_value=provided_configuration(signal_definition_uid=None),
+        ),
+        patch(f"{DEFINITIONS}.create_signal_definition", return_value=definition()),
+        patch(
+            f"{CONFIGURATIONS}.update_portfolio_configuration_row",
+            side_effect=[provided_configuration(), RuntimeError("the last write failed")],
+        ),
+        patch(
+            "alpaca_connectors.market_data.configurations.create_portfolio_bar_configuration",
+            return_value=SimpleNamespace(uid=BARS_UID),
+        ),
+        patch.object(provided_weights, "_publish_validated", return_value=published),
+        patch.object(provided_weights, "_upsert_portfolio_row", return_value=portfolio_row),
+        patch(f"{CONFIGURATIONS}.delete_portfolio_configuration_row", order.delete_row),
+        patch(f"{DEFINITIONS}.delete_signal_rows", order.delete_signal),
+        patch.object(SignalDefinition, "delete", order.delete_definition),
+        patch("alpaca_connectors.markets_api.delete_portfolio", order.delete_portfolio),
+        pytest.raises(RuntimeError, match="the last write failed"),
+    ):
+        _create()
+
+    # A step that fails is logged and the next still runs; the create's own error is raised.
+    assert order.mock_calls == [
+        call.delete_row(CONFIGURATION_UID),
+        call.delete_portfolio(str(uuid.UUID(int=7))),
+        call.delete_signal(signal_uid_for_key(str(CONFIGURATION_UID))),
+        call.delete_definition(DEFINITION_UID),
+    ]
 
 
 def test_create_names_exactly_one_bars_configuration() -> None:

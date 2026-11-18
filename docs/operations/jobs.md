@@ -403,3 +403,8 @@ mainsequence code-repository resources list
 Success requires a terminal successful JobRun, clean logs, and current output-table progress or
 newly persisted rows. A queued run alone is not proof. Runtime attachment only binds already
 migrated MetaTables; it never creates schema.
+
+After a push, the migration Job's last log line, `{"markets_access": {...}}`, lists the contract
+instances Markets cannot read yet (issue #37). An empty `instances_missing_from_namespace` is the
+healthy state; otherwise grant Markets its access
+([Markets API boundary, step 5](markets-api-boundary.md)).

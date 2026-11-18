@@ -138,6 +138,12 @@ for table in TimeIndexMetaTable.filter_by_body(physical_table_name__in=names, li
     print(table.physical_table_name, sorted(item.name for item in table.namespaces))
 ```
 
+The migration Job checks it on every deploy (issue #37). Its last log line,
+`{"markets_access": {...}}`, lists under `instances_missing_from_namespace` each instance that is not
+in `alpaca-connectors-markets` yet, so the gap shows at deploy and not at the first call that needs
+it. The report never fails the deploy. A call that meets the gap answers
+`503 signal_not_registered` and stores nothing.
+
 ## 6. Move The History
 
 As a person who holds `data_viewer` on the source tables in `mainsequence.markets` and

@@ -78,4 +78,8 @@ In each Environment, in this order:
 ## Open
 
 - The registration of ADR 0024 is still not atomic: the failed call in Production left stored
-  weights and a `SignalMetadata` row without a portfolio configuration.
+  weights and a `SignalMetadata` row without a portfolio configuration. **Resolved on 2026-11-18**
+  ([issue #37](https://github.com/mainsequence-projects/alpaca-connectors/issues/37)): a publication binds its signal to the instance before it writes a row, so a refused
+  binding answers `503 signal_not_registered`, names no table and stores nothing. A create that
+  fails deletes everything it stored, its signal's rows included. The migration Job reports, on
+  every deploy, the instances Markets cannot read yet.

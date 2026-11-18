@@ -95,3 +95,49 @@ def test_a_malformed_uid_is_refused(catalog) -> None:
     with pytest.raises(ValueError):
         markets_access.grant_markets_access(markets_workload_uid="not-a-uid", execute=True)
     assert catalog.created == []
+
+
+def test_the_deploy_report_lists_the_instances_markets_cannot_read(monkeypatch) -> None:
+    monkeypatch.setattr(
+        markets_access,
+        "_instance_memberships",
+        lambda: {
+            "alpaca_connectors__ordersts__main": True,
+            "alpaca_connectors__signalweightsts__main": False,
+        },
+    )
+
+    assert markets_access.markets_instances_report() == {
+        "checked": True,
+        "namespace": "alpaca-connectors-markets",
+        "instances_missing_from_namespace": ["alpaca_connectors__signalweightsts__main"],
+    }
+
+
+def test_the_deploy_report_never_fails_the_deploy(monkeypatch) -> None:
+    def unreadable():
+        raise PermissionError("the catalog refused")
+
+    monkeypatch.setattr(markets_access, "_instance_memberships", unreadable)
+
+    assert markets_access.markets_instances_report() == {
+        "checked": False,
+        "error": "PermissionError",
+    }
+
+
+def test_an_instance_with_no_table_yet_counts_as_unreadable(monkeypatch) -> None:
+    import alpaca_connectors.instances
+    import metatables.models
+
+    models = [SimpleNamespace(__table__=SimpleNamespace(name=name)) for name in ("b_ts", "a_ts")]
+    monkeypatch.setattr(alpaca_connectors.instances, "project_instance_models", lambda: models)
+    shared = SimpleNamespace(
+        physical_table_name="a_ts",
+        namespaces=[SimpleNamespace(name="alpaca-connectors-markets")],
+    )
+    monkeypatch.setattr(
+        metatables.models.MetaTable, "filter_by_body", staticmethod(lambda **kwargs: [shared])
+    )
+
+    assert markets_access._instance_memberships() == {"a_ts": True, "b_ts": False}

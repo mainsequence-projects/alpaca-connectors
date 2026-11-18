@@ -264,6 +264,12 @@ GET|PATCH|DELETE /v1/portfolio-rebalance-configurations/{configuration_uid}
 - **Assets** must be registered Alpaca assets: `422 unknown_asset` or `422 asset_not_alpaca`
   otherwise. Other refusals are `422 invalid_observation` and `422 empty_observations`. No error
   names an asset, a weight or an owner.
+- **Markets must read the signal's table.** Each call binds the signal to this application's
+  signal-weights instance before it writes a row. Where Markets cannot read that instance, the call
+  answers `503 signal_not_registered` and stores nothing; the operator's grant fixes it
+  ([Markets API boundary, step 5](operations/markets-api-boundary.md)). A create that fails stores
+  nothing either: it deletes its configuration, its own bars configuration, its `Portfolio` row,
+  its signal's rows and its definition (issue #37).
 - **The owner.** The acting owner at creation owns the portfolio: the account's owner on
   `POST /v1/portfolio-configurations`, the caller on ADR 0024's create. Only that owner gives it
   weights, changes, pauses or deletes it; anyone else gets `403

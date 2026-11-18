@@ -43,11 +43,32 @@ def _instance_memberships() -> dict[str, bool]:
 
     names = sorted(model.__table__.name for model in project_instance_models())
     rows = MetaTable.filter_by_body(physical_table_name__in=names, limit=max(len(names) * 2, 1))
-    return {
-        row.physical_table_name: any(
+    # An instance with no table yet is not readable either.
+    memberships = dict.fromkeys(names, False)
+    for row in rows:
+        memberships[row.physical_table_name] = any(
             item.name == MARKETS_INSTANCES_NAMESPACE for item in row.namespaces
         )
-        for row in sorted(rows, key=lambda row: row.physical_table_name)
+    return dict(sorted(memberships.items()))
+
+
+def markets_instances_report() -> dict[str, Any]:
+    """The contract instances Markets cannot read yet, for the migration Job's log (issue #37).
+
+    An instance outside ``alpaca-connectors-markets`` is invisible to the Markets workload, so the
+    first call that needs it would be refused; the deploy says so first. Reported, never raised:
+    the release still rolls out, and the runbook's grant fixes it (ADR 0025).
+    """
+    try:
+        memberships = _instance_memberships()
+    except Exception as exc:  # noqa: BLE001 - a report never fails the deploy
+        return {"checked": False, "error": type(exc).__name__}
+    return {
+        "checked": True,
+        "namespace": MARKETS_INSTANCES_NAMESPACE,
+        "instances_missing_from_namespace": sorted(
+            name for name, present in memberships.items() if not present
+        ),
     }
 
 
@@ -106,4 +127,4 @@ def grant_markets_access(
     }
 
 
-__all__ = ["MARKETS_ROLE", "MIGRATION_ROLE", "grant_markets_access"]
+__all__ = ["MARKETS_ROLE", "MIGRATION_ROLE", "grant_markets_access", "markets_instances_report"]
