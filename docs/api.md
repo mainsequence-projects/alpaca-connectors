@@ -455,10 +455,13 @@ write. Preflight reports the identity, holdings and `credential_source` and writ
 it wrote ([registration](account/registration.md#holdings)). Sending the same registration again,
 for example after a client timeout, succeeds; a held asset that Markets stores with another asset
 type answers `409 action_conflict` and writes nothing.
-Responses expose `credential_source`, `credentials_stored` and
+Responses expose `credential_source`, `credentials_stored`, `credentials_removed` and
 `credentials_updated_at`/`_by_user_uid`; never values, Secret names or the key fingerprint.
-`DELETE` deletes the row and its keys; it still reports `deleted_secrets` and `warnings`, which
-are empty unless the registration predated revision `0018`.
+`credentials_removed` is true once the owner removed the keys; `credentials_stored` is false
+then, and for a registration made before revision `0018` that the credential migration has not
+copied yet. Removing the keys and deleting the account report `deleted_secrets` and `warnings`,
+empty unless the registration predated revision `0018`
+([below](#removing-keys-and-deleting-an-account)).
 
 Alpaca rejecting the keys returns `400 alpaca_credentials_rejected` without provider text. A
 registration whose keys have not been migrated yet returns `409 account_credentials_missing`; an
@@ -541,7 +544,9 @@ Two separate actions, both for the account's owner only
   before anything changes, while ms-markets' preflight reports a blocker or another account's
   current target holds one of its portfolios; the refusal names no other account.
   `POST /v1/accounts/{account_uid}/actions/delete/preflight` reports the same without changing
-  anything. A repeated request finishes what an interrupted one left.
+  anything, with the counts of what would go. A repeated request finishes what an interrupted one
+  left. The answer lists the deleted and kept portfolio and signal UIDs and, for a registration
+  made before revision `0018`, the Secrets this application created that went with it.
 
 ## MCP
 

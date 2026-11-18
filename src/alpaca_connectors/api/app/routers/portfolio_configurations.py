@@ -91,6 +91,13 @@ def portfolio_configurations_discovery() -> ResourceDiscoveryResponse:
         orderable_fields=["name", "updated_at"],
         columns=[
             {"id": "name", "header": "Portfolio", "sortable_key": "name", "hideable": False},
+            # The account it belongs to and the signal it follows (ADR 0028); null before adoption.
+            {"id": "account_uid", "header": "Account", "filter_key": "account_uid"},
+            {
+                "id": "signal_definition_uid",
+                "header": "Signal",
+                "filter_key": "signal_definition_uid",
+            },
             {"id": "rebalance_strategy", "header": "Rebalance"},
             {
                 "id": "job_image_status",

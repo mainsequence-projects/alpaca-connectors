@@ -64,7 +64,8 @@ Verify the returned Account and initial holdings; a registration row alone is no
 ## Inspect And Maintain
 
 `alpaca_query_accounts` supports `list`, `get`, `holdings`, and `holdings_snapshot`. Account
-results report `credential_source` and `credentials_stored`, never a key. Collection limits are
+results report `credential_source`, `credentials_stored` and `credentials_removed` (the owner
+removed the keys), never a key. Collection limits are
 1–100; offsets must be multiples of the fixed limit.
 Query holdings only for the selected Account, not every Account in the list:
 

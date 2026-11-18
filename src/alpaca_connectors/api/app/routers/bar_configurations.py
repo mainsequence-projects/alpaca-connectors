@@ -67,8 +67,8 @@ def configurations_discovery() -> ResourceDiscoveryResponse:
         item_label="configuration",
         identity_fields=["uid"],
         searchable_fields=["name", "description"],
-        filterable_fields=["enabled", "scheduled", "asset_source"],
-        filter_types={"enabled": "boolean", "scheduled": "boolean"},
+        filterable_fields=["enabled", "scheduled", "asset_source", "portfolio_owned"],
+        filter_types={"enabled": "boolean", "scheduled": "boolean", "portfolio_owned": "boolean"},
         filter_options={
             "asset_source": [
                 {"value": "account_holdings", "label": "Latest account holdings"},
@@ -79,6 +79,9 @@ def configurations_discovery() -> ResourceDiscoveryResponse:
         orderable_fields=["name", "updated_at", "frequency_id"],
         columns=[
             {"id": "name", "header": "Configuration", "sortable_key": "name", "hideable": False},
+            # Its one parent (ADR 0028): the account of a feed or the portfolio of its own.
+            {"id": "account_uid", "header": "Account"},
+            {"id": "portfolio_configuration_uid", "header": "Portfolio"},
             {"id": "asset_source", "header": "Asset Source", "filter_key": "asset_source"},
             {"id": "frequency_id", "header": "Frequency", "sortable_key": "frequency_id"},
             {"id": "feed", "header": "Feed"},

@@ -36,9 +36,17 @@ def _record(portfolio, configuration, signal):
     )
 
 
-def _run(*, preflight_blockers=(), held_by=(), refuse_markets=False, registration=True):
+def _run(
+    *,
+    preflight_blockers=(),
+    held_by=(),
+    refuse_markets=False,
+    registration=True,
+    registration_values=None,
+):
     """Delete the account with Markets and storage replaced; return the recorder."""
     calls = MagicMock()
+    calls.secrets.return_value = (["ALPACA_CONNECTORS__API_KEY"], [])
     portfolio = SimpleNamespace(uid=CONFIGURATION, portfolio_uid=PORTFOLIO)
     definitions = [
         SimpleNamespace(uid="definition-followed", signal_key="followed"),
@@ -58,8 +66,14 @@ def _run(*, preflight_blockers=(), held_by=(), refuse_markets=False, registratio
         patch(
             "alpaca_connectors.account.services.get_account_registration",
             return_value=(
-                {"account_unique_identifier": "ACCOUNT__ALPACA"} if registration else None
+                {"account_unique_identifier": "ACCOUNT__ALPACA", **(registration_values or {})}
+                if registration
+                else None
             ),
+        ),
+        patch(
+            "alpaca_connectors.account.legacy_secrets.delete_legacy_managed_secrets",
+            calls.secrets,
         ),
         patch(
             f"{MARKETS}.account_delete_preflight",
@@ -162,6 +176,30 @@ def test_a_retry_after_the_account_is_gone_finishes_its_portfolios_and_signals()
     calls.markets_delete.assert_not_called()
     calls.delete_portfolio.assert_called_once_with(str(PORTFOLIO))
     assert "signal-followed" in result.deleted_signal_uids
+
+
+def test_a_registration_from_before_encrypted_keys_takes_its_own_secrets_with_it() -> None:
+    # Removing the keys deletes the Secrets this application created; deleting does too.
+    legacy = {
+        "api_key_secret_name": "ALPACA_CONNECTORS__API_KEY",
+        "secret_key_secret_name": "ALPACA_CONNECTORS__SECRET_KEY",
+        "credential_source": "managed",
+    }
+    result, calls = _run(registration_values=legacy)
+    order = [name for name, *_ in calls.mock_calls]
+
+    calls.secrets.assert_called_once()
+    assert calls.secrets.call_args.args[0].api_key_secret_name == "ALPACA_CONNECTORS__API_KEY"
+    # Only once the account is gone: a refused delete keeps the keys it runs with.
+    assert order.index("markets_delete") < order.index("secrets")
+    assert result.summary()["deleted_secrets"] == ["ALPACA_CONNECTORS__API_KEY"]
+
+
+def test_a_migrated_registration_names_no_secret_to_delete() -> None:
+    result, calls = _run()
+    calls.secrets.assert_not_called()
+    assert result.summary()["deleted_secrets"] == []
+    assert result.summary()["warnings"] == []
 
 
 def test_markets_refusing_the_account_delete_is_reported() -> None:

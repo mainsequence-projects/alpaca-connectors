@@ -300,7 +300,9 @@ before the signal it follows.
 4. This connector deletes the account's orders and trades in its own instances, whose
    `RESTRICT` keys would refuse the next step.
 5. ms-markets' `Account.delete` deletes the account with its whole history.
-   `ProviderAccountDetails`, the account's bars feeds and its signal definitions go with it.
+   `ProviderAccountDetails`, the account's bars feeds and its signal definitions go with it. A
+   registration made before revision `0018` still names the Main Sequence Secrets its keys were
+   in; those this application created are deleted next, as removing the keys deletes them.
 6. Each retired `Portfolio` of the account that no other account's history names is deleted, its
    datasets first. One that another account's history names stays retired (ms-markets ADR 0049).
 7. Each of the account's signals that no `Portfolio` follows any more is deleted as decision 5

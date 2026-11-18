@@ -316,9 +316,11 @@ class AccountResponse(BaseModel):
     is_paper: bool
     account_is_active: bool
     credential_source: Literal["managed", "imported", "external"] = "external"
-    # False only for a registration made before revision 0018 that the credential migration
-    # has not copied yet; the keys themselves are never part of a response.
+    # False after the owner removed the keys (``credentials_removed``) or for a registration made
+    # before revision 0018 that the credential migration has not copied yet; the keys themselves
+    # are never part of a response.
     credentials_stored: bool = True
+    credentials_removed: bool = False
     credentials_updated_at: Any | None = None
     credentials_updated_by_user_uid: str | None = None
     # Null only for a registration whose key author was never recorded (revision 0022).

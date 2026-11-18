@@ -77,7 +77,50 @@ def test_registration_reads_leave_the_key_columns_out() -> None:
     keys = {column.key for column in registration_columns()}
     assert "api_key" not in keys and "secret_key" not in keys
     assert "credentials_stored" in keys
+    assert "credentials_removed" in keys
     assert "api_key_fingerprint" in keys
+
+
+def test_the_key_flags_tell_removed_keys_from_a_registration_awaiting_migration() -> None:
+    import sqlalchemy as sa
+
+    from alpaca_connectors.account.credentials import credential_state_columns
+
+    metadata = sa.MetaData()
+    table = sa.Table(
+        "registration",
+        metadata,
+        sa.Column("name", sa.String, primary_key=True),
+        *(
+            sa.Column(column, sa.String)
+            for column in ("api_key", "secret_key", "api_key_secret_name", "secret_key_secret_name")
+        ),
+    )
+    empty = dict.fromkeys(
+        ("api_key", "secret_key", "api_key_secret_name", "secret_key_secret_name")
+    )
+    engine = sa.create_engine("sqlite://")
+    metadata.create_all(engine)
+    with engine.begin() as connection:
+        connection.execute(
+            table.insert(),
+            [
+                {**empty, "name": "stored", "api_key": "sealed", "secret_key": "sealed"},
+                {**empty, "name": "removed"},
+                {
+                    **empty,
+                    "name": "awaiting",
+                    "api_key_secret_name": "A",
+                    "secret_key_secret_name": "B",
+                },
+            ],
+        )
+        rows = connection.execute(sa.select(table.c.name, *credential_state_columns(table)))
+        flags = {
+            row.name: (bool(row.credentials_stored), bool(row.credentials_removed)) for row in rows
+        }
+
+    assert flags == {"stored": (True, False), "removed": (False, True), "awaiting": (False, False)}
 
 
 def test_stored_values_carry_the_fingerprint_and_clear_the_legacy_references() -> None:

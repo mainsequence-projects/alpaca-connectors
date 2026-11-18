@@ -27,12 +27,14 @@ API, the Admin, the Analyst, SQL and the database only ever see envelopes. The r
   registration and never changed by a rotation, `(uid, uid)` for a Main Sequence user
   ([ADR 0019](../adrs/0019_account_owners_vouched_for_by_trusted_applications.md));
 - a non-reversible API-key fingerprint, which no response exposes;
-- `credentials_stored`, a read-only flag in every response: false only for a registration made
-  before revision `0018` that the credential migration has not copied yet.
+- `credentials_stored` and `credentials_removed`, read-only flags in every response:
+  `credentials_stored` is false once the owner removed the keys, when `credentials_removed` is
+  true, and for a registration made before revision `0018` that the credential migration has not
+  copied yet.
 
 **Managed** keys come from the static site or the API's `managed` credential shape. The user types
 both keys; the API checks them against Alpaca and stores them encrypted. Rotation replaces them in
-place and removing the registration deletes the row and the keys with it.
+place, removing the keys clears them, and deleting the account deletes the row with them.
 
 **Imported** keys come from two existing Main Sequence Secrets named through the CLI, the Agent's
 MCP tools, or the API's `external` credential shape. The API reads both Secrets once as its
@@ -99,7 +101,9 @@ Removing keys and deleting an account are separate actions
 - **`delete`** deletes the account and everything it owns: its portfolios (retired, then deleted
   unless another account's history names them), its bars feeds, its signal definitions and their
   signals, its orders and trades, and its whole Markets history. It is refused, before anything
-  changes, while another account's current target holds one of its portfolios.
+  changes, while another account's current target holds one of its portfolios. A registration
+  made before revision `0018` takes the Secrets this application created with it, as
+  `remove-keys` does.
 
 Without `--execute`, each only reports what it would do.
 

@@ -840,6 +840,25 @@ class ApiAppTests(unittest.TestCase):
             (resource["id"], resource["label"]), ("alpaca-portfolio-configurations", "Portfolios")
         )
 
+    def test_discovery_columns_name_what_each_resource_belongs_to(self) -> None:
+        # ADR 0028: the site renders these columns by their ids; discovery is the column contract.
+        expected = {
+            "/v1/accounts/discovery": {"credentials-stored"},
+            "/v1/portfolio-configurations/discovery": {"account-uid", "signal-definition-uid"},
+            "/v1/market-data/bar-configurations/discovery": {
+                "account-uid",
+                "portfolio-configuration-uid",
+            },
+            "/v1/signal-definitions/discovery": {"account-uid"},
+        }
+        for path, column_ids in expected.items():
+            with self.subTest(path=path):
+                columns = self.client.get(path).json()["list"]["columns"]
+                self.assertLessEqual(column_ids, {column["id"] for column in columns})
+        bars = self.client.get("/v1/market-data/bar-configurations/discovery").json()
+        filters = {item["key"]: item["type"] for item in bars["list"]["controls"]["filters"]}
+        self.assertEqual(filters["portfolio_owned"], "boolean")
+
     def test_bar_configurations_filter_and_show_the_scheduled_flag(self) -> None:
         discovery = self.client.get("/v1/market-data/bar-configurations/discovery").json()
         filters = discovery["list"]["controls"]["filters"]

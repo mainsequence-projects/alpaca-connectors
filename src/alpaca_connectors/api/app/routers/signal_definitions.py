@@ -68,6 +68,7 @@ def signal_definitions_discovery() -> ResourceDiscoveryResponse:
         columns=[
             {"id": "name", "header": "Signal", "sortable_key": "name", "hideable": False},
             {"id": "key", "header": "Key"},
+            {"id": "account_uid", "header": "Account", "filter_key": "account_uid"},
             {"id": "portfolio_count", "header": "Portfolios", "data_type": "number"},
             {"id": "updated_at", "header": "Updated", "data_type": "datetime"},
         ],

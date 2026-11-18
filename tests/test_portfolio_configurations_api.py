@@ -292,6 +292,8 @@ def test_portfolio_discovery_columns_are_renderable(api_client) -> None:
     assert result.status_code == 200
     assert [column["id"] for column in result.json()["list"]["columns"]] == [
         "name",
+        "account-uid",
+        "signal-definition-uid",
         "rebalance-strategy",
         "job-image-status",
         "latest-run-status",

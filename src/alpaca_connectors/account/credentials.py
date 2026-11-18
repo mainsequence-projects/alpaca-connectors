@@ -213,11 +213,28 @@ def cleared_credential_values(
     }
 
 
+def credential_state_columns(table: Any) -> list[Any]:
+    """The read-only key flags of a registration read, computed without selecting the keys.
+
+    ``credentials_stored``: both keys are stored. ``credentials_removed``: no key is stored and
+    no Secret of a registration made before revision 0018 is named either, which only removing
+    the keys leaves (ADR 0028); a registration still awaiting the credential migration is
+    neither.
+    """
+    stored = table.c.api_key.isnot(None) & table.c.secret_key.isnot(None)
+    legacy_names = (table.c.api_key_secret_name, table.c.secret_key_secret_name)
+    awaiting_migration = legacy_names[0].isnot(None) & legacy_names[1].isnot(None)
+    return [
+        stored.label("credentials_stored"),
+        (~stored & ~awaiting_migration).label("credentials_removed"),
+    ]
+
+
 def registration_columns() -> list[Any]:
     """The detail columns a registration read returns: every column except the encrypted ones.
 
-    The read-only ``credentials_stored`` flag reports whether the keys are stored, without
-    carrying them.
+    The read-only ``credentials_stored`` and ``credentials_removed`` flags report the keys' state
+    without carrying them.
     """
     from alpaca_connectors.account.provider_account_details import ProviderAccountDetails
     from metatables import EncryptedString
@@ -228,9 +245,7 @@ def registration_columns() -> list[Any]:
         for column in table.columns
         if not isinstance(column.type, EncryptedString)
     ]
-    columns.append(
-        (table.c.api_key.isnot(None) & table.c.secret_key.isnot(None)).label("credentials_stored")
-    )
+    columns.extend(credential_state_columns(table))
     return columns
 
 

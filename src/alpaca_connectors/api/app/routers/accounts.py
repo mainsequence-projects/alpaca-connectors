@@ -127,6 +127,8 @@ def accounts_discovery() -> ResourceDiscoveryResponse:
             {"id": "unique_identifier", "header": "Identifier"},
             {"id": "is_paper", "header": "Paper", "data_type": "boolean"},
             {"id": "account_is_active", "header": "Active", "data_type": "boolean"},
+            # False once the owner removed the keys (`credentials_removed`, ADR 0028).
+            {"id": "credentials_stored", "header": "Keys", "data_type": "boolean"},
             {"id": "snapshot_time", "header": "Last Refresh", "data_type": "datetime"},
         ],
         actions=[
