@@ -25,7 +25,7 @@ from alpaca_connectors.account.services import (
     plan_alpaca_account,
     prepare_alpaca_position_assets,
     register_alpaca_account,
-    remove_account_registration,
+    remove_account_keys,
     update_account_registration,
 )
 from alpaca_connectors.holdings import build_account_holdings_rows
@@ -1127,72 +1127,63 @@ class AccountCredentialUpdateTests(unittest.TestCase):
         write.assert_not_called()
 
 
-class AccountRemovalTests(unittest.TestCase):
-    def _remove(self, current, *, bars=()):
+class AccountKeyRemovalTests(unittest.TestCase):
+    """Removing keys clears them and keeps everything else (ADR 0028, decision 8)."""
+
+    def _remove(self, current):
         calls = MagicMock()
         with (
             patch(
                 "alpaca_connectors.account.services.get_account_registration", return_value=current
             ),
             patch(
-                "alpaca_connectors.market_data.configurations.bar_configurations_for_account",
-                return_value=list(bars),
+                "alpaca_connectors.runtime.start_markets_engine",
+                return_value=SimpleNamespace(context="context"),
             ),
+            patch("msm.api.accounts.Account", new=calls.Account),
+            patch("msm.repositories.crud.delete_model", new=calls.delete_model),
             patch(
                 "alpaca_connectors.market_data.configurations.disable_bar_configuration",
                 new=calls.disable_bars,
             ),
             patch(
-                "alpaca_connectors.runtime.start_markets_engine",
-                return_value=SimpleNamespace(context=None),
+                "alpaca_connectors.account.credentials.write_stored_credentials",
+                new=calls.write,
             ),
-            patch("msm.api.accounts.Account", new=calls.Account),
-            patch("msm.api.accounts.AccountHoldingsSet") as holdings_sets,
-            patch("msm.repositories.crud.delete_model", new=calls.delete_model),
             patch(
                 "alpaca_connectors.account.services.delete_legacy_managed_secrets",
                 return_value=(["A", "B"], []),
             ) as delete_legacy,
         ):
-            holdings_sets.filter.return_value = []
-            result = remove_account_registration("acc-uid-1")
+            result = remove_account_keys("acc-uid-1", actor_user_uid="person")
         return result, calls, delete_legacy
 
-    def test_removing_a_registration_deletes_the_row_and_nothing_else(self) -> None:
+    def test_removing_keys_clears_only_the_keys(self) -> None:
         result, calls, delete_legacy = self._remove(_stub_registration())
 
-        calls.delete_model.assert_called_once()
-        self.assertEqual(calls.delete_model.call_args.kwargs["uid"], "acc-uid-1")
-        delete_legacy.assert_not_called()
+        calls.write.assert_called_once()
+        written = calls.write.call_args.kwargs["values"]
+        self.assertIsNone(written["api_key"])
+        self.assertIsNone(written["secret_key"])
+        self.assertEqual(written["credentials_updated_by_user_uid"], "person")
+        # The owner and the row stay; nothing is disabled and the account stays active.
+        self.assertFalse(set(written) & {"owner_gateway_uid", "owner_user_uid"})
+        calls.delete_model.assert_not_called()
         calls.disable_bars.assert_not_called()
+        calls.Account.update.assert_not_called()
+        delete_legacy.assert_not_called()
+        self.assertTrue(result["keys_removed"])
         self.assertEqual(result["deleted_secrets"], [])
-        self.assertEqual(result["disabled_bar_configuration_uids"], [])
-        self.assertTrue(result["registration_removed"])
 
-    def test_removing_a_legacy_registration_deletes_its_managed_secrets(self) -> None:
+    def test_removing_the_keys_of_a_legacy_registration_deletes_its_managed_secrets(self) -> None:
         result, _, delete_legacy = self._remove(_legacy_registration())
 
         delete_legacy.assert_called_once_with(_legacy_managed_references())
         self.assertEqual(result["deleted_secrets"], ["A", "B"])
 
-    def test_configurations_never_block_a_removal_and_are_disabled_first(self) -> None:
-        # Issue #25: another principal's configurations used to refuse the owner's removal.
-        bars = [
-            SimpleNamespace(uid="bars-on", name="Theirs", enabled=True),
-            SimpleNamespace(uid="bars-off", name="Off", enabled=False),
-        ]
-
-        result, calls, _ = self._remove(_stub_registration(), bars=bars)
-
-        self.assertTrue(result["registration_removed"])
-        self.assertEqual(result["disabled_bar_configuration_uids"], ["bars-on"])
-        # Only the flag is written, and only on the enabled ones, before the keys are deleted.
-        calls.disable_bars.assert_called_once_with("bars-on")
-        order = [name for name, *_ in calls.mock_calls]
-        self.assertLess(order.index("disable_bars"), order.index("delete_model"))
-        calls.Account.update.assert_called_once_with("acc-uid-1", account_is_active=False)
-        # Configurations are named by UID only; another principal named them.
-        self.assertNotIn("Theirs", str(result))
+    def test_removing_the_keys_of_a_missing_registration_is_refused(self) -> None:
+        with self.assertRaises(LookupError):
+            self._remove(None)
 
 
 if __name__ == "__main__":

@@ -12,13 +12,17 @@ No shell, SQL, trade submission or brokerage-portfolio management is supported.
 
 ## What A Portfolio Is
 
-Every portfolio is built from the weights an application provides. That application creates it,
-gives it new weights and owns it; you never create a portfolio or give it weights. If asked to,
-say so plainly and suggest asking the application that owns the portfolio.
+Every portfolio belongs to one Alpaca Account and follows one of that Account's signals, whose
+weights an application provides; several portfolios of the Account may follow one signal. The
+Account's owner creates the signals and portfolios through the application, which gives the
+signals their weights; you never create a portfolio or a signal or give weights. If asked to, say
+so plainly and suggest asking the application that owns the portfolio.
 
 - Each observation of its weights is the whole set at its time; an asset left out is held at zero.
 - It rebalances to the latest observation at its rebalance rule's next calendar event and is
-  valued with the daily Alpaca prices of its bars configuration.
+  valued with the daily Alpaca prices its own bars configuration fetches with its Account's keys.
+- A portfolio answering `adopted: false` predates Account ownership; it neither runs nor takes
+  weights until the operator's rollout gives it an Account or ends it. Report it, do not run it.
 - Pausing, resuming and deleting are done only for its owner. Another owner's portfolio answers
   `portfolio_owned_by_another`; report it and stop.
 
@@ -81,7 +85,7 @@ UID. Do not claim success from submission or automatically resubmit a failed run
 Deletion requires the person's exact `DELETE <uid>` confirmation. It retires the portfolio, then
 deletes its configuration; it is refused with `portfolio_in_account_target` while an account's
 target names the portfolio, so that account's owner changes the target first. Retiring keeps the
-portfolio's series and history.
+portfolio's series and history until its Account is deleted.
 
 Portfolio/rebalance list limits are 1–100 and offsets are multiples of the fixed limit.
 Detail observation limits are 1–5000; run-history limits are 1–100.

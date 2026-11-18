@@ -59,7 +59,7 @@ def postgresql(monkeypatch):
     from msm.repositories.base import MarketsRepositoryContext
 
     import metatables.runtime_context
-    from alpaca_connectors.account.alpaca_account_details import AlpacaAccountDetails
+    from alpaca_connectors.account.provider_account_details import ProviderAccountDetails
     from alpaca_connectors.assets.alpaca_asset_details import AlpacaAssetDetailsTable
     from alpaca_connectors.operations import account_sync
     from alpaca_connectors.operations.account_sync import AccountSyncOperationTable
@@ -72,7 +72,7 @@ def postgresql(monkeypatch):
         AccountSyncOperationTable.__table__,
         AssetRegistrationOperationTable.__table__,
         AlpacaAssetDetailsTable.__table__,
-        AlpacaAccountDetails.__table__,
+        ProviderAccountDetails.__table__,
     ]
     engine = sa.create_engine(parsed.set(drivername="postgresql+psycopg"))
     with engine.begin() as connection:

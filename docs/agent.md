@@ -97,9 +97,15 @@ Sequential mutation tools for the same application workflows:
 - `alpaca_manage_portfolio`
 
 `alpaca_manage_portfolio` runs a portfolio, and pauses, resumes or deletes one for its owner. No
-tool creates a portfolio or gives it weights: an application does that over HTTP
-([ADR 0024](adrs/0024_portfolios_from_provided_weights.md),
-[ADR 0027](adrs/0027_one_portfolio_path.md)).
+tool creates a portfolio or a signal definition or gives weights: the account's owner does that
+through the application over HTTP ([ADR 0024](adrs/0024_portfolios_from_provided_weights.md),
+[ADR 0027](adrs/0027_one_portfolio_path.md),
+[ADR 0028](adrs/0028_every_portfolio_belongs_to_one_account.md)).
+
+`alpaca_manage_account` removes an account's keys (`remove_keys`), or reports and runs its
+deletion (`plan_delete`, then `delete` with the exact `DELETE <account_uid>` confirmation), for the
+account's owner only. Removing keys keeps everything else; deleting deletes the account and all it
+owns.
 
 Each multi-operation tool uses an explicit operation discriminator and a strict JSON Schema. The
 MCP server runs the existing application services inside the API's request identity: authorship

@@ -17,12 +17,12 @@ Repository rules:
 - Execution (ADR 0016) is an API capability for applications, never an Agent tool; only
   `alpaca_connectors.execution.services` places market day orders and writes the execution ledger.
 - Frozen identity: `alpaca_connectors.migrations:migration` keeps catalog key `package="src"`.
-- One portfolio path (ADR 0027): an application creates each portfolio from weights it provides
-  and owns it (ADR 0024); every delete retires its `Portfolio` first.
+- One portfolio path (ADR 0027), owned by one account (ADR 0028): the account's owner creates its
+  signal definitions and portfolios; every delete retires its `Portfolio` first.
 - Keep planning, registration, holdings, bars and portfolio logic in `alpaca_connectors`. The CLI,
   routes and Jobs only orchestrate; add no one-off scripts.
-- Reach Markets only by `msm.api` row calls and the `markets_api` composites: registration and the
-  sync's target read, plan and allocation (ADR 0023). Own tables: markets-api-boundary.md.
+- Reach Markets only by `msm.api` row calls and the `markets_api` composites: registration, the
+  sync (ADR 0023) and the account delete (ADR 0028). Own tables: markets-api-boundary.md.
 - Only `.mainsequence/workflows/*.yaml` creates Jobs and sets their schedules; code never does.
   A configuration run (`operations/configuration_jobs.py`) selects it with `--configuration-uid`;
   JobRuns never own configuration. A Job cannot declare access to itself, so each kind's dispatcher

@@ -33,6 +33,16 @@ def project_skill_paths() -> list[str]:
     ]
 
 
+class _MkDocsConfigLoader(yaml.SafeLoader):
+    """Reads mkdocs.yml without importing what its `!!python/name:` tags name.
+
+    MkDocs resolves those tags itself; the Mermaid fence's `format` is one.
+    """
+
+
+_MkDocsConfigLoader.add_multi_constructor("tag:yaml.org,2002:python/name:", lambda *_: None)
+
+
 class AgentArtifactsTests(unittest.TestCase):
     def test_agents_md_has_repository_specific_agent_instructions(self) -> None:
         content = AGENTS_PATH.read_text(encoding="utf-8")
@@ -70,7 +80,9 @@ class AgentArtifactsTests(unittest.TestCase):
         ):
             self.assertIn(heading, moved)
         self.assertIn("alpaca-connectors asset register", moved)
-        mkdocs = yaml.safe_load((REPO_ROOT / "mkdocs.yml").read_text(encoding="utf-8"))
+        mkdocs = yaml.load(
+            (REPO_ROOT / "mkdocs.yml").read_text(encoding="utf-8"), Loader=_MkDocsConfigLoader
+        )
         self.assertIn("operations/operator-guide.md", str(mkdocs["nav"]))
 
     def test_agent_card_is_source_metadata_not_a_runtime_card(self) -> None:

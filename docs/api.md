@@ -26,7 +26,7 @@ resource adapter contract. Discovery responses are private, revalidated, and var
 authorization and Resource Release headers.
 
 Bulk actions advertised by discovery use full app-relative `endpoint` and `preflight_endpoint`
-paths, such as `/v1/accounts/actions/remove`. The resource adapter sends both requests to those
+paths, such as `/v1/accounts/actions/remove-keys`. The resource adapter sends both requests to those
 exact paths with the action's `method`; it does not resolve them against the collection path. The
 offline API tests require every advertised path and method to match a registered route.
 
@@ -60,16 +60,19 @@ before its work finds the Markets API starting as well.
 | --- | --- |
 | Project State | `GET /health`, `GET /v1/project-state/capabilities`, `GET /v1/project-state/configuration` |
 | Assets | `GET /v1/assets`, `GET /v1/assets/{asset_uid}`, synchronous registration plan/execute, and observable registration operations |
-| Accounts | `GET/POST /v1/accounts`, `POST /v1/accounts/registration/preflight`, `GET/PATCH/DELETE /v1/accounts/{account_uid}`, refresh and bulk actions; the signed-in person's key requests under `/v1/accounts/key-requests` |
+| Accounts | `GET/POST /v1/accounts`, `POST /v1/accounts/registration/preflight`, `GET/PATCH /v1/accounts/{account_uid}`, refresh, [remove keys and delete](#removing-keys-and-deleting-an-account), and bulk actions; the signed-in person's key requests under `/v1/accounts/key-requests` |
 | Holdings | list/get and capture under `/v1/accounts/{account_uid}/holdings`; `/latest` lists only the newest immutable snapshot; the [account sync](#account-sync) at `POST /v1/accounts/{account_uid}/actions/sync` |
 | Execution | submit (with preflight), sync and cancel order batches, and list recorded orders, under `/v1/accounts/{account_uid}/orders` |
 | Market Data | configuration CRUD and resolve/update actions under `/v1/market-data/bar-configurations`; dataset list/get and bounded observations under `/v1/market-data/datasets` |
-| Portfolios | portfolios built from weights an application provides: create at `POST /v1/portfolio-configurations/provided-weights`, new weights at `/{uid}/weights`, list/get/`PATCH`/`DELETE`, and run and JobRun-history actions on the portfolio Job under `/v1/portfolio-configurations`; reusable calendar-event policies under `/v1/portfolio-rebalance-configurations` |
+| Portfolios | an account's signals under `/v1/signal-definitions`, with their weights at `/{uid}/weights`; the account's portfolios that follow them: create at `POST /v1/portfolio-configurations`, list/get/`PATCH`/`DELETE`, and run and JobRun-history actions on the portfolio Job under `/v1/portfolio-configurations`; ADR 0024's routes `POST /v1/portfolio-configurations/provided-weights` and `/{uid}/weights` until the applications move; reusable calendar-event policies under `/v1/portfolio-rebalance-configurations` |
 | Operations | poll an accepted Alpaca bars or portfolio JobRun under `GET /v1/operations/job-runs/{job_run_uid}`; read an account sync again at `GET /v1/operations/{operation_uid}` |
 
-Market-data writes are configuration-oriented. Create one stored definition with exactly one
-source (`assets`, `account_holdings`, or `portfolios`), review it with the `resolve` action, and
-run it with the `update` action. Neither request accepts a dataset UID. The response reports the
+Market-data writes are configuration-oriented. A bar configuration has exactly one parent
+([ADR 0028](adrs/0028_every_portfolio_belongs_to_one_account.md)): a feed of an account, created
+here by the account's owner with the `assets` or `account_holdings` source and deleted with the
+account, or a portfolio's own configuration, with the `portfolios` source, created and deleted with
+the portfolio. Review one with the `resolve` action and run it with the `update` action. Every
+configuration writes the one shared price table of its bar profile, whose rows name no account. Neither request accepts a dataset UID. The response reports the
 derived output MetaTable only as diagnostics.
 
 A bar configuration's `scheduled` field (default `true`) includes it in the daily bars update at
@@ -199,32 +202,57 @@ Portfolio configurations run on the `alpaca-portfolio` Job ("Alpaca Portfolio") 
 
 An application builds a portfolio from weights it chooses
 ([ADR 0024](adrs/0024_portfolios_from_provided_weights.md)), and that is the connector's only
-kind of portfolio ([ADR 0027](adrs/0027_one_portfolio_path.md)). Its signal is ms-markets'
-`ApplicationWeights`, configured with this connector's namespace and the configuration UID as key,
-so its `signal_uid` never changes. The supported rebalance strategy is `CalendarEventSignal`,
-backed by persisted market-session events; valuation uses daily persistent `InterpolatedPrices`,
-forward-fill interpolation, and a bounded staleness policy. The
-[Portfolios page](portfolios/portfolios.md) describes the whole flow.
+kind of portfolio ([ADR 0027](adrs/0027_one_portfolio_path.md)). Each portfolio belongs to one
+account and follows one of that account's signal definitions
+([ADR 0028](adrs/0028_every_portfolio_belongs_to_one_account.md)). A definition's signal is
+ms-markets' `ApplicationWeights`, configured with this connector's namespace and a key made of the
+account UID and the application's key, so two accounts never share a signal. The supported
+rebalance strategy is `CalendarEventSignal`, backed by persisted market-session events; valuation
+uses daily persistent `InterpolatedPrices`, forward-fill interpolation, and a bounded staleness
+policy. The [Portfolios page](portfolios/portfolios.md) describes the whole flow.
 
 ```text
-POST             /v1/portfolio-configurations/provided-weights
-POST|GET         /v1/portfolio-configurations/{configuration_uid}/weights
+GET|POST         /v1/signal-definitions
+GET|PATCH|DELETE /v1/signal-definitions/{definition_uid}
+POST|GET         /v1/signal-definitions/{definition_uid}/weights
+
+POST             /v1/portfolio-configurations
 GET              /v1/portfolio-configurations
 GET|PATCH|DELETE /v1/portfolio-configurations/{configuration_uid}
 POST             /v1/portfolio-configurations/{configuration_uid}/actions/run
 GET              /v1/portfolio-configurations/{configuration_uid}/runs
 
+POST             /v1/portfolio-configurations/provided-weights           (ADR 0024, until moved)
+POST|GET         /v1/portfolio-configurations/{configuration_uid}/weights (ADR 0024, until moved)
+
 GET|POST         /v1/portfolio-rebalance-configurations
 GET|PATCH|DELETE /v1/portfolio-rebalance-configurations/{configuration_uid}
 ```
 
-- **Create** takes `name`, `description?`, either `bars_configuration_uid` or `bars_configuration`
-  (`name`, `account_uid`, `frequency_id`, `feed`, `adjustment`, `scheduled?`: a new `portfolios`
-  bars configuration, whose account the caller must be allowed to configure), the
-  `rebalance_configuration_uid`, the valuation and fee settings, `scheduled?`, and `observations`.
-  It answers the configuration, the `Portfolio` (`portfolio_uid`, `portfolio_unique_identifier`
-  `ALPACA_PORTFOLIO__<uid hex>`), whether it created the bars configuration, and the weights it
-  published. A refused create leaves no row.
+- **A signal definition** takes `account_uid`, the application's `key` (unique within the
+  account), `name` and `description?`. Only the account's owner creates it, gives it weights,
+  renames it or deletes it; nobody does on an account without an owner (`409
+  account_without_owner`). It answers its `signal_uid` and how many portfolios follow it, never its
+  stored key. A key already used in the account answers `409 signal_key_exists`; a key whose
+  signal a retired portfolio still follows answers `409 signal_key_taken`. Deleting it is refused
+  while a portfolio follows it (`409 signal_followed`); otherwise its observations, signal-asset
+  rows and Markets `SignalMetadata` are deleted with it, unless a retired `Portfolio` still follows
+  the signal, in which case they stay with that `Portfolio`.
+- **Weights** go to the definition, `POST /v1/signal-definitions/{uid}/weights`, and every
+  portfolio that follows it uses them.
+- **Create** (`POST /v1/portfolio-configurations`) takes `name`, `description?`, `account_uid`,
+  `signal_definition_uid` (a definition of the same account), `rebalance_configuration_uid`, the
+  bar profile of the portfolio's own bars configuration under `bars` (`frequency_id`, `feed`,
+  `adjustment`, `enabled?`, `scheduled?`, `name?`), the valuation and fee settings and
+  `scheduled?`. Only the account's owner creates it. It answers the configuration, the `Portfolio`
+  (`portfolio_uid`, `portfolio_unique_identifier` `ALPACA_PORTFOLIO__<uid hex>`) and its bars
+  configuration. A refused create leaves no row.
+- **ADR 0024's create** (`POST /v1/portfolio-configurations/provided-weights`) stays until the
+  applications move: it takes either `bars_configuration_uid` (a feed) or `bars_configuration`
+  (`name`, `account_uid`, `frequency_id`, `feed`, `adjustment`, `scheduled?`), and the
+  `observations`. The portfolio belongs to that account, which the caller must own, gets its own
+  bars configuration with that profile, and a signal definition whose key is its configuration
+  UID, as its signal's key was. Its `/{uid}/weights` routes publish to that definition.
 - **An observation** is `{observed_at, weights: {<ALPACA::uuid>: <weight>}}`. `observed_at` needs a
   timezone. Each observation is the whole set: an asset the previous one held and this one leaves
   out is written at `0`. Weights are stored as given, negatives included. Several observations in
@@ -233,18 +261,24 @@ GET|PATCH|DELETE /v1/portfolio-rebalance-configurations/{configuration_uid}
 - **Assets** must be registered Alpaca assets: `422 unknown_asset` or `422 asset_not_alpaca`
   otherwise. Other refusals are `422 invalid_observation` and `422 empty_observations`. No error
   names an asset, a weight or an owner.
-- **The owner.** The acting owner at creation owns the portfolio. Only that owner gives it
-  weights, changes, pauses or deletes it; anyone else gets `403 portfolio_owned_by_another`. Reads
-  and runs stay open. Responses never carry the owner.
+- **The owner.** The acting owner at creation, the account's owner, owns the portfolio. Only that
+  owner gives it weights, changes, pauses or deletes it; anyone else gets `403
+  portfolio_owned_by_another`. Reads and runs stay open. Responses never carry the owner, but carry
+  `account_uid`, `signal_definition_uid` and `adopted`.
+- **Not adopted yet.** A portfolio created before ADR 0028 that revision 0029 could not give an
+  account answers `adopted: false`; it neither runs nor takes weights (`409
+  portfolio_not_adopted`) until the `portfolio adopt` rollout gives it one or ends it.
 - **Deleting ends it.** `DELETE` retires the ms-markets `Portfolio` (ms-markets ADR 0049), then
-  deletes the configuration, and answers `portfolio: {uid, unique_identifier, state: "retired",
-  retired_at}`. While an account's current target names the portfolio it answers
-  `409 portfolio_in_account_target` and changes nothing. The `Portfolio`, its series and account
-  history stay; a retired portfolio is no longer offered as a target and is no longer computed.
+  deletes the configuration with its own bars configuration, and answers `portfolio: {uid,
+  unique_identifier, state: "retired", retired_at}`. While an account's current target names the
+  portfolio it answers `409 portfolio_in_account_target` and changes nothing. The `Portfolio`, its
+  series, its signal and account history stay, recorded under the account, whose delete deletes
+  them; a retired portfolio is no longer offered as a target and is no longer computed.
 - **No schedule or compute is stored.** The configuration's only operational field is
   `scheduled`. `PATCH {"scheduled": false}` pauses a portfolio without validating its references.
-  A run also needs an allowed preflight: its bars configuration must exist and be enabled, its
-  rebalance configuration must exist, and it must have at least one observation.
+  A run also needs an allowed preflight: the portfolio must be adopted, its own bars configuration
+  must be enabled, its rebalance configuration must exist, and its signal must have at least one
+  observation.
 
 There is no Environment request field. A run selects its configuration with
 `--configuration-uid <uid>` and updates persistent interpolation, calendar events, rebalance state,
@@ -480,18 +514,34 @@ API believes it only from a caller listed in `ALPACA_CONNECTORS_VOUCHING_CALLERS
 - A call for an external person reaches only that person's accounts: every route that names an
   account, in its path, body or options, answers `404` for anyone else's, and `GET /v1/accounts`
   lists only theirs. Account key requests are refused for them (`400`). Other calls are unchanged.
-- Only an account's owner creates, updates or resumes a bar configuration on it, judged on the
-  account the configuration will run with: the one the request names, else its current one
-  ([ADR 0022](adrs/0022_configurations_never_block_an_owners_removal.md)). Anyone else gets
-  `409 account_owned_by_another`, and an external person `404`. Deleting a configuration is
-  unchanged, and an account without an owner stays open to every caller.
+- Only an account's owner creates, changes or deletes its bars feeds, signal definitions and
+  portfolios ([ADR 0028](adrs/0028_every_portfolio_belongs_to_one_account.md)); a portfolio's own
+  bars configuration is changed by the portfolio's owner. Anyone else gets `409
+  account_owned_by_another`, and an external person `404`. Nobody acts on an account without an
+  owner (`409 account_without_owner`) until it takes one at its next key registration.
 - An external person's registration of an account without an owner answers `409 account_in_use`
   while enabled bar configurations run with its keys. It names none of them.
-- Configurations never block a removal. `DELETE /v1/accounts/{account_uid}` and the bulk remove
-  first disable the enabled bar configurations (no runs) that use the account, and return their
-  UIDs as `disabled_bar_configuration_uids`. The remove preflight counts them in a warning.
 - `GET /v1/accounts` filters by `owner_gateway_uid` and `owner_user_uid`, given together.
 - A malformed `ALPACA_CONNECTORS_VOUCHING_CALLERS` stops the API from starting.
+
+### Removing keys and deleting an account
+
+Two separate actions, both for the account's owner only
+([ADR 0028](adrs/0028_every_portfolio_belongs_to_one_account.md), decision 8):
+
+- **Remove keys**, `POST /v1/accounts/{account_uid}/actions/remove-keys` or the bulk
+  `POST /v1/accounts/actions/remove-keys` (with its preflight), clears the stored keys. The owner,
+  the account, its history, portfolios and configurations stay; nothing is disabled, and runs fail
+  with the ordinary error until the owner registers keys again.
+- **Delete**, `DELETE /v1/accounts/{account_uid}?confirm=DELETE%20<account_uid>`, deletes the
+  account and everything that belongs to it: its portfolios (retired, then deleted unless another
+  account's history names them), their bars configurations, its bars feeds, its signal
+  definitions and their signals, its orders and trades, and its whole Markets history. A request
+  without the exact confirmation changes nothing. It is refused with `409 account_delete_refused`,
+  before anything changes, while ms-markets' preflight reports a blocker or another account's
+  current target holds one of its portfolios; the refusal names no other account.
+  `POST /v1/accounts/{account_uid}/actions/delete/preflight` reports the same without changing
+  anything. A repeated request finishes what an interrupted one left.
 
 ## MCP
 

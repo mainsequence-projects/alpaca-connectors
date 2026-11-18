@@ -90,7 +90,7 @@ def test_api_service_projects_typed_configuration_rows_for_create_get_and_update
             return_value=row,
         ),
         patch(
-            "alpaca_connectors.api.app.services.bar_configurations.require_owner_may_configure_account"
+            "alpaca_connectors.api.app.services.bar_configurations.require_account_owned_by"
         ) as require_owner,
     ):
         created = create_api_configuration(create_request, owner=OWNER)
@@ -101,8 +101,9 @@ def test_api_service_projects_typed_configuration_rows_for_create_get_and_update
             owner=OWNER,
         )
 
-    # Create checks the account it names; an update without one checks the configuration's own.
-    assert [item.args for item in require_owner.call_args_list] == [
+    # Create checks the account it names; an update without one checks the feed's own account,
+    # whose owner alone changes it (ADR 0028).
+    assert [(str(item.args[0]), item.args[1]) for item in require_owner.call_args_list] == [
         (str(row.account_uid), OWNER),
         (str(row.account_uid), OWNER),
     ]
@@ -120,8 +121,10 @@ def test_configuration_table_has_uuid_identity_and_no_dataset_pointer() -> None:
     assert "asset_source" in table.columns
     # A configuration chooses its assets by list, account holdings or portfolios (ADR 0027).
     assert "universe_uid" not in table.columns
-    assert {key.column.table.name for key in table.foreign_keys} == {
-        "ms_markets__account",
+    # Exactly one parent: its account (a feed) or its portfolio (ADR 0028), each CASCADE.
+    assert {key.column.table.name: key.ondelete for key in table.foreign_keys} == {
+        "ms_markets__account": "CASCADE",
+        "alpaca_connectors__portfolio_configuration": "CASCADE",
     }
 
 
@@ -192,10 +195,11 @@ def test_scope_validation_owns_the_exclusive_source_shapes() -> None:
         "account_holdings",
         [],
     )
-    assert validate_configuration_scope(asset_source="portfolios", asset_uids=None) == (
-        "portfolios",
-        [],
-    )
+    assert validate_configuration_scope(
+        asset_source="portfolios", asset_uids=None, portfolio_owned=True
+    ) == ("portfolios", [])
+    with pytest.raises(ValueError, match="bars feed"):
+        validate_configuration_scope(asset_source="portfolios", asset_uids=None)
     with pytest.raises(ValueError, match="requires"):
         validate_configuration_scope(asset_source="assets", asset_uids=None)
     with pytest.raises(ValueError, match="forbids"):
@@ -508,9 +512,7 @@ def test_api_create_defaults_to_scheduled_and_passes_the_flag_through() -> None:
             "alpaca_connectors.api.app.services.bar_configurations.create_bar_configuration",
             return_value=row,
         ) as create,
-        patch(
-            "alpaca_connectors.api.app.services.bar_configurations.require_owner_may_configure_account"
-        ),
+        patch("alpaca_connectors.api.app.services.bar_configurations.require_account_owned_by"),
     ):
         created = create_api_configuration(
             BarConfigurationCreateRequest(**values, scheduled=False), owner=OWNER

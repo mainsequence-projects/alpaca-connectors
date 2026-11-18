@@ -25,7 +25,8 @@ def configure_list_parser(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--limit", type=int, default=25)
     parser.add_argument("--offset", type=int, default=0)
     parser.add_argument("--search")
-    parser.add_argument("--bars-configuration-uid")
+    parser.add_argument("--account-uid")
+    parser.add_argument("--signal-definition-uid")
     parser.add_argument("--ordering", default="name")
     parser.set_defaults(handler=run_list_command)
 
@@ -39,6 +40,16 @@ def configure_delete_parser(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("configuration_uid")
     parser.add_argument("--execute", action="store_true")
     parser.set_defaults(handler=run_delete_command)
+
+
+def configure_adopt_parser(parser: argparse.ArgumentParser) -> None:
+    parser.description = (
+        "Rollout of ADR 0028: give every portfolio not yet adopted its account, a signal "
+        "definition that keeps its signal and its own bars configuration, or end the ones whose "
+        "bars run on an account their owner does not own. Dry run without --execute."
+    )
+    parser.add_argument("--execute", action="store_true")
+    parser.set_defaults(handler=run_adopt_command)
 
 
 def configure_action_parser(parser: argparse.ArgumentParser) -> None:
@@ -123,10 +134,18 @@ def run_list_command(args: argparse.Namespace) -> int:
         limit=args.limit,
         offset=args.offset,
         search=args.search,
-        bars_configuration_uid=args.bars_configuration_uid,
+        account_uids=[args.account_uid] if args.account_uid else None,
+        signal_definition_uid=args.signal_definition_uid,
         ordering=args.ordering,
     )
     _print({"items": [row.model_dump(mode="json") for row in rows], "total": total})
+    return 0
+
+
+def run_adopt_command(args: argparse.Namespace) -> int:
+    from alpaca_connectors.portfolios.adoption import run_adoption
+
+    _print(run_adoption(execute=args.execute).summary())
     return 0
 
 

@@ -65,7 +65,7 @@ def account_runtime_models() -> list[type[Any]]:
     It equals ``application_runtime_models()``: ``start_engine`` rejects a second *differing*
     model set in one process, and services started with either set call each other.
     """
-    from alpaca_connectors.account.alpaca_account_details import project_account_models
+    from alpaca_connectors.account.provider_account_details import project_account_models
     from alpaca_connectors.execution import execution_runtime_models
     from alpaca_connectors.instances import portfolio_instance_models
 

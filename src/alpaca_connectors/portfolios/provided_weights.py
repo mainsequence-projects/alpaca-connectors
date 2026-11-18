@@ -1,14 +1,18 @@
-"""Portfolios built from weights an application provides (ADR 0024).
+"""Portfolios built from weights an application provides (ADR 0024), owned by accounts (ADR 0028).
 
-Every portfolio of this connector is one (ADR 0027): a row of the portfolio configuration table.
-Its signal is ms-markets' ``ApplicationWeights`` with ``provider`` = this connector's namespace
-and ``key`` = the configuration UID, bound to this application's ``AlpacaSignalWeightsStorage``
-instance, so its signal UID never changes. Each call that gives weights publishes one or more
-observations; ms-markets writes a dropped asset at ``0`` and refuses an observation at or before
-the last one.
+Every portfolio of this connector is one (ADR 0027): a row of the portfolio configuration table
+that belongs to one account and follows one signal definition of that account (ADR 0028). The
+signal is ms-markets' ``ApplicationWeights`` with ``provider`` = this connector's namespace and the
+definition's ``signal_key``, bound to this application's ``AlpacaSignalWeightsStorage`` instance.
+Each call that gives weights publishes one or more observations to that signal; ms-markets
+writes a dropped asset at ``0`` and refuses an observation at or before the last one.
 
-Only the portfolio's owner, the acting owner that created it, gives it weights, changes, pauses
-or deletes it. Errors carry a code and never name an asset, a weight or an owner.
+Only the account's owner creates its portfolios and signals, gives them weights, changes,
+pauses or deletes them. Errors carry a code and never name an asset, a weight or an owner.
+
+The routes of ADR 0024 stay until the applications move: ``create_provided_weights_portfolio``
+creates the portfolio with a definition of its own whose key is the configuration UID, as its
+signal's key was, and ``give_portfolio_weights`` publishes to the portfolio's definition.
 """
 
 from __future__ import annotations
@@ -23,9 +27,16 @@ from typing import Any
 
 from alpaca_connectors.account.ownership import AccountOwner
 from alpaca_connectors.portfolios.configurations import AlpacaPortfolioConfiguration
-from alpaca_connectors.settings import PROJECT_NAMESPACE
+from alpaca_connectors.portfolios.signal_definitions import (
+    SignalDefinition,
+    legacy_signal_key,
+    signal_uid_for_key,
+    weights_signal,
+)
 
 PROVIDED_PORTFOLIO_PREFIX = "ALPACA_PORTFOLIO__"
+OWN_BARS_SOURCE = "portfolios"
+OWN_BARS_SUFFIX = " prices"
 UTC = dt.timezone.utc
 
 
@@ -48,6 +59,17 @@ class PortfolioOwnedByAnotherError(ProvidedWeightsError):
         )
 
 
+class PortfolioNotAdoptedError(ProvidedWeightsError):
+    def __init__(self) -> None:
+        super().__init__(
+            "portfolio_not_adopted",
+            "This portfolio was created before accounts owned portfolios and has no account yet; "
+            "it does not run or take weights until the portfolio adopt rollout gives it one or "
+            "ends it.",
+            status_code=409,
+        )
+
+
 @dataclass(frozen=True, slots=True)
 class PublishedWeights:
     signal_uid: str
@@ -60,61 +82,50 @@ class PublishedWeights:
 @dataclass(frozen=True, slots=True)
 class ProvidedPortfolioCreation:
     configuration: AlpacaPortfolioConfiguration
-    published: PublishedWeights
+    published: PublishedWeights | None
     portfolio_uid: str
     portfolio_unique_identifier: str
     bars_configuration_created: bool
+    bars_configuration_uid: str
+    signal_definition: SignalDefinition
 
 
 def provided_portfolio_unique_identifier(configuration_uid: Any) -> str:
     return f"{PROVIDED_PORTFOLIO_PREFIX}{str(configuration_uid).replace('-', '').upper()}"
 
 
-def provided_weights_signal(configuration_uid: Any) -> Any:
-    """The portfolio's ``ApplicationWeights`` signal, bound to this application's instance."""
-    from msm_portfolios.contrib.signals import ApplicationWeights
-
-    from alpaca_connectors.instances import AlpacaSignalWeightsStorage
-
-    return ApplicationWeights.from_signal_configuration(
-        _signal_configuration(configuration_uid),
-        output_table=AlpacaSignalWeightsStorage,
-    )
-
-
-def _signal_configuration(configuration_uid: Any) -> Any:
-    from msm_portfolios.contrib.signals import ApplicationWeightsConfig
-
-    return ApplicationWeightsConfig(
-        provider=PROJECT_NAMESPACE, key=str(uuid.UUID(str(configuration_uid)))
-    )
-
-
-class _SignalIdentity:
-    """The payload ``ApplicationWeights`` hashes into its signal UID, without an updater.
-
-    Building the updater binds its output table to the backend catalog; a UID is a pure hash of
-    the class path and the configuration, so listings and the bars resolution compute it here.
-    """
-
-    def __init__(self, configuration_uid: Any) -> None:
-        self._configuration = _signal_configuration(configuration_uid)
-
-    def build_configuration(self) -> dict[str, Any]:
-        from msm_portfolios.contrib.signals import ApplicationWeights
-        from msm_portfolios.time_index.signals.weights import _class_import_path
-
-        return {
-            "table_updater_class_import_path": _class_import_path(ApplicationWeights),
-            "config": self._configuration,
-        }
-
-
 def provided_signal_uid(configuration_uid: Any) -> str:
-    """The portfolio's signal UID, the same one its ``ApplicationWeights`` publishes under."""
-    from msm_portfolios.time_index.signals.weights import compute_signal_uid
+    """The UID of the signal a portfolio created before ADR 0028 published to (its own UID)."""
+    return signal_uid_for_key(legacy_signal_key(configuration_uid))
 
-    return str(compute_signal_uid(_SignalIdentity(configuration_uid)))
+
+def portfolio_signal_key(
+    configuration: AlpacaPortfolioConfiguration,
+    *,
+    definitions: Mapping[str, SignalDefinition] | None = None,
+) -> str:
+    """The key of the signal the portfolio follows: its definition's, or its own UID before it."""
+    from alpaca_connectors.portfolios.signal_definitions import get_signal_definition
+
+    if configuration.signal_definition_uid is None:
+        return legacy_signal_key(configuration.uid)
+    definition = (definitions or {}).get(str(configuration.signal_definition_uid))
+    if definition is None:
+        definition = get_signal_definition(configuration.signal_definition_uid)
+    if definition is None:
+        raise LookupError(
+            f"Signal definition {configuration.signal_definition_uid!s} does not exist."
+        )
+    return definition.signal_key
+
+
+def portfolio_signal_uid(
+    configuration: AlpacaPortfolioConfiguration,
+    *,
+    definitions: Mapping[str, SignalDefinition] | None = None,
+) -> str:
+    """The UID of the signal the portfolio follows."""
+    return signal_uid_for_key(portfolio_signal_key(configuration, definitions=definitions))
 
 
 def is_owner(configuration: AlpacaPortfolioConfiguration, owner: AccountOwner) -> bool:
@@ -131,6 +142,12 @@ def require_portfolio_owner(
     """Refuse a change to a portfolio by anyone but its owner (ADR 0024, decision 6)."""
     if not is_owner(configuration, owner):
         raise PortfolioOwnedByAnotherError()
+
+
+def require_adopted(configuration: AlpacaPortfolioConfiguration) -> None:
+    """Refuse to run or give weights to a portfolio that has no account yet (ADR 0028)."""
+    if not configuration.adopted:
+        raise PortfolioNotAdoptedError()
 
 
 def _invalid(message: str) -> ProvidedWeightsError:
@@ -209,66 +226,91 @@ def _last_observed_at(signal_uid: str) -> dt.datetime | None:
 def _not_after_last() -> ProvidedWeightsError:
     return ProvidedWeightsError(
         "observation_not_after_last",
-        "An observation is at or before the portfolio's last stored observation; "
+        "An observation is at or before the signal's last stored observation; "
         "published observations are never restated.",
         status_code=409,
     )
 
 
-def ensure_provided_signal_metadata(
-    configuration: AlpacaPortfolioConfiguration,
-) -> str:
+def ensure_signal_metadata(signal_key: str, *, description: str) -> str:
     """Register the signal in Markets before its first publication (its rows reference it)."""
     from msm_portfolios.api.market_metadata import SignalMetadata
 
-    signal = provided_weights_signal(configuration.uid)
-    SignalMetadata.upsert(
-        signal_uid=signal.signal_uid,
-        signal_description=(
-            f"Weights provided for the portfolio {configuration.name!r} by its owner application."
-        ),
-    )
+    signal = weights_signal(signal_key)
+    SignalMetadata.upsert(signal_uid=signal.signal_uid, signal_description=description)
     return str(signal.signal_uid)
+
+
+def _signal_description(definition: SignalDefinition) -> str:
+    return f"Weights the application provides for the signal {definition.name!r}."
 
 
 def _observation_assets(normalized: Mapping[dt.datetime, Mapping[str, float]]) -> list[str]:
     return sorted({asset for weights in normalized.values() for asset in weights})
 
 
+def publish_definition_weights(
+    definition: SignalDefinition,
+    observations: Sequence[Mapping[str, Any]],
+) -> PublishedWeights:
+    """Validate and publish one or more observations of the definition's signal, in one write."""
+    normalized = normalize_observations(observations)
+    assets = _observation_assets(normalized)
+    require_alpaca_assets(assets)
+    return _publish_validated(
+        definition.signal_key,
+        normalized,
+        assets,
+        description=definition.description,
+        metadata_description=_signal_description(definition),
+    )
+
+
 def publish_provided_weights(
     configuration: AlpacaPortfolioConfiguration,
     observations: Sequence[Mapping[str, Any]],
 ) -> PublishedWeights:
-    """Validate and publish one or more observations of the portfolio's signal, in one write."""
-    normalized = normalize_observations(observations)
-    assets = _observation_assets(normalized)
-    require_alpaca_assets(assets)
-    return _publish_validated(configuration, normalized, assets)
+    """Publish to the signal definition the portfolio follows (the routes of ADR 0024)."""
+    from alpaca_connectors.portfolios.signal_definitions import get_signal_definition
+
+    require_adopted(configuration)
+    definition = get_signal_definition(configuration.signal_definition_uid)
+    if definition is None:
+        raise LookupError(
+            f"Signal definition {configuration.signal_definition_uid!s} does not exist."
+        )
+    return publish_definition_weights(definition, observations)
 
 
 def _publish_validated(
-    configuration: AlpacaPortfolioConfiguration,
+    signal_key: str,
     normalized: Mapping[dt.datetime, Mapping[str, float]],
     assets: Sequence[str],
+    *,
+    description: str | None,
+    metadata_description: str,
 ) -> PublishedWeights:
     """Publish observations whose shape and assets were already validated.
 
-    Refuse an observation at or before the last stored one, record the assets (ADR 0024
-    decision 5), then publish. ms-markets repeats its own checks. Which of its refusals is a time
-    conflict is decided from the stored last time, not from the wording of its message.
+    Refuse an observation at or before the last stored one, register the signal in Markets on its
+    first publication (its rows reference it), record the assets (ADR 0024 decision 5), then
+    publish. ms-markets repeats its own checks. Which of its refusals is a time conflict is
+    decided from the stored last time, not from the wording of its message.
     """
-    signal = provided_weights_signal(configuration.uid)
+    signal = weights_signal(signal_key)
     signal_uid = str(signal.signal_uid)
     first_time = next(iter(normalized))
     last_stored = _last_observed_at(signal_uid)
     if last_stored is not None and first_time <= last_stored:
         raise _not_after_last()
+    if last_stored is None:
+        ensure_signal_metadata(signal_key, description=metadata_description)
 
     from alpaca_connectors.portfolios.signal_assets import record_signal_assets
 
     record_signal_assets(signal_uid, assets)
     try:
-        signal.publish(dict(normalized), description=configuration.description)
+        signal.publish(dict(normalized), description=description)
     except LookupError as exc:
         raise ProvidedWeightsError(
             "unknown_asset", "An asset identifier is not a registered Main Sequence asset."
@@ -317,24 +359,45 @@ class PortfolioRemoval:
         }
 
 
+def ended_portfolio_account_uid(configuration: AlpacaPortfolioConfiguration) -> str | None:
+    """The account an ended portfolio belonged to.
+
+    A portfolio not yet adopted has none; its former bars configuration's account, whose keys
+    priced it, takes its place.
+    """
+    if configuration.account_uid is not None:
+        return str(configuration.account_uid)
+    if configuration.bars_configuration_uid is None:
+        return None
+    from alpaca_connectors.market_data.configurations import get_bar_configuration
+
+    bars = get_bar_configuration(configuration.bars_configuration_uid)
+    if bars is None or bars.account_uid is None:
+        return None
+    return str(bars.account_uid)
+
+
 def end_portfolio_configuration(
     configuration: AlpacaPortfolioConfiguration,
 ) -> PortfolioRemoval:
-    """End a portfolio: retire its `Portfolio`, then delete its configuration.
+    """End a portfolio: retire its `Portfolio`, record it, then delete its configuration.
 
-    Every delete ends a portfolio this way (ADR 0027): retiring comes first (ms-markets ADR 0049),
-    so a portfolio an account's current target names is refused with
+    Every delete ends a portfolio this way (ADR 0027 decision 4, ADR 0028): retiring comes first
+    (ms-markets ADR 0049), so a portfolio an account's current target names is refused with
     ``409 portfolio_in_account_target`` and nothing changes. A configuration whose `Portfolio` no
-    longer exists answers ``absent``. Then the signal's rows in the signal-asset table and the
-    configuration row are deleted. The `Portfolio`, its series and account history stay. Retiring
-    a retired portfolio does nothing, so a retry after a partial failure is safe, and a retired
-    portfolio's updaters write nothing meanwhile (issue #33). It checks no owner: its callers do.
+    longer exists answers ``absent``. The retired `Portfolio` and the signal it followed are
+    recorded under the account, which deletes them when it is deleted; then the configuration
+    row is deleted, and its own bars configuration with it. The `Portfolio`, its series, its
+    signal and account history stay. Retiring a retired portfolio does nothing, so a retry after
+    a partial failure is safe. It checks no owner: its callers do.
     """
     from msm.api.remote import MarketsConflictError
 
     from alpaca_connectors.markets_api import retire_portfolio
-    from alpaca_connectors.portfolios.configurations import delete_portfolio_configuration_row
-    from alpaca_connectors.portfolios.signal_assets import forget_signal_assets
+    from alpaca_connectors.portfolios.configurations import (
+        delete_portfolio_configuration_row,
+        record_ended_portfolio,
+    )
 
     portfolio_uid = (
         str(configuration.portfolio_uid) if configuration.portfolio_uid is not None else None
@@ -354,7 +417,14 @@ def end_portfolio_configuration(
             ) from exc
         retired_at = getattr(portfolio, "retired_at", None)
         state = "retired"
-    forget_signal_assets(provided_signal_uid(configuration.uid))
+        account_uid = ended_portfolio_account_uid(configuration)
+        if account_uid is not None:
+            record_ended_portfolio(
+                account_uid=account_uid,
+                portfolio_uid=portfolio_uid,
+                portfolio_configuration_uid=configuration.uid,
+                signal_uid=portfolio_signal_uid(configuration),
+            )
     delete_portfolio_configuration_row(configuration.uid)
     return PortfolioRemoval(
         configuration_uid=str(configuration.uid),
@@ -390,7 +460,7 @@ def give_portfolio_weights(
     *,
     owner: AccountOwner,
 ) -> PublishedWeights:
-    """Give an existing provided-weights portfolio one or more new observations."""
+    """Give the signal the portfolio follows one or more new observations (ADR 0024's route)."""
     from alpaca_connectors.portfolios.configurations import get_portfolio_configuration
 
     configuration = get_portfolio_configuration(configuration_uid)
@@ -418,6 +488,101 @@ def _upsert_portfolio_row(configuration: AlpacaPortfolioConfiguration) -> Any:
     )
 
 
+def _create_own_bars(
+    configuration: AlpacaPortfolioConfiguration,
+    profile: Mapping[str, Any],
+) -> Any:
+    """The portfolio's own bars configuration, which prices its signal's assets (decision 4)."""
+    from alpaca_connectors.market_data.configurations import create_portfolio_bar_configuration
+
+    return create_portfolio_bar_configuration(
+        portfolio_configuration_uid=configuration.uid,
+        name=profile.get("name") or (configuration.name + OWN_BARS_SUFFIX)[:255],
+        description=profile.get("description"),
+        frequency_id=profile.get("frequency_id") or "1d",
+        feed=profile.get("feed") or "sip",
+        adjustment=profile.get("adjustment") or "all",
+        enabled=profile.get("enabled", True),
+        scheduled=profile.get("scheduled", True),
+    )
+
+
+def create_portfolio(
+    *,
+    owner: AccountOwner,
+    account_uid: Any,
+    signal_definition_uid: Any,
+    name: str,
+    rebalance_configuration_uid: Any,
+    bars: Mapping[str, Any] | None = None,
+    description: str | None = None,
+    upsample_frequency_id: str = "1d",
+    intraday_bar_interpolation_rule: str = "ffill",
+    valuation_column: str = "close",
+    valuation_maximum_staleness_seconds: int = 86_400,
+    fail_on_missing_prices: bool = True,
+    commission_fee: float = 0.00018,
+    scheduled: bool = True,
+) -> ProvidedPortfolioCreation:
+    """Create a portfolio of the account that follows one of the account's signal definitions.
+
+    The caller has checked that ``owner`` owns the account (ADR 0028, decision 3). Order: the
+    configuration row, its own bars configuration, then the `Portfolio` row. A failure after the
+    row was stored deletes it, and its bars configuration with it.
+    """
+    from alpaca_connectors.portfolios.configurations import (
+        create_portfolio_configuration_row,
+        delete_portfolio_configuration_row,
+        update_portfolio_configuration_row,
+    )
+    from alpaca_connectors.portfolios.signal_definitions import get_signal_definition
+
+    definition = get_signal_definition(signal_definition_uid)
+    if definition is None or str(definition.account_uid) != str(uuid.UUID(str(account_uid))):
+        raise ProvidedWeightsError(
+            "signal_of_another_account",
+            "The portfolio must follow a signal definition of its own account.",
+            status_code=409,
+        )
+    configuration: AlpacaPortfolioConfiguration | None = None
+    try:
+        configuration = create_portfolio_configuration_row(
+            name=name,
+            description=description,
+            account_uid=account_uid,
+            signal_definition_uid=definition.uid,
+            owner_gateway_uid=owner.gateway_uid,
+            owner_user_uid=owner.user_uid,
+            rebalance_configuration_uid=rebalance_configuration_uid,
+            upsample_frequency_id=upsample_frequency_id,
+            intraday_bar_interpolation_rule=intraday_bar_interpolation_rule,
+            valuation_column=valuation_column,
+            valuation_maximum_staleness_seconds=valuation_maximum_staleness_seconds,
+            fail_on_missing_prices=fail_on_missing_prices,
+            commission_fee=commission_fee,
+            scheduled=scheduled,
+        )
+        own_bars = _create_own_bars(configuration, bars or {})
+        portfolio_row = _upsert_portfolio_row(configuration)
+        configuration = update_portfolio_configuration_row(
+            configuration.uid,
+            values={"portfolio_uid": uuid.UUID(str(portfolio_row.uid))},
+        )
+    except Exception:
+        if configuration is not None:
+            delete_portfolio_configuration_row(configuration.uid)
+        raise
+    return ProvidedPortfolioCreation(
+        configuration=configuration,
+        published=None,
+        portfolio_uid=str(portfolio_row.uid),
+        portfolio_unique_identifier=str(portfolio_row.unique_identifier),
+        bars_configuration_created=True,
+        bars_configuration_uid=str(own_bars.uid),
+        signal_definition=definition,
+    )
+
+
 def create_provided_weights_portfolio(
     *,
     owner: AccountOwner,
@@ -435,21 +600,24 @@ def create_provided_weights_portfolio(
     commission_fee: float = 0.00018,
     scheduled: bool = True,
 ) -> ProvidedPortfolioCreation:
-    """Create a provided-weights portfolio from its first observation or a history.
+    """Create a portfolio from its first observation or a history (ADR 0024's route).
 
-    Order: validate the observations and assets, create the inline `portfolios` bars
-    configuration when one is given, store the row, register and publish the signal, then create
-    the `Portfolio` row. A failure after a row was stored deletes the rows this call stored.
-    Ownership of an inline bars configuration's account is the caller's check (ADR 0022).
+    The portfolio belongs to the account of the bars configuration the request gives inline or
+    names, which the caller has checked the owner owns; it gets its own bars configuration with
+    that profile, and a signal definition of that account whose key is its configuration UID, as
+    its signal's key was (ADR 0028). Order: validate the observations and assets, store the row,
+    its definition and its own bars configuration, publish, then create the `Portfolio` row. A
+    failure after a row was stored deletes the rows this call stored.
     """
-    from alpaca_connectors.market_data.configurations import (
-        create_bar_configuration,
-        delete_bar_configuration,
-    )
+    from alpaca_connectors.market_data.configurations import get_bar_configuration
     from alpaca_connectors.portfolios.configurations import (
         create_portfolio_configuration_row,
         delete_portfolio_configuration_row,
         update_portfolio_configuration_row,
+    )
+    from alpaca_connectors.portfolios.signal_definitions import (
+        SignalDefinition,
+        create_signal_definition,
     )
 
     if (bars_configuration_uid is None) == (bars_configuration is None):
@@ -461,21 +629,41 @@ def create_provided_weights_portfolio(
     assets = _observation_assets(normalized)
     require_alpaca_assets(assets)
 
-    created_bars_uid: uuid.UUID | None = None
-    configuration: AlpacaPortfolioConfiguration | None = None
-    try:
-        if bars_configuration is not None:
-            created = create_bar_configuration(
-                **{**dict(bars_configuration), "asset_source": "portfolios"}
+    if bars_configuration is not None:
+        profile = dict(bars_configuration)
+        account_uid = profile.get("account_uid")
+    else:
+        named = get_bar_configuration(bars_configuration_uid)
+        if named is None:
+            raise LookupError(f"Bars configuration {bars_configuration_uid!s} does not exist.")
+        if named.account_uid is None:
+            raise ProvidedWeightsError(
+                "invalid_bars_configuration",
+                "Name a bars feed of an account; a portfolio's own configuration is its alone.",
             )
-            created_bars_uid = created.uid
-            bars_configuration_uid = created.uid
+        account_uid = named.account_uid
+        profile = {
+            "frequency_id": named.frequency_id,
+            "feed": named.feed,
+            "adjustment": named.adjustment,
+            "enabled": named.enabled,
+            "scheduled": named.scheduled,
+        }
+    if account_uid is None:
+        raise ProvidedWeightsError(
+            "invalid_bars_configuration", "The bars configuration must name its account."
+        )
+
+    configuration: AlpacaPortfolioConfiguration | None = None
+    definition: SignalDefinition | None = None
+    try:
         configuration = create_portfolio_configuration_row(
             name=name,
             description=description,
+            account_uid=account_uid,
+            signal_definition_uid=None,
             owner_gateway_uid=owner.gateway_uid,
             owner_user_uid=owner.user_uid,
-            bars_configuration_uid=bars_configuration_uid,
             rebalance_configuration_uid=rebalance_configuration_uid,
             upsample_frequency_id=upsample_frequency_id,
             intraday_bar_interpolation_rule=intraday_bar_interpolation_rule,
@@ -485,8 +673,26 @@ def create_provided_weights_portfolio(
             commission_fee=commission_fee,
             scheduled=scheduled,
         )
-        ensure_provided_signal_metadata(configuration)
-        published = _publish_validated(configuration, normalized, assets)
+        key = legacy_signal_key(configuration.uid)
+        definition = create_signal_definition(
+            account_uid=account_uid,
+            key=key,
+            name=configuration.name,
+            description=description,
+            signal_key=key,
+        )
+        configuration = update_portfolio_configuration_row(
+            configuration.uid,
+            values={"signal_definition_uid": definition.uid},
+        )
+        own_bars = _create_own_bars(configuration, profile)
+        published = _publish_validated(
+            definition.signal_key,
+            normalized,
+            assets,
+            description=description,
+            metadata_description=_signal_description(definition),
+        )
         portfolio_row = _upsert_portfolio_row(configuration)
         configuration = update_portfolio_configuration_row(
             configuration.uid,
@@ -495,36 +701,45 @@ def create_provided_weights_portfolio(
     except Exception:
         if configuration is not None:
             delete_portfolio_configuration_row(configuration.uid)
-        if created_bars_uid is not None:
-            delete_bar_configuration(created_bars_uid)
+        if definition is not None:
+            SignalDefinition.delete(definition.uid)
         raise
     return ProvidedPortfolioCreation(
         configuration=configuration,
         published=published,
         portfolio_uid=str(portfolio_row.uid),
         portfolio_unique_identifier=str(portfolio_row.unique_identifier),
-        bars_configuration_created=created_bars_uid is not None,
+        bars_configuration_created=True,
+        bars_configuration_uid=str(own_bars.uid),
+        signal_definition=definition,
     )
 
 
 __all__ = [
+    "OWN_BARS_SOURCE",
     "PROVIDED_PORTFOLIO_PREFIX",
+    "PortfolioNotAdoptedError",
     "PortfolioOwnedByAnotherError",
     "PortfolioRemoval",
     "ProvidedPortfolioCreation",
     "ProvidedWeightsError",
     "PublishedWeights",
+    "create_portfolio",
     "create_provided_weights_portfolio",
     "delete_provided_weights_portfolio",
     "end_portfolio_configuration",
-    "ensure_provided_signal_metadata",
+    "ended_portfolio_account_uid",
+    "ensure_signal_metadata",
     "give_portfolio_weights",
     "is_owner",
     "normalize_observations",
+    "portfolio_signal_key",
+    "portfolio_signal_uid",
     "provided_portfolio_unique_identifier",
     "provided_signal_uid",
-    "provided_weights_signal",
+    "publish_definition_weights",
     "publish_provided_weights",
+    "require_adopted",
     "require_alpaca_assets",
     "require_portfolio_owner",
 ]

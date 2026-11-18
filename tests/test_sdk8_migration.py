@@ -60,6 +60,8 @@ def test_migration_metadata_includes_fk_dependencies_but_manages_only_project_ta
         "alpaca_connectors__asset_registration_operation",
         "alpaca_connectors__portfolio_configuration",
         "alpaca_connectors__portfolio_rebalance_configuration",
+        "alpaca_connectors__signal_definition",
+        "alpaca_connectors__ended_portfolio",
         # Contract instances of the Markets time series (ms-markets ADR 0047).
         "alpaca_connectors__signalweightsts__main",
         "alpaca_connectors__portfoliosts__main",

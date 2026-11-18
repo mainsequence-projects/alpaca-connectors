@@ -190,9 +190,19 @@ class CliTests(unittest.TestCase):
             for action in top_level["portfolio"]._actions
             if getattr(action, "choices", None)
         )
+        # ADR 0028 adds the `adopt` rollout; still no command creates a portfolio or gives weights.
         self.assertEqual(
             set(portfolio_commands),
-            {"list", "get", "delete", "run", "runs", "prepare-interpolated-prices", "rebalance"},
+            {
+                "list",
+                "get",
+                "delete",
+                "run",
+                "runs",
+                "prepare-interpolated-prices",
+                "rebalance",
+                "adopt",
+            },
         )
         for command in (
             ["universe-source", "list"],

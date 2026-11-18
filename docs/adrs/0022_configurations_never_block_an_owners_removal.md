@@ -7,6 +7,11 @@ Accepted on 2026-11-14 for
 by the same change. The owner chose this fix on 2026-11-14 over the issue's proposal of one
 registration per account and owner (see [Alternatives](#alternatives-considered)).
 
+Amended on 2026-11-18 by [ADR 0028](0028_every_portfolio_belongs_to_one_account.md): its decision 1
+is withdrawn: removing keys disables nothing, and deleting an account deletes its configurations
+(decision 8). Its decisions 2 and 3 are restated by decision 3: only the account's owner configures
+it, and nobody configures an account without an owner.
+
 It amends [ADR 0019](0019_account_owners_vouched_for_by_trusted_applications.md):
 
 - section 5, Registration: an external person's claim of an account without an owner can now be

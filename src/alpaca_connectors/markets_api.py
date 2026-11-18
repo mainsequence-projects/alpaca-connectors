@@ -4,11 +4,16 @@ Markets registries (assets, categories and their memberships, accounts, holdings
 are reached with ``msm.api`` row calls, which run on the Markets API once the process selected the
 remote row backend (``alpaca_connectors.runtime.use_markets_api``; ms-markets ADR 0047). These
 helpers keep those reads set-based: a request carries at most ``MARKETS_BATCH_SIZE`` keys, and a
-collection is read in pages of that size, never one call per row. Five composite routes go through
+collection is read in pages of that size, never one call per row. Composite routes go through
 the same client: ``register_account`` (ms-markets ADR 0051); for the sync that sizes and
 allocates an account's target (ADR 0023, ms-markets ADR 0054), ``account_target_positions``,
-``plan_account_virtual_funds`` and ``allocate_account_virtual_funds``; and ``retire_portfolio``
-(ms-markets ADR 0049), which ends a provided-weights portfolio its owner deletes (ADR 0024).
+``plan_account_virtual_funds`` and ``allocate_account_virtual_funds``; ``retire_portfolio``
+(ms-markets ADR 0049), which ends a portfolio its owner deletes (ADR 0024, ADR 0027); and the
+calls of an account delete and a signal delete (ADR 0028): ``current_target_account_uids``,
+``clear_account_target``, ``account_delete_preflight``, ``delete_account``,
+``portfolio_delete_blockers``, ``delete_portfolio`` and ``delete_signal_metadata``. The
+preflights and the signal delete have no typed client method in ms-markets 4.0.1, so they call
+their routes through the same client's ``request``.
 """
 
 from __future__ import annotations
@@ -169,8 +174,118 @@ def retire_portfolio(portfolio_uid: Any) -> Any:
     return use_markets_api().client.retire_portfolio(portfolio_uid)
 
 
+def _client() -> Any:
+    from alpaca_connectors.runtime import use_markets_api
+
+    return use_markets_api().client
+
+
+def _explicit_selection(uid: Any) -> dict[str, Any]:
+    return {"selection": {"mode": "explicit", "uids": [str(uid)]}, "options": {}}
+
+
+def current_target_account_uids(portfolio_uid: Any) -> list[str]:
+    """Accounts whose current target names the portfolio (``listPortfolioAccountTargets``).
+
+    Only current targets: an account that named it earlier, or cleared its target, is not
+    listed. Read in pages of ``MARKETS_BATCH_SIZE``.
+    """
+    client = _client()
+    accounts: list[str] = []
+    offset = 0
+    while True:
+        page = client.portfolio_account_targets(
+            portfolio_uid, limit=MARKETS_BATCH_SIZE, offset=offset
+        )
+        accounts.extend(str(uuid.UUID(str(item.account_uid))) for item in page.items)
+        if not page.page_info.has_next_page:
+            return accounts
+        offset += MARKETS_BATCH_SIZE
+
+
+def clear_account_target(account_uid: Any, *, at: Any) -> Any:
+    """Clear the account's current target at ``at``: an empty snapshot (ms-markets ADR 0049)."""
+    return _client().clear_account_target_positions(account_uid, target_positions_date=at)
+
+
+def account_delete_preflight(account_uid: Any) -> dict[str, Any]:
+    """What would refuse deleting the account, from ms-markets' preflight (its ADR 0050).
+
+    ``other_namespace_restricts`` are only warnings there: Markets cannot count another
+    application's rows, so the delete can still be refused by them.
+    """
+    from msm.client.client import API_PREFIX
+
+    return _client().request(
+        "POST",
+        f"{API_PREFIX}/account/bulk-delete/preflight/",
+        json=_explicit_selection(account_uid),
+    )
+
+
+def delete_account(account_uid: Any) -> dict[str, Any] | None:
+    """Delete the account with its whole history in one transaction (``Account.delete``).
+
+    Another application's ``CASCADE`` keys go with it and its ``RESTRICT`` keys refuse it
+    (``MarketsConflictError``). ``None`` when the account does not exist.
+    """
+    from msm.api.accounts import Account
+
+    return Account.delete(account_uid)
+
+
+def portfolio_delete_blockers(portfolio_uid: Any) -> list[str]:
+    """Why the portfolio cannot be deleted: target rows or virtual funds of any account's history.
+
+    From ms-markets' portfolio delete preflight, which changes nothing.
+    """
+    from msm.client.client import API_PREFIX
+
+    preflight = _client().request(
+        "POST",
+        f"{API_PREFIX}/portfolio/bulk-delete/preflight/",
+        json=_explicit_selection(portfolio_uid),
+    )
+    return [str(blocker) for blocker in (preflight or {}).get("blockers") or []]
+
+
+def delete_portfolio(portfolio_uid: Any) -> dict[str, Any]:
+    """Delete a portfolio nothing references (``deletePortfolio``, ms-markets ADR 0049).
+
+    Its core weights and values go with it. Rows in this application's own instances refuse
+    the delete with ``RESTRICT``, so their deletion comes first.
+    """
+    from msm.api.portfolios import Portfolio
+
+    return Portfolio.delete(portfolio_uid)
+
+
+def delete_signal_metadata(signal_uid: str) -> dict[str, Any] | None:
+    """Unbind the signal from its dataset and delete its ``SignalMetadata`` row.
+
+    ms-markets refuses while a ``Portfolio`` follows the signal or an instance holds its
+    observations. ``None`` when the signal is not registered.
+    """
+    from msm.client.client import API_PREFIX
+    from msm_portfolios.api.datasets import PortfolioDatasets
+    from msm_portfolios.api.market_metadata import SignalMetadata
+
+    rows = SignalMetadata.filter(signal_uid=str(signal_uid), limit=1)
+    if not rows:
+        return None
+    PortfolioDatasets.unregister_signal(signal_uid=str(signal_uid))
+    return _client().request("DELETE", f"{API_PREFIX}/portfolio-signal/{rows[0].uid}/")
+
+
 __all__ = [
     "MARKETS_BATCH_SIZE",
+    "account_delete_preflight",
+    "clear_account_target",
+    "current_target_account_uids",
+    "delete_account",
+    "delete_portfolio",
+    "delete_signal_metadata",
+    "portfolio_delete_blockers",
     "account_target_positions",
     "allocate_account_virtual_funds",
     "assets_by_identifier",

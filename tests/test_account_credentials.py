@@ -13,7 +13,6 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from alpaca_connectors.account import api_key_fingerprint
-from alpaca_connectors.account.alpaca_account_details import AlpacaAccountDetails
 from alpaca_connectors.account.credentials import (
     CREDENTIAL_SECRET_NAME,
     CREDENTIAL_SOURCE_IMPORTED,
@@ -34,6 +33,7 @@ from alpaca_connectors.account.credentials import (
     submitted_alpaca_credentials,
     write_stored_credentials,
 )
+from alpaca_connectors.account.provider_account_details import ProviderAccountDetails
 from alpaca_connectors.platform_secrets import PlatformSecretAccessError
 from metatables.compiled_sql.v1 import compile_sqlalchemy_statement
 from metatables.encryption import (
@@ -46,7 +46,7 @@ from metatables.encryption import (
 
 RAW_API_KEY = "PKRAWVALUE123"
 RAW_SECRET_KEY = "SKRAWVALUE456"
-TABLE = AlpacaAccountDetails.__table__
+TABLE = ProviderAccountDetails.__table__
 WHEN = __import__("datetime").datetime(2026, 10, 24, 9, 0, tzinfo=__import__("datetime").UTC)
 
 

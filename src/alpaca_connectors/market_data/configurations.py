@@ -31,12 +31,21 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.types import Uuid
 
-from alpaca_connectors.metatables import AlpacaMarketsMetaTableMixin, ProjectStorageNameMixin
+from alpaca_connectors.metatables import (
+    PROJECT_TABLE_APP,
+    AlpacaMarketsMetaTableMixin,
+    ProjectStorageNameMixin,
+)
+from metatables import schema_table_name
 
 AssetSource = Literal["assets", "account_holdings", "portfolios"]
 ASSET_SOURCES: tuple[AssetSource, ...] = ("assets", "account_holdings", "portfolios")
+# A bars feed's sources; a portfolio's own configuration prices its portfolio (`portfolios`).
+FEED_ASSET_SOURCES: tuple[AssetSource, ...] = ("assets", "account_holdings")
 UTC = dt.timezone.utc
 _UNSET = object()
+# Named by its physical name: the portfolio tables import this module (ADR 0028, decision 4).
+PORTFOLIO_CONFIGURATION_TABLE = schema_table_name(PROJECT_TABLE_APP, "portfolio_configuration")
 
 
 def utc_now() -> dt.datetime:
@@ -48,17 +57,25 @@ class AlpacaBarsConfigurationTable(
     AlpacaMarketsMetaTableMixin,
     MarketsBase,
 ):
-    """One reusable stock-bar update configuration."""
+    """One stock-bar update configuration with exactly one parent (ADR 0028, decision 4).
+
+    A bars feed names its account, whose keys fetch its explicit assets or the account's
+    holdings. A portfolio's own configuration names its portfolio configuration, and fetches
+    that portfolio's assets with the portfolio's account's keys. Either goes with its parent.
+    Every configuration writes the one shared price table of its bar profile, whose rows name no
+    account.
+    """
 
     __project_storage_concept__ = "bars_configuration"
     __markets_base_identifier__ = "AlpacaBarsConfiguration"
     __metatable_description__ = (
         "One row per stored stock price-update configuration. Saved settings for downloading "
-        "stock prices (OHLCV bars) from Alpaca: the registered Alpaca brokerage account whose "
-        "keys to use, how to choose the assets to price (an explicit list, the account's recent "
-        "holdings, or every asset the portfolios that name it hold) and the bar frequency, data "
-        "feed and corporate-action adjustment; created by operators of the Alpaca Connectors "
-        "application."
+        "stock prices (OHLCV bars) from Alpaca: either a feed of one registered Alpaca account, "
+        "whose keys fetch an explicit list of assets or the account's recent holdings, or one "
+        "portfolio's own configuration, which fetches every asset that portfolio's signal has "
+        "published with the portfolio's account's keys; and the bar frequency, data feed and "
+        "corporate-action adjustment that choose the shared price table; created by the "
+        "account's owner through the Alpaca Connectors application."
     )
     __metatable_labels__ = ["equities", "prices", "configuration", "alpaca"]
     __table_args__ = markets_table_args(
@@ -67,10 +84,15 @@ class AlpacaBarsConfigurationTable(
             "asset_source IN ('assets', 'account_holdings', 'portfolios')",
             name="ck_alpaca_bars_configuration_asset_source",
         ),
+        CheckConstraint(
+            "(account_uid IS NULL) <> (portfolio_configuration_uid IS NULL)",
+            name="ck_alpaca_bars_configuration_one_parent",
+        ),
         Index(None, "name"),
         Index(None, "enabled"),
         Index(None, "account_uid"),
         Index(None, "asset_source"),
+        Index(None, "portfolio_configuration_uid", unique=True),
     )
 
     uid: Mapped[uuid.UUID] = mapped_column(
@@ -107,16 +129,30 @@ class AlpacaBarsConfigurationTable(
             ),
         },
     )
-    account_uid: Mapped[uuid.UUID] = mapped_column(
+    account_uid: Mapped[uuid.UUID | None] = mapped_column(
         Uuid(as_uuid=True),
-        ForeignKey(f"{AccountTable.__table__.fullname}.uid", ondelete="RESTRICT"),
-        nullable=False,
+        ForeignKey(f"{AccountTable.__table__.fullname}.uid", ondelete="CASCADE"),
+        nullable=True,
         info={
             "label": "Account UID",
             "description": (
-                "Main Sequence account UID of the registered Alpaca brokerage account whose API "
-                "keys authorize the price requests and, for account_holdings, whose holdings "
-                "choose the assets."
+                "For a bars feed, the Main Sequence account UID of the registered Alpaca "
+                "brokerage account it belongs to, whose API keys authorize the price requests "
+                "and, for account_holdings, whose holdings choose the assets; the feed is deleted "
+                "with the account. Null for a portfolio's own configuration."
+            ),
+        },
+    )
+    portfolio_configuration_uid: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey(f"{PORTFOLIO_CONFIGURATION_TABLE}.uid", ondelete="CASCADE"),
+        nullable=True,
+        info={
+            "label": "Portfolio configuration UID",
+            "description": (
+                "For a portfolio's own configuration, the UID of the portfolio configuration it "
+                "belongs to and is deleted with; its runs use that portfolio's account's keys. "
+                "Null for a bars feed."
             ),
         },
     )
@@ -128,8 +164,8 @@ class AlpacaBarsConfigurationTable(
             "description": (
                 "How the assets to price are chosen: assets for an explicit list, "
                 "account_holdings for the account's latest holdings from the past 30 days, or "
-                "portfolios for every asset ever published by the live portfolios that name this "
-                "configuration."
+                "portfolios for every asset ever published by the signal of the portfolio the "
+                "configuration belongs to."
             ),
         },
     )
@@ -259,7 +295,8 @@ class AlpacaBarsConfiguration(MarketsMetaTableRow):
     name: str
     description: str | None
     enabled: bool
-    account_uid: uuid.UUID
+    account_uid: uuid.UUID | None = None
+    portfolio_configuration_uid: uuid.UUID | None = None
     asset_source: AssetSource
     frequency_id: str
     feed: str
@@ -290,12 +327,24 @@ def validate_configuration_scope(
     *,
     asset_source: str,
     asset_uids: list[uuid.UUID | str] | None,
+    portfolio_owned: bool = False,
 ) -> tuple[AssetSource, list[uuid.UUID]]:
-    """Normalize and validate the mutually exclusive source shapes."""
+    """Normalize and validate the mutually exclusive source shapes.
+
+    A bars feed of an account prices explicit assets or the account's holdings; a portfolio's own
+    configuration prices that portfolio's assets, the ``portfolios`` source (ADR 0028).
+    """
     normalized_source = asset_source.strip().lower()
     if normalized_source not in ASSET_SOURCES:
         raise ValueError(
             f"Unsupported asset_source {asset_source!r}. Expected one of {list(ASSET_SOURCES)!r}."
+        )
+    if portfolio_owned and normalized_source != "portfolios":
+        raise ValueError("A portfolio's own bars configuration prices its portfolio's assets.")
+    if not portfolio_owned and normalized_source not in FEED_ASSET_SOURCES:
+        raise ValueError(
+            "A bars feed prices explicit assets or its account's holdings; a portfolio's "
+            "own bars configuration is created with the portfolio."
         )
     normalized_asset_uids = list(
         dict.fromkeys(uuid.UUID(str(asset_uid)) for asset_uid in (asset_uids or []))
@@ -326,10 +375,57 @@ def _validate_references(
         raise LookupError(f"These Asset UIDs do not exist: {sorted(missing_assets)!r}")
 
 
+def bar_configuration_account_uid(configuration: AlpacaBarsConfiguration) -> uuid.UUID:
+    """The account whose keys run the configuration: a feed's own, or its portfolio's account."""
+    if configuration.account_uid is not None:
+        return uuid.UUID(str(configuration.account_uid))
+    from alpaca_connectors.portfolios.configurations import get_portfolio_configuration
+
+    portfolio = get_portfolio_configuration(configuration.portfolio_configuration_uid)
+    if portfolio is None or portfolio.account_uid is None:
+        raise LookupError(
+            f"Bar configuration {configuration.uid!s} belongs to a portfolio without an account."
+        )
+    return uuid.UUID(str(portfolio.account_uid))
+
+
+def portfolio_bar_configuration(
+    portfolio_configuration_uid: uuid.UUID | str,
+) -> AlpacaBarsConfiguration | None:
+    """The portfolio's own bars configuration (ADR 0028, decision 4)."""
+    from alpaca_connectors.runtime import account_runtime_models, start_markets_engine
+
+    start_markets_engine(models=account_runtime_models())
+    rows = AlpacaBarsConfiguration.filter(
+        portfolio_configuration_uid=uuid.UUID(str(portfolio_configuration_uid)), limit=1
+    )
+    return _with_memberships(rows[0]) if rows else None
+
+
+def portfolio_bar_configurations(
+    portfolio_configuration_uids: list[uuid.UUID | str],
+) -> dict[str, AlpacaBarsConfiguration]:
+    """The own bars configurations of several portfolios, by portfolio configuration UID."""
+    from alpaca_connectors.markets_api import read_in_batches
+    from alpaca_connectors.runtime import account_runtime_models, start_markets_engine
+
+    uids = sorted({str(uuid.UUID(str(uid))) for uid in portfolio_configuration_uids})
+    if not uids:
+        return {}
+    start_markets_engine(models=account_runtime_models())
+    rows = read_in_batches(
+        lambda batch: AlpacaBarsConfiguration.filter(
+            portfolio_configuration_uid__in=batch, limit=len(batch)
+        ),
+        uids,
+    )
+    return {str(row.portfolio_configuration_uid): row for row in rows}
+
+
 def bar_configurations_for_account(
     account_uid: uuid.UUID | str,
 ) -> list[AlpacaBarsConfiguration]:
-    """Return stored bar configurations that run with one account's keys."""
+    """Return the account's bars feeds, which run with its keys and go with it."""
     from alpaca_connectors.runtime import account_runtime_models, start_markets_engine
 
     start_markets_engine(models=account_runtime_models())
@@ -533,6 +629,66 @@ def create_bar_configuration(
     return _with_memberships(row)
 
 
+def create_portfolio_bar_configuration(
+    *,
+    portfolio_configuration_uid: uuid.UUID | str,
+    name: str,
+    frequency_id: str,
+    feed: str,
+    adjustment: str,
+    description: str | None = None,
+    enabled: bool = True,
+    scheduled: bool = True,
+) -> AlpacaBarsConfiguration:
+    """Store a portfolio's own bars configuration (ADR 0028, decision 4).
+
+    It names the portfolio configuration, not an account: its runs use the portfolio's account's
+    keys, and it is deleted with the portfolio. It prices every asset the portfolio's signal has
+    published, into the shared table of its bar profile.
+    """
+    from msm.bootstrap import resolve_runtime
+    from msm.repositories.crud import create_model
+
+    from alpaca_connectors.market_data.alpaca_bars_support import (
+        normalize_adjustment,
+        normalize_feed,
+        normalize_frequency_id,
+    )
+    from alpaca_connectors.market_data.storage import storage_for
+    from alpaca_connectors.runtime import account_runtime_models, start_markets_engine
+
+    normalized_frequency = normalize_frequency_id(frequency_id)
+    normalized_feed = normalize_feed(feed)
+    normalized_adjustment = normalize_adjustment(adjustment)
+    storage_for(normalized_frequency, normalized_feed, normalized_adjustment)
+    start_markets_engine(models=account_runtime_models())
+    now = utc_now()
+    values: dict[str, Any] = {
+        "uid": new_markets_uid(),
+        "name": _normalize_name(name),
+        "description": _normalize_description(description),
+        "enabled": bool(enabled),
+        "scheduled": bool(scheduled),
+        "account_uid": None,
+        "portfolio_configuration_uid": uuid.UUID(str(portfolio_configuration_uid)),
+        "asset_source": "portfolios",
+        "frequency_id": normalized_frequency,
+        "feed": normalized_feed,
+        "adjustment": normalized_adjustment,
+        "created_at": now,
+        "updated_at": now,
+    }
+    runtime = resolve_runtime(
+        models=[AlpacaBarsConfigurationTable, AlpacaBarsConfigurationAssetTable],
+        row_model_name="AlpacaBarsConfiguration",
+    )
+    result = create_model(runtime.context, model=AlpacaBarsConfigurationTable, values=values)
+    rows = operation_result_rows(result)
+    if not rows:
+        raise RuntimeError("Bar configuration create returned no row.")
+    return _with_memberships(AlpacaBarsConfiguration.model_validate(rows[0]), asset_uids=[])
+
+
 def get_bar_configuration(
     configuration_uid: uuid.UUID | str,
 ) -> AlpacaBarsConfiguration | None:
@@ -551,6 +707,8 @@ def list_bar_configurations(
     enabled: bool | None = None,
     scheduled: bool | None = None,
     asset_source: str | None = None,
+    account_uids: list[uuid.UUID | str] | None = None,
+    portfolio_owned: bool | None = None,
     ordering: str = "name",
 ) -> tuple[list[AlpacaBarsConfiguration], int]:
     from msm.bootstrap import resolve_runtime
@@ -574,6 +732,14 @@ def list_bar_configurations(
         if normalized_source not in ASSET_SOURCES:
             raise ValueError(f"Unsupported asset_source filter {asset_source!r}.")
         statement = statement.where(AlpacaBarsConfigurationTable.asset_source == normalized_source)
+    if account_uids is not None:
+        accounts = [uuid.UUID(str(uid)) for uid in account_uids]
+        if not accounts:
+            return [], 0
+        statement = statement.where(AlpacaBarsConfigurationTable.account_uid.in_(accounts))
+    if portfolio_owned is not None:
+        column = AlpacaBarsConfigurationTable.portfolio_configuration_uid
+        statement = statement.where(column.is_not(None) if portfolio_owned else column.is_(None))
     if search:
         pattern = f"%{search.strip()}%"
         statement = statement.where(
@@ -626,12 +792,13 @@ def scheduled_bar_configuration_uids() -> list[uuid.UUID]:
     """Return the configurations the daily bars dispatcher's scheduled run includes.
 
     A configuration is updated daily when it is both enabled and scheduled (ADR 0021): an
-    unscheduled one still runs on demand, and a disabled one runs neither way. Ordered by name,
-    then UID.
+    unscheduled one still runs on demand, and a disabled one runs neither way. A ``portfolios``
+    feed that only portfolios not yet adopted name prices nothing and is left out (ADR 0028).
+    Ordered by name, then UID.
     """
     from msm.bootstrap import resolve_runtime
     from msm.repositories.base import compile_markets_statement, execute_markets_operation
-    from sqlalchemy import select
+    from sqlalchemy import or_, select
 
     from alpaca_connectors.runtime import account_runtime_models, start_markets_engine
 
@@ -640,7 +807,11 @@ def scheduled_bar_configuration_uids() -> list[uuid.UUID]:
     runtime = resolve_runtime(models=[table], row_model_name="AlpacaBarsConfiguration")
     operation = compile_markets_statement(
         select(table.uid)
-        .where(table.enabled.is_(True), table.scheduled.is_(True))
+        .where(
+            table.enabled.is_(True),
+            table.scheduled.is_(True),
+            or_(table.asset_source != "portfolios", table.portfolio_configuration_uid.is_not(None)),
+        )
         .order_by(table.name.asc(), table.uid.asc()),
         context=runtime.context,
         operation="select",
@@ -670,7 +841,9 @@ def update_bar_configuration(
     """Update the configuration's fields, its flags, or both.
 
     Changing only ``scheduled`` skips the scope and reference validation, so a configuration
-    whose account is gone can still be left out of the daily run (as for portfolios).
+    whose account is gone can still be left out of the daily run (as for portfolios). A
+    portfolio's own configuration keeps its portfolio and its ``portfolios`` source; only its
+    name, description, flags and bar profile change.
     """
     from alpaca_connectors.market_data.alpaca_bars_support import (
         normalize_adjustment,
@@ -702,6 +875,9 @@ def update_bar_configuration(
             {"scheduled": bool(scheduled), "updated_at": utc_now()},
         )
         return _with_memberships(row, asset_uids=list(current.asset_uids))
+    portfolio_owned = current.portfolio_configuration_uid is not None
+    if portfolio_owned and account_uid is not None:
+        raise ValueError("A portfolio's own bars configuration uses its portfolio's account.")
     requested_source = asset_source if asset_source is not None else current.asset_source
     if asset_source is None and asset_uids is _UNSET:
         requested_asset_uids = list(current.asset_uids)
@@ -710,15 +886,18 @@ def update_bar_configuration(
     source, normalized_asset_uids = validate_configuration_scope(
         asset_source=requested_source,
         asset_uids=requested_asset_uids,
+        portfolio_owned=portfolio_owned,
     )
-    normalized_account_uid = uuid.UUID(str(account_uid or current.account_uid))
     normalized_frequency = normalize_frequency_id(frequency_id or current.frequency_id)
     normalized_feed = normalize_feed(feed or current.feed)
     normalized_adjustment = normalize_adjustment(adjustment or current.adjustment)
     storage_for(normalized_frequency, normalized_feed, normalized_adjustment)
-    _validate_references(account_uid=normalized_account_uid, asset_uids=normalized_asset_uids)
-    values: dict[str, Any] = {
-        "account_uid": normalized_account_uid,
+    values: dict[str, Any] = {}
+    if not portfolio_owned:
+        normalized_account_uid = uuid.UUID(str(account_uid or current.account_uid))
+        _validate_references(account_uid=normalized_account_uid, asset_uids=normalized_asset_uids)
+        values["account_uid"] = normalized_account_uid
+    values |= {
         "asset_source": source,
         "frequency_id": normalized_frequency,
         "feed": normalized_feed,
@@ -741,8 +920,14 @@ def update_bar_configuration(
 
 
 def delete_bar_configuration(configuration_uid: uuid.UUID | str) -> dict[str, Any]:
-    if get_bar_configuration(configuration_uid) is None:
+    """Delete a bars feed; a portfolio's own configuration goes only with its portfolio."""
+    current = get_bar_configuration(configuration_uid)
+    if current is None:
         raise LookupError(f"Bar configuration {configuration_uid!s} does not exist.")
+    if current.portfolio_configuration_uid is not None:
+        raise ValueError(
+            "This bars configuration belongs to a portfolio; it is deleted with the portfolio."
+        )
     return AlpacaBarsConfiguration.delete(configuration_uid)
 
 
@@ -756,12 +941,17 @@ __all__ = [
     "AlpacaBarsConfigurationAssetTable",
     "AlpacaBarsConfigurationTable",
     "AssetSource",
+    "FEED_ASSET_SOURCES",
+    "bar_configuration_account_uid",
     "create_bar_configuration",
+    "create_portfolio_bar_configuration",
     "bar_configurations_for_account",
     "delete_bar_configuration",
     "disable_bar_configuration",
     "get_bar_configuration",
     "list_bar_configurations",
+    "portfolio_bar_configuration",
+    "portfolio_bar_configurations",
     "project_configuration_models",
     "scheduled_bar_configuration_uids",
     "update_bar_configuration",

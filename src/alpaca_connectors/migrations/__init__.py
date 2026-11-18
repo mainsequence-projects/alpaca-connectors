@@ -11,7 +11,7 @@ from msm.models import (
 from msm.models.assets.core import AssetTable
 from msm_portfolios.models import SignalMetadataTable
 
-from alpaca_connectors.account.alpaca_account_details import project_account_models
+from alpaca_connectors.account.provider_account_details import project_account_models
 from alpaca_connectors.assets.alpaca_asset_details import project_asset_models
 from alpaca_connectors.instances import project_instance_models
 from alpaca_connectors.market_data import project_configuration_models, project_storage_models

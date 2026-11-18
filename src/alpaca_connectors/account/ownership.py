@@ -49,6 +49,15 @@ class AccountOwnedByAnotherError(Exception):
         super().__init__("This Alpaca account is registered to another owner.")
 
 
+class AccountWithoutOwnerError(Exception):
+    """Nobody creates what belongs to an account without an owner (ADR 0028, decision 3)."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "This Alpaca account has no owner; it takes one at its next key registration."
+        )
+
+
 class AccountInUseError(Exception):
     """An external person's registration would claim an account that configurations run on."""
 
@@ -97,6 +106,24 @@ def require_owner_may_configure(
     require_owner_may_register(registration, owner)
 
 
+def require_account_owner(
+    registration: Mapping[str, Any] | None,
+    owner: AccountOwner,
+) -> None:
+    """Only the account's owner creates or changes its portfolios, signals and feeds (ADR 0028).
+
+    An account without an owner takes one at its next key registration (ADR 0019 section 8);
+    until then nobody creates anything on it. A missing registration is left for the caller.
+    """
+    if not registration:
+        return
+    recorded = registered_owner(registration)
+    if recorded is None:
+        raise AccountWithoutOwnerError()
+    if recorded != owner:
+        raise AccountOwnedByAnotherError()
+
+
 def is_claim_by_external_person(
     registration: Mapping[str, Any] | None,
     owner: AccountOwner | None,
@@ -111,8 +138,10 @@ __all__ = [
     "AccountInUseError",
     "AccountOwnedByAnotherError",
     "AccountOwner",
+    "AccountWithoutOwnerError",
     "is_claim_by_external_person",
     "registered_owner",
+    "require_account_owner",
     "require_owner_may_configure",
     "require_owner_may_register",
 ]

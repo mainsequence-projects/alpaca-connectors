@@ -1,4 +1,10 @@
-"""API shaping for durable Alpaca bar configurations and update actions."""
+"""API shaping for durable Alpaca bar configurations and update actions.
+
+A bars feed belongs to its account and a portfolio's own configuration to its portfolio
+(ADR 0028, decision 4). Only the account's owner creates or changes a feed, and only the
+portfolio's owner changes the portfolio's own configuration, which is created and deleted with
+the portfolio.
+"""
 
 from __future__ import annotations
 
@@ -23,7 +29,7 @@ from ..schemas import (
     BarConfigurationUpdateAcceptedResponse,
     BarConfigurationUpdateRequest,
 )
-from .accounts import require_owner_may_configure_account
+from .accounts import require_account_owned_by
 from .common import collection_response
 
 
@@ -44,6 +50,7 @@ def list_configurations(
     asset_source: str | None,
     ordering: str,
     scheduled: bool | None = None,
+    portfolio_owned: bool | None = None,
 ):
     items, total = list_bar_configurations(
         limit=limit,
@@ -52,23 +59,36 @@ def list_configurations(
         enabled=enabled,
         scheduled=scheduled,
         asset_source=asset_source,
+        portfolio_owned=portfolio_owned,
         ordering=ordering,
     )
     return collection_response(items=items, total=total, limit=limit, offset=offset)
 
 
-def _require_owner_of_configured_account(
+def _require_owner_of_configuration(
     configuration_uid: str,
     account_uid: Any,
     owner: AccountOwner,
 ) -> None:
-    """Check the account the configuration will run with: the new one, else its current one."""
-    if account_uid is None:
-        current = get_bar_configuration(configuration_uid)
-        if current is None:
-            return  # The configuration service reports the missing configuration.
-        account_uid = current.account_uid
-    require_owner_may_configure_account(str(account_uid), owner)
+    """Only the owner of what the configuration belongs to changes it.
+
+    A feed belongs to its account, the new one too when the change moves it; a portfolio's own
+    configuration to its portfolio, whose owner owns the portfolio's account.
+    """
+    from alpaca_connectors.portfolios.configurations import get_portfolio_configuration
+    from alpaca_connectors.portfolios.provided_weights import require_portfolio_owner
+
+    current = get_bar_configuration(configuration_uid)
+    if current is None:
+        return  # The configuration service reports the missing configuration.
+    if current.portfolio_configuration_uid is not None:
+        portfolio = get_portfolio_configuration(current.portfolio_configuration_uid)
+        if portfolio is not None:
+            require_portfolio_owner(portfolio, owner)
+        return
+    require_account_owned_by(current.account_uid, owner)
+    if account_uid is not None and str(account_uid) != str(current.account_uid):
+        require_account_owned_by(account_uid, owner)
 
 
 def create_configuration(
@@ -76,8 +96,8 @@ def create_configuration(
     *,
     owner: AccountOwner,
 ) -> BarConfigurationResponse:
-    """Create a configuration; an account another owner holds is refused (ADR 0022)."""
-    require_owner_may_configure_account(str(request.account_uid), owner)
+    """Create a feed of an account its owner owns (ADR 0028, decisions 3 and 4)."""
+    require_account_owned_by(request.account_uid, owner)
     return _configuration_response(create_bar_configuration(**request.model_dump()))
 
 
@@ -92,8 +112,8 @@ def update_configuration(
     *,
     owner: AccountOwner,
 ) -> BarConfigurationResponse:
-    """Update a configuration; one that runs with another owner's keys is refused (ADR 0022)."""
-    _require_owner_of_configured_account(configuration_uid, request.account_uid, owner)
+    """Update a configuration; anyone but the owner of what it belongs to is refused."""
+    _require_owner_of_configuration(configuration_uid, request.account_uid, owner)
     return _configuration_response(
         update_bar_configuration(
             configuration_uid,
@@ -102,7 +122,9 @@ def update_configuration(
     )
 
 
-def delete_configuration(configuration_uid: str) -> dict:
+def delete_configuration(configuration_uid: str, *, owner: AccountOwner) -> dict:
+    """Delete a feed for its account's owner; a portfolio's own goes with its portfolio."""
+    _require_owner_of_configuration(configuration_uid, None, owner)
     return delete_bar_configuration(configuration_uid)
 
 

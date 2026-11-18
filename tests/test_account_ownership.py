@@ -484,13 +484,23 @@ def _scoped_routes(client: TestClient, headers: dict[str, str]) -> dict[str, int
         "update": client.patch(
             "/v1/accounts/account-uid", json={"account_name": "x"}, headers=headers
         ).status_code,
-        "delete": client.delete("/v1/accounts/account-uid", headers=headers).status_code,
+        "delete": client.delete(
+            "/v1/accounts/account-uid",
+            params={"confirm": "DELETE account-uid"},
+            headers=headers,
+        ).status_code,
+        "plan delete": client.post(
+            "/v1/accounts/account-uid/actions/delete/preflight", headers=headers
+        ).status_code,
+        "remove keys": client.post(
+            "/v1/accounts/account-uid/actions/remove-keys", headers=headers
+        ).status_code,
         "refresh": client.post(
             "/v1/accounts/account-uid/actions/refresh", headers=headers
         ).status_code,
         "sync": client.post("/v1/accounts/account-uid/actions/sync", headers=headers).status_code,
-        "remove": client.post(
-            "/v1/accounts/actions/remove", json=selection, headers=headers
+        "remove keys of several": client.post(
+            "/v1/accounts/actions/remove-keys", json=selection, headers=headers
         ).status_code,
         "capture": client.post(
             "/v1/accounts/actions/capture-holdings", json=selection, headers=headers
@@ -510,7 +520,9 @@ def test_an_external_person_reaches_no_other_persons_account(vouching) -> None:
             return_value=others,
         ),
         patch("alpaca_connectors.api.app.routers.accounts.update_account") as update,
-        patch("alpaca_connectors.api.app.routers.accounts.remove_account") as remove,
+        patch("alpaca_connectors.api.app.routers.accounts.remove_keys") as remove,
+        patch("alpaca_connectors.api.app.routers.accounts.delete_account") as delete,
+        patch("alpaca_connectors.api.app.routers.accounts.preflight_delete") as plan_delete,
         patch("alpaca_connectors.api.app.routers.accounts.refresh_account") as refresh,
         patch("alpaca_connectors.api.app.routers.accounts.sync_account") as sync,
         patch("alpaca_connectors.api.app.routers.accounts.capture_holdings") as capture,
@@ -518,7 +530,7 @@ def test_an_external_person_reaches_no_other_persons_account(vouching) -> None:
     ):
         answers = _scoped_routes(vouching.client, vouching.headers(**baggage()))
     assert set(answers.values()) == {404}, answers
-    for touched in (update, remove, refresh, sync, capture, submit):
+    for touched in (update, remove, delete, plan_delete, refresh, sync, capture, submit):
         touched.assert_not_called()
 
 
@@ -592,13 +604,13 @@ def test_revision_0022_adds_the_owner_and_backfills_it_from_the_key_author() -> 
     from sqlalchemy.dialects import postgresql
     from sqlalchemy.schema import CreateIndex
 
-    from alpaca_connectors.account.alpaca_account_details import AlpacaAccountDetails
+    from alpaca_connectors.account.provider_account_details import ProviderAccountDetails
 
     revision = _revision()
     assert (revision.revision, revision.down_revision) == ("0022", "0021")
     [model_index] = [
         index
-        for index in AlpacaAccountDetails.__table__.indexes
+        for index in ProviderAccountDetails.__table__.indexes
         if [column.name for column in index.columns] == ["owner_gateway_uid", "owner_user_uid"]
     ]
     compiled = str(CreateIndex(model_index).compile(dialect=postgresql.dialect()))

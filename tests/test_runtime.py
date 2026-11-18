@@ -32,11 +32,15 @@ def test_portfolio_runtime_includes_project_foreign_key_dependencies(remote_back
     bars_configuration = "alpaca_connectors__bars_configuration"
     rebalance_configuration = "alpaca_connectors__portfolio_rebalance_configuration"
     portfolio_configuration = "alpaca_connectors__portfolio_configuration"
+    signal_definition = "alpaca_connectors__signal_definition"
 
     assert bars_configuration in table_names
     assert application_tables.issubset(table_names)
-    assert table_names.index(bars_configuration) < table_names.index(portfolio_configuration)
+    # A portfolio's own bars configuration names its portfolio configuration (ADR 0028), which
+    # names a rebalance configuration and a signal definition of its account.
+    assert table_names.index(portfolio_configuration) < table_names.index(bars_configuration)
     assert table_names.index(rebalance_configuration) < table_names.index(portfolio_configuration)
+    assert table_names.index(signal_definition) < table_names.index(portfolio_configuration)
 
 
 def test_runtimes_attach_only_this_applications_tables(remote_backend) -> None:

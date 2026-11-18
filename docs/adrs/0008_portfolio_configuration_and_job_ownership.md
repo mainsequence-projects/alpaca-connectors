@@ -5,6 +5,10 @@
 Accepted. The Job-ownership decision remains authoritative; its ImmediateSignal timing decision is
 superseded by [ADR 0009](0009_calendar_event_portfolio_timing.md).
 
+Amended on 2026-11-18 by [ADR 0028](0028_every_portfolio_belongs_to_one_account.md): the portfolio
+configuration names its account and the signal definition it follows, and its own bars configuration
+names it (decisions 3 to 5).
+
 Amended on 2026-10-05 by [ADR 0013](0013_workflow_declared_configuration_jobs.md): one portfolio
 Job declared in `.mainsequence/workflows/alpaca-connectors-api.yaml` runs every Portfolio
 Configuration, because `mainsequence` 9.0.2 removed runtime Job creation. Configurations keep a

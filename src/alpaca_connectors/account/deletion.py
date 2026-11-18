@@ -1,0 +1,294 @@
+"""Deleting an account deletes everything that belongs to it (ADR 0028, decision 8).
+
+ms-markets' rules stay as they are; the order of this connector's calls is the one their keys
+impose: the account's history before its ``Portfolio`` rows, a ``Portfolio`` before the signal it
+follows.
+
+1. Refused before anything changes when ms-markets' account delete preflight reports a blocker,
+   or when another account's current target holds one of the account's portfolios (ms-markets
+   ADR 0049: retiring is refused while any current target names the portfolio).
+2. The account's own current target is cleared, since it also names its portfolios.
+3. Each portfolio ends as every portfolio does (ADR 0027): its ``Portfolio`` is retired and
+   recorded under the account, and the configuration goes with its own bars configuration.
+   A signal definition whose signal no retired ``Portfolio`` follows has its signal deleted now.
+4. The account's orders and trades in this application's instances are deleted: their
+   ``RESTRICT`` keys would refuse the next step.
+5. ``Account.delete`` deletes the account with its whole history in one transaction;
+   ``ProviderAccountDetails``, the account's bars feeds and its signal definitions go with it.
+6. Each retired ``Portfolio`` of the account that no other account's history names is deleted,
+   its series in this application's instances first. One another account's history names stays
+   retired, recorded.
+7. Each signal no ``Portfolio`` follows any more is deleted.
+
+Every step can run again: a retry after a partial failure finds the records of step 3 and
+finishes steps 6 and 7.
+"""
+
+from __future__ import annotations
+
+import datetime as dt
+import uuid
+from dataclasses import dataclass, field
+from typing import Any
+
+UTC = dt.timezone.utc
+
+
+class AccountDeleteRefused(Exception):
+    """The account cannot be deleted now; nothing changed. Never names another account."""
+
+    def __init__(self, blockers: list[str]) -> None:
+        super().__init__("The account cannot be deleted: " + "; ".join(blockers))
+        self.blockers = blockers
+
+
+@dataclass(frozen=True, slots=True)
+class AccountDeletePreflight:
+    account_uid: str
+    blockers: list[str]
+    warnings: list[str]
+    portfolio_count: int
+    signal_definition_count: int
+    bars_feed_count: int
+    ended_portfolio_count: int
+
+    @property
+    def allowed(self) -> bool:
+        return not self.blockers
+
+    def summary(self) -> dict[str, Any]:
+        return {
+            "account_uid": self.account_uid,
+            "allowed": self.allowed,
+            "blockers": list(self.blockers),
+            "warnings": list(self.warnings),
+            "portfolio_count": self.portfolio_count,
+            "signal_definition_count": self.signal_definition_count,
+            "bars_feed_count": self.bars_feed_count,
+            "ended_portfolio_count": self.ended_portfolio_count,
+        }
+
+
+@dataclass(slots=True)
+class AccountDeletion:
+    account_uid: str
+    ended_portfolio_count: int = 0
+    deleted_portfolio_uids: list[str] = field(default_factory=list)
+    kept_portfolio_uids: list[str] = field(default_factory=list)
+    deleted_signal_uids: list[str] = field(default_factory=list)
+    kept_signal_uids: list[str] = field(default_factory=list)
+    markets: dict[str, Any] | None = None
+
+    def summary(self) -> dict[str, Any]:
+        return {
+            "account_uid": self.account_uid,
+            "deleted": True,
+            "ended_portfolio_count": self.ended_portfolio_count,
+            "deleted_portfolio_uids": list(self.deleted_portfolio_uids),
+            "kept_portfolio_uids": list(self.kept_portfolio_uids),
+            "deleted_signal_uids": list(self.deleted_signal_uids),
+            "kept_signal_uids": list(self.kept_signal_uids),
+            "markets": self.markets,
+        }
+
+
+def _delete_instance_rows(model: Any, column: str, values: list[str]) -> None:
+    """Delete this application's instance rows whose ``column`` is one of ``values``."""
+    from msm.bootstrap import resolve_runtime
+    from msm.repositories.base import compile_markets_statement, execute_markets_operation
+    from sqlalchemy import delete
+
+    if not values:
+        return
+    runtime = resolve_runtime(models=[model], row_model_name="alpaca_connectors.account_deletion")
+    operation = compile_markets_statement(
+        delete(model).where(getattr(model, column).in_(values)),
+        context=runtime.context,
+        operation="delete",
+    )
+    execute_markets_operation(operation, context=runtime.context)
+
+
+def delete_account_orders_and_trades(account_identifier: str) -> None:
+    """Delete the account's orders and trades from this application's instances (ADR 0016)."""
+    from alpaca_connectors.instances import AlpacaOrdersStorage, AlpacaTradesStorage
+
+    for model in (AlpacaTradesStorage, AlpacaOrdersStorage):
+        _delete_instance_rows(model, "account_identifier", [account_identifier])
+
+
+def delete_portfolio_series(portfolio_identifier: str) -> None:
+    """Delete a portfolio's values, weights and rebalance state from this application's instances.
+
+    They reference the ``Portfolio`` with ``RESTRICT``, so they go before it.
+    """
+    from alpaca_connectors.instances import (
+        AlpacaPortfolioRebalanceStateStorage,
+        AlpacaPortfoliosStorage,
+        AlpacaPortfolioWeightsStorage,
+    )
+
+    for model in (
+        AlpacaPortfolioRebalanceStateStorage,
+        AlpacaPortfolioWeightsStorage,
+        AlpacaPortfoliosStorage,
+    ):
+        _delete_instance_rows(model, "portfolio_identifier", [portfolio_identifier])
+
+
+def _account_definitions(account_uid: str) -> list[Any]:
+    from alpaca_connectors.markets_api import MARKETS_BATCH_SIZE
+    from alpaca_connectors.portfolios.signal_definitions import list_signal_definitions
+
+    rows: list[Any] = []
+    while True:
+        page, total = list_signal_definitions(
+            account_uids=[account_uid], limit=MARKETS_BATCH_SIZE, offset=len(rows)
+        )
+        rows.extend(page)
+        if not page or len(rows) >= total:
+            return rows
+
+
+def preflight_account_delete(account_uid: Any) -> AccountDeletePreflight:
+    """What deleting the account would delete and what refuses it; nothing changes."""
+    from alpaca_connectors.market_data.configurations import bar_configurations_for_account
+    from alpaca_connectors.markets_api import account_delete_preflight, current_target_account_uids
+    from alpaca_connectors.portfolios.configurations import (
+        ended_portfolios_of_account,
+        portfolio_configurations_of_account,
+    )
+
+    normalized = str(uuid.UUID(str(account_uid)))
+    markets = account_delete_preflight(normalized) or {}
+    blockers = [str(blocker) for blocker in markets.get("blockers") or []]
+    warnings = [str(warning) for warning in markets.get("warnings") or []]
+    portfolios = portfolio_configurations_of_account(normalized)
+    held = sum(
+        1
+        for configuration in portfolios
+        if configuration.portfolio_uid is not None
+        and set(current_target_account_uids(configuration.portfolio_uid)) - {normalized}
+    )
+    if held:
+        # ms-markets' rule (its ADR 0049): never names the other accounts (ADR 0019).
+        blockers.append(
+            f"{held} of the account's portfolios are held by another account's current target; "
+            "that account's owner must change its target first."
+        )
+    return AccountDeletePreflight(
+        account_uid=normalized,
+        blockers=blockers,
+        warnings=warnings,
+        portfolio_count=len(portfolios),
+        signal_definition_count=len(_account_definitions(normalized)),
+        bars_feed_count=len(bar_configurations_for_account(normalized)),
+        ended_portfolio_count=len(ended_portfolios_of_account(normalized)),
+    )
+
+
+def _clear_own_target(account_uid: str) -> None:
+    from alpaca_connectors.markets_api import account_target_positions, clear_account_target
+
+    target = account_target_positions(account_uid)
+    if getattr(target, "positions", None):
+        clear_account_target(account_uid, at=dt.datetime.now(UTC).replace(microsecond=0))
+
+
+def _finish_portfolios(account_uid: str, deletion: AccountDeletion) -> list[str]:
+    """Step 6: delete each recorded ``Portfolio`` nothing else names; answer their signals."""
+    from alpaca_connectors.markets_api import delete_portfolio, portfolio_delete_blockers
+    from alpaca_connectors.portfolios.configurations import (
+        ended_portfolios_of_account,
+        forget_ended_portfolio,
+    )
+    from alpaca_connectors.portfolios.provided_weights import (
+        provided_portfolio_unique_identifier,
+    )
+
+    signals: list[str] = []
+    for record in ended_portfolios_of_account(account_uid):
+        signals.append(record.signal_uid)
+        portfolio_uid = str(record.portfolio_uid)
+        if portfolio_delete_blockers(portfolio_uid):
+            deletion.kept_portfolio_uids.append(portfolio_uid)
+            continue
+        delete_portfolio_series(
+            provided_portfolio_unique_identifier(record.portfolio_configuration_uid)
+        )
+        try:
+            delete_portfolio(portfolio_uid)
+        except LookupError:
+            pass  # Already deleted by an earlier attempt.
+        forget_ended_portfolio(record)
+        deletion.deleted_portfolio_uids.append(portfolio_uid)
+    return signals
+
+
+def _finish_signals(signal_uids: list[str], deletion: AccountDeletion) -> None:
+    """Step 7: delete each signal unless a retired ``Portfolio`` kept for history follows it."""
+    from alpaca_connectors.portfolios.signal_definitions import delete_signal_rows
+
+    for signal_uid in sorted(set(signal_uids)):
+        if delete_signal_rows(signal_uid) == "deleted":
+            deletion.deleted_signal_uids.append(signal_uid)
+        else:
+            deletion.kept_signal_uids.append(signal_uid)
+
+
+def delete_account(account_uid: Any) -> AccountDeletion:
+    """Delete the account and everything that belongs to it, in the order ms-markets allows.
+
+    The caller has checked the account's owner. Raises ``AccountDeleteRefused`` before anything
+    changes when the preflight finds a blocker.
+    """
+    from msm.api.remote import MarketsConflictError
+
+    from alpaca_connectors.account.services import get_account_registration
+    from alpaca_connectors.markets_api import delete_account as delete_markets_account
+    from alpaca_connectors.portfolios.configurations import portfolio_configurations_of_account
+    from alpaca_connectors.portfolios.provided_weights import end_portfolio_configuration
+    from alpaca_connectors.portfolios.signal_definitions import (
+        definition_signal_uid,
+        delete_signal_rows,
+        signal_kept_by_ended_portfolio,
+    )
+    from alpaca_connectors.runtime import account_runtime_models, start_markets_engine
+
+    normalized = str(uuid.UUID(str(account_uid)))
+    start_markets_engine(models=account_runtime_models())
+    registration = get_account_registration(normalized)
+    deletion = AccountDeletion(account_uid=normalized)
+    if registration is not None:
+        preflight = preflight_account_delete(normalized)
+        if not preflight.allowed:
+            raise AccountDeleteRefused(preflight.blockers)
+        _clear_own_target(normalized)
+        for configuration in portfolio_configurations_of_account(normalized):
+            end_portfolio_configuration(configuration)
+            deletion.ended_portfolio_count += 1
+        for definition in _account_definitions(normalized):
+            signal_uid = definition_signal_uid(definition)
+            if not signal_kept_by_ended_portfolio(signal_uid):
+                delete_signal_rows(signal_uid)
+                deletion.deleted_signal_uids.append(signal_uid)
+        delete_account_orders_and_trades(str(registration["account_unique_identifier"]))
+        try:
+            deletion.markets = delete_markets_account(normalized)
+        except MarketsConflictError as exc:
+            raise AccountDeleteRefused([str(exc)]) from exc
+    # Steps 6 and 7 also finish what an earlier, interrupted attempt left.
+    signals = _finish_portfolios(normalized, deletion)
+    _finish_signals(signals, deletion)
+    return deletion
+
+
+__all__ = [
+    "AccountDeletePreflight",
+    "AccountDeleteRefused",
+    "AccountDeletion",
+    "delete_account",
+    "delete_account_orders_and_trades",
+    "delete_portfolio_series",
+    "preflight_account_delete",
+]

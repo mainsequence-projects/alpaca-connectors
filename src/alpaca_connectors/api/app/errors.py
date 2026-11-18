@@ -15,13 +15,19 @@ from alpaca_connectors.account.credentials import (
     AlpacaCredentialsRejectedError,
     StoredCredentialError,
 )
-from alpaca_connectors.account.ownership import AccountInUseError, AccountOwnedByAnotherError
+from alpaca_connectors.account.deletion import AccountDeleteRefused
+from alpaca_connectors.account.ownership import (
+    AccountInUseError,
+    AccountOwnedByAnotherError,
+    AccountWithoutOwnerError,
+)
 from alpaca_connectors.dependencies import STARTING_RETRY_SECONDS, is_dependency_starting
 from alpaca_connectors.execution.orders import PreTradeCheckError
 from alpaca_connectors.holdings.allocation import RETRYABLE_REFUSALS
 from alpaca_connectors.holdings.sizing import FundAllocationError
 from alpaca_connectors.platform_secrets import PlatformSecretAccessError
 from alpaca_connectors.portfolios.provided_weights import ProvidedWeightsError
+from alpaca_connectors.portfolios.signal_definitions import SignalDefinitionError
 from metatables import EncryptionError
 
 logger = logging.getLogger(__name__)
@@ -122,6 +128,10 @@ def api_http_error(exc: Exception) -> HTTPException:
             code="account_owned_by_another",
             message=str(exc),
         )
+    if isinstance(exc, AccountDeleteRefused):
+        return api_error(status_code=409, code="account_delete_refused", message=str(exc))
+    if isinstance(exc, AccountWithoutOwnerError):
+        return api_error(status_code=409, code="account_without_owner", message=str(exc))
     if isinstance(exc, AccountInUseError):
         # Never names the configurations (ADR 0022).
         return api_error(
@@ -140,6 +150,8 @@ def api_http_error(exc: Exception) -> HTTPException:
                 "checks": [check.as_payload() for check in exc.checks],
             },
         )
+    if isinstance(exc, SignalDefinitionError):
+        return api_error(status_code=exc.status_code, code=exc.code, message=str(exc))
     if isinstance(exc, ProvidedWeightsError):
         # Provided weights (ADR 0024): the message names no asset, weight or owner.
         return api_error(status_code=exc.status_code, code=exc.code, message=str(exc))

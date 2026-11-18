@@ -524,6 +524,15 @@ def test_portfolio_responses_report_the_declared_job(monkeypatch) -> None:
         "rebalance_configurations_by_uids",
         lambda uids: {C: SimpleNamespace(strategy="calendar_event_signal")},
     )
+    # A portfolio not yet adopted: no definition to read, and its former bars stay named.
+    monkeypatch.setattr(
+        "alpaca_connectors.portfolios.signal_definitions.signal_definitions_by_uids",
+        lambda uids: {},
+    )
+    monkeypatch.setattr(
+        "alpaca_connectors.market_data.configurations.portfolio_bar_configurations",
+        lambda uids: {},
+    )
 
     (response,) = service._responses([row])
 

@@ -8,6 +8,9 @@ approved the names under [Names](#names). Implemented in the connector the same 
 review of section 8 runs once revision `0022` has been applied in each Environment. The owner
 decided three points on 2026-11-07:
 
+Amended on 2026-11-18 by [ADR 0028](0028_every_portfolio_belongs_to_one_account.md): the row is
+`ProviderAccountDetails` in code, and its owner stays when the keys are removed (decision 7).
+
 - a vouched call reaches only its person's accounts (section 6);
 - a malformed allow-list stops the API from starting (section 3);
 - existing accounts take their owner from whoever last entered the keys, services included, and

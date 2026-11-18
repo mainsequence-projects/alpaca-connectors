@@ -9,6 +9,9 @@ UIDs, the backfill), the Secret-reference listing of
 [ADR 0014](0014_sdk_request_identity.md) that names Secret writes among the API's platform calls.
 The identity rules of ADR 0014 and the site key-entry flow of ADR 0015 are unchanged.
 
+Amended on 2026-11-18 by [ADR 0028](0028_every_portfolio_belongs_to_one_account.md): removing keys
+clears them and keeps the row and its owner; deleting an account deletes it (decision 8).
+
 Implementation status: implemented in the connector; the credential migration Job has to run once
 per Environment after revision `0018`, and a later revision drops the transition columns (see
 [Transition](#transition)).

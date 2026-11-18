@@ -260,7 +260,10 @@ def build_market_data_update(
         AlpacaStockBarsNode,
         AlpacaStockBarsPortfoliosConfig,
     )
-    from alpaca_connectors.market_data.configurations import get_bar_configuration
+    from alpaca_connectors.market_data.configurations import (
+        bar_configuration_account_uid,
+        get_bar_configuration,
+    )
     from alpaca_connectors.market_data.storage import storage_for
     from alpaca_connectors.runtime import account_runtime_models, start_markets_engine
 
@@ -270,11 +273,12 @@ def build_market_data_update(
         raise LookupError(f"Bar configuration {configuration_uid!s} does not exist.")
     if not configuration.enabled:
         raise ValueError(f"Bar configuration {configuration_uid!s} is disabled.")
-    registration = get_account_registration(configuration.account_uid)
+    # A feed runs with its account's keys, a portfolio's own configuration with its
+    # portfolio's account's (ADR 0028, decision 4).
+    keys_account_uid = bar_configuration_account_uid(configuration)
+    registration = get_account_registration(keys_account_uid)
     if registration is None:
-        raise LookupError(
-            f"Alpaca account registration {configuration.account_uid!s} does not exist."
-        )
+        raise LookupError(f"Alpaca account registration {keys_account_uid!s} does not exist.")
 
     triple = (
         configuration.frequency_id,
@@ -329,7 +333,7 @@ def build_market_data_update(
     summary = {
         "configuration": configuration.model_dump(mode="json"),
         "dataset": asdict(dataset),
-        "account_uid": str(configuration.account_uid),
+        "account_uid": str(keys_account_uid),
         "asset_source": configuration.asset_source,
         "asset_count": len(identifiers),
         "asset_uids": asset_uids,

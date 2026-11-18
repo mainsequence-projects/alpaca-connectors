@@ -39,6 +39,7 @@ def configurations_list(
     enabled: bool | None = None,
     scheduled: bool | None = None,
     asset_source: str | None = None,
+    portfolio_owned: bool | None = None,
     ordering: str = "name",
 ) -> ResourceCollection:
     validate_page_window(limit=limit, offset=offset)
@@ -51,6 +52,7 @@ def configurations_list(
             enabled=enabled,
             scheduled=scheduled,
             asset_source=asset_source,
+            portfolio_owned=portfolio_owned,
             ordering=ordering,
         )
     except Exception as exc:
@@ -130,7 +132,7 @@ def configuration_update(
 @router.delete("/{configuration_uid}", response_model=dict)
 def configuration_delete(configuration_uid: str) -> dict:
     try:
-        return delete_configuration(configuration_uid)
+        return delete_configuration(configuration_uid, owner=acting_owner())
     except Exception as exc:
         raise api_http_error(exc) from exc
 

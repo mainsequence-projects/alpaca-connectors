@@ -1,6 +1,6 @@
 """Project-owned ms-markets storage for Alpaca account metadata + current financials.
 
-A single project-owned MetaTable: ``AlpacaAccountDetails`` — a one-to-one ``AccountTable`` detail
+A single project-owned MetaTable: ``ProviderAccountDetails`` — a one-to-one ``AccountTable`` detail
 row (PK+FK on ``account_uid``) holding everything the generic ms-markets ``AccountTable`` cannot:
 
 - static metadata (status, margin multiplier, PDT flag, shorting/blocks, options levels, account
@@ -150,8 +150,14 @@ def _account_uid_pk_fk() -> Mapped[uuid.UUID]:
     )
 
 
-class AlpacaAccountDetails(ProjectStorageNameMixin, AlpacaMarketsMetaTableMixin, MarketsBase):
-    """Alpaca account metadata + current financials, one row per account, keyed by ``AccountTable.uid``."""
+class ProviderAccountDetails(ProjectStorageNameMixin, AlpacaMarketsMetaTableMixin, MarketsBase):
+    """This connector's provider account sidecar (ms-markets ADR 0047; ADR 0028, decision 7).
+
+    Alpaca account metadata, current financials, the owner and the encrypted keys, one row per
+    account, keyed by ``AccountTable.uid`` with ``CASCADE``. Removing the keys clears them and
+    keeps the owner. The catalog identity and the physical table keep their names: an encrypted
+    value decrypts only in the table and column it was written to (ADR 0028, open question 1).
+    """
 
     __project_storage_concept__ = "acct_alpaca"
     __metatable_identifier__ = "AlpacaAccountDetails"
@@ -664,7 +670,7 @@ class AlpacaAccountDetails(ProjectStorageNameMixin, AlpacaMarketsMetaTableMixin,
 # migration-visible). These are current values refreshed on each register, not a time series.
 for _balance_column in ACCOUNT_BALANCE_NUMERIC_COLUMNS:
     setattr(
-        AlpacaAccountDetails,
+        ProviderAccountDetails,
         _balance_column,
         mapped_column(
             _balance_column,
@@ -686,11 +692,11 @@ def project_account_models() -> list[type]:
     """Project-owned account MetaTables (for the migration provider + runtime attach)."""
     from alpaca_connectors.account.key_requests import AccountKeyRequestTable
 
-    return [AlpacaAccountDetails, AccountKeyRequestTable]
+    return [ProviderAccountDetails, AccountKeyRequestTable]
 
 
 __all__ = [
     "ACCOUNT_BALANCE_NUMERIC_COLUMNS",
-    "AlpacaAccountDetails",
+    "ProviderAccountDetails",
     "project_account_models",
 ]

@@ -8,6 +8,9 @@ external Main Sequence Secrets, so the Secret naming, the UID resolution, the ba
 Secret-reference listing and the managed-Secret lifecycle below no longer apply. The value
 boundary, the registration order and the fixed Alpaca rejection error remain in force.
 
+Amended on 2026-11-18 by [ADR 0028](0028_every_portfolio_belongs_to_one_account.md): removing keys
+clears them and keeps the row and its owner; deleting an account deletes it (decision 8).
+
 Amended by [ADR 0015](0015_agent_tools_on_the_api_mcp_and_site_key_entry.md): Agent sessions
 register accounts from keys the person enters on the Alpaca site, not by Secret name only.
 

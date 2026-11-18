@@ -19,7 +19,7 @@ PHYSICAL_TABLES = {
         "alpaca_connectors__bars_1d_iex_raw",
         "alpaca_stock_bars_1d_iex_raw",
     ),
-    "AlpacaAccountDetails": ("alpaca_connectors__acct_alpaca", "AlpacaAccountDetails"),
+    "ProviderAccountDetails": ("alpaca_connectors__acct_alpaca", "AlpacaAccountDetails"),
     "AccountKeyRequestTable": ("alpaca_connectors__account_key_request", "AccountKeyRequest"),
     "AlpacaBarsConfigurationTable": (
         "alpaca_connectors__bars_configuration",

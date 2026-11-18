@@ -13,13 +13,11 @@ from alpaca_connectors.account.ownership import (
     require_owner_may_configure,
 )
 from alpaca_connectors.account.services import (
-    enabled_account_configurations,
     get_account_registration,
     list_account_registrations,
     plan_alpaca_account,
     refresh_alpaca_account,
     register_alpaca_account,
-    remove_account_registration,
     update_account_registration,
 )
 
@@ -159,6 +157,22 @@ def require_owner_may_configure_account(account_uid: str, owner: AccountOwner) -
         require_owner_may_configure(get_account_registration(account_uid), owner)
 
 
+def require_account_owned_by(account_uid: object, owner: AccountOwner) -> None:
+    """Only the account's owner creates or changes what belongs to it (ADR 0028, decision 3).
+
+    An external person reaches only their own accounts (``404``, ADR 0019 section 6); anyone else
+    gets ``409 account_owned_by_another`` for another owner's account, ``409
+    account_without_owner`` for one without an owner, and ``404`` for a missing one.
+    """
+    from alpaca_connectors.account.ownership import require_account_owner
+
+    require_account_access(str(account_uid), owner)
+    registration = get_account_registration(str(account_uid))
+    if registration is None:
+        raise not_found("Account registration not found.")
+    require_account_owner(registration, owner)
+
+
 def require_accounts_access(account_uids: Iterable[str], owner: AccountOwner) -> None:
     for account_uid in account_uids:
         require_account_access(account_uid, owner)
@@ -260,25 +274,42 @@ def refresh_account(account_uid: str) -> AccountResponse:
     return AccountResponse.model_validate(refresh_alpaca_account(account_uid))
 
 
-def remove_account(account_uid: str) -> dict:
-    return remove_account_registration(account_uid)
+def remove_keys(account_uid: str, *, owner: AccountOwner) -> dict:
+    """Clear the account's keys for its owner; everything else stays (ADR 0028, decision 8)."""
+    from alpaca_connectors.account.services import remove_account_keys
+
+    require_account_owned_by(account_uid, owner)
+    return remove_account_keys(account_uid, actor_user_uid=owner.user_uid)
 
 
-def configurations_disabled_by_removal(account_uid: str) -> int:
-    """How many enabled configurations removing the account disables (ADR 0022)."""
-    return len(enabled_account_configurations(account_uid))
+def preflight_delete(account_uid: str, *, owner: AccountOwner) -> dict:
+    """What deleting the account would delete, and what refuses it; nothing changes."""
+    from alpaca_connectors.account.deletion import preflight_account_delete
+
+    require_account_owned_by(account_uid, owner)
+    return preflight_account_delete(account_uid).summary()
+
+
+def delete_account(account_uid: str, *, owner: AccountOwner) -> dict:
+    """Delete the account and everything that belongs to it, for its owner (decision 8)."""
+    from alpaca_connectors.account.deletion import delete_account as delete_whole_account
+
+    require_account_owned_by(account_uid, owner)
+    return delete_whole_account(account_uid).summary()
 
 
 __all__ = [
-    "configurations_disabled_by_removal",
     "create_account_registration",
+    "delete_account",
     "get_account",
     "list_accounts",
     "log_account_action",
     "preflight_account_registration",
+    "preflight_delete",
     "refresh_account",
-    "remove_account",
+    "remove_keys",
     "require_account_access",
+    "require_account_owned_by",
     "require_accounts_access",
     "require_named_account_access",
     "require_owner_may_configure_account",

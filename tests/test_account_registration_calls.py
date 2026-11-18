@@ -27,8 +27,8 @@ from test_account_services import (
 )
 from test_alpaca_us_equities import alpaca_catalog_asset
 
-from alpaca_connectors.account.alpaca_account_details import AlpacaAccountDetails
 from alpaca_connectors.account.ownership import AccountOwnedByAnotherError, AccountOwner
+from alpaca_connectors.account.provider_account_details import ProviderAccountDetails
 from alpaca_connectors.account.services import register_alpaca_account
 from alpaca_connectors.assets.alpaca_asset_details import AlpacaAssetDetailsTable
 from alpaca_connectors.holdings.services import (
@@ -163,7 +163,7 @@ class OwnTables:
     def execute(self, compiled: Any, *, context: Any) -> dict[str, Any]:
         (table,) = compiled.statement.get_final_froms()
         self.operations.append(f"select {table.name}")
-        if table is AlpacaAccountDetails.__table__:
+        if table is ProviderAccountDetails.__table__:
             return {"rows": [self.account_details] if self.account_details else []}
         if table is AlpacaAssetDetailsTable.__table__:
             return {"rows": [{"alpaca_asset_id": str(i)} for i in self.described_asset_ids]}
@@ -177,7 +177,7 @@ class OwnTables:
         return {"rows": []}
 
 
-ACCOUNT_DETAILS = AlpacaAccountDetails.__table__.name
+ACCOUNT_DETAILS = ProviderAccountDetails.__table__.name
 ASSET_DETAILS = AlpacaAssetDetailsTable.__table__.name
 
 

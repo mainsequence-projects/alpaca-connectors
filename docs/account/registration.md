@@ -81,22 +81,30 @@ alpaca-connectors account list
 alpaca-connectors account get <ACCOUNT_UID>
 alpaca-connectors account update <ACCOUNT_UID> --account-name "Paper account"
 alpaca-connectors account refresh <ACCOUNT_UID>
-alpaca-connectors account remove <ACCOUNT_UID>
-alpaca-connectors account remove <ACCOUNT_UID> --execute
+alpaca-connectors account remove-keys <ACCOUNT_UID>
+alpaca-connectors account remove-keys <ACCOUNT_UID> --execute
+alpaca-connectors account delete <ACCOUNT_UID>
+alpaca-connectors account delete <ACCOUNT_UID> --execute
 ```
 
 `update` with both `--api-key-secret-name` and `--secret-key-secret-name` imports new keys the
 same way; the new keys must authenticate as the registered Alpaca account.
 
-Removal deletes the project binding, its stored keys included, and deactivates the shared Account.
-It retains historical holdings. Configurations never block it
-([ADR 0022](../adrs/0022_configurations_never_block_an_owners_removal.md)): the enabled bar
-configurations that run with the account's keys are disabled first, and the result lists their
-UIDs. They keep their account until someone deletes them, and the owner can enable them again once
-the account is registered again. `remove` without `--execute` lists the ones it would disable.
+Removing keys and deleting an account are separate actions
+([ADR 0028](../adrs/0028_every_portfolio_belongs_to_one_account.md), decision 8):
 
-Once an account has an owner, only that owner creates, updates or resumes a bar configuration on
-it. An external person cannot claim an account without an owner while enabled
+- **`remove-keys`** clears the stored keys of the account's `ProviderAccountDetails` row. The
+  owner, the account, its history, portfolios and configurations stay; nothing is disabled, and
+  runs fail with the ordinary error until the owner registers keys again.
+- **`delete`** deletes the account and everything it owns: its portfolios (retired, then deleted
+  unless another account's history names them), its bars feeds, its signal definitions and their
+  signals, its orders and trades, and its whole Markets history. It is refused, before anything
+  changes, while another account's current target holds one of its portfolios.
+
+Without `--execute`, each only reports what it would do.
+
+Only the account's owner creates or changes its bars feeds, signal definitions and portfolios,
+and nobody does on an account without an owner until it takes one at its next key registration. An external person cannot claim an account without an owner while enabled
 configurations run with its keys.
 
 Registrations created before revision `0018` still hold their keys in Main Sequence Secrets. The

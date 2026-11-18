@@ -1,8 +1,10 @@
-"""Configurations never stand between an account's owner and its removal (ADR 0022, issue #25).
+"""Only an account's owner acts on what belongs to the account (ADR 0028, decisions 3 and 8).
 
-- Removing a registration disables the configurations that run with its keys instead of being
-  refused by them (the service is covered in ``test_account_services.AccountRemovalTests``).
-- Only an account's owner configures it once it has one.
+- Only the owner creates or changes the account's bars feeds; nobody acts on an account without an
+  owner until it takes one at its next key registration (ADR 0019 section 8).
+- Removing keys clears them and keeps everything else (the service is covered in
+  ``test_account_services.AccountKeyRemovalTests``); deleting an account is a separate action,
+  with an exact confirmation.
 - An external person never claims an account without an owner while enabled configurations,
   which another principal made, run with its keys.
 
@@ -34,7 +36,9 @@ from alpaca_connectors.account.ownership import (
     AccountInUseError,
     AccountOwnedByAnotherError,
     AccountOwner,
+    AccountWithoutOwnerError,
     is_claim_by_external_person,
+    require_account_owner,
     require_owner_may_configure,
 )
 from alpaca_connectors.account.services import (
@@ -76,6 +80,16 @@ def test_another_owners_account_cannot_be_configured() -> None:
     assert GATEWAY_UID not in str(refused.value)
     for open_to_the_caller in (registration(None), registration(CALLER), None):
         require_owner_may_configure(open_to_the_caller, CALLER)
+
+
+def test_only_the_accounts_owner_acts_on_it_and_nobody_on_an_unowned_one() -> None:
+    require_account_owner(registration(CALLER), CALLER)
+    require_account_owner(None, CALLER)  # A missing account is reported by the caller.
+    with pytest.raises(AccountOwnedByAnotherError) as refused:
+        require_account_owner(registration(PERSON), CALLER)
+    assert GATEWAY_UID not in str(refused.value)
+    with pytest.raises(AccountWithoutOwnerError):
+        require_account_owner(registration(None), CALLER)
 
 
 @pytest.mark.parametrize(
@@ -192,8 +206,8 @@ def _configuration_calls(client, headers) -> dict[str, int]:
 
 
 def _configured_account(owner: AccountOwner | None):
-    """The account is owned by ``owner``; a bar configuration already runs with it."""
-    configured = SimpleNamespace(account_uid=ACCOUNT_UID)
+    """The account is owned by ``owner``; a bars feed of it already exists."""
+    configured = SimpleNamespace(account_uid=ACCOUNT_UID, portfolio_configuration_uid=None)
     return (
         patch(
             "alpaca_connectors.api.app.services.accounts.get_account_registration",
@@ -220,16 +234,22 @@ def test_a_main_sequence_user_cannot_configure_another_owners_account(vouching) 
             service.assert_not_called()
 
 
-def test_the_owner_and_every_caller_of_an_unowned_account_configure_it(vouching) -> None:
+def test_only_the_owner_configures_the_accounts_feeds(vouching) -> None:
     for owner, headers in (
         (CALLER, vouching.headers()),
-        (None, vouching.headers()),
         (PERSON, vouching.headers(**baggage())),
     ):
         answers, services = _call(vouching, owner, headers)
         assert set(answers.values()) == {400}, (owner, answers)
         for service in services:
             service.assert_called_once()
+
+
+def test_nobody_configures_an_account_without_an_owner(vouching) -> None:
+    answers, services = _call(vouching, None, vouching.headers())
+    assert set(answers.values()) == {409}, answers
+    for service in services:
+        service.assert_not_called()
 
 
 def test_an_owner_refusal_names_the_code_not_the_owner(vouching) -> None:
@@ -252,71 +272,111 @@ def test_an_external_person_reaches_no_other_persons_configurations(vouching) ->
 
 
 # ------------------------------------------------------------------------------------------------
-# Removal
+# Removing keys and deleting an account
 # ------------------------------------------------------------------------------------------------
-def test_removal_preflight_warns_instead_of_blocking(vouching) -> None:
+def test_removing_keys_disables_nothing_and_warns_of_nothing(vouching) -> None:
     selection = {"selection": {"mode": "explicit", "uids": [ACCOUNT_UID]}, "options": {}}
     with (
         patch(
             "alpaca_connectors.api.app.routers.accounts.get_account",
-            return_value=registration(None),
+            return_value=registration(CALLER),
         ),
         patch(
-            "alpaca_connectors.api.app.routers.accounts.configurations_disabled_by_removal",
-            return_value=2,
+            "alpaca_connectors.api.app.services.accounts.get_account_registration",
+            return_value=registration(CALLER),
         ),
-        patch("alpaca_connectors.holdings.list_account_holdings", return_value=([], 0)),
     ):
         answer = vouching.client.post(
-            "/v1/accounts/actions/remove/preflight", json=selection, headers=vouching.headers()
+            "/v1/accounts/actions/remove-keys/preflight",
+            json=selection,
+            headers=vouching.headers(),
         )
     body = answer.json()
     assert answer.status_code == 200
     assert body["allowed"] is True
     assert body["blockers"] == []
-    assert any("2 enabled bar configurations" in item for item in body["warnings"])
+    assert body["warnings"] == []
 
 
-def test_the_owner_removes_an_account_that_configurations_run_on(vouching) -> None:
-    removed = {
-        "account_uid": ACCOUNT_UID,
-        "registration_removed": True,
-        "disabled_bar_configuration_uids": ["b-on"],
-    }
+def test_only_the_owner_removes_the_keys(vouching) -> None:
+    removed = {"account_uid": ACCOUNT_UID, "keys_removed": True}
+    external, user = vouching.headers(**baggage()), vouching.headers()
+    for owner, headers, expected in (
+        (PERSON, external, 200),
+        (CALLER, user, 200),
+        # An external person reaches only their own accounts (ADR 0019).
+        (ANOTHER_USER, external, 404),
+        (None, external, 404),
+        (ANOTHER_USER, user, 409),
+        (None, user, 409),
+    ):
+        with (
+            patch(
+                "alpaca_connectors.api.app.services.accounts.get_account_registration",
+                return_value=registration(owner),
+            ),
+            patch(
+                "alpaca_connectors.account.services.remove_account_keys", return_value=removed
+            ) as remove,
+        ):
+            answer = vouching.client.post(
+                f"/v1/accounts/{ACCOUNT_UID}/actions/remove-keys", headers=headers
+            )
+        assert answer.status_code == expected, (owner, answer.text)
+        assert remove.called is (expected == 200)
+
+
+def test_deleting_an_account_takes_the_exact_confirmation(vouching) -> None:
+    deleted = SimpleNamespace(summary=lambda: {"account_uid": ACCOUNT_UID, "deleted": True})
     with (
         patch(
             "alpaca_connectors.api.app.services.accounts.get_account_registration",
             return_value=registration(PERSON),
         ),
-        patch(
-            "alpaca_connectors.api.app.routers.accounts.remove_account", return_value=removed
-        ) as remove,
+        patch("alpaca_connectors.account.deletion.delete_account", return_value=deleted) as delete,
     ):
-        answer = vouching.client.delete(
+        refused = vouching.client.delete(
             f"/v1/accounts/{ACCOUNT_UID}", headers=vouching.headers(**baggage())
         )
+        wrong = vouching.client.delete(
+            f"/v1/accounts/{ACCOUNT_UID}",
+            params={"confirm": "DELETE another"},
+            headers=vouching.headers(**baggage()),
+        )
+        answer = vouching.client.delete(
+            f"/v1/accounts/{ACCOUNT_UID}",
+            params={"confirm": f"DELETE {ACCOUNT_UID}"},
+            headers=vouching.headers(**baggage()),
+        )
+    assert refused.status_code == 422
+    assert wrong.status_code == 400
     assert answer.status_code == 200
-    assert answer.json()["disabled_bar_configuration_uids"] == ["b-on"]
-    remove.assert_called_once_with(ACCOUNT_UID)
+    assert answer.json()["deleted"] is True
+    delete.assert_called_once_with(ACCOUNT_UID)
 
 
 # ------------------------------------------------------------------------------------------------
 # The Agent
 # ------------------------------------------------------------------------------------------------
-def test_the_agent_configures_and_removes_for_the_person_it_works_for() -> None:
+def test_the_agent_configures_removes_keys_and_deletes_for_the_person_it_works_for() -> None:
     from alpaca_connectors import agent_tools
 
     person = AccountOwner.main_sequence_user("person-uid")
+    accounts = "alpaca_connectors.api.app.services.accounts"
     with (
         patch("alpaca_connectors.agent_tools._acting_user_uid", return_value="person-uid"),
         patch(f"{BAR_SERVICES}.create_configuration") as create_bars,
         patch(f"{BAR_SERVICES}.update_configuration") as update_bars,
-        patch("alpaca_connectors.api.app.services.accounts.remove_account") as remove,
+        patch(f"{accounts}.remove_keys") as remove_keys,
+        patch(f"{accounts}.delete_account") as delete,
     ):
         agent_tools.manage_bar_configuration({"operation": "create", "request": BAR_BODY})
         agent_tools.manage_bar_configuration(
             {"operation": "update", "configuration_uid": "b", "request": {"name": "Renamed"}}
         )
+        agent_tools.manage_account({"operation": "remove_keys", "account_uid": ACCOUNT_UID})
+        with pytest.raises(ValueError):
+            agent_tools.manage_account({"operation": "delete", "account_uid": ACCOUNT_UID})
         agent_tools.manage_account(
             {
                 "operation": "delete",
@@ -324,30 +384,34 @@ def test_the_agent_configures_and_removes_for_the_person_it_works_for() -> None:
                 "confirmation": "DELETE account-uid",
             }
         )
-    for call in (create_bars, update_bars):
+    for call in (create_bars, update_bars, remove_keys, delete):
         assert call.call_args.kwargs["owner"] == person
-    # Configurations no longer refuse the Agent's removal; the service disables them.
-    remove.assert_called_once_with(ACCOUNT_UID)
+    delete.assert_called_once()
 
 
-def test_the_cli_dry_run_names_the_configurations_it_would_disable(capsys) -> None:
+def test_the_cli_dry_runs_change_nothing(capsys) -> None:
     from argparse import Namespace
 
-    from alpaca_connectors.cli.account import run_account_remove_command
+    from alpaca_connectors.cli.account import (
+        run_account_delete_command,
+        run_account_remove_keys_command,
+    )
 
     services = "alpaca_connectors.account.services"
+    preflight = SimpleNamespace(summary=lambda: {"allowed": True, "portfolio_count": 2})
     with (
         patch(f"{services}.get_account_registration", return_value=registration(None)),
-        patch("alpaca_connectors.holdings.services.list_account_holdings", return_value=([], 3)),
+        patch(f"{services}.remove_account_keys") as remove,
         patch(
-            f"{services}.enabled_account_configurations",
-            return_value=AccountConfigurations(bar_uids=("b-on",)),
+            "alpaca_connectors.account.deletion.preflight_account_delete", return_value=preflight
         ),
-        patch(f"{services}.remove_account_registration") as remove,
+        patch("alpaca_connectors.account.deletion.delete_account") as delete,
     ):
-        assert run_account_remove_command(Namespace(account_uid=ACCOUNT_UID, execute=False)) == 0
+        dry = Namespace(account_uid=ACCOUNT_UID, execute=False)
+        assert run_account_remove_keys_command(dry) == 0
+        assert run_account_delete_command(dry) == 0
     remove.assert_not_called()
+    delete.assert_not_called()
     printed = capsys.readouterr().out
-    assert '"disables_bar_configuration_uids"' in printed
-    assert "b-on" in printed
-    assert "signal" not in printed
+    assert "stored keys will be removed" in printed
+    assert '"portfolio_count": 2' in printed

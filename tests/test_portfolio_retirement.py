@@ -27,6 +27,8 @@ CONFIGURATION_UID = uuid.UUID("11111111-1111-4111-8111-111111111111")
 PORTFOLIO_UID = uuid.UUID("55555555-5555-4555-8555-555555555555")
 OWNER = AccountOwner.main_sequence_user("owner-uid")
 RETIRED_AT = dt.datetime(2026, 11, 16, 15, tzinfo=dt.UTC)
+ACCOUNT_UID = uuid.UUID("66666666-6666-4666-8666-666666666666")
+DEFINITION_UID = uuid.UUID("77777777-7777-4777-8777-777777777777")
 CONFIGURATIONS = "alpaca_connectors.portfolios.configurations"
 SERVICES = "alpaca_connectors.api.app.services.portfolio_configurations"
 
@@ -39,7 +41,9 @@ def configuration(**overrides) -> AlpacaPortfolioConfiguration:
         "description": None,
         "owner_gateway_uid": OWNER.gateway_uid,
         "owner_user_uid": OWNER.user_uid,
-        "bars_configuration_uid": uuid.uuid4(),
+        "account_uid": ACCOUNT_UID,
+        "signal_definition_uid": DEFINITION_UID,
+        "bars_configuration_uid": None,
         "rebalance_configuration_uid": uuid.uuid4(),
         "portfolio_uid": PORTFOLIO_UID,
         "scheduled": True,
@@ -57,7 +61,11 @@ def configuration(**overrides) -> AlpacaPortfolioConfiguration:
 
 
 def _removal(row, *, retire=None):
-    """Run the removal with Markets and storage replaced; return the recorder of their calls."""
+    """Run the removal with Markets and storage replaced; return the recorder of their calls.
+
+    The signal is the one revision 0029 gave the portfolio: its key is still the configuration
+    UID, so its UID is ``provided_signal_uid``.
+    """
     calls = MagicMock()
     calls.retire.side_effect = retire or (
         lambda uid: SimpleNamespace(uid=uid, retired_at=RETIRED_AT)
@@ -65,21 +73,37 @@ def _removal(row, *, retire=None):
     patches = (
         patch(f"{CONFIGURATIONS}.get_portfolio_configuration", return_value=row),
         patch("alpaca_connectors.markets_api.retire_portfolio", calls.retire),
-        patch("alpaca_connectors.portfolios.signal_assets.forget_signal_assets", calls.forget),
+        patch(f"{CONFIGURATIONS}.record_ended_portfolio", calls.record),
         patch(f"{CONFIGURATIONS}.delete_portfolio_configuration_row", calls.delete),
+        patch(
+            "alpaca_connectors.portfolios.signal_definitions.get_signal_definition",
+            return_value=SimpleNamespace(signal_key=str(CONFIGURATION_UID)),
+        ),
     )
     return calls, patches
 
 
+def _recorded():
+    """The record the account delete finishes: the retired Portfolio and its signal."""
+    return call.record(
+        account_uid=str(ACCOUNT_UID),
+        portfolio_uid=str(PORTFOLIO_UID),
+        portfolio_configuration_uid=CONFIGURATION_UID,
+        signal_uid=provided_signal_uid(CONFIGURATION_UID),
+    )
+
+
 def test_the_owner_retires_the_portfolio_then_deletes_its_configuration() -> None:
     calls, patches = _removal(configuration())
-    with patches[0], patches[1], patches[2], patches[3]:
+    with patches[0], patches[1], patches[2], patches[3], patches[4]:
         removal = delete_provided_weights_portfolio(CONFIGURATION_UID, owner=OWNER)
 
-    # Retired first, so a refusal leaves everything as it was.
+    # Retired first, so a refusal leaves everything as it was; recorded under its account, so the
+    # account's delete deletes the Portfolio and its signal (ADR 0028). The signal's rows stay:
+    # they belong to the definition, which other portfolios of the account may follow.
     assert calls.mock_calls == [
         call.retire(str(PORTFOLIO_UID)),
-        call.forget(provided_signal_uid(CONFIGURATION_UID)),
+        _recorded(),
         call.delete(CONFIGURATION_UID),
     ]
     assert removal.summary() == {
@@ -102,6 +126,7 @@ def test_a_portfolio_an_account_targets_is_refused_and_nothing_changes() -> None
         patches[1],
         patches[2],
         patches[3],
+        patches[4],
         pytest.raises(ProvidedWeightsError) as raised,
     ):
         delete_provided_weights_portfolio(CONFIGURATION_UID, owner=OWNER)
@@ -109,7 +134,7 @@ def test_a_portfolio_an_account_targets_is_refused_and_nothing_changes() -> None
     assert (raised.value.code, raised.value.status_code) == ("portfolio_in_account_target", 409)
     # Names no account and no count.
     assert "2" not in str(raised.value) and "5555" not in str(raised.value)
-    calls.forget.assert_not_called()
+    calls.record.assert_not_called()
     calls.delete.assert_not_called()
 
 
@@ -120,6 +145,7 @@ def test_only_the_owner_ends_it() -> None:
         patches[1],
         patches[2],
         patches[3],
+        patches[4],
         pytest.raises(PortfolioOwnedByAnotherError),
     ):
         delete_provided_weights_portfolio(
@@ -131,10 +157,11 @@ def test_only_the_owner_ends_it() -> None:
 
 def test_a_configuration_without_a_portfolio_is_deleted_without_retiring() -> None:
     calls, patches = _removal(configuration(portfolio_uid=None))
-    with patches[0], patches[1], patches[2], patches[3]:
+    with patches[0], patches[1], patches[2], patches[3], patches[4]:
         removal = delete_provided_weights_portfolio(CONFIGURATION_UID, owner=OWNER)
 
     calls.retire.assert_not_called()
+    calls.record.assert_not_called()
     calls.delete.assert_called_once_with(CONFIGURATION_UID)
     assert removal.summary()["portfolio"]["state"] == "absent"
 
@@ -183,6 +210,7 @@ def test_delete_route_retires_the_portfolio(api_client, local_caller) -> None:
         patches[1],
         patches[2],
         patches[3],
+        patches[4],
     ):
         response = api_client.delete(f"/v1/portfolio-configurations/{CONFIGURATION_UID}")
 
@@ -203,6 +231,7 @@ def test_delete_route_answers_409_while_an_account_targets_it(api_client, local_
         patches[1],
         patches[2],
         patches[3],
+        patches[4],
     ):
         response = api_client.delete(f"/v1/portfolio-configurations/{CONFIGURATION_UID}")
 
@@ -245,6 +274,7 @@ def test_the_cli_ends_any_portfolio_for_the_operator() -> None:
         patches[1],
         patches[2],
         patches[3],
+        patches[4],
     ):
         assert (
             run_delete_command(Namespace(configuration_uid=str(CONFIGURATION_UID), execute=True))
@@ -253,6 +283,6 @@ def test_the_cli_ends_any_portfolio_for_the_operator() -> None:
 
     assert calls.mock_calls == [
         call.retire(str(PORTFOLIO_UID)),
-        call.forget(provided_signal_uid(CONFIGURATION_UID)),
+        _recorded(),
         call.delete(CONFIGURATION_UID),
     ]

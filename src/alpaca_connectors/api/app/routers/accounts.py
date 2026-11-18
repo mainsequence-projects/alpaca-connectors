@@ -7,6 +7,11 @@ accounts; every other call is unchanged.
 `POST /v1/accounts/{account_uid}/actions/sync` is the account sync every venue connector serves
 (issue #14): it answers 200 with a terminal `ObservableOperation`, which
 `GET /v1/operations/{operation_uid}` answers again to its owner.
+
+Removing keys and deleting an account are separate actions (ADR 0028, decision 8), both for the
+account's owner only: `actions/remove-keys` clears the keys and keeps everything else;
+`DELETE /v1/accounts/{account_uid}` deletes the account and everything that belongs to it, and
+takes the exact confirmation `DELETE <account uid>`.
 """
 
 from __future__ import annotations
@@ -31,15 +36,17 @@ from ..schemas import (
 )
 from ..services.account_sync import sync_account
 from ..services.accounts import (
-    configurations_disabled_by_removal,
     create_account_registration,
+    delete_account,
     get_account,
     list_accounts,
     log_account_action,
     preflight_account_registration,
+    preflight_delete,
     refresh_account,
-    remove_account,
+    remove_keys,
     require_account_access,
+    require_account_owned_by,
     require_accounts_access,
     update_account,
 )
@@ -133,14 +140,14 @@ def accounts_discovery() -> ResourceDiscoveryResponse:
                 "preflight_endpoint": f"{router.prefix}/actions/capture-holdings/preflight",
             },
             {
-                "id": "remove",
-                "label": "Remove registration",
-                "endpoint": f"{router.prefix}/actions/remove",
+                "id": "remove-keys",
+                "label": "Remove keys",
+                "endpoint": f"{router.prefix}/actions/remove-keys",
                 "method": "POST",
                 "tone": "danger",
                 "selection_modes": ["explicit"],
                 "options": [],
-                "preflight_endpoint": f"{router.prefix}/actions/remove/preflight",
+                "preflight_endpoint": f"{router.prefix}/actions/remove-keys/preflight",
             },
         ],
     )
@@ -175,57 +182,45 @@ def account_create(
     return account
 
 
-@router.post("/actions/remove/preflight", response_model=BulkActionPreflightResponse)
-def accounts_remove_preflight(request: BulkActionRequest = Body(...)) -> dict[str, Any]:
-    require_accounts_access(request.selection.uids, acting_owner())
+@router.post("/actions/remove-keys/preflight", response_model=BulkActionPreflightResponse)
+def accounts_remove_keys_preflight(request: BulkActionRequest = Body(...)) -> dict[str, Any]:
+    """Removing keys clears them and keeps everything else; only each account's owner may."""
+    owner = acting_owner()
     try:
         missing = [uid for uid in request.selection.uids if get_account(uid) is None]
         blockers = [f"Missing account: {uid}" for uid in missing]
-        retained_rows = 0
-        disabled_configurations = 0
-        if not missing:
-            from alpaca_connectors.holdings import list_account_holdings
-
-            for uid in request.selection.uids:
-                # Configurations never block a removal; they are disabled (ADR 0022).
-                disabled_configurations += configurations_disabled_by_removal(uid)
-                _, count = list_account_holdings(uid, limit=1)
-                retained_rows += count
+        for uid in request.selection.uids:
+            if uid not in missing:
+                require_account_owned_by(uid, owner)
     except Exception as exc:
         raise api_http_error(exc) from exc
-    warnings = [f"{retained_rows} historical holdings rows will be retained."]
-    if disabled_configurations:
-        warnings.append(
-            f"{disabled_configurations} enabled bar configurations that run with these "
-            "accounts' keys will be disabled."
-        )
     return {
         "contract": "command-center.bulk_action_preflight@v1",
         "allowed": not blockers,
         "detail": (
-            "Registrations will be removed with their stored keys, accounts deactivated, and "
-            "holdings retained."
+            "The stored keys will be removed. The owners, the accounts, their history, portfolios "
+            "and configurations stay; runs fail until keys are registered again."
             if not blockers
-            else "One or more selected account registrations do not exist."
+            else "One or more selected accounts do not exist."
         ),
         "matched_count": len(request.selection.uids) - len(missing),
         "blockers": blockers,
-        "warnings": warnings,
+        "warnings": [],
     }
 
 
-@router.post("/actions/remove", response_model=dict[str, Any])
-def accounts_remove(request: BulkActionRequest = Body(...)) -> dict[str, Any]:
-    preflight = accounts_remove_preflight(request)
+@router.post("/actions/remove-keys", response_model=dict[str, Any])
+def accounts_remove_keys(request: BulkActionRequest = Body(...)) -> dict[str, Any]:
+    preflight = accounts_remove_keys_preflight(request)
     if not preflight["allowed"]:
         raise HTTPException(status_code=409, detail=preflight)
     owner = acting_owner()
     try:
-        results = [remove_account(uid) for uid in request.selection.uids]
+        results = [remove_keys(uid, owner=owner) for uid in request.selection.uids]
     except Exception as exc:
         raise api_http_error(exc) from exc
     for uid in request.selection.uids:
-        log_account_action("removed", owner=owner, account_uid=uid)
+        log_account_action("keys_removed", owner=owner, account_uid=uid)
     return {"results": results}
 
 
@@ -309,15 +304,52 @@ def account_update(
     return account
 
 
-@router.delete("/{account_uid}", response_model=dict[str, Any])
-def account_delete(account_uid: str) -> dict[str, Any]:
+@router.post("/{account_uid}/actions/remove-keys", response_model=dict[str, Any])
+def account_remove_keys(account_uid: str) -> dict[str, Any]:
+    """Clear the account's keys; the owner, the account and everything that belongs to it stay."""
     owner = acting_owner()
     require_account_access(account_uid, owner)
     try:
-        result = remove_account(account_uid)
+        result = remove_keys(account_uid, owner=owner)
     except Exception as exc:
         raise api_http_error(exc) from exc
-    log_account_action("removed", owner=owner, account_uid=account_uid)
+    log_account_action("keys_removed", owner=owner, account_uid=account_uid)
+    return result
+
+
+@router.post("/{account_uid}/actions/delete/preflight", response_model=dict[str, Any])
+def account_delete_preflight(account_uid: str) -> dict[str, Any]:
+    """What deleting the account would delete, and what refuses it; nothing changes."""
+    owner = acting_owner()
+    require_account_access(account_uid, owner)
+    try:
+        return preflight_delete(account_uid, owner=owner)
+    except Exception as exc:
+        raise api_http_error(exc) from exc
+
+
+@router.delete("/{account_uid}", response_model=dict[str, Any])
+def account_delete(
+    account_uid: str,
+    confirm: str = Query(
+        description="Exactly `DELETE <account uid>`: the account and all it owns are deleted."
+    ),
+) -> dict[str, Any]:
+    """Delete the account and everything that belongs to it (ADR 0028, decision 8).
+
+    Its portfolios, bars feeds, signal definitions and their signals, and its whole Markets
+    history go. Refused, with nothing changed, while another account currently holds one of
+    its portfolios.
+    """
+    if confirm != f"DELETE {account_uid}":
+        raise bad_request("Confirm with exactly `DELETE <account uid>`.")
+    owner = acting_owner()
+    require_account_access(account_uid, owner)
+    try:
+        result = delete_account(account_uid, owner=owner)
+    except Exception as exc:
+        raise api_http_error(exc) from exc
+    log_account_action("deleted", owner=owner, account_uid=account_uid)
     return result
 
 

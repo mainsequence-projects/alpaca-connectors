@@ -284,16 +284,27 @@ def query_accounts(arguments: Mapping[str, Any]) -> Any:
 def manage_account(arguments: Mapping[str, Any]) -> Any:
     from alpaca_connectors.api.app.services.accounts import (
         create_account_registration,
+        delete_account,
         preflight_account_registration,
+        preflight_delete,
         refresh_account,
-        remove_account,
+        remove_keys,
         update_account,
     )
     from alpaca_connectors.api.app.services.holdings import capture_holdings, preflight_holdings
 
     operation = _operation(
         arguments,
-        {"capture_holdings", "create", "delete", "plan_create", "refresh", "update"},
+        {
+            "capture_holdings",
+            "create",
+            "delete",
+            "plan_create",
+            "plan_delete",
+            "refresh",
+            "remove_keys",
+            "update",
+        },
     )
     if operation in {"create", "plan_create"}:
         request = _request_model(arguments, AccountSecretNameRegistrationRequest)
@@ -319,9 +330,15 @@ def manage_account(arguments: Mapping[str, Any]) -> Any:
             blockers = "; ".join(preflight.get("blockers") or ["Account is not ready."])
             raise ValueError(blockers)
         return capture_holdings(account_uid)
+    if operation == "remove_keys":
+        # Only the keys go; the owner, the account and all it owns stay (ADR 0028).
+        return remove_keys(account_uid, owner=_acting_owner())
+    if operation == "plan_delete":
+        return preflight_delete(account_uid, owner=_acting_owner())
     _confirm_delete(arguments, account_uid)
-    # Configurations never block a removal; the result names those it disabled (ADR 0022).
-    return remove_account(account_uid)
+    # The account and everything it owns are deleted; refused while another account holds one of
+    # its portfolios (ADR 0028, decision 8).
+    return delete_account(account_uid, owner=_acting_owner())
 
 
 def _acting_owner():
@@ -544,7 +561,8 @@ def query_portfolios(arguments: Mapping[str, Any]) -> Any:
         limit=limit,
         offset=offset,
         search=_optional_text(arguments, "search"),
-        bars_configuration_uid=_optional_text(arguments, "bars_configuration_uid"),
+        account_uid=_optional_text(arguments, "account_uid"),
+        signal_definition_uid=_optional_text(arguments, "signal_definition_uid"),
         ordering=str(arguments.get("ordering") or "name"),
     )
 
@@ -696,15 +714,19 @@ PROJECT_AGENT_TOOLS: tuple[ProjectAgentTool, ...] = (
         name="alpaca_manage_account",
         label="Manage Alpaca Account",
         description=(
-            "Plan, create, update, refresh, or delete an Alpaca Account registration, or capture "
-            "its holdings. Creation accepts Main Sequence Secret names only: the keys are "
-            "imported once from those Secrets and stored encrypted on the account, and creation "
-            "always performs the connector's mandatory initial asset registration and holdings "
-            "capture. Never ask a user for Alpaca key values; to register an account or replace "
-            "keys from values the person holds, use alpaca_account_key_request so the person "
-            "enters them on the Alpaca site. Deleting an account deletes its stored keys and "
-            "disables the enabled bar configurations that run with them; the result lists their "
-            "UIDs."
+            "Plan, create, update or refresh an Alpaca account, capture its holdings, remove its "
+            "keys, or plan and run its deletion. Creation accepts Main Sequence Secret names "
+            "only: the keys are imported once from those Secrets and stored encrypted on the "
+            "account, and creation always performs the connector's mandatory initial asset "
+            "registration and holdings capture. Never ask a user for Alpaca key values; to "
+            "register an account or replace keys from values the person holds, use "
+            "alpaca_account_key_request so the person enters them on the Alpaca site. Only the "
+            "account's owner removes its keys or deletes it. remove_keys clears the stored keys "
+            "and keeps the owner, the account, its history, portfolios and configurations; runs "
+            "fail until keys return. delete deletes the account and everything it owns: its "
+            "portfolios, bars feeds, signals and its whole history; plan_delete first says what "
+            "would be deleted and what refuses it, and delete is refused while another account "
+            "currently holds one of its portfolios."
         ),
         parameters=_operations(
             *[
@@ -740,6 +762,16 @@ PROJECT_AGENT_TOOLS: tuple[ProjectAgentTool, ...] = (
             ),
             _operation_case(
                 "capture_holdings",
+                properties={"account_uid": _uid("Account")},
+                required=("account_uid",),
+            ),
+            _operation_case(
+                "remove_keys",
+                properties={"account_uid": _uid("Account")},
+                required=("account_uid",),
+            ),
+            _operation_case(
+                "plan_delete",
                 properties={"account_uid": _uid("Account")},
                 required=("account_uid",),
             ),
@@ -971,7 +1003,8 @@ PROJECT_AGENT_TOOLS: tuple[ProjectAgentTool, ...] = (
                     **PAGE,
                     **SEARCH,
                     **ORDERING,
-                    "bars_configuration_uid": _uid("bar configuration"),
+                    "account_uid": _uid("Account"),
+                    "signal_definition_uid": _uid("signal definition"),
                 },
             ),
             _operation_case(

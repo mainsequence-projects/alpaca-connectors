@@ -1,7 +1,8 @@
 """Resolve and run durable portfolio configurations.
 
-Every portfolio follows its own ``ApplicationWeights`` signal, the weights its owner application
-provides (ADR 0024, ADR 0027).
+Every portfolio belongs to one account and follows the ``ApplicationWeights`` signal of one of its
+account's signal definitions, the weights the application provides (ADR 0024, ADR 0027, ADR 0028).
+A portfolio not yet adopted does not run.
 """
 
 from __future__ import annotations
@@ -109,17 +110,25 @@ def resolve_portfolio_configuration(
     configuration_uid: Any,
 ) -> ResolvedPortfolioConfiguration:
     """Resolve stored calculation inputs and require an existing signal observation."""
-    from alpaca_connectors.portfolios.provided_weights import provided_signal_uid
+    from alpaca_connectors.market_data.configurations import portfolio_bar_configuration
+    from alpaca_connectors.portfolios.provided_weights import portfolio_signal_uid, require_adopted
     from alpaca_connectors.portfolios.signal_assets import assets_for_signals
 
     configuration = get_portfolio_configuration(configuration_uid)
     if configuration is None:
         raise LookupError(f"Portfolio configuration {configuration_uid!s} does not exist.")
-    bars_configuration, rebalance_configuration = validate_portfolio_references(
-        bars_configuration_uid=configuration.bars_configuration_uid,
+    require_adopted(configuration)
+    rebalance_configuration = validate_portfolio_references(
         rebalance_configuration_uid=configuration.rebalance_configuration_uid,
     )
-    signal_uid = provided_signal_uid(configuration.uid)
+    bars_configuration = portfolio_bar_configuration(configuration.uid)
+    if bars_configuration is None:
+        raise LookupError(
+            f"Portfolio configuration {configuration_uid!s} has no bars configuration."
+        )
+    if not bars_configuration.enabled:
+        raise ValueError(f"Bars configuration {bars_configuration.uid!s} is disabled.")
+    signal_uid = portfolio_signal_uid(configuration)
     latest = read_signal_observation_matrix(signal_uid=signal_uid, observation_limit=1)
     bounds = read_signal_observation_bounds(signal_uid=signal_uid)
     if (
@@ -130,7 +139,7 @@ def resolve_portfolio_configuration(
     ):
         raise ValueError(
             f"Signal {signal_uid} has no published observations. "
-            "Give the portfolio weights before running it."
+            "Publish weights to the portfolio's signal before running it."
         )
     # Every asset the portfolio ever held, so a history it started with is priced too; read from
     # the signal-asset table, not the signal weights series (ADR 0024).
@@ -195,13 +204,14 @@ def build_portfolio_graph(resolved: ResolvedPortfolioConfiguration) -> Portfolio
         AlpacaPortfolioCalendarEventsStorage,
         portfolio_output_tables,
     )
-    from alpaca_connectors.portfolios.provided_weights import provided_weights_signal
+    from alpaca_connectors.portfolios.provided_weights import portfolio_signal_key
+    from alpaca_connectors.portfolios.signal_definitions import weights_signal
 
     configuration = resolved.configuration
     rebalance = resolved.rebalance_configuration
     if rebalance.strategy != "calendar_event_signal":
         raise ValueError("Portfolio execution requires CalendarEventSignal.")
-    signal = provided_weights_signal(configuration.uid)
+    signal = weights_signal(portfolio_signal_key(configuration))
     # `ApplicationWeights.get_asset_list()` reads the whole signal weights table; the resolved
     # scope is the same set, from the signal-asset table. The class path, and so the UID, stay.
     recorded_assets = list(resolved.asset_identifiers)

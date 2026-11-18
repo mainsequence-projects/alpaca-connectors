@@ -45,6 +45,10 @@ def _revision(file_name: str):
 REVISION_0025 = _revision("0025_add_provided_weights_portfolios.py")
 REVISION_0027 = _revision("0027_add_portfolio_configurations.py")
 REVISION_0028 = _revision("0028_drop_retired_configuration_tables.py")
+# Revision 0029 (ADR 0028) adds the account and the signal definition, relaxes the former bars key
+# and gives bars configurations a portfolio parent; the models declare the tables after it.
+REVISION_0029 = _revision("0029_add_account_owned_portfolios.py")
+LATER_PORTFOLIO_COLUMNS = {"account_uid", "signal_definition_uid"}
 # The names the previous release's tables and rows used, read from the revisions that made them.
 PREVIOUS_TABLE = REVISION_0027.PREVIOUS_TABLE
 PREVIOUS_SIGNAL_TABLE = PREVIOUS_TABLE.replace("portfolio", "signal_job")
@@ -256,23 +260,33 @@ def test_revision_0027_creates_the_table_the_model_declares(connection) -> None:
 
     assert REVISION_0027.TABLE_NAME == table.name
     created = {column["name"]: column for column in inspector.get_columns(table.name)}
-    assert set(created) == set(table.columns.keys())
+    assert set(created) == set(table.columns.keys()) - LATER_PORTFOLIO_COLUMNS
     for column in table.columns:
-        assert created[column.name]["nullable"] == column.nullable, column.name
+        if column.name in LATER_PORTFOLIO_COLUMNS:
+            continue
+        # Required until revision 0029 relaxed it.
+        expected = False if column.name == "bars_configuration_uid" else column.nullable
+        assert created[column.name]["nullable"] == expected, column.name
     checks = {
         constraint.name: str(constraint.sqltext)
         for constraint in table.constraints
         if isinstance(constraint, sa.CheckConstraint)
     }
     assert dict(REVISION_0027.CHECKS) == checks
+    later_indexes = {name for name, _columns, _unique in REVISION_0029.PORTFOLIO_INDEXES}
     indexes = {
-        index.name: ([c.name for c in index.columns], index.unique) for index in table.indexes
+        index.name: ([c.name for c in index.columns], index.unique)
+        for index in table.indexes
+        if index.name not in later_indexes
     }
     assert {name: (columns, unique) for name, columns, unique in REVISION_0027.INDEXES} == indexes
+    later_keys = {REVISION_0029.PORTFOLIO_ACCOUNT_KEY, REVISION_0029.PORTFOLIO_DEFINITION_KEY}
     foreign_keys = {
         constraint.name: constraint.referred_table.name
         for constraint in table.foreign_key_constraints
+        if constraint.name not in later_keys
     }
+    foreign_keys[REVISION_0029.PORTFOLIO_BARS_KEY] = REVISION_0029.BARS_TABLE
     assert {
         key["name"]: key["referred_table"] for key in inspector.get_foreign_keys(table.name)
     } == (foreign_keys)
@@ -338,6 +352,7 @@ def test_revision_0028_leaves_the_bars_configurations_as_the_model_declares(conn
         constraint.name: str(constraint.sqltext)
         for constraint in table.constraints
         if isinstance(constraint, sa.CheckConstraint)
+        and constraint.name != REVISION_0029.BARS_ONE_PARENT[0]
     }
     created = {
         check["name"]: check["sqltext"]

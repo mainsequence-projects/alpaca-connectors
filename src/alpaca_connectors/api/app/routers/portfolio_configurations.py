@@ -1,7 +1,8 @@
 """Durable analytical portfolio and rebalance configuration API.
 
-Every portfolio follows the weights the calling application gives (ADR 0024, ADR 0027) and is
-changed only by its owner.
+Every portfolio belongs to one account and follows one of its account's signal definitions, whose
+weights the application gives (ADR 0024, ADR 0027, ADR 0028); only its owner, the account's owner,
+creates or changes it. Rebalance configurations stay independent rules (ADR 0028, decision 6).
 """
 
 from __future__ import annotations
@@ -14,6 +15,8 @@ from ..schemas import (
     PortfolioConfigurationDetailResponse,
     PortfolioConfigurationResponse,
     PortfolioConfigurationUpdateRequest,
+    PortfolioCreateRequest,
+    PortfolioCreateResponse,
     PortfolioJobRunAcceptedResponse,
     PortfolioJobRunResponse,
     PortfolioRebalanceConfigurationCreateRequest,
@@ -31,6 +34,7 @@ from ..services.common import resource_discovery, validate_ordering, validate_pa
 from ..services.portfolio_configurations import (
     configuration_runs,
     configuration_weights,
+    create_configuration,
     create_provided_configuration,
     create_rebalance,
     delete_configuration,
@@ -53,7 +57,8 @@ def portfolio_configurations_list(
     limit: int = Query(default=25, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
     search: str | None = None,
-    bars_configuration_uid: str | None = None,
+    account_uid: str | None = None,
+    signal_definition_uid: str | None = None,
     ordering: str = "name",
 ) -> ResourceCollection:
     validate_page_window(limit=limit, offset=offset)
@@ -63,7 +68,8 @@ def portfolio_configurations_list(
             limit=limit,
             offset=offset,
             search=search,
-            bars_configuration_uid=bars_configuration_uid,
+            account_uid=account_uid,
+            signal_definition_uid=signal_definition_uid,
             ordering=ordering,
         )
     except Exception as exc:
@@ -81,7 +87,7 @@ def portfolio_configurations_discovery() -> ResourceDiscoveryResponse:
         item_label="portfolio configuration",
         identity_fields=["uid"],
         searchable_fields=["name", "description"],
-        filterable_fields=["bars_configuration_uid"],
+        filterable_fields=["account_uid", "signal_definition_uid"],
         orderable_fields=["name", "updated_at"],
         columns=[
             {"id": "name", "header": "Portfolio", "sortable_key": "name", "hideable": False},
@@ -96,6 +102,19 @@ def portfolio_configurations_discovery() -> ResourceDiscoveryResponse:
             {"id": "updated_at", "header": "Updated", "data_type": "datetime"},
         ],
     )
+
+
+@router.post(
+    "/v1/portfolio-configurations",
+    response_model=PortfolioCreateResponse,
+    status_code=201,
+)
+def portfolio_create(request: PortfolioCreateRequest = Body(...)) -> PortfolioCreateResponse:
+    """Create a portfolio of an account the caller owns, following one of its signals."""
+    try:
+        return create_configuration(request, owner=acting_owner())
+    except Exception as exc:
+        raise api_http_error(exc) from exc
 
 
 @router.post(

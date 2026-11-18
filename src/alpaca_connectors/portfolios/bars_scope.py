@@ -1,17 +1,17 @@
-"""The assets a `portfolios` bars configuration fetches (ADR 0024, decision 5).
+"""The assets a portfolio's own bars configuration fetches (ADR 0024 decision 5, ADR 0028).
 
-The asset list is stored nowhere. Each resolution derives it in three bounded reads, none of them
-over a time series and none per portfolio:
+The asset list is stored nowhere. Each resolution derives it in bounded reads, none of them over a
+time series:
 
-1. the portfolio configurations that name the bars configuration (indexed on
-   ``bars_configuration_uid``), reading only the columns it needs;
-2. their `Portfolio` rows by uid in one batched Markets read, for ``retired_at``; signal UIDs are
-   then computed in memory from the configuration UIDs;
-3. every asset those signals ever published, from the signal-asset table by primary key.
+1. the bars configuration and the portfolio configuration it belongs to;
+2. that portfolio's `Portfolio` row in one Markets read, for ``retired_at``; the signal UID is
+   computed from its signal definition's key;
+3. every asset that signal ever published, from the signal-asset table by primary key.
 
-A deleted configuration has no row. A configuration whose `Portfolio` is retired at or before
-the resolution time is left out. A paused one still counts, and so does one whose `Portfolio`
-does not exist yet.
+A bars feed of an account, or a ``portfolios`` configuration a portfolio not yet adopted still
+names, has no portfolio of its own and resolves to nothing. A portfolio whose `Portfolio` is
+retired at or before the resolution time is left out. A paused one still counts, and so does one
+whose `Portfolio` does not exist yet.
 """
 
 from __future__ import annotations
@@ -41,30 +41,18 @@ class PortfolioBarsScope:
         }
 
 
-def _naming_configurations(bars_configuration_uid: uuid.UUID) -> list[dict[str, Any]]:
-    from msm.api.base import operation_result_rows
-    from msm.bootstrap import resolve_runtime
-    from msm.repositories.base import compile_markets_statement, execute_markets_operation
-    from sqlalchemy import select
+def _owning_configurations(bars_configuration_uid: uuid.UUID) -> list[Any]:
+    """The adopted portfolio configuration the bars configuration belongs to, if any."""
+    from alpaca_connectors.market_data.configurations import get_bar_configuration
+    from alpaca_connectors.portfolios.configurations import get_portfolio_configuration
 
-    from alpaca_connectors.portfolios.configurations import (
-        AlpacaPortfolioConfigurationTable,
-        _start_runtime,
-    )
-
-    table = AlpacaPortfolioConfigurationTable
-    _start_runtime()
-    runtime = resolve_runtime(models=[table], row_model_name="AlpacaPortfolioConfiguration")
-    operation = compile_markets_statement(
-        select(table.uid, table.portfolio_uid).where(
-            table.bars_configuration_uid == bars_configuration_uid
-        ),
-        context=runtime.context,
-        operation="select",
-    )
-    return list(
-        operation_result_rows(execute_markets_operation(operation, context=runtime.context))
-    )
+    bars = get_bar_configuration(bars_configuration_uid)
+    if bars is None or bars.portfolio_configuration_uid is None:
+        return []
+    configuration = get_portfolio_configuration(bars.portfolio_configuration_uid)
+    if configuration is None or not configuration.adopted:
+        return []
+    return [configuration]
 
 
 def retired_portfolio_uids(portfolio_uids: Sequence[str], *, at: dt.datetime) -> set[str]:
@@ -94,29 +82,28 @@ def resolve_portfolio_bars_scope(
     *,
     at: dt.datetime | None = None,
 ) -> PortfolioBarsScope:
-    """Every asset ever published by the live portfolios that name this bars configuration."""
-    from alpaca_connectors.portfolios.provided_weights import provided_signal_uid
+    """Every asset ever published by the signal of the live portfolio that owns the configuration."""
+    from alpaca_connectors.portfolios.provided_weights import portfolio_signal_uid
     from alpaca_connectors.portfolios.signal_assets import assets_for_signals
 
     normalized_uid = uuid.UUID(str(bars_configuration_uid))
     resolved_at = at or dt.datetime.now(UTC)
-    rows = _naming_configurations(normalized_uid)
+    rows = _owning_configurations(normalized_uid)
     retired = retired_portfolio_uids(
-        [str(row["portfolio_uid"]) for row in rows if row.get("portfolio_uid") is not None],
+        [str(row.portfolio_uid) for row in rows if row.portfolio_uid is not None],
         at=resolved_at,
     )
-    live: list[dict[str, Any]] = []
+    live: list[Any] = []
     retired_configurations: list[str] = []
     for row in rows:
-        portfolio_uid = row.get("portfolio_uid")
-        if portfolio_uid is not None and str(portfolio_uid) in retired:
-            retired_configurations.append(str(row["uid"]))
+        if row.portfolio_uid is not None and str(row.portfolio_uid) in retired:
+            retired_configurations.append(str(row.uid))
         else:
             live.append(row)
-    ordered_signals = tuple(sorted({provided_signal_uid(row["uid"]) for row in live}))
+    ordered_signals = tuple(sorted({portfolio_signal_uid(row) for row in live}))
     return PortfolioBarsScope(
         bars_configuration_uid=str(normalized_uid),
-        configuration_uids=tuple(sorted(str(row["uid"]) for row in live)),
+        configuration_uids=tuple(sorted(str(row.uid) for row in live)),
         retired_configuration_uids=tuple(sorted(retired_configurations)),
         signal_uids=ordered_signals,
         asset_identifiers=tuple(assets_for_signals(ordered_signals)),

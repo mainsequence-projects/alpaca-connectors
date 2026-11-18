@@ -362,7 +362,7 @@ def test_signal_and_ledger_updaters_are_bound_to_own_instances(monkeypatch) -> N
         AlpacaSignalWeightsStorage,
         AlpacaTradesStorage,
     )
-    from alpaca_connectors.portfolios.provided_weights import provided_weights_signal
+    from alpaca_connectors.portfolios.signal_definitions import weights_signal
 
     built: dict[str, Any] = {}
     monkeypatch.setattr(
@@ -370,7 +370,7 @@ def test_signal_and_ledger_updaters_are_bound_to_own_instances(monkeypatch) -> N
         "from_signal_configuration",
         classmethod(lambda cls, config, **kwargs: built.setdefault("signal", kwargs)),
     )
-    provided_weights_signal("11111111-1111-4111-8111-111111111111")
+    weights_signal("11111111-1111-4111-8111-111111111111")
     assert built["signal"] == {"output_table": AlpacaSignalWeightsStorage}
 
     class Node:
@@ -452,12 +452,13 @@ _MARKETS_TABLE_MODULES = re.compile(
     r"|msm_portfolios\.time_index\..*storage)$"
 )
 _FOREIGN_KEY_ONLY = {
-    "account/alpaca_account_details.py",
+    "account/provider_account_details.py",
     "assets/alpaca_asset_details.py",
     "market_data/configurations.py",
     "market_data/storage.py",
     "operations/signal_job_configurations.py",
     "portfolios/configurations.py",
+    "portfolios/signal_definitions.py",
     "universes/registry.py",
 }
 _EXEMPT = {

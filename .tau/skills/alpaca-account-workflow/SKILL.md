@@ -24,8 +24,10 @@ call `alpaca_project_state` with empty arguments. No shell or direct table-write
   missing, and the initial holdings, in one Markets call. These are mandatory. Cash uses `USD`,
   not an Alpaca-specific Asset or `CurrencySpot` pair. A held Asset Markets stores with another
   asset type refuses the whole registration and writes nothing.
-- Deleting a registration deletes its stored keys with the row. Main Sequence Secrets a person
-  named are never changed or deleted; historical holdings are retained.
+- Removing keys and deleting an account are different actions. `remove_keys` clears the stored
+  keys and keeps the owner, the Account, its history, portfolios and configurations; runs fail
+  until keys are registered again. `delete` deletes the Account and everything it owns. Main
+  Sequence Secrets a person named are never changed or deleted.
 
 ## Site-Based Key Entry
 
@@ -76,9 +78,11 @@ from both Secret names), `refresh` (provider state), and `capture_holdings` (pub
 the complete position set, registering only Assets Markets lacks). Send one capture, never one
 request per position.
 
-Deletion requires the person's exact `DELETE <account_uid>` confirmation. Before asking for it,
-tell the person that deletion also disables every enabled bar configuration that runs with the
-account's keys. It never deletes them; report the configuration UIDs the result names as
-disabled. Only an Account's owner configures it: another owner's Account answers
-`account_owned_by_another`. Writes can outlast an MCP timeout: inspect
+Only an Account's owner removes its keys or deletes it, and only the owner creates or changes its
+bars feeds: another owner's Account answers `account_owned_by_another`, an Account without an
+owner `account_without_owner`. To delete an Account, first call `plan_delete` and tell the person
+what it reports: its portfolios, bars feeds and signals, and its whole Markets history, all go;
+nothing comes back. Then ask for their exact `DELETE <account_uid>` confirmation. Deletion is
+refused (`account_delete_refused`) while another account's current target holds one of its
+portfolios; report it, never name that account, and stop. Writes can outlast an MCP timeout: inspect
 Account/key-request/holdings state before retrying an ambiguous result, never assume rollback.

@@ -1,8 +1,9 @@
 """API shaping for durable analytical portfolio configurations.
 
 Every configuration runs on the portfolio Job declared in the repository workflow (ADR 0013). A
-portfolio is built from the weights an application provides (ADR 0024, ADR 0027) and is changed,
-paused, given weights or deleted only by its owner.
+portfolio belongs to one account and follows one of its account's signal definitions (ADR 0028);
+it is built from the weights an application provides (ADR 0024, ADR 0027) and is created,
+changed, paused, given weights or deleted only by its owner, the account's owner.
 """
 
 from __future__ import annotations
@@ -31,10 +32,11 @@ from alpaca_connectors.portfolios import (
     update_rebalance_configuration,
 )
 from alpaca_connectors.portfolios.provided_weights import (
+    create_portfolio,
     create_provided_weights_portfolio,
     end_portfolio_configuration,
     give_portfolio_weights,
-    provided_signal_uid,
+    portfolio_signal_uid,
     require_portfolio_owner,
 )
 
@@ -42,6 +44,8 @@ from ..schemas import (
     PortfolioConfigurationDetailResponse,
     PortfolioConfigurationResponse,
     PortfolioConfigurationUpdateRequest,
+    PortfolioCreateRequest,
+    PortfolioCreateResponse,
     PortfolioJobRunAcceptedResponse,
     PortfolioJobRunResponse,
     PortfolioRebalanceConfigurationCreateRequest,
@@ -59,11 +63,16 @@ from .configuration_jobs import accepted_run, job_fields
 
 
 def _responses(rows: list[Any]) -> list[PortfolioConfigurationResponse]:
+    from alpaca_connectors.market_data.configurations import portfolio_bar_configurations
+    from alpaca_connectors.portfolios.signal_definitions import signal_definitions_by_uids
+
     if not rows:
         return []
     state = configuration_job_state("portfolio", [row.uid for row in rows])
     rebalance_uids = list(dict.fromkeys(str(row.rebalance_configuration_uid) for row in rows))
     rebalance_configurations = rebalance_configurations_by_uids(rebalance_uids)
+    definitions = signal_definitions_by_uids(row.signal_definition_uid for row in rows)
+    own_bars = portfolio_bar_configurations([row.uid for row in rows])
     responses: list[PortfolioConfigurationResponse] = []
     for row in rows:
         rebalance_configuration = rebalance_configurations.get(str(row.rebalance_configuration_uid))
@@ -73,11 +82,16 @@ def _responses(rows: list[Any]) -> list[PortfolioConfigurationResponse]:
             )
         # The owner pair stays internal: it can name a gateway's person (ADR 0019).
         values = row.model_dump(mode="json", exclude={"owner_gateway_uid", "owner_user_uid"})
+        bars = own_bars.get(str(row.uid))
         responses.append(
             PortfolioConfigurationResponse.model_validate(
                 {
                     **values,
-                    "signal_uid": provided_signal_uid(row.uid),
+                    "adopted": row.adopted,
+                    "bars_configuration_uid": (
+                        str(bars.uid) if bars is not None else values["bars_configuration_uid"]
+                    ),
+                    "signal_uid": portfolio_signal_uid(row, definitions=definitions),
                     "rebalance_strategy": rebalance_configuration.strategy,
                     **job_fields(
                         state.job,
@@ -95,14 +109,16 @@ def list_configurations(
     limit: int,
     offset: int,
     search: str | None,
-    bars_configuration_uid: str | None,
     ordering: str,
+    account_uid: str | None = None,
+    signal_definition_uid: str | None = None,
 ):
     rows, total = list_portfolio_configurations(
         limit=limit,
         offset=offset,
         search=search,
-        bars_configuration_uid=bars_configuration_uid,
+        account_uids=[account_uid] if account_uid is not None else None,
+        signal_definition_uid=signal_definition_uid,
         ordering=ordering,
     )
     return collection_response(
@@ -125,7 +141,11 @@ def get_configuration_detail(
 ) -> PortfolioConfigurationDetailResponse | None:
     """Resolve all business-facing portfolio detail and its latest value history."""
     from alpaca_connectors.account.services import get_account_registration
-    from alpaca_connectors.market_data import get_bar_configuration
+    from alpaca_connectors.market_data.configurations import (
+        get_bar_configuration,
+        portfolio_bar_configuration,
+    )
+    from alpaca_connectors.portfolios.provided_weights import ended_portfolio_account_uid
     from alpaca_connectors.portfolios.signal_assets import assets_for_signals
     from alpaca_connectors.portfolios.signal_history import read_signal_observation_bounds
 
@@ -134,7 +154,11 @@ def get_configuration_detail(
         return None
     base = _responses([row])[0]
     rebalance_configuration = get_rebalance_configuration(row.rebalance_configuration_uid)
-    bars_configuration = get_bar_configuration(row.bars_configuration_uid)
+    bars_configuration = (
+        portfolio_bar_configuration(row.uid)
+        if row.adopted
+        else get_bar_configuration(row.bars_configuration_uid)
+    )
     if rebalance_configuration is None or bars_configuration is None:
         raise RuntimeError(
             f"Portfolio configuration {configuration_uid!s} has an unresolved required relationship."
@@ -147,18 +171,18 @@ def get_configuration_detail(
         "last_observation_at": bounds.last_observation_at,
         "asset_count": len(assets_for_signals([base.signal_uid])),
     }
-    bars_account = get_account_registration(str(bars_configuration.account_uid))
+    # The portfolio's account runs its bars (ADR 0028); before adoption, its former feed's did.
+    account_uid = ended_portfolio_account_uid(row)
+    bars_account = get_account_registration(str(account_uid)) if account_uid else None
     if bars_account is None:
-        raise RuntimeError(
-            f"Portfolio detail references missing Alpaca account {bars_configuration.account_uid}."
-        )
+        raise RuntimeError(f"Portfolio detail references missing Alpaca account {account_uid}.")
     asset_count: int | None
     if bars_configuration.asset_source == "assets":
         asset_count = len(bars_configuration.asset_uids)
         asset_source_name = f"{asset_count} explicitly selected registered assets"
     elif bars_configuration.asset_source == "portfolios":
         asset_count = None
-        asset_source_name = "Every asset of the live portfolios that use these prices"
+        asset_source_name = "Every asset the portfolio's signal has published"
     else:
         asset_count = None
         asset_source_name = (
@@ -303,22 +327,54 @@ def delete_configuration(
     return end_portfolio_configuration(row).summary()
 
 
+def create_configuration(
+    request: PortfolioCreateRequest,
+    *,
+    owner: AccountOwner,
+) -> PortfolioCreateResponse:
+    """Create a portfolio of an account the acting owner owns (ADR 0028, decision 3)."""
+    from .accounts import require_account_owned_by
+
+    require_account_owned_by(request.account_uid, owner)
+    created = create_portfolio(
+        owner=owner,
+        **request.model_dump(exclude={"bars"}),
+        bars=request.bars.model_dump(),
+    )
+    return PortfolioCreateResponse(
+        configuration=_responses([created.configuration])[0],
+        portfolio_uid=created.portfolio_uid,
+        portfolio_unique_identifier=created.portfolio_unique_identifier,
+        bars_configuration_uid=created.bars_configuration_uid,
+    )
+
+
 def create_provided_configuration(
     request: ProvidedWeightsPortfolioCreateRequest,
     *,
     owner: AccountOwner,
 ) -> ProvidedWeightsPortfolioCreateResponse:
-    """Create a provided-weights portfolio owned by the acting owner (ADR 0024).
+    """Create a portfolio by ADR 0024's route, kept until the applications move (ADR 0028).
 
-    An inline bars configuration runs with its account's keys, so its account must be one the
-    owner may configure (ADR 0022), as for ``POST /v1/bar-configurations``.
+    The portfolio belongs to the account of the bars configuration given inline or named, so
+    that account must be the acting owner's.
     """
-    from .accounts import require_owner_may_configure_account
+    from alpaca_connectors.market_data.configurations import get_bar_configuration
+
+    from .accounts import require_account_owned_by
 
     values = request.model_dump(exclude={"observations", "bars_configuration"})
     if request.bars_configuration is not None:
-        require_owner_may_configure_account(request.bars_configuration.account_uid, owner)
+        require_account_owned_by(request.bars_configuration.account_uid, owner)
         values["bars_configuration"] = request.bars_configuration.model_dump()
+    else:
+        named = get_bar_configuration(request.bars_configuration_uid)
+        if named is None:
+            raise LookupError(
+                f"Bars configuration {request.bars_configuration_uid} does not exist."
+            )
+        if named.account_uid is not None:
+            require_account_owned_by(named.account_uid, owner)
     created = create_provided_weights_portfolio(
         owner=owner,
         observations=[observation.model_dump() for observation in request.observations],
@@ -388,7 +444,7 @@ def configuration_weights(configuration_uid: str, *, limit: int) -> SignalObserv
     if row is None:
         raise LookupError(f"Portfolio configuration {configuration_uid!s} does not exist.")
     matrix = read_signal_observation_matrix(
-        signal_uid=provided_signal_uid(row.uid),
+        signal_uid=portfolio_signal_uid(row),
         observation_limit=limit,
     )
     return observations_response(row.uid, matrix)

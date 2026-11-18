@@ -251,10 +251,13 @@ def test_enabled_and_scheduled_bar_configurations_are_dispatched() -> None:
     statement = compile_statement.call_args.args[0]
     table = AlpacaBarsConfigurationTable.__table__.name
     sql = " ".join(str(statement.compile(compile_kwargs={"literal_binds": True})).split())
-    # Both flags decide: an unscheduled configuration still runs on demand (revision 0024).
+    # Both flags decide: an unscheduled configuration still runs on demand (revision 0024). A
+    # `portfolios` feed only portfolios not yet adopted name prices nothing (ADR 0028).
     assert sql == (
         f"SELECT {table}.uid FROM {table} WHERE {table}.enabled IS true "
         f"AND {table}.scheduled IS true "
+        f"AND ({table}.asset_source != 'portfolios' "
+        f"OR {table}.portfolio_configuration_uid IS NOT NULL) "
         f"ORDER BY {table}.name ASC, {table}.uid ASC"
     )
 

@@ -9,6 +9,11 @@ review. ms-markets 3.8.0, released on 2026-11-16, ships the signal it needs
 [MainSequenceMarkets#75](https://github.com/mainsequence-projects/MainSequenceMarkets/issues/75)),
 and this plan is written against that release.
 
+Amended on 2026-11-18 by [ADR 0028](0028_every_portfolio_belongs_to_one_account.md): weights are
+published to a signal definition of the portfolio's account, by the application's key (decision 5),
+and each portfolio has its own bars configuration (decision 4). Its routes stay until the
+applications move.
+
 Implemented on 2026-11-16 at the owner's request, with open question 2 as planned (naming a bars
 configuration needs no ownership of its account). It has not been run against a Markets API (see
 [Implementation Notes](#implementation-notes)).

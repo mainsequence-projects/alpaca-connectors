@@ -9,6 +9,9 @@ from .account import (
     configure_backfill_listing_fields_parser as configure_account_backfill_listing_fields_parser,
 )
 from .account import (
+    configure_delete_parser as configure_account_delete_parser,
+)
+from .account import (
     configure_get_parser as configure_account_get_parser,
 )
 from .account import (
@@ -24,7 +27,7 @@ from .account import (
     configure_register_parser as configure_account_register_parser,
 )
 from .account import (
-    configure_remove_parser as configure_account_remove_parser,
+    configure_remove_keys_parser as configure_account_remove_keys_parser,
 )
 from .account import (
     configure_update_parser as configure_account_update_parser,
@@ -55,6 +58,9 @@ from .instances import (
 from .instances import configure_rollback_parser as configure_instances_rollback_parser
 from .portfolios import (
     configure_action_parser as configure_portfolio_action_parser,
+)
+from .portfolios import (
+    configure_adopt_parser as configure_portfolio_adopt_parser,
 )
 from .portfolios import (
     configure_delete_parser as configure_portfolio_delete_parser,
@@ -146,7 +152,12 @@ def build_parser() -> argparse.ArgumentParser:
     configure_account_get_parser(account_commands.add_parser("get"))
     configure_account_update_parser(account_commands.add_parser("update"))
     configure_account_refresh_parser(account_commands.add_parser("refresh"))
-    configure_account_remove_parser(account_commands.add_parser("remove"))
+    configure_account_remove_keys_parser(
+        account_commands.add_parser("remove-keys", help="Clear an account's stored keys.")
+    )
+    configure_account_delete_parser(
+        account_commands.add_parser("delete", help="Delete an account and everything it owns.")
+    )
     configure_account_migrate_credentials_parser(
         account_commands.add_parser(
             "migrate-credentials",
@@ -197,6 +208,11 @@ def build_parser() -> argparse.ArgumentParser:
     configure_portfolio_list_parser(portfolio_commands.add_parser("list"))
     configure_portfolio_get_parser(portfolio_commands.add_parser("get"))
     configure_portfolio_delete_parser(portfolio_commands.add_parser("delete"))
+    configure_portfolio_adopt_parser(
+        portfolio_commands.add_parser(
+            "adopt", help="Rollout: give every portfolio its account, or end it (ADR 0028)."
+        )
+    )
     configure_portfolio_action_parser(portfolio_commands.add_parser("run"))
     configure_portfolio_runs_parser(portfolio_commands.add_parser("runs"))
     configure_prepare_interpolated_prices_parser(

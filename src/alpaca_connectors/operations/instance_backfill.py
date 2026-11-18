@@ -51,7 +51,7 @@ def _scope() -> dict[str, Any]:
     from msm.api.portfolios import Portfolio
     from sqlalchemy import select
 
-    from alpaca_connectors.account.alpaca_account_details import AlpacaAccountDetails
+    from alpaca_connectors.account.provider_account_details import ProviderAccountDetails
     from alpaca_connectors.portfolios.configurations import (
         AlpacaPortfolioConfigurationTable,
         PortfolioRebalanceConfigurationTable,
@@ -68,7 +68,7 @@ def _scope() -> dict[str, Any]:
         str(row["calendar_identifier"])
         for row in _own_rows(select(PortfolioRebalanceConfigurationTable.calendar_identifier))
     }
-    details = AlpacaAccountDetails.__table__
+    details = ProviderAccountDetails.__table__
     accounts = {
         str(row["account_unique_identifier"])
         for row in _own_rows(select(details.c.account_unique_identifier))

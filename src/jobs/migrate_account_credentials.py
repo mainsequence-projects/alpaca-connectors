@@ -1,7 +1,7 @@
 """Entry point of the one-off `alpaca-credential-migration` Job (ADR 0017).
 
 Copies every account registration's Alpaca keys from the Main Sequence Secrets it referenced
-before revision 0018 into the encrypted columns of `AlpacaAccountDetails`, and deletes the Secrets
+before revision 0018 into the encrypted columns of `ProviderAccountDetails`, and deletes the Secrets
 this application created. Dry run by default; `--execute` writes. The schema gate (ADR 0012) comes
 first. The summary carries counts, Secret names and reasons, never a key value.
 """

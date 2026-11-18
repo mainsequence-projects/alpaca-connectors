@@ -4,6 +4,10 @@
 
 Accepted — implemented in migration `0004`
 
+Amended on 2026-11-18 by [ADR 0028](0028_every_portfolio_belongs_to_one_account.md): a bars
+configuration is either a feed of its account, with the `assets` or `account_holdings` source, or
+its portfolio's own, with the `portfolios` source (decision 4).
+
 Amended on 2026-11-16 by [ADR 0024](0024_portfolios_from_provided_weights.md): a fourth asset
 source, `portfolios`, fetches every asset of the live portfolios that name the configuration.
 

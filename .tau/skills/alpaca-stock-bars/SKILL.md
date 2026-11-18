@@ -17,14 +17,18 @@ and `observations`. Discover the Account, Asset scope and migrated frequency/fee
 profile before `alpaca_manage_bar_configuration` operations `create`/`update`.
 Never invent profiles or dynamically create schemas.
 
-A stored configuration selects one Account and exactly one source:
+A stored configuration belongs to one Account (a feed) or to one portfolio. Only the Account's
+owner creates or changes a feed, which selects exactly one source:
 
 - `assets`: non-empty registered `asset_uids`.
 - `account_holdings`: no explicit Assets. The configured Account resolves its newest stored
   holdings inside the inclusive trailing 30-day window; resolution is read-only and never
   captures holdings.
-- `portfolios`: no explicit Assets. Every asset ever given a weight by the live portfolios that
-  name this configuration; a new asset joins the next update without editing the configuration.
+
+A portfolio's own configuration, source `portfolios`, is made and deleted with the portfolio: every
+asset its signal ever gave a weight, fetched with the portfolio's Account's keys; a new asset joins
+the next update without editing it. You can pause, resume, review or run it, never create or
+delete it. Every configuration writes the shared price table of its profile.
 
 Collections use limit 1–100 and offset in multiples of the fixed limit. Examples are arguments to
 `alpaca__call_tool`; replace placeholders with discovered identifiers/profile values:
@@ -42,7 +46,7 @@ Collections use limit 1–100 and offset in multiples of the fixed limit. Exampl
 A workflow-declared dispatcher updates every enabled, scheduled configuration once a day at
 00:00 UTC; `run` is only for an update now. Setting `scheduled` false (it defaults to true) leaves a
 configuration out of that daily update but still lets `run` update it on demand. Setting `enabled`
-false refuses every run, daily or on demand, and blocks the portfolios linked to it. A portfolio
+false refuses every run, daily or on demand, and blocks the portfolio it belongs to. A portfolio
 whose bars configuration is unscheduled values on whatever bars were last updated.
 
 1. Query `resolve` using the stored configuration UID; inspect derived Assets and output dataset.

@@ -5,6 +5,11 @@
 Decided by the owner on 2026-11-17. Not implemented yet: three releases carry it out, with a drain
 of each Environment between the first two ([Rollout](#rollout)).
 
+Amended on 2026-11-18 by [ADR 0028](0028_every_portfolio_belongs_to_one_account.md):
+`alpaca_connectors__portfolio_configuration` gains the account and the signal definition and loses
+its bars key (decisions 3 to 5); removing an account no longer disables bar configurations (decision
+8).
+
 It supersedes:
 
 - [ADR 0001](0001_etf_holdings_asset_category_ownership.md) and

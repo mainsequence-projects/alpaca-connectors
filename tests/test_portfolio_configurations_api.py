@@ -31,6 +31,8 @@ BARS_CONFIGURATION_UID = "33333333-3333-4333-8333-333333333333"
 REBALANCE_CONFIGURATION_UID = "44444444-4444-4444-8444-444444444444"
 JOB_UID = "55555555-5555-4555-8555-555555555555"
 JOB_RUN_UID = "66666666-6666-4666-8666-666666666666"
+ACCOUNT_UID = "88888888-8888-4888-8888-888888888888"
+DEFINITION_UID = "99999999-9999-4999-8999-999999999999"
 
 
 def performance_summary(
@@ -178,7 +180,9 @@ def portfolio_row() -> AlpacaPortfolioConfiguration:
             "description": "NYSE-close portfolio backtest.",
             "owner_gateway_uid": "owner-uid",
             "owner_user_uid": "owner-uid",
-            "bars_configuration_uid": uuid.UUID(BARS_CONFIGURATION_UID),
+            "account_uid": uuid.UUID(ACCOUNT_UID),
+            "signal_definition_uid": uuid.UUID(DEFINITION_UID),
+            "bars_configuration_uid": None,
             "rebalance_configuration_uid": uuid.UUID(REBALANCE_CONFIGURATION_UID),
             "portfolio_uid": None,
             "scheduled": True,
@@ -209,6 +213,14 @@ def test_portfolio_response_resolves_linked_metatables_with_bulk_uid_queries() -
             "rebalance_configurations_by_uids",
             return_value={REBALANCE_CONFIGURATION_UID: rebalance},
         ) as rebalances_by_uids,
+        patch(
+            "alpaca_connectors.portfolios.signal_definitions.signal_definitions_by_uids",
+            return_value={DEFINITION_UID: SimpleNamespace(signal_key="account/key")},
+        ) as definitions_by_uids,
+        patch(
+            "alpaca_connectors.market_data.configurations.portfolio_bar_configurations",
+            return_value={CONFIGURATION_UID: SimpleNamespace(uid=BARS_CONFIGURATION_UID)},
+        ) as own_bars,
     ):
         result = portfolio_service._responses([row])
 
@@ -217,6 +229,11 @@ def test_portfolio_response_resolves_linked_metatables_with_bulk_uid_queries() -
     assert (result[0].job_uid, result[0].job, result[0].scheduled) == (None, None, True)
     job_state.assert_called_once_with("portfolio", [row.uid])
     rebalances_by_uids.assert_called_once_with([REBALANCE_CONFIGURATION_UID])
+    # One read each for the signal definitions and the portfolios' own bars (ADR 0028).
+    assert list(definitions_by_uids.call_args.args[0]) == [uuid.UUID(DEFINITION_UID)]
+    own_bars.assert_called_once_with([row.uid])
+    assert result[0].bars_configuration_uid == BARS_CONFIGURATION_UID
+    assert (result[0].account_uid, result[0].adopted) == (ACCOUNT_UID, True)
 
 
 def test_rebalance_crud_serializes_storage_domain_models(api_client) -> None:
@@ -292,10 +309,10 @@ def test_portfolio_discovery_columns_are_renderable(api_client) -> None:
 
 def test_only_provided_weights_portfolios_are_created(api_client) -> None:
     # ADR 0027: a portfolio is created only from provided weights, and names no signal
-    # configuration.
+    # configuration; ADR 0028: it names its account and one of its account's signals.
     signal_based = {**create_request(), "signal_configuration_uid": SIGNAL_CONFIGURATION_UID}
     del signal_based["observations"]
-    assert api_client.post("/v1/portfolio-configurations", json=signal_based).status_code == 405
+    assert api_client.post("/v1/portfolio-configurations", json=signal_based).status_code == 422
     provided = "/v1/portfolio-configurations/provided-weights"
     assert api_client.post(provided, json=signal_based).status_code == 422
 
@@ -389,7 +406,10 @@ def test_portfolio_detail_resolves_business_labels_and_value_history() -> None:
             "get_rebalance_configuration",
             return_value=rebalance_row(),
         ),
-        patch("alpaca_connectors.market_data.get_bar_configuration", return_value=bars),
+        patch(
+            "alpaca_connectors.market_data.configurations.portfolio_bar_configuration",
+            return_value=bars,
+        ),
         patch("alpaca_connectors.account.services.get_account_registration", return_value=account),
         patch(
             "alpaca_connectors.portfolios.signal_history.read_signal_observation_bounds",
@@ -409,8 +429,8 @@ def test_portfolio_detail_resolves_business_labels_and_value_history() -> None:
     assert isinstance(detail, PortfolioConfigurationDetailResponse)
     assert detail.provided_weights.signal_uid == "signal-uid"
     assert detail.provided_weights.asset_count == 2
-    assert detail.linked_bars.asset_source_name == (
-        "Every asset of the live portfolios that use these prices"
+    assert (
+        detail.linked_bars.asset_source_name == "Every asset the portfolio's signal has published"
     )
     assert detail.linked_bars.asset_count is None
     # An unscheduled bars configuration stays linked, and the detail shows it is not updated daily.
@@ -506,3 +526,37 @@ def test_portfolio_detail_route_loads_latest_100_observations(api_client) -> Non
     assert result.json()["provided_weights"]["signal_uid"] == "signal-uid"
     assert "linked_signal" not in result.json()
     get_detail.assert_called_once_with(CONFIGURATION_UID, observation_limit=100)
+
+
+def test_only_the_accounts_owner_creates_its_portfolio(api_client, local_caller) -> None:
+    """ADR 0028: the account's owner creates its portfolios, which follow one of its signals."""
+    body = {
+        "name": "Momentum basket",
+        "account_uid": ACCOUNT_UID,
+        "signal_definition_uid": DEFINITION_UID,
+        "rebalance_configuration_uid": REBALANCE_CONFIGURATION_UID,
+        "bars": {"feed": "iex", "adjustment": "raw"},
+    }
+    accounts = "alpaca_connectors.api.app.services.accounts.get_account_registration"
+    owned = {"account_uid": ACCOUNT_UID, "owner_gateway_uid": "x", "owner_user_uid": "x"}
+    with (
+        patch(accounts, return_value=owned),
+        patch.object(portfolio_service, "create_portfolio") as create,
+    ):
+        refused = api_client.post("/v1/portfolio-configurations", json=body)
+    assert refused.status_code == 409
+    assert refused.json()["detail"]["code"] == "account_owned_by_another"
+    create.assert_not_called()
+
+    owned = {**owned, "owner_gateway_uid": local_caller.uid, "owner_user_uid": local_caller.uid}
+    with (
+        patch(accounts, return_value=owned),
+        patch.object(
+            portfolio_service, "create_portfolio", side_effect=LookupError("stop")
+        ) as create,
+    ):
+        api_client.post("/v1/portfolio-configurations", json=body)
+    kwargs = create.call_args.kwargs
+    assert (kwargs["account_uid"], kwargs["signal_definition_uid"]) == (ACCOUNT_UID, DEFINITION_UID)
+    assert (kwargs["bars"]["feed"], kwargs["bars"]["adjustment"]) == ("iex", "raw")
+    assert "bars_configuration_uid" not in kwargs

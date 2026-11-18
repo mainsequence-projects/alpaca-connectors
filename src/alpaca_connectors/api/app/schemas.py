@@ -534,8 +534,13 @@ class BarConfigurationCreateRequest(BaseModel):
             "runs on demand while enabled."
         ),
     )
-    account_uid: str
-    asset_source: Literal["assets", "account_holdings", "portfolios"]
+    account_uid: str = Field(
+        description=(
+            "The account the feed belongs to and runs with; the feed is deleted with it. A "
+            "portfolio's own configuration is created with the portfolio instead (ADR 0028)."
+        )
+    )
+    asset_source: Literal["assets", "account_holdings"]
     asset_uids: list[str] = Field(default_factory=list)
     frequency_id: str
     feed: str
@@ -545,7 +550,7 @@ class BarConfigurationCreateRequest(BaseModel):
     def validate_source(self) -> "BarConfigurationCreateRequest":
         if self.asset_source == "assets" and not self.asset_uids:
             raise ValueError("assets source requires asset_uids.")
-        if self.asset_source in {"account_holdings", "portfolios"} and self.asset_uids:
+        if self.asset_source == "account_holdings" and self.asset_uids:
             raise ValueError(f"{self.asset_source} source forbids asset_uids.")
         return self
 
@@ -594,7 +599,13 @@ class BarConfigurationResponse(BaseModel):
     description: str | None
     enabled: bool
     scheduled: bool
-    account_uid: str
+    account_uid: str | None = Field(
+        default=None, description="The account a feed belongs to; null for a portfolio's own."
+    )
+    portfolio_configuration_uid: str | None = Field(
+        default=None,
+        description="The portfolio a portfolio's own configuration belongs to; null for a feed.",
+    )
     asset_source: Literal["assets", "account_holdings", "portfolios"]
     asset_uids: list[str]
     frequency_id: str
@@ -700,11 +711,12 @@ class SignalObservationAssetResponse(BaseModel):
 
 
 class SignalObservationsResponse(BaseModel):
-    """Transposed latest observations for one configured signal."""
+    """Transposed latest observations for one signal, of a portfolio or a signal definition."""
 
     model_config = ConfigDict(extra="forbid")
 
-    configuration_uid: str
+    configuration_uid: str | None = None
+    signal_definition_uid: str | None = None
     signal_uid: str
     observation_count: int = Field(ge=0)
     asset_count: int = Field(ge=0)
@@ -820,7 +832,11 @@ class WeightsObservationRequest(BaseModel):
 
 
 class InlinePortfolioBarsConfigurationRequest(BaseModel):
-    """A new `portfolios` bars configuration created with the portfolio (ADR 0024)."""
+    """The account and bar profile of a portfolio created by ADR 0024's route.
+
+    The portfolio belongs to ``account_uid`` and gets its own bars configuration with this
+    profile (ADR 0028).
+    """
 
     model_config = ConfigDict(extra="forbid")
 
@@ -833,8 +849,48 @@ class InlinePortfolioBarsConfigurationRequest(BaseModel):
     scheduled: bool = True
 
 
+class PortfolioBarsProfileRequest(BaseModel):
+    """The bar profile of the portfolio's own bars configuration (ADR 0028, decision 4)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str | None = Field(default=None, min_length=1, max_length=255)
+    description: str | None = None
+    frequency_id: str = "1d"
+    feed: str = "sip"
+    adjustment: str = "all"
+    enabled: bool = True
+    scheduled: bool = True
+
+
+class PortfolioCreateRequest(_ConfigurationRequest):
+    """Create a portfolio of an account that follows one of the account's signals (ADR 0028)."""
+
+    name: str = Field(min_length=1, max_length=255)
+    description: str | None = None
+    account_uid: str = Field(
+        min_length=1, description="The account the portfolio belongs to; only its owner creates it."
+    )
+    signal_definition_uid: str = Field(
+        min_length=1, description="A signal definition of the same account, which it follows."
+    )
+    rebalance_configuration_uid: str = Field(min_length=1)
+    bars: PortfolioBarsProfileRequest = Field(default_factory=PortfolioBarsProfileRequest)
+    upsample_frequency_id: Literal["1d"] = "1d"
+    intraday_bar_interpolation_rule: Literal["ffill"] = "ffill"
+    valuation_column: str = Field(default="close", min_length=1, max_length=64)
+    valuation_maximum_staleness_seconds: int = Field(default=86_400, gt=0)
+    fail_on_missing_prices: bool = True
+    commission_fee: float = Field(default=0.00018, ge=0)
+    scheduled: bool = True
+
+
 class ProvidedWeightsPortfolioCreateRequest(_ConfigurationRequest):
-    """Create a portfolio whose weights the calling application provides (ADR 0024)."""
+    """Create a portfolio from weights the caller provides (ADR 0024's route, kept for now).
+
+    The portfolio belongs to the account of the bars configuration given inline or named, and
+    follows a signal definition of its own whose key is its configuration UID (ADR 0028).
+    """
 
     name: str = Field(min_length=1, max_length=255)
     description: str | None = None
@@ -858,7 +914,7 @@ class ProvidedWeightsPortfolioCreateRequest(_ConfigurationRequest):
 
 
 class PortfolioWeightsRequest(BaseModel):
-    """New weights for a provided-weights portfolio: one observation or several."""
+    """New weights for a signal: one observation or several."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -868,7 +924,8 @@ class PortfolioWeightsRequest(BaseModel):
 class PublishedWeightsResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    configuration_uid: str
+    configuration_uid: str | None = None
+    signal_definition_uid: str | None = None
     signal_uid: str
     observation_count: int = Field(ge=1)
     asset_count: int = Field(ge=0)
@@ -879,7 +936,6 @@ class PublishedWeightsResponse(BaseModel):
 class PortfolioConfigurationUpdateRequest(_ConfigurationRequest):
     name: str | None = Field(default=None, min_length=1, max_length=255)
     description: str | None = None
-    bars_configuration_uid: str | None = None
     rebalance_configuration_uid: str | None = None
     upsample_frequency_id: Literal["1d"] | None = None
     intraday_bar_interpolation_rule: Literal["ffill"] | None = None
@@ -904,8 +960,27 @@ class PortfolioConfigurationResponse(BaseModel):
     uid: str
     name: str
     description: str | None
+    account_uid: str | None = Field(
+        default=None,
+        description="The account the portfolio belongs to; null only before it is adopted.",
+    )
+    signal_definition_uid: str | None = Field(
+        default=None, description="The account's signal definition the portfolio follows."
+    )
+    adopted: bool = Field(
+        default=True,
+        description=(
+            "False for a portfolio created before accounts owned portfolios that the rollout "
+            "has not given an account yet; it neither runs nor takes weights."
+        ),
+    )
     signal_uid: str
-    bars_configuration_uid: str
+    bars_configuration_uid: str | None = Field(
+        default=None,
+        description=(
+            "The portfolio's own bars configuration, or the one a portfolio not yet adopted named."
+        ),
+    )
     rebalance_configuration_uid: str
     rebalance_strategy: Literal["calendar_event_signal"]
     portfolio_uid: str | None
@@ -1023,6 +1098,61 @@ class ProvidedWeightsPortfolioCreateResponse(BaseModel):
     portfolio_unique_identifier: str
     bars_configuration_created: bool
     weights: PublishedWeightsResponse
+
+
+class PortfolioCreateResponse(BaseModel):
+    """The created portfolio, its `Portfolio` row and its own bars configuration."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    configuration: PortfolioConfigurationResponse
+    portfolio_uid: str
+    portfolio_unique_identifier: str
+    bars_configuration_uid: str
+
+
+class SignalDefinitionCreateRequest(BaseModel):
+    """A signal of one account whose weights its application provides (ADR 0028, decision 5)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    account_uid: str = Field(
+        min_length=1, description="The account the signal belongs to; only its owner creates it."
+    )
+    key: str = Field(
+        min_length=1,
+        max_length=255,
+        description="The application's own stable key for the weights, unique within the account.",
+    )
+    name: str = Field(min_length=1, max_length=255)
+    description: str | None = None
+
+
+class SignalDefinitionUpdateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str | None = Field(default=None, min_length=1, max_length=255)
+    description: str | None = None
+
+    @model_validator(mode="after")
+    def require_change(self) -> "SignalDefinitionUpdateRequest":
+        if not self.model_fields_set:
+            raise ValueError("At least one signal definition field must be provided.")
+        return self
+
+
+class SignalDefinitionResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    uid: str
+    account_uid: str
+    key: str
+    name: str
+    description: str | None
+    signal_uid: str = Field(description="UID of the Main Sequence signal the weights publish to.")
+    portfolio_count: int = Field(ge=0, description="The account's portfolios that follow it.")
+    created_at: dt.datetime
+    updated_at: dt.datetime
 
 
 class PortfolioProvidedWeightsResponse(BaseModel):

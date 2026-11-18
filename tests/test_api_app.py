@@ -97,7 +97,7 @@ class ApiAppTests(unittest.TestCase):
         self.assertEqual(
             shared_preflight_paths,
             {
-                "/v1/accounts/actions/remove/preflight",
+                "/v1/accounts/actions/remove-keys/preflight",
                 "/v1/accounts/actions/capture-holdings/preflight",
                 "/v1/accounts/{account_uid}/holdings/actions/capture/preflight",
                 "/v1/accounts/{account_uid}/orders/actions/submit/preflight",

@@ -4,7 +4,7 @@ Mirrors the binance connector's ``src/account`` three-layer design:
 
 - ``src/account/__init__.py`` (this module): identity constants + the stable
   ``Account.unique_identifier`` builder used as the ``msm.api.accounts.Account`` upsert key.
-- ``src/account/alpaca_account_details.py``: project-owned one-to-one ``AccountTable`` detail
+- ``src/account/provider_account_details.py``: project-owned one-to-one ``AccountTable`` detail
   MetaTable (static metadata) + a timestamped ``AlpacaAccountBalancesStorage`` (point-in-time
   financials).
 - ``src/account/services.py``: the only authenticated layer + ``register_alpaca_account(...)``.

@@ -17,6 +17,7 @@ from typing import Any, ClassVar, Literal
 
 from msm.api.base import MarketsMetaTableRow, operation_result_rows
 from msm.base import MarketsBase, markets_table_args, new_markets_uid
+from msm.models import AccountTable
 from msm.models.portfolios import PortfolioTable
 from pydantic import ConfigDict
 from sqlalchemy import (
@@ -25,6 +26,7 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    ForeignKeyConstraint,
     Index,
     Integer,
     String,
@@ -34,8 +36,8 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.types import Uuid
 
-from alpaca_connectors.market_data.configurations import AlpacaBarsConfigurationTable
 from alpaca_connectors.metatables import AlpacaMarketsMetaTableMixin, ProjectStorageNameMixin
+from alpaca_connectors.portfolios.signal_definitions import SignalDefinitionTable
 
 RebalanceStrategy = Literal["calendar_event_signal"]
 RebalanceEvent = Literal["market_open", "market_close"]
@@ -217,17 +219,23 @@ class AlpacaPortfolioConfigurationTable(
     AlpacaMarketsMetaTableMixin,
     MarketsBase,
 ):
-    """One analytical portfolio built from the weights its owner application provides."""
+    """One analytical portfolio of one account, following one of its account's signals.
+
+    The account (ADR 0028, decision 3) and the signal definition it follows (decision 5) are
+    nullable only until revision 0029's adoption and the ``portfolio adopt`` rollout command
+    have given every existing portfolio one; a later revision makes them required. A row without
+    an account is not adopted: it is listed and can be deleted, but it does not run.
+    """
 
     __project_storage_concept__ = "portfolio_configuration"
     __markets_base_identifier__ = "AlpacaPortfolioConfiguration"
     __metatable_description__ = (
         "One row per analytical portfolio valued with Alpaca stock prices and built from the "
-        "weights an application provides. Saved settings for the simulated portfolio: its "
-        "price-update configuration and rebalance rule, its valuation and trading-fee settings, "
-        "the application's person who owns it, and whether the scheduled portfolio update "
-        "includes it; created by the applications that give the Alpaca Connectors application "
-        "the weights."
+        "weights an application provides. Saved settings for the simulated portfolio: the "
+        "registered Alpaca account it belongs to, the account's signal it follows, its rebalance "
+        "rule, its valuation and trading-fee settings, the application's person who owns it, "
+        "and whether the scheduled portfolio update includes it; created by the account's owner "
+        "through the applications that give the Alpaca Connectors application the weights."
     )
     __metatable_labels__ = ["portfolios", "configuration", "alpaca"]
     __table_args__ = markets_table_args(
@@ -257,10 +265,21 @@ class AlpacaPortfolioConfigurationTable(
             "valuation_maximum_staleness_seconds > 0",
             name="ck_portfolio_valuation_maximum_staleness",
         ),
+        # The definition must be one of the portfolio's own account (ADR 0028, decision 2).
+        ForeignKeyConstraint(
+            ["signal_definition_uid", "account_uid"],
+            [
+                f"{SignalDefinitionTable.__table__.fullname}.uid",
+                f"{SignalDefinitionTable.__table__.fullname}.account_uid",
+            ],
+            ondelete="RESTRICT",
+        ),
         Index(None, "name"),
         Index(None, "bars_configuration_uid"),
         Index(None, "rebalance_configuration_uid"),
         Index(None, "portfolio_uid", unique=True),
+        Index(None, "account_uid"),
+        Index(None, "signal_definition_uid"),
     )
 
     uid: Mapped[uuid.UUID] = mapped_column(
@@ -288,15 +307,40 @@ class AlpacaPortfolioConfigurationTable(
             "description": "Free-text description of the portfolio; null when none was given.",
         },
     )
-    bars_configuration_uid: Mapped[uuid.UUID] = mapped_column(
+    account_uid: Mapped[uuid.UUID | None] = mapped_column(
         Uuid(as_uuid=True),
-        ForeignKey(f"{AlpacaBarsConfigurationTable.__table__.fullname}.uid", ondelete="RESTRICT"),
-        nullable=False,
+        ForeignKey(f"{AccountTable.__table__.fullname}.uid", ondelete="RESTRICT"),
+        nullable=True,
         info={
-            "label": "Price configuration UID",
+            "label": "Account UID",
             "description": (
-                "UID of the stock price-update configuration whose stored daily prices value the "
-                "portfolio."
+                "Main Sequence account UID of the registered Alpaca brokerage account the "
+                "portfolio belongs to; the account cannot be deleted while it has portfolios. "
+                "Null only for a portfolio created before accounts owned portfolios and not yet "
+                "adopted."
+            ),
+        },
+    )
+    signal_definition_uid: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        nullable=True,
+        info={
+            "label": "Signal definition UID",
+            "description": (
+                "UID of the account's signal definition whose weights the portfolio follows; "
+                "null only for a portfolio not yet adopted."
+            ),
+        },
+    )
+    bars_configuration_uid: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        nullable=True,
+        info={
+            "label": "Former price configuration UID",
+            "description": (
+                "UID of the stock price-update configuration a portfolio not yet adopted named; "
+                "null once the portfolio has its own price-update configuration. Retired: a "
+                "later revision drops it."
             ),
         },
     )
@@ -441,6 +485,79 @@ class AlpacaPortfolioConfigurationTable(
     )
 
 
+class EndedPortfolioTable(ProjectStorageNameMixin, AlpacaMarketsMetaTableMixin, MarketsBase):
+    """A deleted portfolio whose retired ``Portfolio`` or signal ms-markets still keeps.
+
+    No key names the account, so the record never blocks ms-markets' account delete; the
+    account delete reads it to finish what it may delete (ADR 0028, decision 8 and open
+    question 2).
+    """
+
+    __project_storage_concept__ = "ended_portfolio"
+    __markets_base_identifier__ = "AlpacaEndedPortfolio"
+    __metatable_description__ = (
+        "One row per deleted Alpaca portfolio whose retired Main Sequence portfolio, or whose "
+        "signal, still exists: the account it belonged to, the portfolio and the signal it "
+        "followed, kept until both can be deleted with the account; written by the Alpaca "
+        "Connectors application when a portfolio is deleted."
+    )
+    __metatable_labels__ = ["portfolios", "configuration", "alpaca"]
+    __table_args__ = markets_table_args(
+        "AlpacaEndedPortfolio",
+        Index(None, "account_uid"),
+        Index(None, "portfolio_uid", unique=True),
+        Index(None, "signal_uid"),
+    )
+
+    uid: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        primary_key=True,
+        default=new_markets_uid,
+        info={"label": "UID", "description": "UUID of this record."},
+    )
+    account_uid: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        nullable=False,
+        info={
+            "label": "Account UID",
+            "description": (
+                "Main Sequence account UID of the account the portfolio belonged to; no key, so "
+                "the record outlives the account until its portfolio and signal are deleted."
+            ),
+        },
+    )
+    portfolio_uid: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        nullable=False,
+        info={
+            "label": "Portfolio UID",
+            "description": "Main Sequence portfolio UID of the retired portfolio.",
+        },
+    )
+    portfolio_configuration_uid: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        nullable=False,
+        info={
+            "label": "Configuration UID",
+            "description": "UID the deleted portfolio configuration had.",
+        },
+    )
+    signal_uid: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+        info={
+            "label": "Signal UID",
+            "description": "UID of the Main Sequence signal the portfolio followed.",
+        },
+    )
+    ended_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=utc_now,
+        info={"label": "Ended at", "description": "Time, in UTC, the portfolio was deleted."},
+    )
+
+
 class PortfolioRebalanceConfiguration(MarketsMetaTableRow):
     model_config = ConfigDict(extra="ignore", frozen=True)
 
@@ -466,16 +583,18 @@ class AlpacaPortfolioConfiguration(MarketsMetaTableRow):
     model_config = ConfigDict(extra="ignore", frozen=True)
 
     __table__: ClassVar[type[AlpacaPortfolioConfigurationTable]] = AlpacaPortfolioConfigurationTable
-    # Own tables only; the Portfolio foreign key is a reference (ms-markets ADR 0047).
+    # Own tables only; the Account and Portfolio keys are references (ms-markets ADR 0047).
     __required_tables__: ClassVar[list[type[MarketsBase]]] = [
-        AlpacaBarsConfigurationTable,
+        SignalDefinitionTable,
         PortfolioRebalanceConfigurationTable,
         AlpacaPortfolioConfigurationTable,
     ]
 
     name: str
     description: str | None
-    bars_configuration_uid: uuid.UUID
+    account_uid: uuid.UUID | None = None
+    signal_definition_uid: uuid.UUID | None = None
+    bars_configuration_uid: uuid.UUID | None = None
     rebalance_configuration_uid: uuid.UUID
     portfolio_uid: uuid.UUID | None
     scheduled: bool
@@ -489,6 +608,24 @@ class AlpacaPortfolioConfiguration(MarketsMetaTableRow):
     owner_user_uid: str
     created_at: dt.datetime
     updated_at: dt.datetime
+
+    @property
+    def adopted(self) -> bool:
+        """Whether the portfolio belongs to an account and follows one of its signals."""
+        return self.account_uid is not None and self.signal_definition_uid is not None
+
+
+class EndedPortfolio(MarketsMetaTableRow):
+    model_config = ConfigDict(extra="ignore", frozen=True)
+
+    __table__: ClassVar[type[EndedPortfolioTable]] = EndedPortfolioTable
+    __required_tables__: ClassVar[list[type[MarketsBase]]] = [EndedPortfolioTable]
+
+    account_uid: uuid.UUID
+    portfolio_uid: uuid.UUID
+    portfolio_configuration_uid: uuid.UUID
+    signal_uid: str
+    ended_at: dt.datetime
 
 
 def _name(value: str, *, label: str) -> str:
@@ -769,30 +906,27 @@ def delete_rebalance_configuration(configuration_uid: uuid.UUID | str) -> dict[s
 
 def validate_portfolio_references(
     *,
-    bars_configuration_uid: uuid.UUID,
     rebalance_configuration_uid: uuid.UUID,
-) -> tuple[Any, PortfolioRebalanceConfiguration]:
-    """Resolve the linked bars and rebalance configurations of a portfolio."""
-    from alpaca_connectors.market_data import get_bar_configuration
+) -> PortfolioRebalanceConfiguration:
+    """Resolve the rebalance configuration a portfolio names.
 
-    bars = get_bar_configuration(bars_configuration_uid)
-    if bars is None:
-        raise LookupError(f"Bars configuration {bars_configuration_uid!s} does not exist.")
-    if not bars.enabled:
-        raise ValueError(f"Bars configuration {bars_configuration_uid!s} is disabled.")
+    Rebalance configurations stay independent rules that any portfolio may name (ADR 0028,
+    decision 6); the portfolio's bars configuration is its own and names it instead.
+    """
     rebalance = get_rebalance_configuration(rebalance_configuration_uid)
     if rebalance is None:
         raise LookupError(
             f"Rebalance configuration {rebalance_configuration_uid!s} does not exist."
         )
     normalize_rebalance_strategy(rebalance.strategy)
-    return bars, rebalance
+    return rebalance
 
 
 def create_portfolio_configuration_row(
     *,
     name: str,
-    bars_configuration_uid: uuid.UUID | str,
+    account_uid: uuid.UUID | str,
+    signal_definition_uid: uuid.UUID | str | None,
     rebalance_configuration_uid: uuid.UUID | str,
     owner_gateway_uid: str,
     owner_user_uid: str,
@@ -806,21 +940,22 @@ def create_portfolio_configuration_row(
     scheduled: bool = True,
     uid: uuid.UUID | str | None = None,
 ) -> AlpacaPortfolioConfiguration:
-    """Store one portfolio configuration and its owner (ADR 0024); it touches no platform Job."""
+    """Store one portfolio configuration of an account, and its owner; it touches no platform Job.
+
+    The account's owner owns its portfolios (ADR 0028, decision 3): the caller has checked that
+    the owner given here owns ``account_uid``. ``signal_definition_uid`` is ``None`` only while
+    the route of ADR 0024 creates the portfolio's own definition right after.
+    """
     from msm.bootstrap import resolve_runtime
     from msm.repositories.crud import create_model
 
     if not owner_gateway_uid or not owner_user_uid:
         raise ValueError("A portfolio requires its owner.")
-    bars_uid = uuid.UUID(str(bars_configuration_uid))
     rebalance_uid = uuid.UUID(str(rebalance_configuration_uid))
     if commission_fee < 0:
         raise ValueError("commission_fee must be greater than or equal to zero.")
     _start_runtime()
-    validate_portfolio_references(
-        bars_configuration_uid=bars_uid,
-        rebalance_configuration_uid=rebalance_uid,
-    )
+    validate_portfolio_references(rebalance_configuration_uid=rebalance_uid)
     now = utc_now()
     values = {
         "uid": uuid.UUID(str(uid)) if uid is not None else new_markets_uid(),
@@ -828,7 +963,11 @@ def create_portfolio_configuration_row(
         "description": _description(description),
         "owner_gateway_uid": owner_gateway_uid,
         "owner_user_uid": owner_user_uid,
-        "bars_configuration_uid": bars_uid,
+        "account_uid": uuid.UUID(str(account_uid)),
+        "signal_definition_uid": (
+            uuid.UUID(str(signal_definition_uid)) if signal_definition_uid is not None else None
+        ),
+        "bars_configuration_uid": None,
         "rebalance_configuration_uid": rebalance_uid,
         "portfolio_uid": None,
         "scheduled": bool(scheduled),
@@ -881,7 +1020,8 @@ def list_portfolio_configurations(
     limit: int = 25,
     offset: int = 0,
     search: str | None = None,
-    bars_configuration_uid: uuid.UUID | str | None = None,
+    account_uids: Sequence[uuid.UUID | str] | None = None,
+    signal_definition_uid: uuid.UUID | str | None = None,
     ordering: str = "name",
 ) -> tuple[list[AlpacaPortfolioConfiguration], int]:
     from msm.bootstrap import resolve_runtime
@@ -894,10 +1034,15 @@ def list_portfolio_configurations(
         row_model_name="AlpacaPortfolioConfiguration",
     )
     statement = select(AlpacaPortfolioConfigurationTable)
-    if bars_configuration_uid is not None:
+    if account_uids is not None:
+        accounts = [uuid.UUID(str(uid)) for uid in account_uids]
+        if not accounts:
+            return [], 0
+        statement = statement.where(AlpacaPortfolioConfigurationTable.account_uid.in_(accounts))
+    if signal_definition_uid is not None:
         statement = statement.where(
-            AlpacaPortfolioConfigurationTable.bars_configuration_uid
-            == uuid.UUID(str(bars_configuration_uid))
+            AlpacaPortfolioConfigurationTable.signal_definition_uid
+            == uuid.UUID(str(signal_definition_uid))
         )
     if search:
         pattern = f"%{search.strip()}%"
@@ -956,7 +1101,6 @@ def update_portfolio_configuration(
     *,
     name: str | None = None,
     description: str | None | object = _UNSET,
-    bars_configuration_uid: uuid.UUID | str | None = None,
     rebalance_configuration_uid: uuid.UUID | str | None = None,
     upsample_frequency_id: str | None = None,
     intraday_bar_interpolation_rule: str | None = None,
@@ -968,15 +1112,15 @@ def update_portfolio_configuration(
 ) -> AlpacaPortfolioConfiguration:
     """Update calculation fields, the scheduled flag, or both.
 
-    Changing only ``scheduled`` (pause or resume) skips the reference validation, so a portfolio
-    whose bars configuration is disabled can still be left out of the scheduled run.
+    Changing only ``scheduled`` (pause or resume) skips the reference validation. The account and
+    the signal definition never change; the bars profile is changed on the portfolio's own bars
+    configuration.
     """
     current = get_portfolio_configuration(configuration_uid)
     if current is None:
         raise LookupError(f"Portfolio configuration {configuration_uid!s} does not exist.")
     calculation_values = (
         name,
-        bars_configuration_uid,
         rebalance_configuration_uid,
         upsample_frequency_id,
         intraday_bar_interpolation_rule,
@@ -992,18 +1136,11 @@ def update_portfolio_configuration(
             configuration_uid,
             values={"scheduled": bool(scheduled)},
         )
-    bars_uid = uuid.UUID(str(bars_configuration_uid or current.bars_configuration_uid))
     rebalance_uid = uuid.UUID(
         str(rebalance_configuration_uid or current.rebalance_configuration_uid)
     )
-    validate_portfolio_references(
-        bars_configuration_uid=bars_uid,
-        rebalance_configuration_uid=rebalance_uid,
-    )
-    values: dict[str, Any] = {
-        "bars_configuration_uid": bars_uid,
-        "rebalance_configuration_uid": rebalance_uid,
-    }
+    validate_portfolio_references(rebalance_configuration_uid=rebalance_uid)
+    values: dict[str, Any] = {"rebalance_configuration_uid": rebalance_uid}
     if name is not None:
         values["name"] = _name(name, label="Portfolio configuration name")
     if description is not _UNSET:
@@ -1043,7 +1180,10 @@ def update_portfolio_configuration(
 
 
 def scheduled_portfolio_configurations() -> list[AlpacaPortfolioConfiguration]:
-    """Return every portfolio configuration the portfolio Job's scheduled run includes."""
+    """Return every portfolio configuration the portfolio Job's scheduled run includes.
+
+    A portfolio not yet adopted (no account, ADR 0028) does not run.
+    """
     from msm.bootstrap import resolve_runtime
     from msm.repositories.base import compile_markets_statement, execute_markets_operation
     from sqlalchemy import select
@@ -1052,7 +1192,13 @@ def scheduled_portfolio_configurations() -> list[AlpacaPortfolioConfiguration]:
     _start_runtime()
     runtime = resolve_runtime(models=[table], row_model_name="AlpacaPortfolioConfiguration")
     operation = compile_markets_statement(
-        select(table).where(table.scheduled.is_(True)).order_by(table.name.asc(), table.uid.asc()),
+        select(table)
+        .where(
+            table.scheduled.is_(True),
+            table.account_uid.is_not(None),
+            table.signal_definition_uid.is_not(None),
+        )
+        .order_by(table.name.asc(), table.uid.asc()),
         context=runtime.context,
         operation="select",
     )
@@ -1070,12 +1216,131 @@ def delete_portfolio_configuration_row(configuration_uid: uuid.UUID | str) -> di
     return AlpacaPortfolioConfiguration.delete(configuration_uid)
 
 
+def portfolio_configurations_of_account(
+    account_uid: uuid.UUID | str,
+) -> list[AlpacaPortfolioConfiguration]:
+    """Every portfolio configuration of the account, in pages (ADR 0028, decision 8)."""
+    from alpaca_connectors.markets_api import MARKETS_BATCH_SIZE
+
+    rows: list[AlpacaPortfolioConfiguration] = []
+    while True:
+        page, total = list_portfolio_configurations(
+            limit=MARKETS_BATCH_SIZE, offset=len(rows), account_uids=[account_uid]
+        )
+        rows.extend(page)
+        if not page or len(rows) >= total:
+            return rows
+
+
+def unadopted_portfolio_configurations() -> list[AlpacaPortfolioConfiguration]:
+    """Every portfolio without an account or a signal definition yet (ADR 0028, decision 9)."""
+    from msm.bootstrap import resolve_runtime
+    from msm.repositories.base import compile_markets_statement, execute_markets_operation
+    from sqlalchemy import or_, select
+
+    table = AlpacaPortfolioConfigurationTable
+    _start_runtime()
+    runtime = resolve_runtime(models=[table], row_model_name="AlpacaPortfolioConfiguration")
+    operation = compile_markets_statement(
+        select(table)
+        .where(or_(table.account_uid.is_(None), table.signal_definition_uid.is_(None)))
+        .order_by(table.name.asc(), table.uid.asc()),
+        context=runtime.context,
+        operation="select",
+    )
+    return [
+        AlpacaPortfolioConfiguration.model_validate(row)
+        for row in operation_result_rows(
+            execute_markets_operation(operation, context=runtime.context)
+        )
+    ]
+
+
+def portfolio_counts_by_definition(
+    signal_definition_uids: Sequence[uuid.UUID | str],
+) -> dict[str, int]:
+    """How many portfolios follow each signal definition, in one grouped read."""
+    from msm.bootstrap import resolve_runtime
+    from msm.repositories.base import compile_markets_statement, execute_markets_operation
+    from sqlalchemy import func, select
+
+    uids = sorted({uuid.UUID(str(uid)) for uid in signal_definition_uids if uid is not None})
+    if not uids:
+        return {}
+    table = AlpacaPortfolioConfigurationTable
+    _start_runtime()
+    runtime = resolve_runtime(models=[table], row_model_name="AlpacaPortfolioConfiguration")
+    operation = compile_markets_statement(
+        select(table.signal_definition_uid, func.count().label("count"))
+        .where(table.signal_definition_uid.in_(uids))
+        .group_by(table.signal_definition_uid),
+        context=runtime.context,
+        operation="select",
+    )
+    return {
+        str(uuid.UUID(str(row["signal_definition_uid"]))): int(row["count"])
+        for row in operation_result_rows(
+            execute_markets_operation(operation, context=runtime.context)
+        )
+    }
+
+
+def record_ended_portfolio(
+    *,
+    account_uid: uuid.UUID | str,
+    portfolio_uid: uuid.UUID | str,
+    portfolio_configuration_uid: uuid.UUID | str,
+    signal_uid: str,
+) -> EndedPortfolio:
+    """Record a retired ``Portfolio`` and its signal under the account it belonged to.
+
+    The record has no key to the account, so it never blocks ms-markets' account delete, which
+    reads it to delete them (ADR 0028, decision 8). Recording the same portfolio again returns
+    the record already stored.
+    """
+    _start_runtime()
+    existing = EndedPortfolio.filter(portfolio_uid=uuid.UUID(str(portfolio_uid)), limit=1)
+    if existing:
+        return existing[0]
+    return EndedPortfolio.create(
+        account_uid=uuid.UUID(str(account_uid)),
+        portfolio_uid=uuid.UUID(str(portfolio_uid)),
+        portfolio_configuration_uid=uuid.UUID(str(portfolio_configuration_uid)),
+        signal_uid=str(signal_uid),
+        ended_at=utc_now(),
+    )
+
+
+def ended_portfolios_of_account(account_uid: uuid.UUID | str) -> list[EndedPortfolio]:
+    """The account's ended portfolios whose retired ``Portfolio`` or signal still exist."""
+    from alpaca_connectors.markets_api import MARKETS_BATCH_SIZE
+
+    _start_runtime()
+    rows: list[EndedPortfolio] = []
+    while True:
+        page = EndedPortfolio.filter(
+            account_uid=uuid.UUID(str(account_uid)),
+            limit=MARKETS_BATCH_SIZE,
+            offset=len(rows),
+        )
+        rows.extend(page)
+        if len(page) < MARKETS_BATCH_SIZE:
+            return rows
+
+
+def forget_ended_portfolio(record: EndedPortfolio) -> None:
+    """Delete the record once its ``Portfolio`` is deleted."""
+    EndedPortfolio.delete(record.uid)
+
+
 def project_portfolio_configuration_models() -> list[type[MarketsBase]]:
     from alpaca_connectors.portfolios.signal_assets import SignalAssetTable
 
     return [
+        SignalDefinitionTable,
         PortfolioRebalanceConfigurationTable,
         AlpacaPortfolioConfigurationTable,
+        EndedPortfolioTable,
         SignalAssetTable,
     ]
 
@@ -1083,6 +1348,14 @@ def project_portfolio_configuration_models() -> list[type[MarketsBase]]:
 __all__ = [
     "AlpacaPortfolioConfiguration",
     "AlpacaPortfolioConfigurationTable",
+    "EndedPortfolio",
+    "EndedPortfolioTable",
+    "ended_portfolios_of_account",
+    "forget_ended_portfolio",
+    "portfolio_configurations_of_account",
+    "portfolio_counts_by_definition",
+    "record_ended_portfolio",
+    "unadopted_portfolio_configurations",
     "PortfolioRebalanceConfiguration",
     "PortfolioRebalanceConfigurationTable",
     "DEFAULT_PORTFOLIO_CALENDAR_IDENTIFIER",

@@ -53,30 +53,40 @@ instructions are `.tau/SYSTEM.md`; its tools and skills are described in
 
 - a portfolio is built from weights an application provides
   ([ADR 0024](../adrs/0024_portfolios_from_provided_weights.md),
-  [ADR 0027](../adrs/0027_one_portfolio_path.md)); only an application creates one, through
-  `POST /v1/portfolio-configurations/provided-weights`, and it owns the portfolio; no CLI command
-  or Agent tool creates one or gives it weights ([Portfolios](../portfolios/portfolios.md))
+  [ADR 0027](../adrs/0027_one_portfolio_path.md)); it belongs to one account and follows one of
+  that account's signal definitions
+  ([ADR 0028](../adrs/0028_every_portfolio_belongs_to_one_account.md)); only the account's owner
+  creates them, through `POST /v1/signal-definitions` and `POST /v1/portfolio-configurations`
+  (or ADR 0024's `.../provided-weights` until the applications move); no CLI command or Agent tool
+  creates one or gives it weights ([Portfolios](../portfolios/portfolios.md))
+- once per Environment after the ADR 0028 release, `alpaca-connectors portfolio adopt` reports
+  each portfolio not yet adopted: the ones it would give their account, a signal definition that
+  keeps their signal and their own bars configuration, and the ones it would end because their
+  bars run on an account their owner does not own; `--execute` does it, deletes the `portfolios`
+  feeds nothing names any more, and reports any portfolio an account's current target holds
 - the application registers every asset before naming it in weights; an unregistered asset, or
   one without Alpaca details, refuses the whole call
-- inspect with `alpaca-connectors portfolio list`, `get` and `runs`; `run` starts one run on the
+- inspect with `alpaca-connectors portfolio list` (`--account-uid`, `--signal-definition-uid`),
+  `get` and `runs`; `run` starts one run on the
   `alpaca-portfolio` Job, and `update <uid> --no-scheduled` leaves a portfolio out of the
   02:00 UTC dispatch
 - `alpaca-connectors portfolio delete <uid>` is a dry run; `--execute` retires the portfolio's
   `Portfolio` before deleting the configuration, and is refused while an account's current target
   names it: that account's owner changes the target first, never the connector
 - retiring deletes nothing: the `Portfolio`, its series and the history of every account that
-  referenced it stay
-- a portfolio's bars come from the bar configuration it names; a `portfolios` configuration
-  follows what its live portfolios hold, so new weights need no bars edit
+  referenced it stay, recorded under the account, whose delete deletes them
+- a portfolio's bars come from its own bars configuration, which follows what its signal ever
+  published, so new weights need no bars edit
 - after a new bars profile is migrated, run `alpaca-connectors portfolio prepare-interpolated-prices`,
   then the same command with `--check-only`
 
 ## Price Updates From Alpaca
 
 - maintain reusable definitions with `alpaca-connectors market-data bar-configuration` CRUD
-- each definition selects one registered account, one migrated frequency/feed/adjustment profile,
-  and exactly one asset source: explicit `assets`, recent `account_holdings`, or `portfolios`
-  (every asset of the live portfolios that name it, ADR 0024)
+- a feed belongs to one registered account and selects one migrated frequency/feed/adjustment
+  profile and exactly one asset source: explicit `assets` or recent `account_holdings`; a
+  portfolio's own configuration, with the `portfolios` source, is made with the portfolio
+  (ADR 0028); every one writes the shared table of its profile
 - for account holdings, the configured Account UID resolves the newest stored holdings set inside
   the inclusive trailing 30-day window; the resolver never captures holdings as a side effect
 - run `alpaca-connectors market-data update --configuration-uid <CONFIGURATION_UID>` for a dry-run
@@ -99,6 +109,13 @@ instructions are `.tau/SYSTEM.md`; its tools and skills are described in
   or `alpaca-connectors` runs that need authenticated platform access; the SDK keeps the session
   in the operating-system credential store, never in `.env`
 - before live platform checks, run `mainsequence refresh-token`
+- removing keys and deleting an account are separate
+  ([ADR 0028](../adrs/0028_every_portfolio_belongs_to_one_account.md)):
+  `alpaca-connectors account remove-keys <uid>` clears the stored keys and keeps the owner and
+  everything else; `alpaca-connectors account delete <uid>` reports what deleting the account
+  would delete and what refuses it, and with `--execute` deletes the account and everything it
+  owns, its whole Markets history included; another account's current target on one of its
+  portfolios refuses it
 - account registration stores the Alpaca keys encrypted on the account row
   ([ADR 0017](../adrs/0017_encrypted_account_credentials.md)): `managed` when a person entered
   them, `imported` when they were copied once from Main Sequence Secrets selected by name; live

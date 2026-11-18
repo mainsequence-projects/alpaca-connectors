@@ -6,6 +6,9 @@ Proposed on 2026-11-09 and implemented the same day. It applies the dispatcher p
 [ADR 0013](0013_workflow_declared_configuration_jobs.md) (decision 8) to the `alpaca-bars-update`
 Job.
 
+Amended on 2026-11-18 by [ADR 0028](0028_every_portfolio_belongs_to_one_account.md): the
+blocked-portfolio rule reads the portfolio's own bars configuration (decision 4).
+
 Amended on 2026-11-12 at the owner's review: the first draft reused `enabled` as the scheduled
 flag. The owner wants configurations that stay usable but run only on demand, so
 [decision 2](#2-a-scheduled-flag-beside-enabled) adds a `scheduled` column (revision 0024). Open:

@@ -8,20 +8,29 @@ series and lets the account sync fund it. It is the connector's only kind of por
 ([ADR 0024](../adrs/0024_portfolios_from_provided_weights.md),
 [ADR 0027](../adrs/0027_one_portfolio_path.md)). Hunch builds every take this way.
 
+Every portfolio belongs to one Alpaca account and follows one of that account's signal
+definitions ([ADR 0028](../adrs/0028_every_portfolio_belongs_to_one_account.md)). Only the account's
+owner creates them, and deleting the account deletes them.
+
 The owner application:
 
 1. registers the assets it needs through the asset routes
    (`POST /v1/assets/registration/execute`), so each has an `ALPACA::<uuid>` identifier and its
    trading calendar;
-2. creates the portfolio with its first weights;
-3. gives it new weights whenever it chooses them, and deletes it when it is done.
+2. creates a signal definition on its account with its own key, and gives it weights;
+3. creates portfolios of the account that follow the signal, as many as it wants;
+4. gives the signal new weights whenever it chooses them, and deletes the portfolios and the
+   signal when it is done.
 
 Everything else is the connector's: the bars, the daily run, the valuation and the account sync.
 
 The implementation lives in:
 
-- `src/alpaca_connectors/portfolios/provided_weights.py`: the signal, the observations, the
-  create and the owner check
+- `src/alpaca_connectors/portfolios/signal_definitions.py`: an account's signals, their identity
+  and their deletion
+- `src/alpaca_connectors/portfolios/provided_weights.py`: the observations, publishing, the
+  creates, ending a portfolio and the owner check
+- `src/alpaca_connectors/portfolios/adoption.py`: the `portfolio adopt` rollout
 - `src/alpaca_connectors/portfolios/configurations.py`: the portfolio and rebalance configuration
   tables
 - `src/alpaca_connectors/portfolios/execution.py`: resolution, preflight and the portfolio graph
@@ -40,28 +49,45 @@ every venue's connector to serve the same ones (Hunch ADR 0030, decision 7).
 
 | Route | Effect | Who |
 | --- | --- | --- |
-| `POST /v1/portfolio-configurations/provided-weights` | create the portfolio with one or more observations | any verified caller, who becomes its owner |
-| `POST /v1/portfolio-configurations/{uid}/weights` | give it new weights: one or more observations | its owner |
-| `GET /v1/portfolio-configurations/{uid}/weights` | its latest observations (`limit`, 1 to 100): their times and each asset's weight at each time | anyone |
+| `POST /v1/signal-definitions` | create a signal of the account, with the application's key | the account's owner |
+| `POST /v1/signal-definitions/{uid}/weights` | give the signal new weights: one or more observations | the account's owner |
+| `GET /v1/signal-definitions/{uid}/weights` | its latest observations: their times and each asset's weight at each time | the account's owner, or any Main Sequence caller |
+| `PATCH`, `DELETE /v1/signal-definitions/{uid}` | rename it; delete it once no portfolio follows it | the account's owner |
+| `POST /v1/portfolio-configurations` | create a portfolio of the account that follows one of its signals | the account's owner, who becomes its owner |
+| `POST /v1/portfolio-configurations/provided-weights` | ADR 0024's create, with its first observations, until the applications move | the owner of the bars configuration's account |
+| `POST`, `GET /v1/portfolio-configurations/{uid}/weights` | ADR 0024's weights routes, on the signal the portfolio follows | its owner; reading, anyone |
 | `PATCH /v1/portfolio-configurations/{uid}` | change its settings; pause or resume it with `scheduled` | its owner |
 | `DELETE /v1/portfolio-configurations/{uid}` | retire its `Portfolio`, then delete it ([Ending A Portfolio](#ending-a-portfolio)) | its owner |
 | `POST /v1/portfolio-configurations/{uid}/actions/run` | run it now on the portfolio Job | anyone |
 | `GET /v1/portfolio-configurations`, `GET .../{uid}`, `GET .../{uid}/runs`, `GET .../discovery` | list, detail, its runs, the discovery contract | anyone |
 
-**Create** takes `name`, `description?`, either `bars_configuration_uid` or `bars_configuration`
-(a new `portfolios` bars configuration: `name`, `description?`, `account_uid`, `frequency_id`,
-`feed`, `adjustment`, `scheduled?`), the `rebalance_configuration_uid`, the valuation and fee
-settings (`valuation_column`, `valuation_maximum_staleness_seconds`, `fail_on_missing_prices`,
-`commission_fee`), `scheduled?` and `observations`. It creates the inline bars configuration,
-stores the row, publishes the observations and creates the `Portfolio` row, in that order, and a
-refused create leaves no row. It answers the configuration, the `Portfolio` (`portfolio_uid`, and
-`portfolio_unique_identifier` `ALPACA_PORTFOLIO__<uid hex>`), whether it created the bars
-configuration, and the weights it published.
+**A signal definition** takes `account_uid`, the application's `key` (unique within the account),
+`name` and `description?`. Its signal is ms-markets' `ApplicationWeights` keyed by the account UID
+and that key, so two accounts never share a signal. It answers its `signal_uid` and the number of
+portfolios that follow it. Its observations, signal-asset rows and Markets `SignalMetadata` go
+with it, unless a retired `Portfolio` still follows the signal.
 
-**Errors.** `403 portfolio_owned_by_another`; `409 observation_not_after_last` and
-`409 portfolio_in_account_target`; `422 unknown_asset`, `asset_not_alpaca`, `invalid_observation`,
-`empty_observations` and `invalid_bars_configuration` (neither or both bars fields). No error names
-an asset, a weight or an owner.
+**Create** (`POST /v1/portfolio-configurations`) takes `name`, `description?`, `account_uid`,
+`signal_definition_uid` (a definition of the same account; the database refuses another
+account's), `rebalance_configuration_uid`, the bar profile of its own bars configuration under
+`bars`, the valuation and fee settings (`valuation_column`,
+`valuation_maximum_staleness_seconds`, `fail_on_missing_prices`, `commission_fee`) and
+`scheduled?`. It stores the row, creates its own bars configuration and the `Portfolio` row, in
+that order, and a refused create leaves no row. It answers the configuration, the `Portfolio`
+(`portfolio_uid`, and `portfolio_unique_identifier` `ALPACA_PORTFOLIO__<uid hex>`) and its bars
+configuration.
+
+**ADR 0024's create** stays until the applications move. It takes either `bars_configuration_uid`
+(a feed of the account) or `bars_configuration` (`name`, `description?`, `account_uid`,
+`frequency_id`, `feed`, `adjustment`, `scheduled?`), the rebalance, valuation and fee settings and
+`observations`. The portfolio belongs to that account, gets its own bars configuration with that
+profile, and a signal definition of its own whose key is its configuration UID, as its signal's key
+was; the observations are published to it.
+
+**Not adopted yet.** A portfolio created before ADR 0028 that revision 0029 could not give an
+account (its bars ran on an account without an owner, or on another owner's) answers
+`adopted: false`. It neither runs nor takes weights until `alpaca-connectors portfolio adopt
+--execute` gives it one or ends it.
 
 ## Observations
 
@@ -97,19 +123,18 @@ timezone:
 
 ## Bars
 
-A portfolio names one bars configuration, which decides the account whose keys fetch the bars
-and the profile (`1d/sip/all` or `1d/iex/raw`). The source made for it is `portfolios`
-([Alpaca Bars](../market_data/alpaca_bars.md)):
+Each portfolio has its own bars configuration (ADR 0028, decision 4): it names the portfolio,
+runs with the portfolio's account's keys, has the `portfolios` source and is deleted with the
+portfolio. Its profile (`1d/sip/all` or `1d/iex/raw`) chooses the shared price table its bars land
+in, whose rows name no account ([Alpaca Bars](../market_data/alpaca_bars.md)):
 
-- **Its assets** are every asset ever published by the live portfolios that name it, read from
-  the signal-asset table, never from the signal weights series. A deleted portfolio, or one whose
-  `Portfolio` is retired, drops out; a paused one still counts. The `resolve` action
+- **Its assets** are every asset the portfolio's signal ever published, read from the
+  signal-asset table, never from the signal weights series. A portfolio whose `Portfolio` is
+  retired prices nothing; a paused one still counts. The `resolve` action
   (`POST /v1/market-data/bar-configurations/{uid}/actions/resolve`) shows the list a run would use.
-- **New weights need no edit.** The next bars run picks up an asset a portfolio was just given.
-- **Created with the portfolio.** The create call may carry `bars_configuration` instead of
-  `bars_configuration_uid`, and the connector creates the `portfolios` configuration through the
-  same rules as `POST /v1/market-data/bar-configurations`: the caller must be allowed to configure
-  its account ([ADR 0022](../adrs/0022_configurations_never_block_an_owners_removal.md)).
+- **New weights need no edit.** The next bars run picks up an asset the signal was just given.
+- **Shared prices.** Two accounts' configurations on the same profile write the same table; a
+  portfolio is valued from it whichever account fetched a price.
 - **The order of the day.** Bars run at 00:00 UTC and portfolios at 02:00 UTC, so weights given
   during a day get their bars before the next scheduled run. Run the bars update first when
   running a portfolio at once after giving it a new asset; otherwise the run fails on missing

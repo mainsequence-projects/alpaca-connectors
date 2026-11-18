@@ -67,6 +67,22 @@ _LAZY_IMPORTS = {
         "alpaca_connectors.market_data.configurations",
         "get_bar_configuration",
     ),
+    "bar_configuration_account_uid": (
+        "alpaca_connectors.market_data.configurations",
+        "bar_configuration_account_uid",
+    ),
+    "create_portfolio_bar_configuration": (
+        "alpaca_connectors.market_data.configurations",
+        "create_portfolio_bar_configuration",
+    ),
+    "portfolio_bar_configuration": (
+        "alpaca_connectors.market_data.configurations",
+        "portfolio_bar_configuration",
+    ),
+    "portfolio_bar_configurations": (
+        "alpaca_connectors.market_data.configurations",
+        "portfolio_bar_configurations",
+    ),
     "list_bar_configurations": (
         "alpaca_connectors.market_data.configurations",
         "list_bar_configurations",

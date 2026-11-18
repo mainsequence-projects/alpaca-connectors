@@ -70,10 +70,24 @@ def configure_refresh_parser(parser: argparse.ArgumentParser) -> None:
     parser.set_defaults(handler=run_account_refresh_command)
 
 
-def configure_remove_parser(parser: argparse.ArgumentParser) -> None:
+def configure_remove_keys_parser(parser: argparse.ArgumentParser) -> None:
+    parser.description = (
+        "Clear the account's stored keys; the owner, the account and all it owns stay. Dry run "
+        "without --execute."
+    )
     parser.add_argument("account_uid")
     parser.add_argument("--execute", action="store_true")
-    parser.set_defaults(handler=run_account_remove_command)
+    parser.set_defaults(handler=run_account_remove_keys_command)
+
+
+def configure_delete_parser(parser: argparse.ArgumentParser) -> None:
+    parser.description = (
+        "Delete the account and everything it owns: portfolios, bars feeds, signals and its "
+        "whole Markets history (ADR 0028). Without --execute, only the preflight."
+    )
+    parser.add_argument("account_uid")
+    parser.add_argument("--execute", action="store_true")
+    parser.set_defaults(handler=run_account_delete_command)
 
 
 def configure_migrate_credentials_parser(parser: argparse.ArgumentParser) -> None:
@@ -191,37 +205,41 @@ def run_account_refresh_command(args: argparse.Namespace) -> int:
     return 0
 
 
-def run_account_remove_command(args: argparse.Namespace) -> int:
-    from alpaca_connectors.account.services import (
-        enabled_account_configurations,
-        get_account_registration,
-        remove_account_registration,
-    )
-    from alpaca_connectors.holdings.services import list_account_holdings
+def run_account_remove_keys_command(args: argparse.Namespace) -> int:
+    """Clear the account's keys; without ``--execute``, say what would change (ADR 0028)."""
+    from alpaca_connectors.account.services import get_account_registration, remove_account_keys
 
     account = get_account_registration(args.account_uid)
     if account is None:
         raise SystemExit(f"Alpaca account registration {args.account_uid} does not exist.")
-    _, holdings_count = list_account_holdings(args.account_uid, limit=1)
-    dependents = enabled_account_configurations(args.account_uid)
-    preflight = {
-        "allowed": True,
-        "account_uid": args.account_uid,
-        "retained_holdings_rows": holdings_count,
-        "credential_source": account.get("credential_source"),
-        "disables_bar_configuration_uids": list(dependents.bar_uids),
-        "detail": (
-            "The Alpaca binding, its stored keys included, will be removed and Account will be "
-            "deactivated. The enabled bar configurations that run with its keys are disabled "
-            "first (ADR 0022). Main Sequence Secrets a registration made before revision "
-            "0018 still references are deleted when this application created them and kept "
-            "otherwise."
-        ),
-    }
     if not args.execute:
-        _print(preflight)
+        _print(
+            {
+                "allowed": True,
+                "account_uid": args.account_uid,
+                "credential_source": account.get("credential_source"),
+                "detail": (
+                    "The stored keys will be removed. The owner, the account, its history, "
+                    "portfolios and configurations stay; runs fail until keys are registered "
+                    "again. Main Sequence Secrets a registration made before revision 0018 "
+                    "still references are deleted when this application created them and kept "
+                    "otherwise."
+                ),
+            }
+        )
         return 0
-    _print(remove_account_registration(args.account_uid))
+    _print(remove_account_keys(args.account_uid))
+    return 0
+
+
+def run_account_delete_command(args: argparse.Namespace) -> int:
+    """Delete the account and all it owns; without ``--execute``, only the preflight."""
+    from alpaca_connectors.account.deletion import delete_account, preflight_account_delete
+
+    if not args.execute:
+        _print(preflight_account_delete(args.account_uid).summary())
+        return 0
+    _print(delete_account(args.account_uid).summary())
     return 0
 
 

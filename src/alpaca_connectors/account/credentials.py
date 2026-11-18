@@ -1,6 +1,6 @@
 """Alpaca account credentials, stored as application-encrypted columns (ADR 0017).
 
-An account registration carries its Alpaca API key and secret key on ``AlpacaAccountDetails`` in
+An account registration carries its Alpaca API key and secret key on ``ProviderAccountDetails`` in
 the ``api_key`` and ``secret_key`` columns, which are ``metatables.EncryptedString`` columns
 sealed in this process under the ``ALPACA_CONNECTORS_DATA_KEY`` Secret (MetaTables ADR 0025). A
 value is accepted from a person (``managed``) or copied once from Main Sequence Secrets selected
@@ -176,7 +176,7 @@ def stored_credential_values(
     updated_at: dt.datetime,
     actor_user_uid: str | None,
 ) -> dict[str, Any]:
-    """``AlpacaAccountDetails`` column values that store these keys.
+    """``ProviderAccountDetails`` column values that store these keys.
 
     The values are plaintext here and are encrypted by the model's column type when the
     statement that carries them is compiled; the transition Secret references end with them.
@@ -196,16 +196,33 @@ def stored_credential_values(
     }
 
 
+def cleared_credential_values(
+    *,
+    updated_at: dt.datetime,
+    actor_user_uid: str | None,
+) -> dict[str, Any]:
+    """``ProviderAccountDetails`` column values that remove the stored keys (ADR 0028).
+
+    The owner and the rest of the row stay; the fingerprint stays to say which key was removed.
+    """
+    return {
+        **{column: None for column in STORED_CREDENTIAL_COLUMNS},
+        "credentials_updated_at": updated_at,
+        "credentials_updated_by_user_uid": actor_user_uid,
+        **{column: None for column in LEGACY_SECRET_REFERENCE_COLUMNS},
+    }
+
+
 def registration_columns() -> list[Any]:
     """The detail columns a registration read returns: every column except the encrypted ones.
 
     The read-only ``credentials_stored`` flag reports whether the keys are stored, without
     carrying them.
     """
-    from alpaca_connectors.account.alpaca_account_details import AlpacaAccountDetails
+    from alpaca_connectors.account.provider_account_details import ProviderAccountDetails
     from metatables import EncryptedString
 
-    table = AlpacaAccountDetails.__table__
+    table = ProviderAccountDetails.__table__
     columns = [
         column.label(column.key)
         for column in table.columns
@@ -231,13 +248,13 @@ def write_stored_credentials(
     from msm.repositories.base import compile_markets_statement, execute_markets_operation
     from sqlalchemy import update
 
-    from alpaca_connectors.account.alpaca_account_details import AlpacaAccountDetails
+    from alpaca_connectors.account.provider_account_details import ProviderAccountDetails
 
-    table = AlpacaAccountDetails.__table__
+    table = ProviderAccountDetails.__table__
     statement = (
-        update(AlpacaAccountDetails)
+        update(ProviderAccountDetails)
         .where(table.c.account_uid == account_uid)
-        .values({getattr(AlpacaAccountDetails, key): value for key, value in values.items()})
+        .values({getattr(ProviderAccountDetails, key): value for key, value in values.items()})
     )
     execute_markets_operation(
         compile_markets_statement(statement, context=context, operation="update"),
@@ -274,11 +291,11 @@ def read_registered_alpaca_credentials(account_uid: str) -> ResolvedAlpacaCreden
     from msm.repositories.base import compile_markets_statement, execute_markets_operation
     from sqlalchemy import select
 
-    from alpaca_connectors.account.alpaca_account_details import AlpacaAccountDetails
+    from alpaca_connectors.account.provider_account_details import ProviderAccountDetails
     from alpaca_connectors.runtime import account_runtime_models, start_markets_engine
 
     runtime = start_markets_engine(models=account_runtime_models())
-    table = AlpacaAccountDetails.__table__
+    table = ProviderAccountDetails.__table__
     statement = (
         select(table.c.api_key, table.c.secret_key)
         .where(table.c.account_uid == account_uid)
@@ -354,6 +371,7 @@ __all__ = [
     "LEGACY_SECRET_REFERENCE_COLUMNS",
     "MANAGED_SECRET_PREFIX",
     "STORED_CREDENTIAL_COLUMNS",
+    "cleared_credential_values",
     "AccountCredentialsMissingError",
     "AlpacaCredentialInput",
     "AlpacaCredentialsRejectedError",

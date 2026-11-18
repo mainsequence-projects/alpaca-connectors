@@ -33,6 +33,8 @@ CONFIGURATION_UID = uuid.UUID("11111111-1111-4111-8111-111111111111")
 BARS_CONFIGURATION_UID = uuid.UUID("33333333-3333-4333-8333-333333333333")
 REBALANCE_CONFIGURATION_UID = uuid.UUID("44444444-4444-4444-8444-444444444444")
 PORTFOLIO_UID = uuid.UUID("55555555-5555-4555-8555-555555555555")
+ACCOUNT_UID = uuid.UUID("66666666-6666-4666-8666-666666666666")
+DEFINITION_UID = uuid.UUID("77777777-7777-4777-8777-777777777777")
 
 
 def portfolio_configuration(**overrides) -> AlpacaPortfolioConfiguration:
@@ -43,7 +45,9 @@ def portfolio_configuration(**overrides) -> AlpacaPortfolioConfiguration:
         "description": "NYSE-close portfolio backtest.",
         "owner_gateway_uid": "owner-uid",
         "owner_user_uid": "owner-uid",
-        "bars_configuration_uid": BARS_CONFIGURATION_UID,
+        "account_uid": ACCOUNT_UID,
+        "signal_definition_uid": DEFINITION_UID,
+        "bars_configuration_uid": None,
         "rebalance_configuration_uid": REBALANCE_CONFIGURATION_UID,
         "portfolio_uid": None,
         "scheduled": True,
@@ -113,7 +117,6 @@ def test_portfolio_configuration_owns_calculation_fields_and_the_scheduled_flag(
         "image_status",
         "latest_run_status",
         "universe_uid",
-        "account_uid",
         "source_time_index_meta_table_uid",
         # One weights source (ADR 0027): no signal configuration, no unused job_uid.
         "weights_source",
@@ -121,7 +124,26 @@ def test_portfolio_configuration_owns_calculation_fields_and_the_scheduled_flag(
         "job_uid",
     ):
         assert forbidden not in columns
-    assert columns.bars_configuration_uid.foreign_keys
+    # The portfolio belongs to its account, which cannot be deleted while it has portfolios, and
+    # follows one of its account's signal definitions (ADR 0028).
+    [account_key] = [
+        key
+        for key in columns.account_uid.foreign_keys
+        if key.column.table.name == "ms_markets__account"
+    ]
+    assert account_key.ondelete == "RESTRICT"
+    [definition_key] = [
+        key
+        for key in AlpacaPortfolioConfigurationTable.__table__.foreign_key_constraints
+        if "signal_definition_uid" in key.column_keys
+    ]
+    assert definition_key.column_keys == ["signal_definition_uid", "account_uid"]
+    assert [element.target_fullname for element in definition_key.elements] == [
+        "alpaca_connectors__signal_definition.uid",
+        "alpaca_connectors__signal_definition.account_uid",
+    ]
+    # Its bars configuration names it instead; the former key is gone.
+    assert not columns.bars_configuration_uid.foreign_keys
     assert columns.rebalance_configuration_uid.foreign_keys
     assert columns.portfolio_uid.foreign_keys
     assert columns.scheduled.nullable is False
@@ -210,6 +232,7 @@ def test_portfolio_resolution_uses_published_signal_and_selected_bars_profile() 
     row = portfolio_configuration()
     bars_configuration = SimpleNamespace(
         uid=BARS_CONFIGURATION_UID,
+        enabled=True,
         frequency_id="1d",
         feed="sip",
         adjustment="all",
@@ -235,10 +258,14 @@ def test_portfolio_resolution_uses_published_signal_and_selected_bars_profile() 
         ),
         patch(
             "alpaca_connectors.portfolios.execution.validate_portfolio_references",
-            return_value=(bars_configuration, rebalance),
+            return_value=rebalance,
         ),
         patch(
-            "alpaca_connectors.portfolios.provided_weights.provided_signal_uid",
+            "alpaca_connectors.market_data.configurations.portfolio_bar_configuration",
+            return_value=bars_configuration,
+        ),
+        patch(
+            "alpaca_connectors.portfolios.provided_weights.portfolio_signal_uid",
             return_value="signal-uid",
         ),
         patch(

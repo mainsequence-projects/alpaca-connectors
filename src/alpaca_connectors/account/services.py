@@ -21,10 +21,6 @@ from alpaca_connectors.account import (
     api_key_fingerprint,
     build_account_unique_identifier,
 )
-from alpaca_connectors.account.alpaca_account_details import (
-    ACCOUNT_BALANCE_NUMERIC_COLUMNS,
-    AlpacaAccountDetails,
-)
 from alpaca_connectors.account.credentials import (
     AlpacaCredentialInput,
     AlpacaSecretNames,
@@ -48,6 +44,10 @@ from alpaca_connectors.account.ownership import (
     AccountOwner,
     is_claim_by_external_person,
     require_owner_may_register,
+)
+from alpaca_connectors.account.provider_account_details import (
+    ACCOUNT_BALANCE_NUMERIC_COLUMNS,
+    ProviderAccountDetails,
 )
 from alpaca_connectors.holdings import DEFAULT_CASH_ASSET_IDENTIFIER, build_account_holdings_rows
 
@@ -140,7 +140,7 @@ def build_account_balance_values(
 
     Prefers the raw account dict (it carries the six live-API-only fields), falling back to the
     typed model. Returns the ``ACCOUNT_BALANCE_NUMERIC_COLUMNS`` plus ``daytrade_count`` /
-    ``balance_asof`` — all written onto the ``AlpacaAccountDetails`` row.
+    ``balance_asof`` — all written onto the ``ProviderAccountDetails`` row.
     """
     values: dict[str, Any] = {}
     for column in ACCOUNT_BALANCE_NUMERIC_COLUMNS:
@@ -160,7 +160,7 @@ def build_account_detail_values(
     snapshot_time: dt.datetime | None = None,
     raw_account: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Map a TradeAccount + AccountConfiguration to ``AlpacaAccountDetails`` column values.
+    """Map a TradeAccount + AccountConfiguration to ``ProviderAccountDetails`` column values.
 
     Includes the static metadata, the account configuration, **and** the current financials
     (cash/equity/buying-power/margin/…) — the latter are refreshed on each register, not stored as a
@@ -587,7 +587,7 @@ def register_alpaca_account(
     # same row instead of conflicting.
     upsert_model(
         context,
-        model=AlpacaAccountDetails,
+        model=ProviderAccountDetails,
         values={"account_uid": account.uid, **detail_values},
         conflict_columns=("account_uid",),
     )
@@ -601,7 +601,7 @@ def register_alpaca_account(
         account_unique_identifier=unique_identifier,
         account_uid=str(account.uid),
         is_paper=paper,
-        detail_table=AlpacaAccountDetails.__metatable_identifier__,
+        detail_table=ProviderAccountDetails.__metatable_identifier__,
         holdings_rows=len(holdings.positions),
         credential_source=credential_source,
         warnings=warnings,
@@ -635,7 +635,7 @@ def _existing_registration(context: Any, unique_identifier: str) -> dict[str, An
     """
     return _registration_details(
         context,
-        AlpacaAccountDetails.__table__.c.account_unique_identifier == unique_identifier,
+        ProviderAccountDetails.__table__.c.account_unique_identifier == unique_identifier,
     )
 
 
@@ -681,17 +681,6 @@ def enabled_account_configurations(account_uid: uuid.UUID | str) -> AccountConfi
     )
 
 
-def disable_account_configurations(configurations: AccountConfigurations) -> None:
-    """Stop the bar configurations that run with the account's keys.
-
-    Only the flag is written, so a configuration is disabled whatever it references.
-    """
-    from alpaca_connectors.market_data.configurations import disable_bar_configuration
-
-    for configuration_uid in configurations.bar_uids:
-        disable_bar_configuration(configuration_uid)
-
-
 def _written_registration(
     account: Any, existing: dict[str, Any] | None, detail_values: dict[str, Any]
 ) -> dict[str, Any]:
@@ -700,7 +689,7 @@ def _written_registration(
 
     sealed = {
         column.key
-        for column in AlpacaAccountDetails.__table__.columns
+        for column in ProviderAccountDetails.__table__.columns
         if isinstance(column.type, EncryptedString)
     }
     detail = {
@@ -796,7 +785,7 @@ def get_account_registration(account_uid: str) -> dict[str, Any] | None:
     runtime = start_markets_engine(models=account_runtime_models())
     account = Account.get_by_uid(account_uid)
     detail = _registration_details(
-        runtime.context, AlpacaAccountDetails.__table__.c.account_uid == account_uid
+        runtime.context, ProviderAccountDetails.__table__.c.account_uid == account_uid
     )
     if account is None or detail is None:
         return None
@@ -855,7 +844,7 @@ def list_account_registrations(
     from alpaca_connectors.runtime import account_runtime_models, start_markets_engine
 
     runtime = start_markets_engine(models=account_runtime_models())
-    details = AlpacaAccountDetails.__table__
+    details = ProviderAccountDetails.__table__
     statement = select(*registration_columns())
     if active is not None:
         statement = statement.where(details.c.account_is_active == active)
@@ -934,7 +923,7 @@ def backfill_account_listing_fields(*, execute: bool = False) -> dict[str, Any]:
     from alpaca_connectors.runtime import account_runtime_models, start_markets_engine
 
     runtime = start_markets_engine(models=account_runtime_models())
-    details = AlpacaAccountDetails.__table__
+    details = ProviderAccountDetails.__table__
     rows = operation_result_rows(
         execute_markets_operation(
             compile_markets_statement(
@@ -1047,7 +1036,7 @@ def update_account_registration(
         account = Account.update(account_uid, account_values)
         update_model(
             runtime.context,
-            model=AlpacaAccountDetails,
+            model=ProviderAccountDetails,
             uid=account_uid,
             values=_listing_values(account),
         )
@@ -1076,31 +1065,32 @@ def update_account_registration(
     return updated
 
 
-def remove_account_registration(account_uid: str) -> dict[str, Any]:
-    """Remove the Alpaca detail binding and deactivate Account; holdings history is retained.
+def remove_account_keys(account_uid: str, *, actor_user_uid: str | None = None) -> dict[str, Any]:
+    """Clear the account's keys; its owner, account, history, portfolios and feeds stay.
 
-    The stored keys go with the row. A registration that still referenced Main Sequence Secrets
-    from before revision 0018 has its managed ones deleted; external ones are kept.
-
-    Configurations never block a removal (ADR 0022): the enabled bar configurations that run with
-    the account's keys are disabled first, and the result names them. They keep
-    their account and stay until someone deletes them; the account's owner can enable them again
-    once the account is registered again.
+    Nothing is disabled or blocked: a run without keys fails with the ordinary error until the
+    owner registers keys again (ADR 0028, decision 8). A registration that still referenced Main
+    Sequence Secrets from before revision 0018 has its managed ones deleted; external ones are
+    kept.
     """
-    from msm.api.accounts import Account, AccountHoldingsSet
-    from msm.repositories.crud import delete_model
-
+    from alpaca_connectors.account.credentials import (
+        cleared_credential_values,
+        write_stored_credentials,
+    )
     from alpaca_connectors.runtime import account_runtime_models, start_markets_engine
 
     current = get_account_registration(account_uid)
     if current is None:
         raise LookupError(f"Alpaca account registration {account_uid!s} does not exist.")
-    dependents = enabled_account_configurations(account_uid)
-    disable_account_configurations(dependents)
     runtime = start_markets_engine(models=account_runtime_models())
-    retained_holdings_sets = AccountHoldingsSet.count(account_uid=str(account_uid))
-    delete_model(runtime.context, model=AlpacaAccountDetails, uid=account_uid)
-    Account.update(account_uid, account_is_active=False)
+    write_stored_credentials(
+        runtime.context,
+        account_uid=account_uid,
+        values=cleared_credential_values(
+            updated_at=dt.datetime.now(dt.timezone.utc).replace(microsecond=0),
+            actor_user_uid=actor_user_uid,
+        ),
+    )
     deleted_secrets: list[str] = []
     warnings: list[str] = []
     previous_references = legacy_secret_references(current)
@@ -1108,10 +1098,7 @@ def remove_account_registration(account_uid: str) -> dict[str, Any]:
         deleted_secrets, warnings = delete_legacy_managed_secrets(previous_references)
     return {
         "account_uid": str(account_uid),
-        "registration_removed": True,
-        "account_deactivated": True,
-        "retained_holdings_sets": retained_holdings_sets,
-        "disabled_bar_configuration_uids": list(dependents.bar_uids),
+        "keys_removed": True,
         "deleted_secrets": deleted_secrets,
         "warnings": warnings,
     }
@@ -1160,7 +1147,7 @@ def refresh_alpaca_account(
     values.update(_listing_values(account))
     update_model(
         runtime.context,
-        model=AlpacaAccountDetails,
+        model=ProviderAccountDetails,
         uid=account_uid,
         values=values,
     )
@@ -1181,7 +1168,6 @@ __all__ = [
     "build_registered_account_client",
     "canonical_identifier_for_position",
     "cash_asset_exists",
-    "disable_account_configurations",
     "enabled_account_configurations",
     "ensure_cash_currency_asset",
     "get_account_registration",
@@ -1191,8 +1177,8 @@ __all__ = [
     "prepare_alpaca_position_assets",
     "read_alpaca_account",
     "refresh_alpaca_account",
+    "remove_account_keys",
     "register_alpaca_account",
-    "remove_account_registration",
     "resolve_alpaca_asset_record_for_position",
     "resolve_alpaca_asset_records_for_positions",
     "update_account_registration",
