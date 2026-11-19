@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import uuid
+
 from fastapi import APIRouter, Body, Query
 
 from ..errors import api_http_error, not_found
@@ -41,6 +43,9 @@ def configurations_list(
     asset_source: str | None = None,
     portfolio_owned: bool | None = None,
     ordering: str = "name",
+    uid: list[uuid.UUID] | None = Query(
+        default=None, description="Only these configurations; repeat the parameter for each."
+    ),
 ) -> ResourceCollection:
     validate_page_window(limit=limit, offset=offset)
     validate_ordering(ordering, allowed_fields={"name", "updated_at", "frequency_id"})
@@ -54,6 +59,7 @@ def configurations_list(
             asset_source=asset_source,
             portfolio_owned=portfolio_owned,
             ordering=ordering,
+            uids=[str(value) for value in uid] if uid is not None else None,
         )
     except Exception as exc:
         raise api_http_error(exc) from exc

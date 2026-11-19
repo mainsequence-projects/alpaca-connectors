@@ -62,7 +62,9 @@ def _run(*, execute: bool, unlinked: list[str], link_results: dict[str, dict]):
             _details((AAPL_ID, "us_equity"), (SPY_ID, "us_equity"), (BTC_ID, "crypto")),
         ),
         patch("msm.api.assets.AssetCalendar", asset_calendar),
-        patch("alpaca_connectors.assets.calendars.ensure_trading_calendar", ensure_calendar),
+        patch(
+            "alpaca_connectors.assets.calendars.ensure_trading_calendars_stored", ensure_calendar
+        ),
         patch.object(asset_calendars, "_UNLINKED_PAGE", 2),
     ):
         report = asset_calendars.link_alpaca_asset_calendars(execute=execute)
@@ -97,7 +99,9 @@ def test_execute_links_only_the_alpaca_assets_that_have_no_calendar() -> None:
         link_results={"NYSE": {"linked": [AAPL]}, "CRYPTO_24_7": {"linked": [BTC]}},
     )
 
-    assert [call.args for call in ensure_calendar.call_args_list] == [("CRYPTO_24_7",), ("NYSE",)]
+    # Both calendars are ensured in one call, before any link.
+    (call,) = ensure_calendar.call_args_list
+    assert list(call.args[0]) == ["CRYPTO_24_7", "NYSE"]
     assert [(call.args[0], call.kwargs) for call in asset_calendar.link_many.call_args_list] == [
         ([BTC], {"calendar_identifier": "CRYPTO_24_7", "relink": False}),
         ([AAPL], {"calendar_identifier": "NYSE", "relink": False}),
@@ -115,7 +119,8 @@ def test_execute_writes_nothing_when_every_asset_has_a_calendar() -> None:
     )
 
     asset_calendar.link_many.assert_not_called()
-    ensure_calendar.assert_not_called()
+    (call,) = ensure_calendar.call_args_list
+    assert list(call.args[0]) == []
     assert report["calendars"] == {
         "CRYPTO_24_7": {"assets": 1, "unlinked": 0, "linked": 0},
         "NYSE": {"assets": 2, "unlinked": 0, "linked": 0},
@@ -124,10 +129,8 @@ def test_execute_writes_nothing_when_every_asset_has_a_calendar() -> None:
 
 def _stored_calendars(*stored: str) -> Mock:
     calendar = Mock()
-    calendar.filter.side_effect = lambda *, unique_identifier, limit: [
-        SimpleNamespace(unique_identifier=unique_identifier)
-        for key in stored
-        if key == unique_identifier
+    calendar.filter.side_effect = lambda *, unique_identifier__in, limit: [
+        SimpleNamespace(unique_identifier=key) for key in stored if key in unique_identifier__in
     ][:limit]
     calendar.create_from_pandas_calendar.side_effect = lambda source, key, **kwargs: (
         SimpleNamespace(unique_identifier=key, source=source, **kwargs)
@@ -141,8 +144,21 @@ def test_a_stored_calendar_is_read_once_and_never_written_again() -> None:
         row = ensure_trading_calendar("NYSE")
 
     assert row.unique_identifier == "NYSE"
-    calendar.filter.assert_called_once_with(unique_identifier="NYSE", limit=1)
+    calendar.filter.assert_called_once_with(unique_identifier__in=["NYSE"], limit=1)
     calendar.create_from_pandas_calendar.assert_not_called()
+
+
+def test_a_process_reads_a_calendar_it_has_seen_stored_only_once() -> None:
+    from alpaca_connectors.assets.calendars import ensure_trading_calendars_stored
+
+    calendar = _stored_calendars("NYSE", "CRYPTO_24_7")
+    with patch("msm.api.calendars.Calendar", calendar):
+        ensure_trading_calendars_stored(["NYSE", "CRYPTO_24_7"])
+        ensure_trading_calendars_stored(["CRYPTO_24_7", "NYSE"])
+        ensure_trading_calendar("NYSE")
+
+    # One read for both calendars; the later calls read nothing.
+    calendar.filter.assert_called_once_with(unique_identifier__in=["NYSE", "CRYPTO_24_7"], limit=2)
 
 
 def test_a_missing_exchange_calendar_is_stored_from_the_library_calendar_of_its_name() -> None:

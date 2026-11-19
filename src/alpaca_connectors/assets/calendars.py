@@ -14,6 +14,7 @@ pandas-market-calendars, so this needs nothing more installed.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from typing import Any
 
 # Stored calendar keys whose sessions are the library's always-open `24/7` calendar: every day,
@@ -23,20 +24,42 @@ ALWAYS_OPEN_CALENDAR_KEYS = ("24/7", "CRYPTO_24_7")
 _ALWAYS_OPEN_LIBRARY_CALENDAR = "24/7"
 
 
-def ensure_trading_calendar(calendar_key: str) -> Any:
-    """Return the stored ms-markets Calendar whose `unique_identifier` is `calendar_key`.
+# The calendars this process has seen stored. A stored calendar is never deleted, so once seen it
+# is not read again in this process.
+_STORED_CALENDARS: dict[str, Any] = {}
 
-    One `Calendar.filter` read when it exists. A missing one is written once with
-    `Calendar.create_from_pandas_calendar`: from the library calendar of the same name, or from
-    the library's `24/7` calendar for `ALWAYS_OPEN_CALENDAR_KEYS`. An existing calendar is never
+
+def ensure_trading_calendars_stored(calendar_keys: Iterable[str]) -> dict[str, Any]:
+    """Return the stored ms-markets Calendar of each key, writing a missing one once.
+
+    The keys this process has not seen yet are read in one `Calendar.filter`
+    (`unique_identifier__in`); a key already seen costs nothing. A missing calendar is written with
+    `Calendar.create_from_pandas_calendar`: from the library calendar of the same name, or from the
+    library's `24/7` calendar for `ALWAYS_OPEN_CALENDAR_KEYS`. An existing calendar is never
     written again: taking it to a newer library release is the Markets deployment's
     `resync-calendars` Job.
     """
+    from msm.api.calendars import Calendar
+
+    keys = list(dict.fromkeys(str(key) for key in calendar_keys))
+    unseen = [key for key in keys if key not in _STORED_CALENDARS]
+    if unseen:
+        for row in Calendar.filter(unique_identifier__in=unseen, limit=len(unseen)):
+            _STORED_CALENDARS[str(row.unique_identifier)] = row
+        for key in unseen:
+            if key not in _STORED_CALENDARS:
+                _STORED_CALENDARS[key] = _create_calendar(key)
+    return {key: _STORED_CALENDARS[key] for key in keys}
+
+
+def ensure_trading_calendar(calendar_key: str) -> Any:
+    """Return the stored ms-markets Calendar whose `unique_identifier` is `calendar_key`."""
+    return ensure_trading_calendars_stored([calendar_key])[str(calendar_key)]
+
+
+def _create_calendar(calendar_key: str) -> Any:
     from msm.api.calendars import Calendar, CalendarType
 
-    existing = Calendar.filter(unique_identifier=calendar_key, limit=1)
-    if existing:
-        return existing[0]
     always_open = calendar_key in ALWAYS_OPEN_CALENDAR_KEYS
     return Calendar.create_from_pandas_calendar(
         _ALWAYS_OPEN_LIBRARY_CALENDAR if always_open else calendar_key,
@@ -50,4 +73,8 @@ def ensure_trading_calendar(calendar_key: str) -> Any:
     )
 
 
-__all__ = ["ALWAYS_OPEN_CALENDAR_KEYS", "ensure_trading_calendar"]
+__all__ = [
+    "ALWAYS_OPEN_CALENDAR_KEYS",
+    "ensure_trading_calendar",
+    "ensure_trading_calendars_stored",
+]

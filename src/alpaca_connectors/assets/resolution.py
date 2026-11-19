@@ -59,6 +59,62 @@ def _alpaca_details_rows(where: Any) -> list[dict[str, Any]]:
     return operation_result_rows(execute_markets_operation(operation, context=runtime.context))
 
 
+def alpaca_details_by_identifier(unique_identifiers: Sequence[str]) -> dict[str, dict[str, Any]]:
+    """This project's Alpaca details of each registered asset, by its canonical identifier.
+
+    The identifier is ``ALPACA::<alpaca_asset_id>`` by construction (ADR 0004), so one read of
+    this project's details table by ``alpaca_asset_id`` answers it, with no Markets call. A details
+    row goes with its Markets asset (``ON DELETE CASCADE``), so a row found here is a registered
+    asset. An identifier that is not an Alpaca one, or has no details row, is absent.
+    """
+    from msm.api.base import operation_result_rows
+    from msm.repositories.base import compile_markets_statement, execute_markets_operation
+    from sqlalchemy import select
+
+    from alpaca_connectors.assets.alpaca_asset_details import (
+        AlpacaAssetDetailsTable,
+        build_alpaca_unique_identifier,
+        parse_alpaca_unique_identifier,
+    )
+    from alpaca_connectors.markets_api import read_in_batches
+    from alpaca_connectors.runtime import start_markets_engine
+
+    alpaca_ids: list[uuid.UUID] = []
+    for identifier in dict.fromkeys(str(value) for value in unique_identifiers):
+        try:
+            alpaca_ids.append(parse_alpaca_unique_identifier(identifier))
+        except (TypeError, ValueError):
+            continue
+    if not alpaca_ids:
+        return {}
+    runtime = start_markets_engine()
+    details = AlpacaAssetDetailsTable.__table__.c
+
+    def read(batch: list[uuid.UUID]) -> list[dict[str, Any]]:
+        statement = select(
+            details.asset_uid,
+            details.alpaca_asset_id,
+            details.symbol,
+            details.name,
+            details.asset_class,
+            details.tradable,
+            details.fractionable,
+        ).where(details.alpaca_asset_id.in_(batch))
+        operation = compile_markets_statement(
+            statement, context=runtime.context, operation="select"
+        )
+        return operation_result_rows(execute_markets_operation(operation, context=runtime.context))
+
+    return {
+        build_alpaca_unique_identifier(row["alpaca_asset_id"]): {
+            **row,
+            "asset_uid": str(uuid.UUID(str(row["asset_uid"]))),
+            "alpaca_asset_id": str(uuid.UUID(str(row["alpaca_asset_id"]))),
+        }
+        for row in read_in_batches(read, alpaca_ids)
+    }
+
+
 def openfigi_details_for_asset_uid(asset_uid: Any) -> Any | None:
     """Return the ``OpenFigiDetails`` row for an asset uid, or ``None``."""
     from msm.api.assets import OpenFigiDetails
@@ -136,6 +192,7 @@ def unique_identifiers_for_ticker(ticker: str) -> list[str]:
 
 
 __all__ = [
+    "alpaca_details_by_identifier",
     "assets_by_uids",
     "assets_by_unique_identifiers",
     "assets_for_ticker",

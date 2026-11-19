@@ -221,30 +221,22 @@ def read_asset_terms(
 ) -> dict[str, AssetTerms]:
     """Uid, latest trade and ``fractionable`` flag of each registered Alpaca asset.
 
-    Three set-based reads: the Markets assets by identifier, this application's Alpaca details by
-    asset uid, and one latest-trade request for their symbols. An asset Markets or the details
-    table does not have is absent from the answer.
+    Two reads: this application's Alpaca details by canonical identifier (the identifier is
+    ``ALPACA::<alpaca_asset_id>``, so no Markets read is needed), and one latest-trade request for
+    their symbols. An asset the details table does not have is absent from the answer.
     """
-    from alpaca_connectors.markets_api import assets_by_identifier
+    from alpaca_connectors.assets.resolution import alpaca_details_by_identifier
 
-    assets = assets_by_identifier(asset_identifiers)
-    uid_by_identifier = {
-        identifier: str(uuid.UUID(str(asset.uid))) for identifier, asset in assets.items()
-    }
-    details = read_alpaca_details(list(uid_by_identifier.values()))
-    prices = price_reader(sorted({symbol for symbol, _ in details.values()}))
-    terms: dict[str, AssetTerms] = {}
-    for identifier, asset_uid in uid_by_identifier.items():
-        detail = details.get(asset_uid)
-        if detail is None:
-            continue
-        symbol, fractionable = detail
-        terms[identifier] = AssetTerms(
-            asset_uid=asset_uid,
-            price=_number(prices.get(symbol)),
-            fractionable=fractionable,
+    details = alpaca_details_by_identifier(asset_identifiers)
+    prices = price_reader(sorted({str(row["symbol"]) for row in details.values()}))
+    return {
+        identifier: AssetTerms(
+            asset_uid=row["asset_uid"],
+            price=_number(prices.get(str(row["symbol"]))),
+            fractionable=bool(row["fractionable"]),
         )
-    return terms
+        for identifier, row in details.items()
+    }
 
 
 def size_account_target(
@@ -347,6 +339,13 @@ def allocate_sized_target(account_uid: Any, sized: SizedAccountTarget) -> FundAl
     )
 
 
+def account_price_reader(credentials: Any) -> PriceReader:
+    """Latest trades read with keys the caller already opened."""
+    from alpaca_connectors.execution.services import alpaca_latest_trade_prices
+
+    return alpaca_latest_trade_prices(credentials)
+
+
 def registered_account_price_reader(account_uid: Any) -> PriceReader:
     """Latest trades read with the account's stored keys, resolved on the first read."""
 
@@ -389,6 +388,7 @@ __all__ = [
     "FundAllocationResult",
     "SizedAccountTarget",
     "account_exposures",
+    "account_price_reader",
     "allocate_sized_target",
     "markets_refusal",
     "read_alpaca_details",

@@ -93,13 +93,13 @@ class AccountHoldingsAssetScope:
 class AccountRegistrationHoldings:
     """One account's complete holdings, ready for a ``registerAccount`` call (ADR 0051).
 
-    ``positions`` are the holdings rows; ``assets`` the Alpaca catalog record of every held asset;
-    ``described_asset_ids`` the held Alpaca asset ids this project's details table already has.
+    ``positions`` are the holdings rows; ``assets`` the Alpaca records of the held assets this
+    project does not describe yet. Markets accepts a position whose asset it already has without
+    the asset being listed, so the assets this project already describes are not sent.
     """
 
     positions: list[dict[str, Any]]
     assets: list[Any]
-    described_asset_ids: frozenset[str]
     cash_currency: str
 
 
@@ -110,45 +110,37 @@ def resolve_account_registration_holdings(
     cash: Any,
     cash_asset_identifier: str = DEFAULT_CASH_ASSET_IDENTIFIER,
 ) -> AccountRegistrationHoldings:
-    """Resolve every non-zero position to its Alpaca asset by UUID, writing nothing.
+    """Resolve every non-zero position to its canonical asset identifier, writing nothing.
 
-    One unfiltered Alpaca catalog request resolves the held assets and one read of this project's
-    details table finds those it already describes; Markets is not called. A position the catalog
-    does not resolve raises ``AccountHoldingsRegistryError``, before anything is written.
+    One read of this project's details table finds the held assets it already describes, and
+    Alpaca is asked only about the others, one asset each (``resolve_held_assets``); Markets is
+    not called. A position that cannot be resolved raises ``AccountHoldingsRegistryError``,
+    before anything is written.
     """
-    from alpaca_connectors.account.services import resolve_alpaca_asset_records_for_positions
-    from alpaca_connectors.assets.alpaca_asset_details import build_alpaca_unique_identifier
-    from alpaca_connectors.assets.alpaca_us_equities import alpaca_asset_ids_with_details
+    from alpaca_connectors.account.services import resolve_held_assets
 
     cash_currency = str(cash_asset_identifier).strip().upper()
     if not cash_currency:
         raise ValueError("A cash currency Asset identifier is required.")
-    records_by_position_id = resolve_alpaca_asset_records_for_positions(
-        trading_client=trading_client,
-        positions=positions,
-    )
+    resolution = resolve_held_assets(trading_client=trading_client, positions=positions)
     rows, unresolved_symbols = build_account_holdings_rows(
         positions=positions,
         cash=cash,
-        resolve_asset=lambda position: (
-            build_alpaca_unique_identifier(records_by_position_id[id(position)].alpaca_asset_id)
-            if id(position) in records_by_position_id
-            else None
-        ),
+        resolve_asset=lambda position: resolution.identifiers_by_position_id.get(id(position)),
         currency_identifier=cash_currency,
     )
     if unresolved_symbols:
         raise AccountHoldingsRegistryError(unresolved_symbols=unresolved_symbols)
+    from alpaca_connectors.assets.alpaca_asset_details import build_alpaca_unique_identifier
+
     held = {row["asset_identifier"] for row in rows}
-    records = {
-        str(record.alpaca_asset_id): record
-        for record in records_by_position_id.values()
-        if build_alpaca_unique_identifier(record.alpaca_asset_id) in held
-    }
     return AccountRegistrationHoldings(
         positions=rows,
-        assets=list(records.values()),
-        described_asset_ids=frozenset(alpaca_asset_ids_with_details(records.keys())),
+        assets=[
+            record
+            for record in resolution.new_assets
+            if build_alpaca_unique_identifier(record.alpaca_asset_id) in held
+        ],
         cash_currency=cash_currency,
     )
 
@@ -162,12 +154,12 @@ def register_account_holdings(
     """Register the account and its holdings snapshot in one Markets call (ADR 0051).
 
     ``account`` is ms-markets' registration account: ``unique_identifier`` and ``account_name``,
-    plus the flags to set. Markets creates the held assets and the cash currency asset it does not
-    know, writes their changed snapshots and the holdings, and replaces a snapshot at the same
+    plus the flags to set. Markets creates the held assets it does not know and the cash currency
+    asset, writes their snapshots and the holdings, and replaces a snapshot at the same
     ``holdings_date``, as a holdings publish always did; a repeat with the same holdings writes
-    nothing. Then this project's details row is written for each held asset that has none. A
-    Markets conflict (409) raises ``AccountRegistrationConflictError``. Returns ms-markets'
-    ``AccountRegistrationResponse``.
+    nothing. Then this project's details row is written for each new held asset. The trading
+    calendars are checked only when a new asset names one. A Markets conflict (409) raises
+    ``AccountRegistrationConflictError``. Returns ms-markets' ``AccountRegistrationResponse``.
     """
     from msm.api.remote import MarketsConflictError
 
@@ -193,14 +185,7 @@ def register_account_holdings(
         )
     except MarketsConflictError as exc:
         raise AccountRegistrationConflictError.from_markets(exc) from exc
-    write_alpaca_asset_details(
-        [
-            record
-            for record in holdings.assets
-            if str(record.alpaca_asset_id) not in holdings.described_asset_ids
-        ],
-        asset_uids_by_identifier=response.asset_uids,
-    )
+    write_alpaca_asset_details(holdings.assets, asset_uids_by_identifier=response.asset_uids)
     return response
 
 
@@ -371,19 +356,25 @@ def plan_alpaca_account_holdings(
     account_uid: uuid.UUID | str,
     *,
     client: Any | None = None,
+    registration: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Read and translate current positions without writing assets or a holdings snapshot."""
+    """Read and translate current positions without writing assets or a holdings snapshot.
+
+    ``registration`` is the account's registration when the caller already read it (a bulk
+    action reads all of its accounts' at once); otherwise it is read here.
+    """
     from alpaca_connectors.account.services import (
         build_registered_account_client,
         cash_asset_exists,
         get_account_registration,
-        prepare_alpaca_position_assets,
         read_alpaca_account,
+        resolve_held_assets,
     )
     from alpaca_connectors.runtime import account_runtime_models, start_markets_engine
 
     start_markets_engine(models=account_runtime_models())
-    registration = get_account_registration(account_uid)
+    if registration is None:
+        registration = get_account_registration(account_uid)
     if registration is None:
         raise LookupError(f"Alpaca account registration {account_uid!s} does not exist.")
     active_client = client or build_registered_account_client(registration)
@@ -396,22 +387,16 @@ def plan_alpaca_account_holdings(
     cash_asset_identifiers_to_ensure = (
         [] if cash_asset_exists(cash_identifier) else [cash_identifier]
     )
-    identifiers_by_position_id, registration_resolution = prepare_alpaca_position_assets(
-        trading_client=active_client,
-        positions=snapshot.positions,
-        register_missing=False,
-    )
+    resolution = resolve_held_assets(trading_client=active_client, positions=snapshot.positions)
 
     rows, unresolved_symbols = build_account_holdings_rows(
         positions=snapshot.positions,
         cash=getattr(snapshot.account, "cash", None),
-        resolve_asset=lambda position: identifiers_by_position_id.get(id(position)),
+        resolve_asset=lambda position: resolution.identifiers_by_position_id.get(id(position)),
         currency_identifier=cash_identifier,
     )
     blockers: list[str] = []
-    registerable_asset_ids = sorted(
-        str(asset.alpaca_asset_id) for asset in registration_resolution.missing_assets
-    )
+    registerable_asset_ids = sorted(str(asset.alpaca_asset_id) for asset in resolution.new_assets)
     return {
         "allowed": not blockers,
         "account_uid": str(account_uid),
@@ -449,14 +434,15 @@ def capture_alpaca_account_holdings(
     *,
     snapshot_time: dt.datetime | None = None,
     client: Any | None = None,
+    registration: Mapping[str, Any] | None = None,
 ) -> AccountHoldingsCaptureResult:
     """Publish a complete snapshot of the account's current Alpaca holdings.
 
-    Sync work only: one read of the registration, the Alpaca reads, and one ``registerAccount``
-    call at the new ``holdings_date`` that leaves the account as it is and creates only the held
-    assets Markets does not know yet. Assets Markets already has are neither registered again nor
-    given a snapshot that did not change. An account that holds nothing, not even cash, publishes
-    no snapshot.
+    Sync work only: one read of the registration (none when the caller passes the one it read),
+    the Alpaca reads, and one ``registerAccount`` call at the new ``holdings_date`` that leaves the
+    account as it is and creates only the held assets this project does not describe yet. Assets it
+    already describes are neither registered again nor given a new snapshot. An account that holds
+    nothing, not even cash, publishes no snapshot.
     """
     from alpaca_connectors.account.services import (
         build_registered_account_client,
@@ -466,7 +452,8 @@ def capture_alpaca_account_holdings(
     from alpaca_connectors.runtime import account_runtime_models, start_markets_engine
 
     start_markets_engine(models=account_runtime_models())
-    registration = get_account_registration(account_uid)
+    if registration is None:
+        registration = get_account_registration(account_uid)
     if registration is None:
         raise LookupError(f"Alpaca account registration {account_uid!s} does not exist.")
     active_client = client or build_registered_account_client(registration)

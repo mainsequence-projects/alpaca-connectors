@@ -146,15 +146,30 @@ def _configuration(monkeypatch, *, uid=A):
 
 
 def _preflight(monkeypatch, blocked: dict[str, list[str]] | None = None):
+    """Replace both preflights; return the configurations each batch preflight was given."""
     blocked = blocked or {}
+    batches: list[list[str]] = []
 
-    def preflight(configuration_uid):
+    def answer(configuration_uid):
         blockers = tuple(blocked.get(str(configuration_uid), []))
         return SimpleNamespace(allowed=not blockers, blockers=blockers)
+
+    def preflight(configuration_uid, *, configuration=None, held=None):
+        return answer(configuration_uid)
+
+    def preflights(configurations, *, held=None):
+        batches.append([str(configuration.uid) for configuration in configurations])
+        return {
+            str(configuration.uid): answer(configuration.uid) for configuration in configurations
+        }
 
     monkeypatch.setattr(
         "alpaca_connectors.portfolios.execution.preflight_portfolio_configuration", preflight
     )
+    monkeypatch.setattr(
+        "alpaca_connectors.portfolios.execution.preflight_portfolio_configurations", preflights
+    )
+    return batches
 
 
 def test_the_declared_job_is_found_by_name_and_reviewed_launcher(platform) -> None:
@@ -328,10 +343,18 @@ def test_scheduled_run_starts_one_run_per_scheduled_configuration(platform, monk
         "scheduled_portfolio_configurations",
         lambda: [SimpleNamespace(uid=uuid.UUID(value)) for value in (A, B, C)],
     )
-    _preflight(monkeypatch)
+    batches = _preflight(monkeypatch)
+    monkeypatch.setattr(
+        configuration_jobs,
+        "get_portfolio_configuration",
+        lambda value: pytest.fail("the scheduled rows are read once"),
+    )
 
     summary = configuration_jobs.dispatch_scheduled_configurations("portfolio")
 
+    # One preflight for every configuration without an active run, from the rows already read
+    # (issue #46); one JobRun per configuration.
+    assert batches == [[A, C]]
     assert job.calls == [["--configuration-uid", A]]
     assert summary["job_uid"] == PORTFOLIO_JOB_UID
     assert summary["scheduled_configurations"] == 3
@@ -360,6 +383,28 @@ def test_scheduled_portfolio_run_skips_a_blocked_preflight(platform, monkeypatch
         }
     ]
     assert summary["failed"] == []
+
+
+def test_a_failed_preflight_read_fails_each_configuration_unraised(platform, monkeypatch) -> None:
+    job = FakeJob()
+    platform.jobs = [job]
+    monkeypatch.setattr(
+        configuration_jobs,
+        "scheduled_portfolio_configurations",
+        lambda: [SimpleNamespace(uid=uuid.UUID(value)) for value in (A, B)],
+    )
+
+    def unavailable(configurations, *, held=None):
+        raise ConnectionError("MetaTables is unavailable")
+
+    monkeypatch.setattr(
+        "alpaca_connectors.portfolios.execution.preflight_portfolio_configurations", unavailable
+    )
+
+    summary = configuration_jobs.dispatch_scheduled_configurations("portfolio")
+
+    assert job.calls == []
+    assert [item["configuration_uid"] for item in summary["failed"]] == [A, B]
 
 
 def test_scheduled_run_needs_the_declared_job(platform, monkeypatch) -> None:

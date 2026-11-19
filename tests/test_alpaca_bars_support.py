@@ -106,9 +106,11 @@ class AlpacaBarsSupportTests(unittest.TestCase):
         with patch(
             "alpaca_connectors.market_data.alpaca_bars_support.build_alpaca_symbol_lookup",
             return_value={"FISV": "FISV"},
-        ):
+        ) as lookup:
             bindings = resolve_asset_bindings_from_category_assets(assets=[StubAsset()])
 
+        # A canonical Alpaca asset never needs Alpaca's whole asset list.
+        lookup.assert_not_called()
         self.assertEqual(len(bindings), 1)
         self.assertEqual(bindings[0].alpaca_symbol, "FI")
         self.assertEqual(

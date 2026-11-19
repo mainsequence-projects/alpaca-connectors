@@ -196,6 +196,9 @@ class RegisteredAlpacaAssetReference(BaseModel):
     unique_identifier: str
     alpaca_asset_id: uuid.UUID
     symbol: str
+    name: str | None = None
+    tradable: bool | None = None
+    fractionable: bool | None = None
 
 
 # Compatibility alias for the CLI/module public surface. The record is provider-native and its
@@ -382,6 +385,101 @@ def fetch_alpaca_asset_catalog(
     return records
 
 
+# Alpaca allows 200 trading API requests a minute; a handful at once stays well inside it.
+ALPACA_ASSET_READ_WORKERS = 8
+
+
+def read_alpaca_asset_record(trading_client: Any, lookup_key: str) -> Any | None:
+    """One Alpaca asset by id or symbol, read raw, or ``None`` when Alpaca does not know it.
+
+    Read raw (as the catalog was), so an exchange or class the installed alpaca-py does not know
+    yet does not fail the read. Alpaca has no read of several assets by id, so a caller with several
+    reads them concurrently (:func:`read_alpaca_asset_records`).
+    """
+    from urllib.parse import quote
+
+    from alpaca.common.exceptions import APIError
+
+    try:
+        payload = trading_client.get(f"/assets/{quote(str(lookup_key), safe='')}")
+    except APIError as exc:
+        if getattr(exc, "status_code", None) in {404, 422}:
+            return None
+        raise
+    if not isinstance(payload, dict):
+        return None
+    return AlpacaAssetRecord.from_catalog_payload(payload)
+
+
+def read_alpaca_asset_records(trading_client: Any, lookup_keys: list[str]) -> dict[str, Any]:
+    """Alpaca assets by id or symbol, read concurrently; a key Alpaca does not know is absent."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    keys = list(dict.fromkeys(key for key in lookup_keys if key))
+    if not keys:
+        return {}
+    if len(keys) == 1:
+        records = [read_alpaca_asset_record(trading_client, keys[0])]
+    else:
+        with ThreadPoolExecutor(max_workers=min(len(keys), ALPACA_ASSET_READ_WORKERS)) as pool:
+            records = list(
+                pool.map(lambda key: read_alpaca_asset_record(trading_client, key), keys)
+            )
+    return {key: record for key, record in zip(keys, records, strict=True) if record is not None}
+
+
+def fetch_alpaca_us_equities_by_symbol(
+    *,
+    trading_client: TradingClient,
+    symbols: Sequence[str],
+) -> tuple[list[AlpacaAssetRecord], list[str], dict[str, str]]:
+    """Resolve requested symbols to Alpaca US equities, asking Alpaca about those symbols only.
+
+    Each symbol is read with ``GET /assets/{symbol}``, concurrently (Alpaca has no read of several
+    assets at once); a symbol Alpaca does not know as a US equity is then tried in its alias forms
+    (``BRK.B``, ``BRK/B``, ``BRK-B``, ...), also concurrently. Alpaca's whole asset list is never
+    read. Returns the resolved records (by symbol), the symbols Alpaca does not know, and the
+    aliases used (requested symbol to Alpaca symbol).
+    """
+    requested = sorted({symbol.strip().upper() for symbol in symbols if symbol.strip()})
+
+    def us_equities(keys: list[str]) -> dict[str, AlpacaAssetRecord]:
+        return {
+            key: record
+            for key, record in read_alpaca_asset_records(trading_client, keys).items()
+            if str(record.asset_class).lower() == "us_equity"
+        }
+
+    found = us_equities(requested)
+    aliases_by_symbol = {
+        symbol: _build_symbol_alias_candidates(symbol)[1:]
+        for symbol in requested
+        if symbol not in found
+    }
+    found_aliases = us_equities(
+        sorted({alias for aliases in aliases_by_symbol.values() for alias in aliases})
+    )
+    resolved: dict[str, AlpacaAssetRecord] = {}
+    missing: list[str] = []
+    requested_symbol_aliases: dict[str, str] = {}
+    for symbol in requested:
+        record = found.get(symbol)
+        if record is None:
+            alias = next((a for a in aliases_by_symbol[symbol] if a in found_aliases), None)
+            record = found_aliases.get(alias) if alias is not None else None
+            if record is None:
+                missing.append(symbol)
+                continue
+        if record.symbol != symbol:
+            requested_symbol_aliases[symbol] = record.symbol
+        resolved[record.symbol] = record
+    return (
+        sorted(resolved.values(), key=lambda asset: asset.symbol),
+        missing,
+        requested_symbol_aliases,
+    )
+
+
 def fetch_alpaca_us_equities(
     *,
     trading_client: TradingClient,
@@ -389,9 +487,15 @@ def fetch_alpaca_us_equities(
 ) -> list[AlpacaUsEquity]:
     """Resolve Alpaca US equities without treating lifecycle state as eligibility.
 
-    One all-status US-equity catalog request supplies the complete batch. ``status`` and
-    ``tradable`` remain facts persisted on ``AlpacaAssetDetails``; neither blocks registration.
+    With ``symbols``, only those symbols are read (:func:`fetch_alpaca_us_equities_by_symbol`).
+    Without, one all-status US-equity catalog request supplies the complete universe. ``status``
+    and ``tradable`` remain facts persisted on ``AlpacaAssetDetails``; neither blocks registration.
     """
+    if symbols:
+        resolved, _, _ = fetch_alpaca_us_equities_by_symbol(
+            trading_client=trading_client, symbols=symbols
+        )
+        return resolved
     request = GetAssetsRequest(
         asset_class=AssetClass.US_EQUITY,
     )
@@ -399,18 +503,7 @@ def fetch_alpaca_us_equities(
         trading_client=trading_client,
         request=request,
     )
-
-    requested_symbols = sorted(
-        {symbol.strip().upper() for symbol in symbols or [] if symbol.strip()}
-    )
-    if not requested_symbols:
-        return sorted(normalized_assets, key=lambda asset: asset.symbol)
-
-    resolved_assets, _, _ = _resolve_requested_symbols_to_alpaca_assets(
-        alpaca_assets=normalized_assets,
-        requested_symbols=requested_symbols,
-    )
-    return resolved_assets
+    return sorted(normalized_assets, key=lambda asset: asset.symbol)
 
 
 def _openfigi_chunk_size(api_key: str | None) -> int:
@@ -667,28 +760,24 @@ def build_alpaca_us_equity_registration_plan(
         "running",
         "Resolving US-equity identities from Alpaca.",
     )
-    available_alpaca_assets = fetch_alpaca_us_equities(
-        trading_client=active_trading_client,
-        symbols=symbols,
-    )
     requested_symbol_aliases: dict[str, str] = {}
-    alpaca_assets = available_alpaca_assets
     missing_symbols_from_alpaca: list[str] = []
     if symbols:
         (
             alpaca_assets,
             missing_symbols_from_alpaca,
             requested_symbol_aliases,
-        ) = _resolve_requested_symbols_to_alpaca_assets(
-            alpaca_assets=available_alpaca_assets,
-            requested_symbols=symbols,
+        ) = fetch_alpaca_us_equities_by_symbol(
+            trading_client=active_trading_client, symbols=symbols
         )
+    else:
+        alpaca_assets = fetch_alpaca_us_equities(trading_client=active_trading_client)
     _emit_registration_progress(
         progress,
         "load_alpaca_assets",
         "succeeded",
         (
-            f"Loaded the Alpaca catalog and matched {len(alpaca_assets)} requested symbol(s); "
+            f"Read {len(alpaca_assets)} requested symbol(s) from Alpaca; "
             f"{len(missing_symbols_from_alpaca)} were not found."
         ),
     )
@@ -865,6 +954,9 @@ def _query_registered_assets_by_symbols(
         AlpacaAssetDetailsTable.asset_uid,
         AlpacaAssetDetailsTable.alpaca_asset_id,
         AlpacaAssetDetailsTable.symbol,
+        AlpacaAssetDetailsTable.name,
+        AlpacaAssetDetailsTable.tradable,
+        AlpacaAssetDetailsTable.fractionable,
     ).where(AlpacaAssetDetailsTable.symbol.in_(candidate_symbols))
     operation = compile_markets_statement(
         statement,
@@ -881,6 +973,9 @@ def _query_registered_assets_by_symbols(
             unique_identifier=expected_identifier,
             alpaca_asset_id=alpaca_asset_id,
             symbol=str(row["symbol"]),
+            name=row.get("name"),
+            tradable=row.get("tradable"),
+            fractionable=row.get("fractionable"),
         )
         references_by_symbol.setdefault(reference.symbol, []).append(reference)
 
@@ -968,14 +1063,14 @@ def ensure_trading_calendars(alpaca_assets: Iterable[AlpacaAssetRecord]) -> list
     """Store the trading calendar of every asset class in ``alpaca_assets`` once (ADR 0026).
 
     A registration names each asset's calendar by ``unique_identifier``; ms-markets refuses a
-    calendar that is not stored. One ``Calendar.filter`` per distinct calendar, and one
-    ``Calendar.create_from_pandas_calendar`` for a missing one. Returns the calendars.
+    calendar that is not stored. One ``Calendar.filter`` for the calendars this process has not
+    seen yet, none when it has seen them all, and one ``Calendar.create_from_pandas_calendar``
+    for a missing one. Returns the calendars.
     """
-    from alpaca_connectors.assets.calendars import ensure_trading_calendar
+    from alpaca_connectors.assets.calendars import ensure_trading_calendars_stored
 
     calendars = sorted({_trading_calendar(asset) for asset in alpaca_assets})
-    for calendar_identifier in calendars:
-        ensure_trading_calendar(calendar_identifier)
+    ensure_trading_calendars_stored(calendars)
     return calendars
 
 
@@ -1066,36 +1161,6 @@ def account_registration_asset(alpaca_asset: AlpacaAssetRecord) -> dict[str, Any
     }
 
 
-def alpaca_asset_ids_with_details(alpaca_asset_ids: Iterable[uuid.UUID | str]) -> set[str]:
-    """The Alpaca asset ids this project's details table already describes: one read of it."""
-    from msm.api.base import operation_result_rows
-    from msm.repositories.base import compile_markets_statement, execute_markets_operation
-    from sqlalchemy import select
-
-    from alpaca_connectors.assets.alpaca_asset_details import (
-        AlpacaAssetDetailsTable,
-        normalize_alpaca_asset_id,
-    )
-    from alpaca_connectors.runtime import start_markets_engine
-
-    normalized_ids = sorted(
-        {normalize_alpaca_asset_id(value) for value in alpaca_asset_ids}, key=str
-    )
-    if not normalized_ids:
-        return set()
-    runtime = start_markets_engine()
-    statement = select(AlpacaAssetDetailsTable.alpaca_asset_id).where(
-        AlpacaAssetDetailsTable.alpaca_asset_id.in_(normalized_ids)
-    )
-    rows = operation_result_rows(
-        execute_markets_operation(
-            compile_markets_statement(statement, context=runtime.context, operation="select"),
-            context=runtime.context,
-        )
-    )
-    return {str(normalize_alpaca_asset_id(row["alpaca_asset_id"])) for row in rows}
-
-
 def write_alpaca_asset_details(
     alpaca_assets: Sequence[AlpacaAssetRecord],
     *,
@@ -1135,50 +1200,6 @@ def write_alpaca_asset_details(
         ],
         conflict_columns=("asset_uid",),
     )
-
-
-def _register_alpaca_asset(
-    alpaca_asset: AlpacaAssetRecord,
-    match: OpenFigiMatch | None = None,
-) -> str:
-    """Upsert one Alpaca asset; callers with many assets use the batch implementation."""
-    from msm.api.assets import Asset, AssetSnapshots, AssetType, OpenFigiDetails
-
-    from alpaca_connectors.assets.alpaca_asset_details import (
-        build_alpaca_unique_identifier,
-        upsert_alpaca_asset_details,
-    )
-
-    asset_type_values = _asset_type_registration_values(alpaca_asset)
-    AssetType.upsert(**asset_type_values)
-    (calendar_identifier,) = ensure_trading_calendars([alpaca_asset])
-    canonical_identifier = build_alpaca_unique_identifier(alpaca_asset.alpaca_asset_id)
-    asset = Asset.upsert(
-        unique_identifier=canonical_identifier,
-        asset_type=asset_type_values["asset_type"],
-        calendar_identifier=calendar_identifier,
-    )
-    refreshed_at = dt.datetime.now(tz=dt.UTC).replace(microsecond=0)
-    upsert_alpaca_asset_details(
-        asset_uid=asset.uid,
-        values=_alpaca_detail_registration_values(
-            alpaca_asset,
-            asset_uid=asset.uid,
-            refreshed_at=refreshed_at,
-        ),
-    )
-    if match is not None:
-        OpenFigiDetails.upsert(**_openfigi_detail_registration_values(match, asset_uid=asset.uid))
-    AssetSnapshots.publish(
-        [
-            _asset_snapshot_registration_values(
-                alpaca_asset,
-                match,
-                time_index=dt.datetime.now(tz=dt.UTC),
-            )
-        ]
-    )
-    return str(asset.uid)
 
 
 def _register_alpaca_assets_batch(
@@ -1307,8 +1328,38 @@ def register_alpaca_us_equity_assets(
         }
     )
 
+    from alpaca_connectors.assets.alpaca_asset_details import build_alpaca_unique_identifier
+
+    registered_assets = [
+        {
+            "symbol": record.symbol,
+            "uid": assets_by_symbol[record.symbol],
+            "unique_identifier": build_alpaca_unique_identifier(record.alpaca_asset_id),
+            "alpaca_asset_id": str(record.alpaca_asset_id),
+            "name": record.name,
+            "tradable": record.tradable,
+            "fractionable": record.fractionable,
+        }
+        for record in registration_resolution.plan.alpaca_assets
+        if record.symbol in assets_by_symbol
+    ]
+    registered_assets.extend(
+        {
+            "symbol": symbol,
+            "uid": reference.asset_uid,
+            "unique_identifier": reference.unique_identifier,
+            "alpaca_asset_id": str(reference.alpaca_asset_id),
+            "name": reference.name,
+            "tradable": reference.tradable,
+            "fractionable": reference.fractionable,
+        }
+        for symbol, reference in (
+            registration_resolution.existing_off_catalog_assets_by_symbol.items()
+        )
+    )
     return {
         "assets": assets_by_symbol,
+        "registered_assets": sorted(registered_assets, key=lambda asset: asset["symbol"]),
         "existing_assets": existing_assets,
         "created_assets": created_assets,
         "openfigi_unmatched_symbols": (registration_resolution.plan.openfigi_unmatched_symbols),

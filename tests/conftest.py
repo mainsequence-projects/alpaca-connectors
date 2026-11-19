@@ -244,6 +244,16 @@ def keyring():
 
 
 @pytest.fixture(autouse=True)
+def _forget_stored_calendars():
+    """A process remembers the calendars it has seen stored; each test starts without them."""
+    from alpaca_connectors.assets import calendars
+
+    calendars._STORED_CALENDARS.clear()
+    yield
+    calendars._STORED_CALENDARS.clear()
+
+
+@pytest.fixture(autouse=True)
 def _restore_runtime_row_backend():
     """Entry points select the remote Markets row backend process-wide; keep tests isolated."""
     yield

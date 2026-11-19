@@ -317,21 +317,46 @@ def launch_configuration_job(
     return _start_run(job, configuration_uid)
 
 
-def require_portfolio_preflight(configuration_uid: Any) -> None:
-    """Raise ValueError naming the blockers when the portfolio cannot run."""
+def _blocked(preflight: Any) -> ValueError:
+    return ValueError("Portfolio preflight is blocked: " + "; ".join(preflight.blockers))
+
+
+def require_portfolio_preflight(
+    configuration_uid: Any,
+    *,
+    configuration: Any = None,
+    held: Any = None,
+) -> None:
+    """Raise ValueError naming the blockers when the portfolio cannot run.
+
+    A caller that holds the configuration, or inputs it just wrote (``HeldPortfolioInputs``),
+    passes them and they are not read again (issue #46).
+    """
     from alpaca_connectors.portfolios.execution import preflight_portfolio_configuration
 
-    preflight = preflight_portfolio_configuration(configuration_uid)
+    preflight = preflight_portfolio_configuration(
+        configuration_uid, configuration=configuration, held=held
+    )
     if not preflight.allowed:
-        raise ValueError("Portfolio preflight is blocked: " + "; ".join(preflight.blockers))
+        raise _blocked(preflight)
 
 
-def launch_portfolio_job(configuration_uid: Any) -> ConfigurationJobSubmission:
-    """Start one portfolio run once its preflight allows it."""
-    configuration = get_portfolio_configuration(configuration_uid)
+def launch_portfolio_job(
+    configuration_uid: Any,
+    *,
+    configuration: Any = None,
+    held: Any = None,
+) -> ConfigurationJobSubmission:
+    """Start one portfolio run once its preflight allows it.
+
+    The configuration is read once, unless the caller holds it (a create that starts its first
+    run passes it and what it wrote, ``held``).
+    """
+    if configuration is None:
+        configuration = get_portfolio_configuration(configuration_uid)
     if configuration is None:
         raise LookupError(f"Portfolio configuration {configuration_uid!s} does not exist.")
-    require_portfolio_preflight(configuration.uid)
+    require_portfolio_preflight(configuration.uid, configuration=configuration, held=held)
     return launch_configuration_job(configuration, kind="portfolio")
 
 
@@ -349,14 +374,31 @@ def dispatch_scheduled_configurations(kind: ConfigurationKind) -> dict[str, Any]
 
     The dispatcher's scheduled run calls this; it holds ``runner`` on the kind's Job. A
     configuration with a pending or running run is skipped, and so is a portfolio whose
-    preflight is blocked. One failed start does not stop the others.
+    preflight is blocked. The preflights of all the others read their inputs together, one read
+    per kind; one JobRun is still started per configuration. One failed start does not stop the
+    others.
     """
+    from alpaca_connectors.portfolios.execution import preflight_portfolio_configurations
+
     job = require_configuration_job(kind)
     configurations = scheduled_portfolio_configurations()
     active = _active_configuration_uids(job)
     launched: list[dict[str, str]] = []
     skipped: list[dict[str, str]] = []
     failed: list[dict[str, str]] = []
+    candidates = [
+        configuration
+        for configuration in configurations
+        if _canonical_uid(configuration.uid, label="Configuration UID") not in active
+    ]
+    # Every candidate's preflight inputs at once, one read per kind (issue #46); the scheduled
+    # rows above are not read again. A failed read fails each candidate, as before, unraised.
+    preflights: dict[str, Any] = {}
+    if candidates:
+        try:
+            preflights = preflight_portfolio_configurations(candidates)
+        except Exception as exc:
+            preflights = {str(configuration.uid): exc for configuration in candidates}
     for configuration in configurations:
         configuration_uid = _canonical_uid(configuration.uid, label="Configuration UID")
         if configuration_uid in active:
@@ -365,13 +407,14 @@ def dispatch_scheduled_configurations(kind: ConfigurationKind) -> dict[str, Any]
             )
             continue
         # One configuration's failure must not stop the others.
-        try:
-            require_portfolio_preflight(configuration_uid)
-        except ValueError as exc:
-            skipped.append({"configuration_uid": configuration_uid, "reason": str(exc)})
+        preflight = preflights[str(configuration.uid)]
+        if isinstance(preflight, Exception):
+            failed.append({"configuration_uid": configuration_uid, "error": repr(preflight)})
             continue
-        except Exception as exc:
-            failed.append({"configuration_uid": configuration_uid, "error": repr(exc)})
+        if not preflight.allowed:
+            skipped.append(
+                {"configuration_uid": configuration_uid, "reason": str(_blocked(preflight))}
+            )
             continue
         try:
             submission = _start_run(job, configuration_uid)

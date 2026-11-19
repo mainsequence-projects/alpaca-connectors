@@ -90,11 +90,13 @@ def record_signal_assets(
     asset_identifiers: Iterable[str],
     *,
     at: dt.datetime | None = None,
+    new_signal: bool = False,
 ) -> list[str]:
     """Record the assets a signal is about to publish; return the ones it had not published.
 
     One primary-key read of the given pairs, then one insert of the missing ones. A recorded
-    pair keeps its ``first_published_at``.
+    pair keeps its ``first_published_at``. A ``new_signal`` (a create's, whose key that call
+    made) has no recorded pair, so the read is skipped and every asset is inserted (issue #46).
     """
     from msm.api.base import operation_result_rows
     from msm.repositories.base import compile_markets_statement, execute_markets_operation
@@ -109,20 +111,22 @@ def record_signal_assets(
         return []
     runtime = _start_runtime()
     table = SignalAssetTable
-    existing_operation = compile_markets_statement(
-        select(table.asset_identifier).where(
-            table.signal_uid == normalized_signal,
-            table.asset_identifier.in_(identifiers),
-        ),
-        context=runtime.context,
-        operation="select",
-    )
-    existing = {
-        str(row["asset_identifier"])
-        for row in operation_result_rows(
-            execute_markets_operation(existing_operation, context=runtime.context)
+    existing: set[str] = set()
+    if not new_signal:
+        existing_operation = compile_markets_statement(
+            select(table.asset_identifier).where(
+                table.signal_uid == normalized_signal,
+                table.asset_identifier.in_(identifiers),
+            ),
+            context=runtime.context,
+            operation="select",
         )
-    }
+        existing = {
+            str(row["asset_identifier"])
+            for row in operation_result_rows(
+                execute_markets_operation(existing_operation, context=runtime.context)
+            )
+        }
     missing = [identifier for identifier in identifiers if identifier not in existing]
     if missing:
         recorded_at = at or utc_now()
@@ -171,19 +175,32 @@ def assets_for_signals(signal_uids: Sequence[str]) -> list[str]:
 
 def forget_signal_assets(signal_uid: str) -> None:
     """Delete one signal's rows, once nothing names its portfolio any more (issue #33)."""
+    if not str(signal_uid).strip():
+        raise ValueError("signal_uid must not be empty.")
+    forget_signals_assets([signal_uid])
+
+
+def forget_signals_assets(signal_uids: Iterable[str]) -> None:
+    """Delete several signals' rows, one statement per ``MARKETS_BATCH_SIZE`` signals (#46)."""
     from msm.repositories.base import compile_markets_statement, execute_markets_operation
     from sqlalchemy import delete
 
-    normalized = str(signal_uid).strip()
+    from alpaca_connectors.markets_api import write_in_batches
+
+    normalized = _normalized(signal_uids)
     if not normalized:
-        raise ValueError("signal_uid must not be empty.")
+        return
     runtime = _start_runtime()
-    operation = compile_markets_statement(
-        delete(SignalAssetTable).where(SignalAssetTable.signal_uid == normalized),
-        context=runtime.context,
-        operation="delete",
-    )
-    execute_markets_operation(operation, context=runtime.context)
+
+    def write(batch: list[str]) -> None:
+        operation = compile_markets_statement(
+            delete(SignalAssetTable).where(SignalAssetTable.signal_uid.in_(batch)),
+            context=runtime.context,
+            operation="delete",
+        )
+        execute_markets_operation(operation, context=runtime.context)
+
+    write_in_batches(write, normalized)
 
 
 def project_signal_asset_models() -> list[type[MarketsBase]]:
@@ -194,6 +211,7 @@ __all__ = [
     "SignalAssetTable",
     "assets_for_signals",
     "forget_signal_assets",
+    "forget_signals_assets",
     "project_signal_asset_models",
     "record_signal_assets",
 ]

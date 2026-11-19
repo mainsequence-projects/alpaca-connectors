@@ -277,16 +277,10 @@ def test_an_external_person_reaches_no_other_persons_configurations(vouching) ->
 # ------------------------------------------------------------------------------------------------
 def test_removing_keys_disables_nothing_and_warns_of_nothing(vouching) -> None:
     selection = {"selection": {"mode": "explicit", "uids": [ACCOUNT_UID]}, "options": {}}
-    with (
-        patch(
-            "alpaca_connectors.api.app.routers.accounts.get_account",
-            return_value=registration(CALLER),
-        ),
-        patch(
-            "alpaca_connectors.api.app.services.accounts.get_account_registration",
-            return_value=registration(CALLER),
-        ),
-    ):
+    with patch(
+        "alpaca_connectors.api.app.services.accounts.get_account_registrations",
+        return_value={ACCOUNT_UID: registration(CALLER)},
+    ) as read:
         answer = vouching.client.post(
             "/v1/accounts/actions/remove-keys/preflight",
             json=selection,
@@ -297,6 +291,7 @@ def test_removing_keys_disables_nothing_and_warns_of_nothing(vouching) -> None:
     assert body["allowed"] is True
     assert body["blockers"] == []
     assert body["warnings"] == []
+    read.assert_called_once_with([ACCOUNT_UID])
 
 
 def test_only_the_owner_removes_the_keys(vouching) -> None:

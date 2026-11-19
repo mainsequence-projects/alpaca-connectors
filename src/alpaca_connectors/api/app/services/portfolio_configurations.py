@@ -9,7 +9,7 @@ changed, paused, given weights or deleted only by its owner, the account's owner
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import asdict
 from typing import Any
 
@@ -65,17 +65,31 @@ from .configuration_jobs import accepted_run, job_fields
 logger = logging.getLogger(__name__)
 
 
-def _responses(rows: list[Any]) -> list[PortfolioConfigurationResponse]:
+def _responses(
+    rows: list[Any],
+    *,
+    rebalance_configurations: Mapping[str, Any] | None = None,
+    definitions: Mapping[str, Any] | None = None,
+    own_bars: Mapping[str, Any] | None = None,
+) -> list[PortfolioConfigurationResponse]:
+    """Shape configuration rows, with one read per kind of what they name.
+
+    A caller that already holds a kind (a create, which just wrote them) passes it, keyed by UID
+    (``own_bars`` by configuration UID), and that kind is not read (issue #46).
+    """
     from alpaca_connectors.market_data.configurations import portfolio_bar_configurations
     from alpaca_connectors.portfolios.signal_definitions import signal_definitions_by_uids
 
     if not rows:
         return []
     state = configuration_job_state("portfolio", [row.uid for row in rows])
-    rebalance_uids = list(dict.fromkeys(str(row.rebalance_configuration_uid) for row in rows))
-    rebalance_configurations = rebalance_configurations_by_uids(rebalance_uids)
-    definitions = signal_definitions_by_uids(row.signal_definition_uid for row in rows)
-    own_bars = portfolio_bar_configurations([row.uid for row in rows])
+    if rebalance_configurations is None:
+        rebalance_uids = list(dict.fromkeys(str(row.rebalance_configuration_uid) for row in rows))
+        rebalance_configurations = rebalance_configurations_by_uids(rebalance_uids)
+    if definitions is None:
+        definitions = signal_definitions_by_uids(row.signal_definition_uid for row in rows)
+    if own_bars is None:
+        own_bars = portfolio_bar_configurations([row.uid for row in rows])
     responses: list[PortfolioConfigurationResponse] = []
     for row in rows:
         rebalance_configuration = rebalance_configurations.get(str(row.rebalance_configuration_uid))
@@ -118,6 +132,7 @@ def list_configurations(
     account_uid: str | None = None,
     signal_definition_uid: str | None = None,
     key: str | None = None,
+    uids: list[str] | None = None,
 ):
     rows, total = list_portfolio_configurations(
         limit=limit,
@@ -127,6 +142,7 @@ def list_configurations(
         signal_definition_uid=signal_definition_uid,
         key=key,
         ordering=ordering,
+        uids=uids,
     )
     return collection_response(
         items=_responses(rows),
@@ -349,7 +365,7 @@ def create_configuration(
         bars=request.bars.model_dump(),
     )
     return PortfolioCreateResponse(
-        configuration=_responses([created.configuration])[0],
+        configuration=_created_response(created),
         portfolio_uid=created.portfolio_uid,
         portfolio_unique_identifier=created.portfolio_unique_identifier,
         bars_configuration_uid=created.bars_configuration_uid,
@@ -385,9 +401,9 @@ def create_provided_configuration(
     )
     run, run_error = None, None
     if request.run and created.created:
-        run, run_error = _start_first_run(created.configuration.uid)
+        run, run_error = _start_first_run(created)
     return ProvidedWeightsPortfolioCreateResponse(
-        configuration=_responses([created.configuration])[0],
+        configuration=_created_response(created),
         portfolio_uid=created.portfolio_uid,
         portfolio_unique_identifier=created.portfolio_unique_identifier,
         created=created.created,
@@ -403,16 +419,66 @@ def create_provided_configuration(
     )
 
 
+def _created_response(created: Any) -> PortfolioConfigurationResponse:
+    """A create's configuration, answered from what it wrote: only the Job state is read."""
+    configuration = created.configuration
+    rebalance = created.rebalance_configuration
+    bars = created.bars_configuration
+    return _responses(
+        [configuration],
+        rebalance_configurations=(
+            {str(rebalance.uid): rebalance} if rebalance is not None else None
+        ),
+        definitions={str(created.signal_definition.uid): created.signal_definition},
+        own_bars={str(configuration.uid): bars} if bars is not None else None,
+    )[0]
+
+
+def _held_inputs(created: Any) -> Any:
+    """What a create wrote, which its first run's preflight does not read again (issue #46)."""
+    from alpaca_connectors.portfolios.execution import HeldPortfolioInputs
+    from alpaca_connectors.portfolios.signal_history import SignalObservationBounds
+
+    published = created.published
+    return HeldPortfolioInputs(
+        rebalance_configurations={
+            str(created.rebalance_configuration.uid): created.rebalance_configuration
+        },
+        bars_configurations={str(created.configuration.uid): created.bars_configuration},
+        definitions={str(created.signal_definition.uid): created.signal_definition},
+        # The signal is the create's own, so what it published is all it holds.
+        signal_bounds={
+            published.signal_uid: SignalObservationBounds(
+                signal_uid=published.signal_uid,
+                first_observation_at=published.first_observed_at,
+                last_observation_at=published.last_observed_at,
+            )
+        },
+    )
+
+
 def _start_first_run(
-    configuration_uid: Any,
+    created: Any,
 ) -> tuple[PortfolioJobRunAcceptedResponse | None, str | None]:
     """Start a new portfolio's first run, as actions/run does (issue #43).
 
     The portfolio already exists, so a run that does not start never fails the create: the answer
-    says why, in the connector's own words, and the scheduled run covers it.
+    says why, in the connector's own words, and the scheduled run covers it. Its preflight uses
+    what the create wrote and reads none of it back (issue #46).
     """
     try:
-        return run_configuration(str(configuration_uid)), None
+        return (
+            PortfolioJobRunAcceptedResponse.model_validate(
+                accepted_run(
+                    launch_portfolio_job(
+                        created.configuration.uid,
+                        configuration=created.configuration,
+                        held=_held_inputs(created),
+                    )
+                )
+            ),
+            None,
+        )
     except (LookupError, ValueError) as exc:
         reason = str(exc)
     except Exception as exc:  # noqa: BLE001 - the portfolio exists; the answer says why
@@ -495,12 +561,20 @@ def configuration_runs(configuration_uid: str, *, limit: int) -> list[PortfolioJ
     ]
 
 
-def list_rebalances(*, limit: int, offset: int, search: str | None, ordering: str):
+def list_rebalances(
+    *,
+    limit: int,
+    offset: int,
+    search: str | None,
+    ordering: str,
+    uids: list[str] | None = None,
+):
     rows, total = list_rebalance_configurations(
         limit=limit,
         offset=offset,
         search=search,
         ordering=ordering,
+        uids=uids,
     )
     return collection_response(
         items=[_rebalance_response(row) for row in rows],

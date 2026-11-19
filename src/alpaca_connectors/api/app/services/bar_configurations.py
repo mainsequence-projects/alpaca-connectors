@@ -52,6 +52,7 @@ def list_configurations(
     ordering: str,
     scheduled: bool | None = None,
     portfolio_owned: bool | None = None,
+    uids: list[str] | None = None,
 ):
     items, total = list_bar_configurations(
         limit=limit,
@@ -62,6 +63,7 @@ def list_configurations(
         asset_source=asset_source,
         portfolio_owned=portfolio_owned,
         ordering=ordering,
+        uids=uids,
     )
     return collection_response(items=items, total=total, limit=limit, offset=offset)
 

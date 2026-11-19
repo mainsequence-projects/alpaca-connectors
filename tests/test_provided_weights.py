@@ -56,9 +56,13 @@ ACCOUNT_UID = uuid.UUID("55555555-5555-4555-8555-555555555555")
 DEFINITION_UID = uuid.UUID("66666666-6666-4666-8666-666666666666")
 OWNER = AccountOwner.main_sequence_user("owner-uid")
 EXTERNAL_OWNER = AccountOwner(gateway_uid="gateway-uid", user_uid="person-17")
-NVDA = "ALPACA::nvda"
-JPM = "ALPACA::jpm"
-AAPL = "ALPACA::aapl"
+# Canonical Alpaca identifiers (ADR 0004), in the order of their tickers.
+AAPL = f"ALPACA::{uuid.UUID(int=1)}"
+JPM = f"ALPACA::{uuid.UUID(int=2)}"
+NVDA = f"ALPACA::{uuid.UUID(int=3)}"
+# Registered nowhere, and an identifier that is not an Alpaca one.
+UNREGISTERED = f"ALPACA::{uuid.UUID(int=9)}"
+NOT_ALPACA = "FIGI::BBG000BLNNH6"
 MONDAY = dt.datetime(2026, 11, 16, 14, tzinfo=dt.UTC)
 WEDNESDAY = dt.datetime(2026, 11, 18, 14, tzinfo=dt.UTC)
 
@@ -149,7 +153,7 @@ def test_invalid_observations_are_refused_without_quoting_them(observations, cod
 
     assert raised.value.code == (code or "invalid_observation")
     assert raised.value.status_code == 422
-    assert "nvda" not in str(raised.value).lower()
+    assert NVDA.lower() not in str(raised.value).lower()
 
 
 # ------------------------------------------------------------------------------------------------
@@ -197,29 +201,25 @@ def test_portfolios_have_their_own_portfolio_identifier() -> None:
 # ------------------------------------------------------------------------------------------------
 # Publishing
 # ------------------------------------------------------------------------------------------------
-def _publish_patches(*, last_stored=None, details=None, assets=None):
-    known = assets if assets is not None else [NVDA, JPM, AAPL]
-    asset_rows = {
-        identifier: SimpleNamespace(uid=uuid.uuid5(uuid.NAMESPACE_URL, identifier))
-        for identifier in known
-    }
-    detail_rows = (
-        details
-        if details is not None
-        else {str(row.uid): ("SYM", True) for row in asset_rows.values()}
-    )
+def _publish_patches(*, last_stored=None, registered=None):
+    """Replace the Alpaca details read and the signal's last observation read.
+
+    ``registered`` are the identifiers with Alpaca details; the default is every test asset.
+    """
+    known = registered if registered is not None else [NVDA, JPM, AAPL]
     return (
         patch(
-            "alpaca_connectors.markets_api.assets_by_identifier",
+            "alpaca_connectors.assets.resolution.alpaca_details_by_identifier",
             side_effect=lambda identifiers: {
-                identifier: asset_rows[identifier]
+                identifier: {"asset_uid": str(uuid.uuid5(uuid.NAMESPACE_URL, identifier))}
                 for identifier in identifiers
-                if identifier in asset_rows
+                if identifier in known
             },
         ),
+        # Markets is never asked: a details row is a registered asset (issue #46).
         patch(
-            "alpaca_connectors.holdings.allocation.read_alpaca_details",
-            return_value=detail_rows,
+            "alpaca_connectors.markets_api.assets_by_identifier",
+            side_effect=AssertionError("Markets read"),
         ),
         patch(
             "alpaca_connectors.portfolios.signal_history.read_signal_last_observation_at",
@@ -234,10 +234,10 @@ def test_publish_binds_the_signal_then_records_the_assets_then_publishes() -> No
     order = MagicMock()
     signal = Mock(signal_uid="signal-a")
     signal.publish.side_effect = lambda *args, **kwargs: order.publish()
-    assets, details, bounds = _publish_patches(last_stored=MONDAY)
+    details, markets, bounds = _publish_patches(last_stored=MONDAY)
     with (
-        assets,
-        details,
+        details as read_details,
+        markets,
         bounds,
         patch.object(provided_weights, "weights_signal", return_value=signal),
         patch.object(provided_weights, "ensure_signal_metadata") as ensure,
@@ -255,6 +255,8 @@ def test_publish_binds_the_signal_then_records_the_assets_then_publishes() -> No
             [{"observed_at": WEDNESDAY, "weights": {NVDA: 0.5, AAPL: 0.5}}],
         )
 
+    # The assets are validated with one read of this application's Alpaca details.
+    read_details.assert_called_once_with([AAPL, NVDA])
     # The signal has observations, so Markets already knows it. It is bound before any row is
     # written, so a refused binding stores nothing (issue #37).
     ensure.assert_not_called()
@@ -270,19 +272,22 @@ def test_publish_binds_the_signal_then_records_the_assets_then_publishes() -> No
 
 
 @pytest.mark.parametrize(
-    ("kwargs", "code", "status"),
+    ("asset", "kwargs", "code", "status"),
     [
-        ({"assets": [NVDA]}, "unknown_asset", 422),
-        ({"details": {}}, "asset_not_alpaca", 422),
-        ({"last_stored": WEDNESDAY}, "observation_not_after_last", 409),
+        # An Alpaca identifier with no details row is not registered.
+        (UNREGISTERED, {}, "unknown_asset", 422),
+        (AAPL, {"registered": [NVDA]}, "unknown_asset", 422),
+        # One that is not an Alpaca identifier can have no bars.
+        (NOT_ALPACA, {}, "asset_not_alpaca", 422),
+        (AAPL, {"last_stored": WEDNESDAY}, "observation_not_after_last", 409),
     ],
 )
-def test_publish_refuses_before_writing_anything(kwargs, code, status) -> None:
+def test_publish_refuses_before_writing_anything(asset, kwargs, code, status) -> None:
     signal = Mock(signal_uid="signal-a")
-    assets, details, bounds = _publish_patches(**kwargs)
+    details, markets, bounds = _publish_patches(**kwargs)
     with (
-        assets,
         details,
+        markets,
         bounds,
         patch.object(provided_weights, "weights_signal", return_value=signal),
         patch.object(provided_weights, "ensure_signal_metadata") as ensure,
@@ -291,27 +296,27 @@ def test_publish_refuses_before_writing_anything(kwargs, code, status) -> None:
     ):
         publish_definition_weights(
             definition(),
-            [{"observed_at": WEDNESDAY, "weights": {NVDA: 0.5, AAPL: 0.5}}],
+            [{"observed_at": WEDNESDAY, "weights": {NVDA: 0.5, asset: 0.5}}],
         )
 
     assert (raised.value.code, raised.value.status_code) == (code, status)
     record.assert_not_called()
     ensure.assert_not_called()
     signal.publish.assert_not_called()
-    assert "ALPACA::" not in str(raised.value)
+    assert "ALPACA::" not in str(raised.value) and "FIGI" not in str(raised.value)
 
 
 def test_a_refused_binding_stores_nothing_and_names_no_table() -> None:
     # Markets cannot see the table (issue #37). Its message names the table; the caller's never.
     signal = Mock(signal_uid="signal-a")
-    assets, details, bounds = _publish_patches(last_stored=None)
+    details, markets, bounds = _publish_patches(last_stored=None)
     refusal = LookupError(
         "SignalWeightsTS instance '1081d765-e0eb-4a7d-9f3a-e8335cf1e85b' is not a visible "
         "TimeIndexMetaTable"
     )
     with (
-        assets,
         details,
+        markets,
         bounds,
         patch.object(provided_weights, "weights_signal", return_value=signal),
         patch.object(provided_weights, "ensure_signal_metadata") as ensure,
@@ -344,10 +349,10 @@ def test_a_refused_binding_stores_nothing_and_names_no_table() -> None:
 def test_signal_refusals_become_codes_that_quote_nothing(error, stored_after, code) -> None:
     signal = Mock(signal_uid="signal-a")
     signal.publish.side_effect = error
-    assets, details, bounds = _publish_patches(last_stored=[None, stored_after])
+    details, markets, bounds = _publish_patches(last_stored=[None, stored_after])
     with (
-        assets,
         details,
+        markets,
         bounds,
         patch.object(provided_weights, "weights_signal", return_value=signal),
         patch.object(provided_weights, "ensure_signal_metadata") as ensure,
@@ -446,6 +451,12 @@ def _create(**overrides):
 
 CONFIGURATIONS = "alpaca_connectors.portfolios.configurations"
 DEFINITIONS = "alpaca_connectors.portfolios.signal_definitions"
+NAMED_REBALANCE = SimpleNamespace(uid=REBALANCE_UID, calendar_identifier="NYSE")
+
+
+def _named_rebalance():
+    """The rule a create names, read once (issue #46)."""
+    return patch(f"{CONFIGURATIONS}.validate_portfolio_references", return_value=NAMED_REBALANCE)
 
 
 def test_create_gives_the_portfolio_its_account_a_definition_and_its_own_bars() -> None:
@@ -456,6 +467,7 @@ def test_create_gives_the_portfolio_its_account_a_definition_and_its_own_bars() 
     published = provided_weights.PublishedWeights("signal-a", 1, 2, MONDAY, MONDAY)
     with (
         patch.object(provided_weights, "require_alpaca_assets"),
+        _named_rebalance() as named,
         patch(
             f"{CONFIGURATIONS}.create_portfolio_configuration_row", return_value=configuration
         ) as create_row,
@@ -471,7 +483,9 @@ def test_create_gives_the_portfolio_its_account_a_definition_and_its_own_bars() 
             return_value=SimpleNamespace(uid=BARS_UID),
         ) as create_bars,
         patch.object(provided_weights, "_publish_validated", return_value=published) as publish,
-        patch.object(provided_weights, "_upsert_portfolio_row", return_value=portfolio_row),
+        patch.object(
+            provided_weights, "_upsert_portfolio_row", return_value=portfolio_row
+        ) as upsert,
     ):
         created = _create()
 
@@ -497,6 +511,16 @@ def test_create_gives_the_portfolio_its_account_a_definition_and_its_own_bars() 
     assert publish.call_args.args[2] == [JPM, NVDA]
     assert created.portfolio_uid == str(uuid.UUID(int=7))
     assert created.bars_configuration_uid == str(BARS_UID)
+    # Nothing it wrote is read back (issue #46): the named rule is read once and given to the
+    # row and to the `Portfolio` row; the new key is not read again; the new signal has no
+    # stored observation to read; the answer carries what was written.
+    named.assert_called_once_with(rebalance_configuration_uid=REBALANCE_UID)
+    assert row_kwargs["rebalance"] is NAMED_REBALANCE
+    assert upsert.call_args.args == (with_definition, NAMED_REBALANCE)
+    assert definition_kwargs["key_checked"] is True
+    assert publish.call_args.kwargs["new_signal"] is True
+    assert created.rebalance_configuration is NAMED_REBALANCE
+    assert created.bars_configuration.uid == BARS_UID
 
 
 def test_a_refused_publication_leaves_no_row_behind() -> None:
@@ -504,6 +528,7 @@ def test_a_refused_publication_leaves_no_row_behind() -> None:
     refused = ProvidedWeightsError("unknown_asset", "refused")
     with (
         patch.object(provided_weights, "require_alpaca_assets"),
+        _named_rebalance(),
         patch(
             f"{CONFIGURATIONS}.create_portfolio_configuration_row",
             return_value=provided_configuration(signal_definition_uid=None),
@@ -624,6 +649,7 @@ def test_a_create_that_fails_after_its_portfolio_exists_deletes_everything() -> 
     published = provided_weights.PublishedWeights("signal-a", 1, 2, MONDAY, MONDAY)
     with (
         patch.object(provided_weights, "require_alpaca_assets"),
+        _named_rebalance(),
         patch(
             f"{CONFIGURATIONS}.create_portfolio_configuration_row",
             return_value=provided_configuration(signal_definition_uid=None),
@@ -1105,6 +1131,24 @@ def test_recording_inserts_only_the_pairs_not_yet_recorded() -> None:
     assert upsert.call_args.kwargs["conflict_columns"] == ("signal_uid", "asset_identifier")
 
 
+def test_a_new_signal_records_its_assets_without_reading_them_first() -> None:
+    # A create's signal is new (its key is the configuration UID it made): nothing to read.
+    from alpaca_connectors.portfolios import signal_assets
+
+    with (
+        patch.object(signal_assets, "_start_runtime", return_value=SimpleNamespace(context="ctx")),
+        patch("msm.repositories.base.execute_markets_operation") as execute,
+        patch("msm.repositories.crud.bulk_upsert_model") as upsert,
+    ):
+        missing = signal_assets.record_signal_assets(
+            "signal-a", [NVDA, AAPL], at=WEDNESDAY, new_signal=True
+        )
+
+    assert missing == [AAPL, NVDA]
+    execute.assert_not_called()
+    upsert.assert_called_once()
+
+
 def test_a_signals_assets_are_one_read_of_the_signal_asset_table() -> None:
     from alpaca_connectors.portfolios import signal_assets
 
@@ -1212,25 +1256,34 @@ def test_the_portfolio_run_resolves_the_provided_signal() -> None:
         patch.object(
             execution, "get_portfolio_configuration", return_value=provided_configuration()
         ),
-        patch.object(
-            execution,
-            "validate_portfolio_references",
-            return_value=Mock(uid=REBALANCE_UID, strategy="calendar_event_signal"),
+        patch(
+            f"{CONFIGURATIONS}.rebalance_configurations_by_uids",
+            return_value={
+                str(REBALANCE_UID): Mock(uid=REBALANCE_UID, strategy="calendar_event_signal")
+            },
         ) as references,
         patch(
-            "alpaca_connectors.market_data.configurations.portfolio_bar_configuration",
-            return_value=SimpleNamespace(
-                uid=BARS_UID, enabled=True, frequency_id="1d", feed="sip", adjustment="all"
-            ),
+            "alpaca_connectors.market_data.configurations.portfolio_bar_configurations",
+            return_value={
+                str(CONFIGURATION_UID): SimpleNamespace(
+                    uid=BARS_UID, enabled=True, frequency_id="1d", feed="sip", adjustment="all"
+                )
+            },
         ) as own_bars,
-        patch(f"{DEFINITIONS}.get_signal_definition", return_value=definition()),
+        patch(
+            f"{DEFINITIONS}.signal_definitions_by_uids",
+            return_value={str(DEFINITION_UID): definition()},
+        ),
         patch.object(execution, "read_signal_observation_matrix", return_value=matrix) as read,
+        patch(
+            "alpaca_connectors.portfolios.signal_history.read_signal_observation_bounds_by_signal",
+            return_value={signal_uid: SignalObservationBounds(signal_uid, MONDAY, WEDNESDAY)},
+        ),
         patch.object(
             execution,
-            "read_signal_observation_bounds",
-            return_value=SignalObservationBounds(signal_uid, MONDAY, WEDNESDAY),
+            "resolve_alpaca_bars_time_index_meta_table_uids",
+            return_value={("1d", "sip", "all"): "t"},
         ),
-        patch.object(execution, "resolve_alpaca_bars_time_index_meta_table_uid", return_value="t"),
         patch(
             "alpaca_connectors.portfolios.signal_assets.assets_for_signals",
             return_value=[AAPL, JPM, NVDA],
@@ -1238,8 +1291,8 @@ def test_the_portfolio_run_resolves_the_provided_signal() -> None:
     ):
         resolved = execution.resolve_portfolio_configuration(CONFIGURATION_UID)
 
-    assert references.call_args.kwargs == {"rebalance_configuration_uid": REBALANCE_UID}
-    own_bars.assert_called_once_with(CONFIGURATION_UID)
+    references.assert_called_once_with([str(REBALANCE_UID)])
+    own_bars.assert_called_once_with([str(CONFIGURATION_UID)])
     read.assert_called_once_with(signal_uid=signal_uid, observation_limit=1)
     assert resolved.signal_uid == signal_uid
     # Every asset it ever held (AAPL was dropped before the latest observation), so a history the
@@ -1273,31 +1326,35 @@ def test_a_portfolio_not_yet_adopted_runs_on_the_feed_it_names() -> None:
     )
     with (
         patch.object(execution, "get_portfolio_configuration", return_value=unadopted),
-        patch.object(
-            execution,
-            "validate_portfolio_references",
-            return_value=Mock(uid=REBALANCE_UID, strategy="calendar_event_signal"),
+        patch(
+            f"{CONFIGURATIONS}.rebalance_configurations_by_uids",
+            return_value={
+                str(REBALANCE_UID): Mock(uid=REBALANCE_UID, strategy="calendar_event_signal")
+            },
         ),
         patch(
-            "alpaca_connectors.market_data.configurations.portfolio_bar_configuration",
-            return_value=None,
+            "alpaca_connectors.market_data.configurations.portfolio_bar_configurations",
+            return_value={},
         ),
         patch(
-            "alpaca_connectors.market_data.configurations.get_bar_configuration",
-            return_value=feed,
+            "alpaca_connectors.market_data.configurations.bar_configuration_rows_by_uids",
+            return_value={str(BARS_UID): feed},
         ) as named,
         patch.object(execution, "read_signal_observation_matrix", return_value=matrix),
+        patch(
+            "alpaca_connectors.portfolios.signal_history.read_signal_observation_bounds_by_signal",
+            return_value={signal_uid: SignalObservationBounds(signal_uid, MONDAY, WEDNESDAY)},
+        ),
         patch.object(
             execution,
-            "read_signal_observation_bounds",
-            return_value=SignalObservationBounds(signal_uid, MONDAY, WEDNESDAY),
+            "resolve_alpaca_bars_time_index_meta_table_uids",
+            return_value={("1d", "sip", "all"): "t"},
         ),
-        patch.object(execution, "resolve_alpaca_bars_time_index_meta_table_uid", return_value="t"),
         patch("alpaca_connectors.portfolios.signal_assets.assets_for_signals", return_value=[NVDA]),
     ):
         resolved = execution.resolve_portfolio_configuration(CONFIGURATION_UID)
 
-    named.assert_called_once_with(BARS_UID)
+    named.assert_called_once_with([BARS_UID])
     assert resolved.bars_configuration is feed
     assert resolved.signal_uid == signal_uid
 
@@ -1378,6 +1435,7 @@ def test_a_new_key_is_the_portfolio_s_definition_key() -> None:
         patch(f"{DEFINITIONS}.account_signal_definition", return_value=None),
         patch(f"{DEFINITIONS}.create_signal_definition", return_value=definition()) as create,
         patch.object(provided_weights, "require_alpaca_assets"),
+        _named_rebalance(),
         patch(
             f"{CONFIGURATIONS}.create_portfolio_configuration_row",
             return_value=provided_configuration(signal_definition_uid=None),
@@ -1421,8 +1479,8 @@ def test_a_used_key_answers_its_portfolio_and_creates_nothing() -> None:
             f"{CONFIGURATIONS}.list_portfolio_configurations", return_value=([_existing()], 1)
         ) as listed,
         patch(
-            "alpaca_connectors.market_data.configurations.portfolio_bar_configuration",
-            return_value=SimpleNamespace(uid=BARS_UID),
+            "alpaca_connectors.market_data.configurations.portfolio_bar_configurations",
+            return_value={str(CONFIGURATION_UID): SimpleNamespace(uid=BARS_UID)},
         ),
         patch.object(provided_weights, "require_alpaca_assets"),
         patch(f"{CONFIGURATIONS}.create_portfolio_configuration_row") as create_row,
@@ -1475,18 +1533,20 @@ def test_two_creates_with_one_key_make_one_portfolio() -> None:
     order = MagicMock()
     unique = RuntimeError("duplicate key value violates unique constraint")
     with (
-        # Not there when this create looked; there once the other create wrote it.
+        # Not there when this create looked; there once the other create wrote it. The create
+        # itself reads the key once: its definition's insert meets the account's unique key.
         patch(
             f"{DEFINITIONS}.account_signal_definition",
             side_effect=[None, definition(), definition()],
         ),
         patch(f"{CONFIGURATIONS}.list_portfolio_configurations", return_value=([_existing()], 1)),
         patch(
-            "alpaca_connectors.market_data.configurations.portfolio_bar_configuration",
-            return_value=SimpleNamespace(uid=BARS_UID),
+            "alpaca_connectors.market_data.configurations.portfolio_bar_configurations",
+            return_value={str(CONFIGURATION_UID): SimpleNamespace(uid=BARS_UID)},
         ),
         patch(f"{DEFINITIONS}.create_signal_definition", side_effect=unique),
         patch.object(provided_weights, "require_alpaca_assets"),
+        _named_rebalance(),
         patch(
             f"{CONFIGURATIONS}.create_portfolio_configuration_row",
             return_value=provided_configuration(signal_definition_uid=None),

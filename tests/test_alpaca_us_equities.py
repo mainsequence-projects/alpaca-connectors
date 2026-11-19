@@ -19,7 +19,6 @@ from alpaca_connectors.assets.alpaca_us_equities import (
     RegisteredAlpacaAssetReference,
     _alpaca_detail_registration_values,
     _query_existing_assets_by_alpaca_id,
-    _register_alpaca_asset,
     _register_alpaca_assets_batch,
     _resolve_requested_symbols_to_alpaca_assets,
     build_alpaca_us_equity_registration_plan,
@@ -92,6 +91,29 @@ def alpaca_catalog_asset(
     }
 
 
+def alpaca_not_found() -> Exception:
+    """The error Alpaca's client raises for an asset Alpaca does not know (HTTP 404)."""
+    from alpaca.common.exceptions import APIError
+
+    return APIError(
+        '{"code": 40410000, "message": "asset not found"}',
+        SimpleNamespace(response=SimpleNamespace(status_code=404), request=None),
+    )
+
+
+def alpaca_asset_from(catalog, path: str) -> dict:
+    """Answer ``GET /assets/{symbol_or_asset_id}`` from a list of catalog assets."""
+    from urllib.parse import unquote
+
+    key = unquote(path.removeprefix("/assets/")).upper()
+    for asset in catalog:
+        if key in {str(asset["id"]).upper(), str(asset["symbol"]).upper()} or key == str(
+            asset["symbol"]
+        ).upper().replace("/", ""):
+            return asset
+    raise alpaca_not_found()
+
+
 class AlpacaAssetRegistrationTests(unittest.TestCase):
     def test_batch_registration_uses_bulk_metatable_operations_and_one_snapshot_run(
         self,
@@ -137,8 +159,8 @@ class AlpacaAssetRegistrationTests(unittest.TestCase):
                 side_effect=lambda rows: markets_calls.append(("asset-snapshots", list(rows))),
             ),
             patch(
-                "alpaca_connectors.assets.calendars.ensure_trading_calendar",
-                side_effect=lambda key: markets_calls.append(("calendar", [key])),
+                "alpaca_connectors.assets.calendars.ensure_trading_calendars_stored",
+                side_effect=lambda keys: markets_calls.append(("calendar", list(keys))),
             ),
         ):
             result = _register_alpaca_assets_batch(assets, {})
@@ -214,10 +236,9 @@ class AlpacaAssetRegistrationTests(unittest.TestCase):
             fractionable=False,
         )
         trading_client = Mock()
-        trading_client.get.return_value = [
-            active_non_tradable,
-            inactive_non_tradable,
-        ]
+        trading_client.get.side_effect = lambda path, data=None: alpaca_asset_from(
+            [active_non_tradable, inactive_non_tradable], path
+        )
 
         assets = fetch_alpaca_us_equities(
             trading_client=trading_client,
@@ -228,7 +249,11 @@ class AlpacaAssetRegistrationTests(unittest.TestCase):
         self.assertFalse(assets[0].tradable)
         self.assertEqual(assets[1].status, "inactive")
         self.assertFalse(assets[1].tradable)
-        trading_client.get.assert_called_once_with("/assets", {"asset_class": "us_equity"})
+        # Only the requested symbols are read, one each; never Alpaca's whole asset list.
+        self.assertEqual(
+            sorted(call.args[0] for call in trading_client.get.call_args_list),
+            ["/assets/AAPL", "/assets/HOLX"],
+        )
         trading_client.get_all_assets.assert_not_called()
         trading_client.get_asset.assert_not_called()
 
@@ -254,11 +279,17 @@ class AlpacaAssetRegistrationTests(unittest.TestCase):
                 ]
                 # Offline client; only its catalog response is replaced.
                 trading_client = TradingClient("PKTEST", "SKTEST", paper=True)
-                with patch.object(trading_client, "get", return_value=catalog):
+                with patch.object(
+                    trading_client,
+                    "get",
+                    side_effect=lambda path, data=None, catalog=catalog: alpaca_asset_from(
+                        catalog, path
+                    ),
+                ):
                     if exchange == "XTEST":
-                        # The typed read fails the whole catalog over one asset.
+                        # The typed read fails over an exchange alpaca-py does not know.
                         with self.assertRaises(ValidationError):
-                            trading_client.get_all_assets()
+                            trading_client.get_asset(str(SPY_ID))
                     assets = fetch_alpaca_us_equities(
                         trading_client=trading_client,
                         symbols=["AAPL", "SPY"],
@@ -478,50 +509,38 @@ class AlpacaAssetRegistrationTests(unittest.TestCase):
         )
         self.assertEqual([asset.symbol for asset in resolution.missing_assets], ["SPY"])
 
-    def test_registration_uses_alpaca_uuid_and_optional_figi_details(self) -> None:
+    def test_registration_answers_each_assets_fields(self) -> None:
         asset_record = alpaca_asset("AAPL", AAPL_ID)
-        match = OpenFigiMatch(
-            symbol="AAPL",
-            figi="BBG000B9XRY4",
-            name="Apple Inc.",
-            ticker="AAPL",
-            exchange_code="US",
-            security_type="Common Stock",
-            security_type_2="Common Stock",
-            security_market_sector="Equity",
-            composite_figi="BBG000B9XRY4",
-            share_class_figi="BBG001S5N8V8",
-            classification_pass_name="common_stock",
+        plan = classify_alpaca_us_equities(
+            [asset_record],
+            classification_passes=(),
+            query_openfigi_fn=lambda **_: ({}, {}),
         )
-        registered = Mock(uid="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
-
-        with (
-            patch("msm.api.assets.AssetType.upsert") as asset_type_upsert,
-            patch("msm.api.assets.Asset.upsert", return_value=registered) as asset_upsert,
-            patch(
-                "alpaca_connectors.assets.alpaca_asset_details.upsert_alpaca_asset_details"
-            ) as alpaca_details_upsert,
-            patch("msm.api.assets.OpenFigiDetails.upsert") as figi_details_upsert,
-            patch("msm.api.assets.AssetSnapshots.publish") as snapshots_publish,
-            patch("alpaca_connectors.assets.calendars.ensure_trading_calendar") as ensure_calendar,
+        resolution = resolve_alpaca_us_equity_registration_plan(
+            plan,
+            query_existing_assets_fn=lambda *_args, **_kwargs: {},
+        )
+        asset_uid = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+        with patch(
+            "alpaca_connectors.assets.alpaca_us_equities._register_alpaca_assets_batch",
+            return_value={"AAPL": asset_uid},
         ):
-            asset_uid = _register_alpaca_asset(asset_record, match)
+            result = register_alpaca_us_equity_assets(registration_resolution=resolution)
 
-        self.assertEqual(asset_uid, str(registered.uid))
-        self.assertEqual(asset_type_upsert.call_args.kwargs["asset_type"], "equity")
         self.assertEqual(
-            asset_upsert.call_args.kwargs["unique_identifier"],
-            build_alpaca_unique_identifier(AAPL_ID),
+            result["registered_assets"],
+            [
+                {
+                    "symbol": "AAPL",
+                    "uid": asset_uid,
+                    "unique_identifier": build_alpaca_unique_identifier(AAPL_ID),
+                    "alpaca_asset_id": str(AAPL_ID),
+                    "name": asset_record.name,
+                    "tradable": asset_record.tradable,
+                    "fractionable": asset_record.fractionable,
+                }
+            ],
         )
-        ensure_calendar.assert_called_once_with("NYSE")
-        self.assertEqual(asset_upsert.call_args.kwargs["calendar_identifier"], "NYSE")
-        self.assertEqual(
-            alpaca_details_upsert.call_args.kwargs["values"]["alpaca_asset_id"], AAPL_ID
-        )
-        self.assertEqual(figi_details_upsert.call_args.kwargs["figi"], "BBG000B9XRY4")
-        (payload,) = snapshots_publish.call_args.args[0]
-        self.assertEqual(payload["asset_identifier"], build_alpaca_unique_identifier(AAPL_ID))
-        self.assertEqual(payload["ticker"], "AAPL")
 
     def test_figi_less_asset_is_still_registered(self) -> None:
         asset_record = alpaca_asset("AAPL", AAPL_ID)

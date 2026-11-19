@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import copy
 import datetime as dt
+import uuid
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any, Literal
@@ -155,6 +156,17 @@ def _integer(
     return value
 
 
+def _uids(arguments: Mapping[str, Any]) -> list[str] | None:
+    """The ``uids`` a list filters on: one call for several UIDs, not a get per UID (#46)."""
+    values = arguments.get("uids")
+    if values is None:
+        return None
+    try:
+        return [str(uuid.UUID(value)) for value in values]
+    except (AttributeError, TypeError, ValueError) as exc:
+        raise ValueError("uids must be a list of UIDs.") from exc
+
+
 def _page(arguments: Mapping[str, Any], *, maximum: int = 100) -> tuple[int, int]:
     limit = _integer(arguments, "limit", default=25, minimum=1, maximum=maximum)
     offset = _integer(arguments, "offset", default=0, minimum=0, maximum=2_147_483_647)
@@ -224,6 +236,7 @@ def query_assets(arguments: Mapping[str, Any]) -> Any:
         search=_optional_text(arguments, "search"),
         ordering=str(arguments.get("ordering") or "name"),
         category_uid=_optional_text(arguments, "category_uid"),
+        uids=_uids(arguments),
     )
 
 
@@ -278,6 +291,7 @@ def query_accounts(arguments: Mapping[str, Any]) -> Any:
         active=arguments.get("active"),
         is_paper=arguments.get("is_paper"),
         ordering=str(arguments.get("ordering") or "account_name"),
+        uids=_uids(arguments),
     )
 
 
@@ -452,6 +466,7 @@ def query_bar_configurations(arguments: Mapping[str, Any]) -> Any:
         scheduled=arguments.get("scheduled"),
         asset_source=_optional_text(arguments, "asset_source"),
         ordering=str(arguments.get("ordering") or "name"),
+        uids=_uids(arguments),
     )
 
 
@@ -502,6 +517,7 @@ def query_rebalance_configurations(arguments: Mapping[str, Any]) -> Any:
         offset=offset,
         search=_optional_text(arguments, "search"),
         ordering=str(arguments.get("ordering") or "name"),
+        uids=_uids(arguments),
     )
 
 
@@ -564,6 +580,7 @@ def query_portfolios(arguments: Mapping[str, Any]) -> Any:
         account_uid=_optional_text(arguments, "account_uid"),
         signal_definition_uid=_optional_text(arguments, "signal_definition_uid"),
         ordering=str(arguments.get("ordering") or "name"),
+        uids=_uids(arguments),
     )
 
 
@@ -607,6 +624,13 @@ ACCOUNT_BOOLEAN_FILTERS = {
     "active": {"type": "boolean"},
     "is_paper": {"type": "boolean"},
 }
+UIDS = {
+    "uids": {
+        "type": "array",
+        "items": {"type": "string", "format": "uuid"},
+        "description": "Only these UIDs: one list call instead of a get per UID.",
+    }
+}
 
 
 PROJECT_AGENT_TOOLS: tuple[ProjectAgentTool, ...] = (
@@ -628,7 +652,13 @@ PROJECT_AGENT_TOOLS: tuple[ProjectAgentTool, ...] = (
         parameters=_operations(
             _operation_case(
                 "list",
-                properties={**PAGE, **SEARCH, **ORDERING, "category_uid": _uid("AssetCategory")},
+                properties={
+                    **PAGE,
+                    **SEARCH,
+                    **ORDERING,
+                    **UIDS,
+                    "category_uid": _uid("AssetCategory"),
+                },
             ),
             _operation_case(
                 "get", properties={"asset_uid": _uid("Asset")}, required=("asset_uid",)
@@ -679,7 +709,7 @@ PROJECT_AGENT_TOOLS: tuple[ProjectAgentTool, ...] = (
         parameters=_operations(
             _operation_case(
                 "list",
-                properties={**PAGE, **SEARCH, **ORDERING, **ACCOUNT_BOOLEAN_FILTERS},
+                properties={**PAGE, **SEARCH, **ORDERING, **ACCOUNT_BOOLEAN_FILTERS, **UIDS},
             ),
             _operation_case(
                 "get",
@@ -845,6 +875,7 @@ PROJECT_AGENT_TOOLS: tuple[ProjectAgentTool, ...] = (
                     **PAGE,
                     **SEARCH,
                     **ORDERING,
+                    **UIDS,
                     "enabled": {"type": "boolean"},
                     "scheduled": {"type": "boolean"},
                     "asset_source": {
@@ -940,7 +971,7 @@ PROJECT_AGENT_TOOLS: tuple[ProjectAgentTool, ...] = (
         label="Query Rebalance Configurations",
         description="List or retrieve stored calendar-event portfolio rebalance configurations.",
         parameters=_operations(
-            _operation_case("list", properties={**PAGE, **SEARCH, **ORDERING}),
+            _operation_case("list", properties={**PAGE, **SEARCH, **ORDERING, **UIDS}),
             _operation_case(
                 "get",
                 properties={"configuration_uid": _uid("rebalance configuration")},
@@ -1003,6 +1034,7 @@ PROJECT_AGENT_TOOLS: tuple[ProjectAgentTool, ...] = (
                     **PAGE,
                     **SEARCH,
                     **ORDERING,
+                    **UIDS,
                     "account_uid": _uid("Account"),
                     "signal_definition_uid": _uid("signal definition"),
                 },

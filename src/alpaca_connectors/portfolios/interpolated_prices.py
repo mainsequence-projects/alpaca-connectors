@@ -35,6 +35,45 @@ def resolve_alpaca_bars_time_index_meta_table_uid(
     return str(exact_matches[0].uid)
 
 
+def resolve_alpaca_bars_time_index_meta_table_uids(
+    profiles: list[tuple[str, str, str]],
+) -> dict[tuple[str, str, str], str | Exception]:
+    """The registered bars table UID of each ``(frequency_id, feed, adjustment)``, in one read.
+
+    The batch form of ``resolve_alpaca_bars_time_index_meta_table_uid`` (issue #46): one
+    MetaTables request for every profile. Each profile is answered with its UID, or with the
+    error the single form raises for it: ``ValueError`` for a profile without storage,
+    ``RuntimeError`` when its table is not registered exactly once.
+    """
+    from metatables import TimeIndexMetaTable
+
+    answers: dict[tuple[str, str, str], str | Exception] = {}
+    names: dict[tuple[str, str, str], str] = {}
+    for profile in dict.fromkeys(profiles):
+        try:
+            names[profile] = storage_for(*profile).__table__.name
+        except ValueError as exc:
+            answers[profile] = exc
+    if not names:
+        return answers
+    physical_names = sorted(set(names.values()))
+    matches = TimeIndexMetaTable.filter_by_body(
+        physical_table_name__in=physical_names,
+        limit=2 * len(physical_names),
+    )
+    for profile, name in names.items():
+        exact = [table for table in matches if table.physical_table_name == name]
+        if len(exact) == 1:
+            answers[profile] = str(exact[0].uid)
+        else:
+            answers[profile] = RuntimeError(
+                "Expected exactly one registered Alpaca bars TimeIndexMetaTable for "
+                f"{name}; found {len(exact)}. Run and verify the project markets migration "
+                "before building an Alpaca-backed portfolio price source."
+            )
+    return answers
+
+
 def alpaca_interpolated_prices_storage_model(
     *,
     source_time_index_meta_table_uid: str,
@@ -94,4 +133,5 @@ __all__ = [
     "alpaca_interpolated_prices_storage_model",
     "build_alpaca_interpolated_prices",
     "resolve_alpaca_bars_time_index_meta_table_uid",
+    "resolve_alpaca_bars_time_index_meta_table_uids",
 ]

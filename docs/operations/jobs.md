@@ -40,6 +40,8 @@ How they run:
   own runs: starting a run needs `runner` on the Job, and a Job cannot declare access to itself
   (`self_reference`).
   - It skips configurations with a pending or running run, and those whose preflight is blocked.
+    The preflights of all the others read their inputs together, one read per kind, from the
+    scheduled rows already read (issue #46).
   - It prints what it launched, skipped and failed, and fails if any start failed.
   - The portfolio Job accepts only `--configuration-uid`; a run with `--scheduled` fails with a
     usage error.

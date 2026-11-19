@@ -18,6 +18,8 @@ from alpaca_connectors.portfolios.signal_definitions import (
     create_signal_definition,
     delete_signal_definition,
     delete_signal_rows,
+    delete_signals_rows,
+    end_signal_definitions,
     normalize_key,
     signal_uid_for_key,
 )
@@ -146,10 +148,10 @@ def test_deleting_a_definition_deletes_its_signal_in_the_order_markets_allows() 
             return_value=[],
         ),
         patch.object(SignalDefinition, "delete", calls.definition),
-        patch(f"{MODULE}.signal_kept_by_ended_portfolio", return_value=False),
-        patch(f"{MODULE}.delete_signal_observations", calls.observations),
-        patch("alpaca_connectors.portfolios.signal_assets.forget_signal_assets", calls.assets),
-        patch("alpaca_connectors.markets_api.delete_signal_metadata", calls.metadata),
+        patch("alpaca_connectors.portfolios.configurations.ended_signal_uids", return_value=set()),
+        patch(f"{MODULE}.delete_signals_observations", calls.observations),
+        patch("alpaca_connectors.portfolios.signal_assets.forget_signals_assets", calls.assets),
+        patch("alpaca_connectors.markets_api.delete_signals_metadata", calls.metadata),
     ):
         result = delete_signal_definition(DEFINITION_UID)
 
@@ -157,22 +159,76 @@ def test_deleting_a_definition_deletes_its_signal_in_the_order_markets_allows() 
     # The observations reference the SignalMetadata with RESTRICT, so they go first.
     assert calls.mock_calls == [
         call.definition(DEFINITION_UID),
-        call.observations(signal_uid),
-        call.assets(signal_uid),
-        call.metadata(signal_uid),
+        call.observations([signal_uid]),
+        call.assets([signal_uid]),
+        call.metadata([signal_uid]),
     ]
     assert result["signal"] == {"uid": signal_uid, "state": "deleted"}
 
 
 def test_a_signal_a_retired_portfolio_follows_stays_with_it() -> None:
     with (
-        patch(f"{MODULE}.signal_kept_by_ended_portfolio", return_value=True),
-        patch(f"{MODULE}.delete_signal_observations") as observations,
-        patch("alpaca_connectors.markets_api.delete_signal_metadata") as metadata,
+        patch(
+            "alpaca_connectors.portfolios.configurations.ended_signal_uids",
+            return_value={"signal-a"},
+        ),
+        patch(f"{MODULE}.delete_signals_observations") as observations,
+        patch("alpaca_connectors.markets_api.delete_signals_metadata") as metadata,
     ):
         assert delete_signal_rows("signal-a") == "kept"
     observations.assert_not_called()
     metadata.assert_not_called()
+
+
+def test_several_signals_rows_go_in_one_pass() -> None:
+    # One read of which signals a retired Portfolio keeps, then one delete per kind for the
+    # others (issue #46).
+    calls = MagicMock()
+    with (
+        patch(
+            "alpaca_connectors.portfolios.configurations.ended_signal_uids",
+            calls.kept,
+        ),
+        patch(f"{MODULE}.delete_signals_observations", calls.observations),
+        patch("alpaca_connectors.portfolios.signal_assets.forget_signals_assets", calls.assets),
+        patch("alpaca_connectors.markets_api.delete_signals_metadata", calls.metadata),
+    ):
+        calls.kept.return_value = {"signal-b"}
+        states = delete_signals_rows(["signal-a", "signal-b", "signal-c"])
+
+    assert states == {"signal-a": "deleted", "signal-b": "kept", "signal-c": "deleted"}
+    assert calls.mock_calls == [
+        call.kept(["signal-a", "signal-b", "signal-c"]),
+        call.observations(["signal-a", "signal-c"]),
+        call.assets(["signal-a", "signal-c"]),
+        call.metadata(["signal-a", "signal-c"]),
+    ]
+
+
+def test_ending_definitions_deletes_only_those_no_portfolio_follows() -> None:
+    followed = definition(uid=uuid.UUID(int=41), key="followed", signal_key="followed")
+    free = definition(uid=uuid.UUID(int=42), key="free", signal_key="free")
+    with (
+        patch(
+            "alpaca_connectors.portfolios.configurations.portfolio_counts_by_definition",
+            return_value={str(followed.uid): 1},
+        ) as counts,
+        patch("alpaca_connectors.portfolios.configurations.delete_rows_in") as delete,
+        patch(
+            f"{MODULE}.delete_signals_rows",
+            side_effect=lambda signals: dict.fromkeys(signals, "deleted"),
+        ) as rows,
+    ):
+        answers = end_signal_definitions([followed, free])
+
+    counts.assert_called_once_with([str(followed.uid), str(free.uid)])
+    assert delete.call_args.args[2] == [free.uid]
+    free_signal = signal_uid_for_key("free")
+    assert list(rows.call_args.args[0]) == [free_signal]
+    assert answers == {
+        str(followed.uid): {"state": "followed", "signal": None},
+        str(free.uid): {"state": "deleted", "signal": {"uid": free_signal, "state": "deleted"}},
+    }
 
 
 # ------------------------------------------------------------------------------------------------

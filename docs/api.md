@@ -67,6 +67,17 @@ before its work finds the Markets API starting as well.
 | Portfolios | an account's signals under `/v1/signal-definitions`, with their weights at `/{uid}/weights`; the account's portfolios that follow them: create at `POST /v1/portfolio-configurations`, list/get/`PATCH`/`DELETE`, and run and JobRun-history actions on the portfolio Job under `/v1/portfolio-configurations`; ADR 0024's routes `POST /v1/portfolio-configurations/provided-weights` and `/{uid}/weights`, supported with their former rules (Hunch uses them); reusable calendar-event policies under `/v1/portfolio-rebalance-configurations` |
 | Operations | poll an accepted Alpaca bars or portfolio JobRun under `GET /v1/operations/job-runs/{job_run_uid}`; read an account sync again at `GET /v1/operations/{operation_uid}` |
 
+A caller holding several UIDs reads them in one request, never one `GET /{uid}` each (issue #46):
+`GET /v1/assets`, `GET /v1/accounts`, `GET /v1/market-data/bar-configurations`,
+`GET /v1/signal-definitions`, `GET /v1/portfolio-configurations` and
+`GET /v1/portfolio-rebalance-configurations` take a repeated `uid` query parameter (`?uid=<uuid>&uid=<uuid>`), combined with their other
+filters and counted in the page's total. A malformed UID answers `422`. The Agent's list tools for
+assets, accounts, bar configurations, portfolios and rebalance configurations take the same filter
+as `uids`. The bulk account actions
+read all selected accounts' registrations at once, and the bulk key removal clears them in one
+statement; a bulk holdings capture still reads Alpaca once per account, since each has its own
+keys.
+
 Market-data writes are configuration-oriented. A bar configuration has exactly one parent
 ([ADR 0028](adrs/0028_every_portfolio_belongs_to_one_account.md)): a feed of an account, created
 here by the account's owner with the `assets` or `account_holdings` source and deleted with the
@@ -280,8 +291,9 @@ GET|PATCH|DELETE /v1/portfolio-rebalance-configurations/{configuration_uid}
   out is written at `0`. Weights are stored as given, negatives included. Several observations in
   one call start or extend a history; an observation at or before the last stored one is refused
   (`409 observation_not_after_last`), because published observations are never restated.
-- **Assets** must be registered Alpaca assets: `422 unknown_asset` or `422 asset_not_alpaca`
-  otherwise. Other refusals are `422 invalid_observation` and `422 empty_observations`. No error
+- **Assets** must be registered Alpaca assets, checked with one read of this application's Alpaca
+  details and no Markets call: `422 unknown_asset` for an `ALPACA::` identifier that is not
+  registered, `422 asset_not_alpaca` for an identifier that is not an Alpaca one. Other refusals are `422 invalid_observation` and `422 empty_observations`. No error
   names an asset, a weight or an owner.
 - **Markets must read the signal's table.** Each call binds the signal to this application's
   signal-weights instance before it writes a row. Where Markets cannot read that instance, the call
@@ -369,6 +381,13 @@ the account's funds ([ADR 0023](adrs/0023_account_sync_sizes_and_allocates_funds
 | `capture_holdings` | Reads Alpaca and publishes the holdings snapshot at time `T` |
 | `size_targets` | Reads the account's latest target and turns each exposure into units: a share of NAV is taken from Alpaca's reported equity, split by the portfolio's latest weights at or before `T`, and divided by Alpaca's latest trade. A whole share is rounded half up unless the asset is fractionable |
 | `allocate_funds` | Plans the snapshot against those units, then allocates with the plan's digest. ms-markets records each owner's target, what it was assigned and the delta |
+
+The registration and the keys are read once and serve both the capture and the latest trades. The
+capture asks Alpaca only about held assets this project does not describe yet, one asset each, and
+never reads Alpaca's whole asset list ([holdings](account/registration.md#holdings)). When a sync
+ends, the API logs one line, `account sync <status> account=<uid>`, with each step's duration in
+seconds and the seconds spent in Alpaca calls, so the time outside Markets and MetaTables can be
+read from the log.
 
 The connector writes no target and trades no delta. An account with no target, and a capture
 that published no snapshot, end after `capture_holdings` with the two other steps `skipped`.
@@ -476,6 +495,10 @@ Progress records are persisted in the project-owned
 `alpaca_connectors__asset_registration_operation` MetaTable and belong to the verified caller who
 started them ([Authentication](#authentication)); polling another caller's operation answers 404.
 The existing synchronous plan and execute routes remain available for non-interactive callers.
+Alpaca is asked about the requested symbols only, one each, concurrently; its whole asset list is
+not read. An execution's result carries `registered_assets`: every asset it answers for, registered
+now or before, with its `uid`, `unique_identifier`, `alpaca_asset_id`, `name`, `tradable` and
+`fractionable`, so a caller needs no `GET /v1/assets/{uid}` per asset afterwards.
 
 The record is durable, but execution currently runs as a FastAPI background task rather than a
 platform Job. A process termination can therefore leave an accepted operation in `queued` or
@@ -596,7 +619,12 @@ Two separate actions, both for the account's owner only
   `POST /v1/accounts/{account_uid}/actions/delete/preflight` reports the same without changing
   anything, with the counts of what would go. A repeated request finishes what an interrupted one
   left. The answer lists the deleted and kept portfolio and signal UIDs and, for a registration
-  made before revision `0018`, the Secrets this application created that went with it.
+  made before revision `0018`, the Secrets this application created that went with it. The
+  delete reads and writes set-based (issue #46): what the preflight read serves the delete, the
+  retired `Portfolio` rows go through one ms-markets delete preflight and one bulk delete, their
+  series and records through one statement per table, and the signals through one pass. Only
+  ms-markets' one-portfolio routes (listing the accounts whose current target names a portfolio,
+  retiring it) and one-signal routes (unbinding and deleting a signal) stay one call each.
 
 ## MCP
 

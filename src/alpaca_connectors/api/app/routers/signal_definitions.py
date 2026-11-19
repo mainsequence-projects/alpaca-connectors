@@ -7,6 +7,8 @@ account's portfolios follow it, as many as it wants.
 
 from __future__ import annotations
 
+import uuid
+
 from fastapi import APIRouter, Body, Query
 
 from ..errors import api_http_error
@@ -41,6 +43,9 @@ def signal_definitions_list(
     offset: int = Query(default=0, ge=0),
     search: str | None = None,
     account_uid: str | None = None,
+    uid: list[uuid.UUID] | None = Query(
+        default=None, description="Only these signal definitions; repeat the parameter for each."
+    ),
 ) -> ResourceCollection:
     validate_page_window(limit=limit, offset=offset)
     try:
@@ -50,6 +55,7 @@ def signal_definitions_list(
             search=search,
             account_uid=account_uid,
             owner=acting_owner(),
+            uids=[str(value) for value in uid] if uid is not None else None,
         )
     except Exception as exc:
         raise api_http_error(exc) from exc

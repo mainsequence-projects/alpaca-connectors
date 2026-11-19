@@ -285,6 +285,65 @@ def read_signal_observation_bounds(*, signal_uid: str) -> SignalObservationBound
     )
 
 
+def read_signal_observation_bounds_by_signal(
+    signal_uids: list[str],
+) -> dict[str, SignalObservationBounds]:
+    """The first and last stored observation times of several signals, in one grouped read.
+
+    One statement per ``MARKETS_BATCH_SIZE`` signals (issue #46). A signal with no observation
+    is answered with no bounds.
+    """
+    from msm.api.base import operation_result_rows
+    from msm.repositories.base import compile_markets_statement, execute_markets_operation
+    from sqlalchemy import func, select
+
+    from alpaca_connectors.instances import AlpacaSignalWeightsStorage as SignalWeightsStorage
+    from alpaca_connectors.markets_api import read_in_batches
+    from alpaca_connectors.runtime import start_markets_engine
+
+    normalized = list(dict.fromkeys(_normalize_signal_uid(uid) for uid in signal_uids))
+    bounds = {
+        uid: SignalObservationBounds(
+            signal_uid=uid, first_observation_at=None, last_observation_at=None
+        )
+        for uid in normalized
+    }
+    if not normalized:
+        return bounds
+    runtime = start_markets_engine()
+
+    def read(batch: list[str]) -> list[dict[str, Any]]:
+        query_context = replace(
+            runtime.context,
+            limits={
+                "max_rows": len(batch),
+                "statement_timeout_ms": SIGNAL_OBSERVATION_QUERY_TIMEOUT_MS,
+            },
+        )
+        statement = (
+            select(
+                SignalWeightsStorage.signal_uid.label("signal_uid"),
+                func.min(SignalWeightsStorage.time_index).label("first_observation_at"),
+                func.max(SignalWeightsStorage.time_index).label("last_observation_at"),
+            )
+            .where(SignalWeightsStorage.signal_uid.in_(batch))
+            .group_by(SignalWeightsStorage.signal_uid)
+        )
+        operation = compile_markets_statement(statement, context=query_context, operation="select")
+        return operation_result_rows(execute_markets_operation(operation, context=query_context))
+
+    for row in read_in_batches(read, normalized):
+        uid = str(row["signal_uid"])
+        first = row.get("first_observation_at")
+        last = row.get("last_observation_at")
+        bounds[uid] = SignalObservationBounds(
+            signal_uid=uid,
+            first_observation_at=None if first is None else _normalize_time_index(first),
+            last_observation_at=None if last is None else _normalize_time_index(last),
+        )
+    return bounds
+
+
 def read_signal_last_observation_at(*, signal_uid: str) -> dt.datetime | None:
     """Return one signal's last stored observation time, or None before its first.
 
@@ -323,5 +382,6 @@ __all__ = [
     "SignalObservationMatrix",
     "read_signal_last_observation_at",
     "read_signal_observation_bounds",
+    "read_signal_observation_bounds_by_signal",
     "read_signal_observation_matrix",
 ]

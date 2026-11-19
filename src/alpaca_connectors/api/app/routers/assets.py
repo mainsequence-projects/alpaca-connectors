@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import uuid
 from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Body, Query, Response, status
@@ -38,11 +39,21 @@ def assets_list(
     offset: int = Query(default=0, ge=0),
     search: str | None = None,
     ordering: str = "ticker",
+    uid: list[uuid.UUID] | None = Query(
+        default=None,
+        description="Only these asset UIDs; repeat the parameter to read several in one request.",
+    ),
 ) -> ResourceCollection:
     validate_page_window(limit=limit, offset=offset)
     validate_ordering(ordering, allowed_fields={"ticker", "alpaca_asset_id"})
     try:
-        return list_asset_resources(limit=limit, offset=offset, search=search, ordering=ordering)
+        return list_asset_resources(
+            limit=limit,
+            offset=offset,
+            search=search,
+            ordering=ordering,
+            uids=[str(value) for value in uid] if uid else None,
+        )
     except Exception as exc:
         raise api_http_error(exc) from exc
 

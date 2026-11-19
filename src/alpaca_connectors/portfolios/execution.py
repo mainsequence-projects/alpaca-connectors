@@ -11,6 +11,7 @@ from __future__ import annotations
 import datetime as dt
 import logging
 import uuid
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -20,17 +21,13 @@ from alpaca_connectors.portfolios.configurations import (
     PortfolioRebalanceConfiguration,
     get_portfolio_configuration,
     update_portfolio_configuration_row,
-    validate_portfolio_references,
 )
 from alpaca_connectors.portfolios.interpolated_prices import (
     build_alpaca_interpolated_prices,
-    resolve_alpaca_bars_time_index_meta_table_uid,
+    resolve_alpaca_bars_time_index_meta_table_uids,
 )
 from alpaca_connectors.portfolios.rebalance_schedule import first_rebalance_state
-from alpaca_connectors.portfolios.signal_history import (
-    read_signal_observation_bounds,
-    read_signal_observation_matrix,
-)
+from alpaca_connectors.portfolios.signal_history import read_signal_observation_matrix
 
 logger = logging.getLogger(__name__)
 
@@ -116,44 +113,188 @@ def portfolio_unique_identifier(configuration_uid: Any) -> str:
     return provided_portfolio_unique_identifier(configuration_uid)
 
 
+@dataclass(frozen=True, slots=True)
+class HeldPortfolioInputs:
+    """What a caller already holds of the inputs a preflight reads, so they are not read again.
+
+    A portfolio create passes what it just wrote (issue #46). Keys are UID strings: rebalance
+    configurations and definitions by their own UID, bars configurations by the portfolio
+    configuration UID they price, bounds by signal UID.
+    """
+
+    rebalance_configurations: Mapping[str, Any] = field(default_factory=dict)
+    bars_configurations: Mapping[str, Any] = field(default_factory=dict)
+    definitions: Mapping[str, Any] = field(default_factory=dict)
+    signal_bounds: Mapping[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
+class _PortfolioInputs:
+    configuration: AlpacaPortfolioConfiguration
+    rebalance_configuration: PortfolioRebalanceConfiguration
+    bars_configuration: Any
+    signal_uid: str
+    signal_start_time: dt.datetime
+    source_time_index_meta_table_uid: str
+
+
+def _resolve_inputs(
+    configurations: Sequence[AlpacaPortfolioConfiguration],
+    *,
+    held: HeldPortfolioInputs | None = None,
+) -> dict[str, _PortfolioInputs | Exception]:
+    """Resolve the stored inputs of several configurations, with one read per kind.
+
+    The rebalance configurations, the portfolios' own bars configurations, the feeds the
+    portfolios not yet adopted name, the signal definitions, the signals' observation bounds and
+    the bars tables are each read once for all of them (issue #46); what ``held`` gives is not
+    read. Each configuration is answered with its inputs or with the error that blocks it: a
+    ``LookupError`` or ``ValueError`` for an input that is missing, disabled or unsupported, a
+    ``RuntimeError`` for a bars table that is not registered.
+    """
+    from alpaca_connectors.market_data.configurations import (
+        bar_configuration_rows_by_uids,
+        portfolio_bar_configurations,
+    )
+    from alpaca_connectors.portfolios.configurations import (
+        normalize_rebalance_strategy,
+        rebalance_configurations_by_uids,
+    )
+    from alpaca_connectors.portfolios.signal_definitions import (
+        legacy_signal_key,
+        signal_definitions_by_uids,
+        signal_uid_for_key,
+    )
+    from alpaca_connectors.portfolios.signal_history import (
+        read_signal_observation_bounds_by_signal,
+    )
+
+    held = held or HeldPortfolioInputs()
+    uids = [str(configuration.uid) for configuration in configurations]
+
+    rebalances = dict(held.rebalance_configurations)
+    rebalances.update(
+        rebalance_configurations_by_uids(
+            [
+                str(configuration.rebalance_configuration_uid)
+                for configuration in configurations
+                if str(configuration.rebalance_configuration_uid) not in rebalances
+            ]
+        )
+    )
+    own_bars = dict(held.bars_configurations)
+    own_bars.update(portfolio_bar_configurations([uid for uid in uids if uid not in own_bars]))
+    # A portfolio not yet adopted is priced by the bars feed it names, as before ADR 0028.
+    named_bars = bar_configuration_rows_by_uids(
+        [
+            configuration.bars_configuration_uid
+            for configuration in configurations
+            if str(configuration.uid) not in own_bars
+            and configuration.bars_configuration_uid is not None
+        ]
+    )
+    definitions = dict(held.definitions)
+    definitions.update(
+        signal_definitions_by_uids(
+            configuration.signal_definition_uid
+            for configuration in configurations
+            if configuration.signal_definition_uid is not None
+            and str(configuration.signal_definition_uid) not in definitions
+        )
+    )
+
+    resolved: dict[str, Any] = {}
+    for configuration in configurations:
+        uid = str(configuration.uid)
+        try:
+            rebalance = rebalances.get(str(configuration.rebalance_configuration_uid))
+            if rebalance is None:
+                raise LookupError(
+                    f"Rebalance configuration {configuration.rebalance_configuration_uid!s} "
+                    "does not exist."
+                )
+            normalize_rebalance_strategy(rebalance.strategy)
+            bars = own_bars.get(uid)
+            if bars is None and configuration.bars_configuration_uid is not None:
+                bars = named_bars.get(str(configuration.bars_configuration_uid))
+            if bars is None:
+                raise LookupError(f"Portfolio configuration {uid} has no bars configuration.")
+            if not bars.enabled:
+                raise ValueError(f"Bars configuration {bars.uid!s} is disabled.")
+            if configuration.signal_definition_uid is None:
+                signal_key = legacy_signal_key(configuration.uid)
+            else:
+                definition = definitions.get(str(configuration.signal_definition_uid))
+                if definition is None:
+                    raise LookupError(
+                        f"Signal definition {configuration.signal_definition_uid!s} does not exist."
+                    )
+                signal_key = definition.signal_key
+        except (LookupError, ValueError) as exc:
+            resolved[uid] = exc
+            continue
+        resolved[uid] = (configuration, rebalance, bars, signal_uid_for_key(signal_key))
+
+    pending = {uid: value for uid, value in resolved.items() if isinstance(value, tuple)}
+    bounds = dict(held.signal_bounds)
+    bounds.update(
+        read_signal_observation_bounds_by_signal(
+            [value[3] for value in pending.values() if value[3] not in bounds]
+        )
+    )
+    sources = (
+        resolve_alpaca_bars_time_index_meta_table_uids(
+            [
+                (value[2].frequency_id, value[2].feed, value[2].adjustment)
+                for value in pending.values()
+            ]
+        )
+        if pending
+        else {}
+    )
+    for uid, (configuration, rebalance, bars, signal_uid) in pending.items():
+        signal_bounds = bounds.get(signal_uid)
+        if (
+            signal_bounds is None
+            or signal_bounds.first_observation_at is None
+            or signal_bounds.last_observation_at is None
+        ):
+            resolved[uid] = ValueError(
+                f"Signal {signal_uid} has no published observations. "
+                "Publish weights to the portfolio's signal before running it."
+            )
+            continue
+        source = sources[(bars.frequency_id, bars.feed, bars.adjustment)]
+        if isinstance(source, Exception):
+            resolved[uid] = source
+            continue
+        resolved[uid] = _PortfolioInputs(
+            configuration=configuration,
+            rebalance_configuration=rebalance,
+            bars_configuration=bars,
+            signal_uid=signal_uid,
+            signal_start_time=signal_bounds.first_observation_at,
+            source_time_index_meta_table_uid=source,
+        )
+    return resolved
+
+
 def resolve_portfolio_configuration(
     configuration_uid: Any,
 ) -> ResolvedPortfolioConfiguration:
     """Resolve stored calculation inputs and require an existing signal observation."""
-    from alpaca_connectors.market_data.configurations import (
-        get_bar_configuration,
-        portfolio_bar_configuration,
-    )
-    from alpaca_connectors.portfolios.provided_weights import portfolio_signal_uid
     from alpaca_connectors.portfolios.signal_assets import assets_for_signals
 
     configuration = get_portfolio_configuration(configuration_uid)
     if configuration is None:
         raise LookupError(f"Portfolio configuration {configuration_uid!s} does not exist.")
-    rebalance_configuration = validate_portfolio_references(
-        rebalance_configuration_uid=configuration.rebalance_configuration_uid,
-    )
-    bars_configuration = portfolio_bar_configuration(configuration.uid)
-    if bars_configuration is None and configuration.bars_configuration_uid is not None:
-        # A portfolio not yet adopted is priced by the bars feed it names, as before ADR 0028.
-        bars_configuration = get_bar_configuration(configuration.bars_configuration_uid)
-    if bars_configuration is None:
-        raise LookupError(
-            f"Portfolio configuration {configuration_uid!s} has no bars configuration."
-        )
-    if not bars_configuration.enabled:
-        raise ValueError(f"Bars configuration {bars_configuration.uid!s} is disabled.")
-    signal_uid = portfolio_signal_uid(configuration)
-    latest = read_signal_observation_matrix(signal_uid=signal_uid, observation_limit=1)
-    bounds = read_signal_observation_bounds(signal_uid=signal_uid)
-    if (
-        not latest.time_indexes
-        or not latest.assets
-        or bounds.first_observation_at is None
-        or bounds.last_observation_at is None
-    ):
+    inputs = _resolve_inputs([configuration])[str(configuration.uid)]
+    if isinstance(inputs, Exception):
+        raise inputs
+    latest = read_signal_observation_matrix(signal_uid=inputs.signal_uid, observation_limit=1)
+    if not latest.time_indexes or not latest.assets:
         raise ValueError(
-            f"Signal {signal_uid} has no published observations. "
+            f"Signal {inputs.signal_uid} has no published observations. "
             "Publish weights to the portfolio's signal before running it."
         )
     # Every asset the portfolio ever held, so a history it started with is priced too; read from
@@ -161,39 +302,62 @@ def resolve_portfolio_configuration(
     asset_identifiers = tuple(
         sorted(
             {asset.asset_identifier for asset in latest.assets}
-            | set(assets_for_signals([signal_uid]))
+            | set(assets_for_signals([inputs.signal_uid]))
         )
-    )
-    source_uid = resolve_alpaca_bars_time_index_meta_table_uid(
-        frequency_id=bars_configuration.frequency_id,
-        feed=bars_configuration.feed,
-        adjustment=bars_configuration.adjustment,
     )
     return ResolvedPortfolioConfiguration(
         configuration=configuration,
-        bars_configuration=bars_configuration,
-        rebalance_configuration=rebalance_configuration,
-        signal_uid=signal_uid,
-        signal_start_time=bounds.first_observation_at,
+        bars_configuration=inputs.bars_configuration,
+        rebalance_configuration=inputs.rebalance_configuration,
+        signal_uid=inputs.signal_uid,
+        signal_start_time=inputs.signal_start_time,
         asset_identifiers=asset_identifiers,
-        source_time_index_meta_table_uid=source_uid,
+        source_time_index_meta_table_uid=inputs.source_time_index_meta_table_uid,
     )
 
 
-def preflight_portfolio_configuration(configuration_uid: Any) -> PortfolioPreflight:
+def preflight_portfolio_configurations(
+    configurations: Sequence[AlpacaPortfolioConfiguration],
+    *,
+    held: HeldPortfolioInputs | None = None,
+) -> dict[str, PortfolioPreflight | Exception]:
+    """The preflight of several configurations, with one read per kind of input (issue #46).
+
+    Each configuration is answered with its preflight, whose blockers are a linked configuration
+    that is missing or disabled, an unsupported rebalance strategy, or a signal without published
+    observations; or with any other error its inputs raised, which blocks only it.
+    """
+    answers: dict[str, PortfolioPreflight | Exception] = {}
+    for uid, inputs in _resolve_inputs(configurations, held=held).items():
+        if isinstance(inputs, (LookupError, ValueError)):
+            answers[uid] = PortfolioPreflight(configuration_uid=uid, blockers=(str(inputs),))
+        elif isinstance(inputs, Exception):
+            answers[uid] = inputs
+        else:
+            answers[uid] = PortfolioPreflight(configuration_uid=uid, blockers=())
+    return answers
+
+
+def preflight_portfolio_configuration(
+    configuration_uid: Any,
+    *,
+    configuration: AlpacaPortfolioConfiguration | None = None,
+    held: HeldPortfolioInputs | None = None,
+) -> PortfolioPreflight:
     """Resolve the inputs a run needs, read-only, and report what blocks the run.
 
     A linked configuration that is missing or disabled, an unsupported rebalance strategy, or a
-    signal without published observations blocks the run. Any other failure propagates.
+    signal without published observations blocks the run. Any other failure propagates. A caller
+    that holds the configuration, or some of its inputs, passes them and they are not read.
     """
-    configuration = get_portfolio_configuration(configuration_uid)
+    if configuration is None:
+        configuration = get_portfolio_configuration(configuration_uid)
     if configuration is None:
         raise LookupError(f"Portfolio configuration {configuration_uid!s} does not exist.")
-    try:
-        resolve_portfolio_configuration(configuration.uid)
-    except (LookupError, ValueError) as exc:
-        return PortfolioPreflight(configuration_uid=str(configuration.uid), blockers=(str(exc),))
-    return PortfolioPreflight(configuration_uid=str(configuration.uid), blockers=())
+    answer = preflight_portfolio_configurations([configuration], held=held)[str(configuration.uid)]
+    if isinstance(answer, Exception):
+        raise answer
+    return answer
 
 
 def build_portfolio_graph(resolved: ResolvedPortfolioConfiguration) -> PortfolioExecutionGraph:
@@ -457,6 +621,7 @@ def _summarize_run_result(value: Any) -> Any:
 
 
 __all__ = [
+    "HeldPortfolioInputs",
     "PortfolioExecutionResult",
     "PortfolioExecutionGraph",
     "PortfolioPreflight",
@@ -465,5 +630,6 @@ __all__ = [
     "execute_portfolio_configuration",
     "portfolio_unique_identifier",
     "preflight_portfolio_configuration",
+    "preflight_portfolio_configurations",
     "resolve_portfolio_configuration",
 ]

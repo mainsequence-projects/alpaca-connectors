@@ -290,8 +290,9 @@ def list_signal_definitions(
     limit: int = 25,
     offset: int = 0,
     search: str | None = None,
+    uids: Any = None,
 ) -> tuple[list[SignalDefinition], int]:
-    """A page of definitions, optionally of the given accounts only, ordered by name."""
+    """A page of definitions, optionally of the given accounts or ``uids`` only, by name."""
     from msm.api.base import operation_result_rows
     from msm.bootstrap import resolve_runtime
     from msm.repositories.base import compile_markets_statement, execute_markets_operation
@@ -306,6 +307,8 @@ def list_signal_definitions(
         if not accounts:
             return [], 0
         statement = statement.where(table.account_uid.in_(accounts))
+    if uids is not None:
+        statement = statement.where(table.uid.in_([uuid.UUID(str(uid)) for uid in uids]))
     if search:
         pattern = f"%{search.strip()}%"
         statement = statement.where(or_(table.name.ilike(pattern), table.key.ilike(pattern)))
@@ -345,11 +348,14 @@ def create_signal_definition(
     name: Any,
     description: Any = None,
     signal_key: str | None = None,
+    key_checked: bool = False,
 ) -> SignalDefinition:
     """Store a definition of the account; the caller has checked the account's owner.
 
     ``signal_key`` is given only for a portfolio created before ADR 0028, whose signal keeps its
-    configuration UID as its key (decision 9).
+    configuration UID as its key (decision 9). ``key_checked`` is a portfolio create's, which has
+    just read that the account has no definition with this key, or made the key from a new UID:
+    the key is not read again, and the account's unique key refuses a concurrent one (#46).
     """
     from msm.api.base import operation_result_rows
     from msm.bootstrap import resolve_runtime
@@ -365,7 +371,8 @@ def create_signal_definition(
         "name": _name(name),
         "description": _description(description),
     }
-    if account_signal_definition(account, normalized_key) is not None:
+    _start_runtime()
+    if not key_checked and account_signal_definition(account, normalized_key) is not None:
         raise SignalDefinitionError(
             "signal_key_exists",
             "This account already has a signal with this key.",
@@ -407,32 +414,44 @@ def update_signal_definition(
 
 def delete_signal_observations(signal_uid: str) -> None:
     """Delete the signal's observations from this application's signal-weights instance."""
+    delete_signals_observations([signal_uid])
+
+
+def delete_signals_observations(signal_uids: Any) -> None:
+    """Delete several signals' observations, one statement per ``MARKETS_BATCH_SIZE`` signals."""
     from msm.bootstrap import resolve_runtime
     from msm.repositories.base import compile_markets_statement, execute_markets_operation
     from sqlalchemy import delete
 
     from alpaca_connectors.instances import AlpacaSignalWeightsStorage
+    from alpaca_connectors.markets_api import write_in_batches
 
+    values = [str(uid) for uid in signal_uids]
+    if not values:
+        return
     _start_runtime()
     runtime = resolve_runtime(
         models=[AlpacaSignalWeightsStorage], row_model_name="alpaca_connectors.signal_definitions"
     )
-    operation = compile_markets_statement(
-        delete(AlpacaSignalWeightsStorage).where(
-            AlpacaSignalWeightsStorage.signal_uid == str(signal_uid)
-        ),
-        context=runtime.context,
-        operation="delete",
-    )
-    execute_markets_operation(operation, context=runtime.context)
+
+    def write(batch: list[str]) -> None:
+        operation = compile_markets_statement(
+            delete(AlpacaSignalWeightsStorage).where(
+                AlpacaSignalWeightsStorage.signal_uid.in_(batch)
+            ),
+            context=runtime.context,
+            operation="delete",
+        )
+        execute_markets_operation(operation, context=runtime.context)
+
+    write_in_batches(write, values)
 
 
 def signal_kept_by_ended_portfolio(signal_uid: str) -> bool:
     """Whether a retired ``Portfolio`` of a deleted portfolio still follows the signal."""
-    from alpaca_connectors.portfolios.configurations import EndedPortfolio
+    from alpaca_connectors.portfolios.configurations import ended_signal_uids
 
-    _start_runtime()
-    return bool(EndedPortfolio.filter(signal_uid=str(signal_uid), limit=1))
+    return str(signal_uid) in ended_signal_uids([signal_uid])
 
 
 def delete_signal_rows(signal_uid: str) -> str:
@@ -442,15 +461,62 @@ def delete_signal_rows(signal_uid: str) -> str:
     in Markets, which refuses while a ``Portfolio`` follows the signal (ADR 0028, decision 5).
     Answers ``"deleted"`` or ``"kept"``.
     """
-    from alpaca_connectors.markets_api import delete_signal_metadata
-    from alpaca_connectors.portfolios.signal_assets import forget_signal_assets
+    return delete_signals_rows([signal_uid])[str(signal_uid)]
 
-    if signal_kept_by_ended_portfolio(signal_uid):
-        return "kept"
-    delete_signal_observations(signal_uid)
-    forget_signal_assets(signal_uid)
-    delete_signal_metadata(signal_uid)
-    return "deleted"
+
+def delete_signals_rows(signal_uids: Any) -> dict[str, str]:
+    """``delete_signal_rows`` for several signals, set-based (issue #46).
+
+    One read of which signals a retired ``Portfolio`` keeps; for the others one delete of their
+    observations, one of their signal-asset rows, one Markets read of their ``SignalMetadata``,
+    then their binding and ``SignalMetadata`` row, which Markets deletes one signal at a time.
+    Answers each signal's ``"deleted"`` or ``"kept"``.
+    """
+    from alpaca_connectors.markets_api import delete_signals_metadata
+    from alpaca_connectors.portfolios.configurations import ended_signal_uids
+    from alpaca_connectors.portfolios.signal_assets import forget_signals_assets
+
+    values = list(dict.fromkeys(str(uid) for uid in signal_uids))
+    if not values:
+        return {}
+    kept = ended_signal_uids(values)
+    free = [uid for uid in values if uid not in kept]
+    if free:
+        delete_signals_observations(free)
+        forget_signals_assets(free)
+        delete_signals_metadata(free)
+    return {uid: "kept" if uid in kept else "deleted" for uid in values}
+
+
+def end_signal_definitions(definitions: Any) -> dict[str, dict[str, Any]]:
+    """Delete, set-based, the definitions no portfolio follows any more (issue #38, #46).
+
+    One grouped read of their followers, one delete of the free ones, then their signals' rows
+    as ``delete_signals_rows`` decides. Answers each definition's ``{"state", "signal"}``:
+    ``followed`` (kept), or ``deleted`` with its signal's ``{"uid", "state"}``.
+    """
+    from alpaca_connectors.portfolios.configurations import (
+        delete_rows_in,
+        portfolio_counts_by_definition,
+    )
+
+    by_uid = {str(definition.uid): definition for definition in definitions}
+    if not by_uid:
+        return {}
+    followed = portfolio_counts_by_definition(list(by_uid))
+    free = [definition for uid, definition in by_uid.items() if not followed.get(uid)]
+    delete_rows_in(SignalDefinitionTable, "uid", [definition.uid for definition in free])
+    signals = delete_signals_rows([definition_signal_uid(definition) for definition in free])
+    answers: dict[str, dict[str, Any]] = {
+        uid: {"state": "followed", "signal": None} for uid in by_uid if followed.get(uid)
+    }
+    for definition in free:
+        signal_uid = definition_signal_uid(definition)
+        answers[str(definition.uid)] = {
+            "state": "deleted",
+            "signal": {"uid": signal_uid, "state": signals[signal_uid]},
+        }
+    return answers
 
 
 def delete_signal_definition(definition_uid: Any) -> dict[str, Any]:
@@ -494,6 +560,9 @@ __all__ = [
     "delete_signal_definition",
     "delete_signal_observations",
     "delete_signal_rows",
+    "delete_signals_observations",
+    "delete_signals_rows",
+    "end_signal_definitions",
     "get_signal_definition",
     "legacy_signal_key",
     "list_signal_definitions",

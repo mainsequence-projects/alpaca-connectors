@@ -26,6 +26,13 @@ follows.
 
 Every step can run again: a retry after a partial failure finds the records of step 3 and
 finishes steps 6 and 7.
+
+Each step reads and writes set-based (issue #46): the portfolios end together
+(``end_portfolio_configurations``), the retired ``Portfolio`` rows go through one preflight and
+one bulk delete of ms-markets, their series and records through one statement per table, and the
+signals through one pass. ms-markets has only one-portfolio routes to list the accounts whose
+current target names a portfolio and to retire one, and only one-signal routes to unbind and
+delete a signal, so those calls stay one per portfolio or signal.
 """
 
 from __future__ import annotations
@@ -121,23 +128,28 @@ def delete_account_orders_and_trades(account_identifier: str) -> None:
         _delete_instance_rows(model, "account_identifier", [account_identifier])
 
 
-def delete_portfolio_series(portfolio_identifier: str) -> None:
-    """Delete a portfolio's values, weights and rebalance state from this application's instances.
+def delete_portfolio_series(portfolio_identifiers: list[str]) -> None:
+    """Delete portfolios' values, weights and rebalance state from this application's instances.
 
-    They reference the ``Portfolio`` with ``RESTRICT``, so they go before it.
+    They reference the ``Portfolio`` with ``RESTRICT``, so they go before it: one statement per
+    table for all the portfolios (issue #46).
     """
     from alpaca_connectors.instances import (
         AlpacaPortfolioRebalanceStateStorage,
         AlpacaPortfoliosStorage,
         AlpacaPortfolioWeightsStorage,
     )
+    from alpaca_connectors.markets_api import write_in_batches
 
     for model in (
         AlpacaPortfolioRebalanceStateStorage,
         AlpacaPortfolioWeightsStorage,
         AlpacaPortfoliosStorage,
     ):
-        _delete_instance_rows(model, "portfolio_identifier", [portfolio_identifier])
+        write_in_batches(
+            lambda batch, model=model: _delete_instance_rows(model, "portfolio_identifier", batch),
+            portfolio_identifiers,
+        )
 
 
 def _account_definitions(account_uid: str) -> list[Any]:
@@ -154,33 +166,45 @@ def _account_definitions(account_uid: str) -> list[Any]:
             return rows
 
 
-def _account_portfolios(account_uid: str) -> list[Any]:
-    """The account's portfolios, and those not yet adopted that its ``portfolios`` feeds price."""
-    from alpaca_connectors.market_data.configurations import bar_configurations_for_account
+def _account_portfolios(account_uid: str, feeds: list[Any]) -> list[Any]:
+    """The account's portfolios, and those not yet adopted that its ``portfolios`` feeds price.
+
+    ``feeds`` are the account's bars feeds; the portfolios naming them are read in one request.
+    """
     from alpaca_connectors.portfolios.configurations import (
-        portfolio_configurations_naming_bars,
+        portfolio_configurations_naming_any_bars,
         portfolio_configurations_of_account,
     )
 
     rows = {str(row.uid): row for row in portfolio_configurations_of_account(account_uid)}
-    for feed in bar_configurations_for_account(account_uid):
-        if feed.asset_source == "portfolios":
-            for row in portfolio_configurations_naming_bars(feed.uid):
-                rows.setdefault(str(row.uid), row)
+    priced = [feed.uid for feed in feeds if feed.asset_source == "portfolios"]
+    if priced:
+        for row in portfolio_configurations_naming_any_bars(priced):
+            rows.setdefault(str(row.uid), row)
     return list(rows.values())
 
 
-def preflight_account_delete(account_uid: Any) -> AccountDeletePreflight:
-    """What deleting the account would delete and what refuses it; nothing changes."""
+@dataclass(frozen=True, slots=True)
+class _AccountContents:
+    """What the preflight read, which the delete then uses instead of reading it again."""
+
+    preflight: AccountDeletePreflight
+    portfolios: list[Any]
+    definitions: list[Any]
+
+
+def _preflight(normalized: str) -> _AccountContents:
     from alpaca_connectors.market_data.configurations import bar_configurations_for_account
     from alpaca_connectors.markets_api import account_delete_preflight, current_target_account_uids
     from alpaca_connectors.portfolios.configurations import ended_portfolios_of_account
 
-    normalized = str(uuid.UUID(str(account_uid)))
     markets = account_delete_preflight(normalized) or {}
     blockers = [str(blocker) for blocker in markets.get("blockers") or []]
     warnings = [str(warning) for warning in markets.get("warnings") or []]
-    portfolios = _account_portfolios(normalized)
+    feeds = bar_configurations_for_account(normalized)
+    portfolios = _account_portfolios(normalized, feeds)
+    # ms-markets lists a portfolio's account targets one portfolio at a time
+    # (``listPortfolioAccountTargets``); it has no form for several portfolios.
     held = sum(
         1
         for configuration in portfolios
@@ -193,15 +217,25 @@ def preflight_account_delete(account_uid: Any) -> AccountDeletePreflight:
             f"{held} of the account's portfolios are held by another account's current target; "
             "that account's owner must change its target first."
         )
-    return AccountDeletePreflight(
-        account_uid=normalized,
-        blockers=blockers,
-        warnings=warnings,
-        portfolio_count=len(portfolios),
-        signal_definition_count=len(_account_definitions(normalized)),
-        bars_feed_count=len(bar_configurations_for_account(normalized)),
-        ended_portfolio_count=len(ended_portfolios_of_account(normalized)),
+    definitions = _account_definitions(normalized)
+    return _AccountContents(
+        preflight=AccountDeletePreflight(
+            account_uid=normalized,
+            blockers=blockers,
+            warnings=warnings,
+            portfolio_count=len(portfolios),
+            signal_definition_count=len(definitions),
+            bars_feed_count=len(feeds),
+            ended_portfolio_count=len(ended_portfolios_of_account(normalized)),
+        ),
+        portfolios=portfolios,
+        definitions=definitions,
     )
+
+
+def preflight_account_delete(account_uid: Any) -> AccountDeletePreflight:
+    """What deleting the account would delete and what refuses it; nothing changes."""
+    return _preflight(str(uuid.UUID(str(account_uid)))).preflight
 
 
 def _clear_own_target(account_uid: str) -> None:
@@ -213,41 +247,45 @@ def _clear_own_target(account_uid: str) -> None:
 
 
 def _finish_portfolios(account_uid: str, deletion: AccountDeletion) -> list[str]:
-    """Step 6: delete each recorded ``Portfolio`` nothing else names; answer their signals."""
-    from alpaca_connectors.markets_api import delete_portfolio, portfolio_delete_blockers
+    """Step 6: delete the recorded ``Portfolio`` rows nothing else names; answer their signals.
+
+    One ms-markets preflight tells which are referenced; the others' series go in one statement
+    per table, then one bulk delete of the `Portfolio` rows, then one delete of their records.
+    """
+    from alpaca_connectors.markets_api import delete_portfolios, portfolios_delete_blockers
     from alpaca_connectors.portfolios.configurations import (
         ended_portfolios_of_account,
-        forget_ended_portfolio,
+        forget_ended_portfolios,
     )
     from alpaca_connectors.portfolios.provided_weights import (
         provided_portfolio_unique_identifier,
     )
 
-    signals: list[str] = []
-    for record in ended_portfolios_of_account(account_uid):
-        signals.append(record.signal_uid)
+    records = ended_portfolios_of_account(account_uid)
+    blockers = portfolios_delete_blockers([record.portfolio_uid for record in records])
+    free = []
+    for record in records:
         portfolio_uid = str(record.portfolio_uid)
-        if portfolio_delete_blockers(portfolio_uid):
+        if blockers[str(uuid.UUID(portfolio_uid))]:
             deletion.kept_portfolio_uids.append(portfolio_uid)
-            continue
+        else:
+            free.append(record)
+    if free:
         delete_portfolio_series(
-            provided_portfolio_unique_identifier(record.portfolio_configuration_uid)
+            [provided_portfolio_unique_identifier(r.portfolio_configuration_uid) for r in free]
         )
-        try:
-            delete_portfolio(portfolio_uid)
-        except LookupError:
-            pass  # Already deleted by an earlier attempt.
-        forget_ended_portfolio(record)
-        deletion.deleted_portfolio_uids.append(portfolio_uid)
-    return signals
+        delete_portfolios([str(record.portfolio_uid) for record in free])
+        forget_ended_portfolios(free)
+        deletion.deleted_portfolio_uids.extend(str(record.portfolio_uid) for record in free)
+    return [record.signal_uid for record in records]
 
 
 def _finish_signals(signal_uids: list[str], deletion: AccountDeletion) -> None:
-    """Step 7: delete each signal unless a retired ``Portfolio`` kept for history follows it."""
-    from alpaca_connectors.portfolios.signal_definitions import delete_signal_rows
+    """Step 7: delete the signals no retired ``Portfolio`` kept for history follows, in one pass."""
+    from alpaca_connectors.portfolios.signal_definitions import delete_signals_rows
 
-    for signal_uid in sorted(set(signal_uids)):
-        if delete_signal_rows(signal_uid) == "deleted":
+    for signal_uid, state in delete_signals_rows(sorted(set(signal_uids))).items():
+        if state == "deleted":
             deletion.deleted_signal_uids.append(signal_uid)
         else:
             deletion.kept_signal_uids.append(signal_uid)
@@ -263,11 +301,10 @@ def delete_account(account_uid: Any) -> AccountDeletion:
 
     from alpaca_connectors.account.services import get_account_registration
     from alpaca_connectors.markets_api import delete_account as delete_markets_account
-    from alpaca_connectors.portfolios.provided_weights import end_portfolio_configuration
+    from alpaca_connectors.portfolios.provided_weights import end_portfolio_configurations
     from alpaca_connectors.portfolios.signal_definitions import (
         definition_signal_uid,
-        delete_signal_rows,
-        signal_kept_by_ended_portfolio,
+        delete_signals_rows,
     )
     from alpaca_connectors.runtime import account_runtime_models, start_markets_engine
 
@@ -276,20 +313,30 @@ def delete_account(account_uid: Any) -> AccountDeletion:
     registration = get_account_registration(normalized)
     deletion = AccountDeletion(account_uid=normalized)
     if registration is not None:
-        preflight = preflight_account_delete(normalized)
-        if not preflight.allowed:
-            raise AccountDeleteRefused(preflight.blockers)
+        contents = _preflight(normalized)
+        if not contents.preflight.allowed:
+            raise AccountDeleteRefused(contents.preflight.blockers)
         _clear_own_target(normalized)
-        for configuration in _account_portfolios(normalized):
-            removal = end_portfolio_configuration(configuration)
-            deletion.ended_portfolio_count += 1
+        removals = end_portfolio_configurations(contents.portfolios)
+        deletion.ended_portfolio_count += len(removals)
+        ended_definitions: set[str] = set()
+        for removal in removals:
             # Its definition went with it, and its signal too when nothing kept it (issue #38).
+            if removal.signal_definition_state == "deleted":
+                ended_definitions.add(str(removal.signal_definition_uid))
             if removal.signal is not None and removal.signal.get("state") == "deleted":
-                deletion.deleted_signal_uids.append(str(removal.signal["uid"]))
-        for definition in _account_definitions(normalized):
-            signal_uid = definition_signal_uid(definition)
-            if not signal_kept_by_ended_portfolio(signal_uid):
-                delete_signal_rows(signal_uid)
+                signal_uid = str(removal.signal["uid"])
+                if signal_uid not in deletion.deleted_signal_uids:
+                    deletion.deleted_signal_uids.append(signal_uid)
+        # The account's other definitions, as the preflight read them: their signals' rows go
+        # now unless a retired Portfolio follows them; the definitions go with the account.
+        remaining = [
+            definition_signal_uid(definition)
+            for definition in contents.definitions
+            if str(definition.uid) not in ended_definitions
+        ]
+        for signal_uid, state in delete_signals_rows(remaining).items():
+            if state == "deleted" and signal_uid not in deletion.deleted_signal_uids:
                 deletion.deleted_signal_uids.append(signal_uid)
         delete_account_orders_and_trades(str(registration["account_unique_identifier"]))
         try:

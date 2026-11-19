@@ -112,9 +112,17 @@ timezone:
   `signal_uid` never changes. They are written to this application's signal weights instance
   (`alpaca_connectors__signalweightsts__main`), and the assets each one names to the signal-asset
   table (`alpaca_connectors__signal_asset`) first.
-- **The assets.** Each must be a registered Alpaca asset: an unknown one is
-  `422 unknown_asset`, and one without Alpaca details, for which no bars can be fetched, is
+- **The assets.** Each must be a registered Alpaca asset. One read of this application's
+  `AlpacaAssetDetails`, by the Alpaca asset id each `ALPACA::<id>` identifier carries, checks them
+  all, with no Markets call: a details row goes with its Markets asset, so a row found is a
+  registered asset (issue #46). An `ALPACA::` identifier with no row is `422 unknown_asset`; an
+  identifier that is not an Alpaca one, for which no bars can be fetched, is
   `422 asset_not_alpaca`.
+- **A create reads back nothing it wrote** (issue #46). The rebalance configuration it names is
+  read once (one given inline is the row it just created), the configuration row is updated
+  without a read, its new signal has no stored observation or asset to read, and the answer, and
+  the first run's preflight when `run` is true, use the rows it wrote; only the Job's state is
+  read for the answer.
 
 ## Ownership
 
@@ -242,7 +250,11 @@ scheduled configuration at 02:00 UTC ([Jobs](../operations/jobs.md),
   get `422`. `PATCH {"scheduled": false}` pauses a portfolio without validating its references.
 - **The preflight.** A run needs its bars configuration to exist and be enabled, its rebalance
   configuration to exist with a supported strategy, and at least one published observation. The
-  dispatcher skips a configuration whose preflight is blocked, and the run action refuses it.
+  dispatcher skips a configuration whose preflight is blocked, and the run action refuses it. The
+  dispatcher preflights every scheduled configuration together, from the rows it already read,
+  with one read per kind of input (rebalance configurations, bars configurations, signal
+  definitions, the signals' first and last observation, the bars tables), never one per
+  configuration (issue #46); it still starts one JobRun per configuration.
 - **A run** returns `202` with the JobRun UID and a `status_url`. It is refused while the
   configuration's newest run is pending or running, or while the Job's image is not ready.
 - **Responses** report the Job as `job_uid` and `job` (its dispatcher's schedule, compute and
@@ -280,6 +292,13 @@ portfolio does nothing, so a call that failed after the retirement is safe to re
 Retiring deletes nothing. The `Portfolio`, its series, its catalog registration and every
 account's history stay. A retired portfolio cannot be named by a new target, gets no virtual-fund
 holdings, leaves discovery, and its updaters write nothing after `retired_at`.
+
+An account's delete ends all its portfolios in one pass (issue #46): each `Portfolio` is retired
+in turn, since ms-markets retires one portfolio per call, and then one read of the definitions
+they followed, one read and one insert of their records, one delete of their configurations, one
+pass over their definitions and one over their inline rebalance configurations serve them all. A
+refused retirement leaves that portfolio and the ones after it unchanged, and ends the ones before
+it, as one at a time would have.
 
 ## CLI
 

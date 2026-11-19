@@ -65,6 +65,7 @@ def list_definitions(
     search: str | None,
     account_uid: str | None,
     owner: AccountOwner,
+    uids: list[str] | None = None,
 ):
     if owner.is_external:
         # An external person names their own account (ADR 0019 section 6).
@@ -76,6 +77,7 @@ def list_definitions(
         limit=limit,
         offset=offset,
         search=search,
+        uids=uids,
     )
     return collection_response(items=_responses(rows), total=total, limit=limit, offset=offset)
 

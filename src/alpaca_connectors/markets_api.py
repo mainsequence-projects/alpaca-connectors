@@ -11,9 +11,12 @@ allocates an account's target (ADR 0023, ms-markets ADR 0054), ``account_target_
 (ms-markets ADR 0049), which ends a portfolio its owner deletes (ADR 0024, ADR 0027); and the
 calls of an account delete and a signal delete (ADR 0028): ``current_target_account_uids``,
 ``clear_account_target``, ``account_delete_preflight``, ``delete_account``,
-``portfolio_delete_blockers``, ``delete_portfolio`` and ``delete_signal_metadata``. The
-preflights and the signal delete have no typed client method in ms-markets 4.0.1, so they call
-their routes through the same client's ``request``.
+``portfolio_delete_blockers``, ``delete_portfolio`` and ``delete_signal_metadata``, with their
+set-based forms ``portfolios_delete_blockers``, ``delete_portfolios`` and
+``delete_signals_metadata`` (issue #46). The preflights, the bulk portfolio delete and the signal
+delete have no typed client method in ms-markets 4.0.1, so they call their routes through the
+same client's ``request``. Retiring a portfolio, listing the accounts whose current target names
+it, unbinding a signal and deleting a signal have only one-item routes there.
 """
 
 from __future__ import annotations
@@ -37,6 +40,12 @@ def batches(values: Iterable[T], size: int = MARKETS_BATCH_SIZE) -> list[list[T]
 def read_in_batches(read: Callable[[list[T]], Sequence[Any]], values: Iterable[T]) -> list[Any]:
     """Call ``read`` once per batch of keys and concatenate the rows."""
     return [row for batch in batches(values) for row in read(batch)]
+
+
+def write_in_batches(write: Callable[[list[T]], Any], values: Iterable[T]) -> None:
+    """Call ``write`` once per batch of keys: one statement or request per batch, never per key."""
+    for batch in batches(values):
+        write(batch)
 
 
 def read_all_pages(read_page: Callable[[int, int], Sequence[Any]], total: int) -> list[Any]:
@@ -181,7 +190,11 @@ def _client() -> Any:
 
 
 def _explicit_selection(uid: Any) -> dict[str, Any]:
-    return {"selection": {"mode": "explicit", "uids": [str(uid)]}, "options": {}}
+    return _explicit_selections([uid])
+
+
+def _explicit_selections(uids: Sequence[Any]) -> dict[str, Any]:
+    return {"selection": {"mode": "explicit", "uids": [str(uid) for uid in uids]}, "options": {}}
 
 
 def current_target_account_uids(portfolio_uid: Any) -> list[str]:
@@ -239,14 +252,51 @@ def portfolio_delete_blockers(portfolio_uid: Any) -> list[str]:
 
     From ms-markets' portfolio delete preflight, which changes nothing.
     """
+    return portfolios_delete_blockers([portfolio_uid])[str(uuid.UUID(str(portfolio_uid)))]
+
+
+def portfolios_delete_blockers(portfolio_uids: Iterable[Any]) -> dict[str, list[str]]:
+    """``portfolio_delete_blockers`` of several portfolios: one preflight per batch (issue #46).
+
+    ms-markets' preflight (``preflightBulkDeletePortfolios``) takes the explicit selection and
+    prefixes each portfolio's blocker with ``Portfolio <uid>``, the uid as sent, so each blocker
+    goes to its portfolio. A blocker that names none (the delete's own table impact) blocks
+    every portfolio of its request.
+    """
     from msm.client.client import API_PREFIX
 
-    preflight = _client().request(
-        "POST",
-        f"{API_PREFIX}/portfolio/bulk-delete/preflight/",
-        json=_explicit_selection(portfolio_uid),
-    )
-    return [str(blocker) for blocker in (preflight or {}).get("blockers") or []]
+    # ms-markets names each portfolio by its canonical uid.
+    uids = list(dict.fromkeys(str(uuid.UUID(str(uid))) for uid in portfolio_uids))
+    blockers: dict[str, list[str]] = {uid: [] for uid in uids}
+    for batch in batches(uids):
+        preflight = _client().request(
+            "POST",
+            f"{API_PREFIX}/portfolio/bulk-delete/preflight/",
+            json=_explicit_selections(batch),
+        )
+        for blocker in (preflight or {}).get("blockers") or []:
+            text = str(blocker)
+            named = [uid for uid in batch if text.startswith(f"Portfolio {uid}")]
+            for uid in named or batch:
+                blockers[uid].append(text)
+    return blockers
+
+
+def delete_portfolios(portfolio_uids: Iterable[Any]) -> list[dict[str, Any]]:
+    """Delete several portfolios nothing references: one ``bulkDeletePortfolios`` per batch.
+
+    The set-based form of ``delete_portfolio`` (issue #46). ms-markets runs its preflight again
+    and refuses the whole request (``MarketsConflictError``) when one of them is referenced or
+    missing; its own weights and values go with each.
+    """
+    from msm.client.client import API_PREFIX
+
+    return [
+        _client().request(
+            "POST", f"{API_PREFIX}/portfolio/bulk-delete/", json=_explicit_selections(batch)
+        )
+        for batch in batches(str(uid) for uid in portfolio_uids)
+    ]
 
 
 def delete_portfolio(portfolio_uid: Any) -> dict[str, Any]:
@@ -266,15 +316,31 @@ def delete_signal_metadata(signal_uid: str) -> dict[str, Any] | None:
     ms-markets refuses while a ``Portfolio`` follows the signal or an instance holds its
     observations. ``None`` when the signal is not registered.
     """
+    return delete_signals_metadata([signal_uid]).get(str(signal_uid))
+
+
+def delete_signals_metadata(signal_uids: Iterable[str]) -> dict[str, Any]:
+    """``delete_signal_metadata`` of several signals; answers each registered signal's result.
+
+    Their ``SignalMetadata`` rows are read in one ``filter`` per batch (issue #46). The unbinding
+    (``unregister_signal``) and the delete (``DELETE /portfolio-signal/{uid}/``) are ms-markets'
+    one-signal routes, so they run once per registered signal.
+    """
     from msm.client.client import API_PREFIX
     from msm_portfolios.api.datasets import PortfolioDatasets
     from msm_portfolios.api.market_metadata import SignalMetadata
 
-    rows = SignalMetadata.filter(signal_uid=str(signal_uid), limit=1)
-    if not rows:
-        return None
-    PortfolioDatasets.unregister_signal(signal_uid=str(signal_uid))
-    return _client().request("DELETE", f"{API_PREFIX}/portfolio-signal/{rows[0].uid}/")
+    values = list(dict.fromkeys(str(uid) for uid in signal_uids))
+    rows = read_in_batches(
+        lambda batch: SignalMetadata.filter(signal_uid__in=batch, limit=len(batch)), values
+    )
+    deleted: dict[str, Any] = {}
+    for row in rows:
+        PortfolioDatasets.unregister_signal(signal_uid=str(row.signal_uid))
+        deleted[str(row.signal_uid)] = _client().request(
+            "DELETE", f"{API_PREFIX}/portfolio-signal/{row.uid}/"
+        )
+    return deleted
 
 
 __all__ = [
@@ -284,8 +350,11 @@ __all__ = [
     "current_target_account_uids",
     "delete_account",
     "delete_portfolio",
+    "delete_portfolios",
     "delete_signal_metadata",
+    "delete_signals_metadata",
     "portfolio_delete_blockers",
+    "portfolios_delete_blockers",
     "account_target_positions",
     "allocate_account_virtual_funds",
     "assets_by_identifier",
@@ -296,6 +365,7 @@ __all__ = [
     "plan_account_virtual_funds",
     "read_all_pages",
     "read_in_batches",
+    "write_in_batches",
     "register_account",
     "retire_portfolio",
 ]

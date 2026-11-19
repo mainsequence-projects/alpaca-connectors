@@ -16,6 +16,7 @@ takes the exact confirmation `DELETE <account uid>`.
 
 from __future__ import annotations
 
+import uuid
 from typing import Any
 
 from fastapi import APIRouter, Body, HTTPException, Query
@@ -36,6 +37,7 @@ from ..schemas import (
 )
 from ..services.account_sync import sync_account
 from ..services.accounts import (
+    accessible_account_registrations,
     create_account_registration,
     delete_account,
     get_account,
@@ -45,9 +47,10 @@ from ..services.accounts import (
     preflight_delete,
     refresh_account,
     remove_keys,
+    remove_keys_of_accounts,
     require_account_access,
-    require_account_owned_by,
     require_accounts_access,
+    require_accounts_owned_by,
     update_account,
 )
 from ..services.common import (
@@ -76,6 +79,9 @@ def accounts_list(
     ordering: str = "account_name",
     owner_gateway_uid: str | None = Query(default=None, min_length=1, max_length=64),
     owner_user_uid: str | None = Query(default=None, min_length=1, max_length=255),
+    uid: list[uuid.UUID] | None = Query(
+        default=None, description="Only these accounts; repeat the parameter for each."
+    ),
 ) -> ResourceCollection:
     validate_page_window(limit=limit, offset=offset)
     validate_ordering(ordering, allowed_fields={"account_name", "unique_identifier"})
@@ -101,6 +107,7 @@ def accounts_list(
             is_paper=is_paper,
             ordering=ordering,
             owner=owner,
+            uids=[str(value) for value in uid] if uid is not None else None,
         )
     except Exception as exc:
         raise api_http_error(exc) from exc
@@ -189,13 +196,10 @@ def accounts_remove_keys_preflight(request: BulkActionRequest = Body(...)) -> di
     """Removing keys clears them and keeps everything else; only each account's owner may."""
     owner = acting_owner()
     try:
-        missing = [uid for uid in request.selection.uids if get_account(uid) is None]
-        blockers = [f"Missing account: {uid}" for uid in missing]
-        for uid in request.selection.uids:
-            if uid not in missing:
-                require_account_owned_by(uid, owner)
+        missing = require_accounts_owned_by(request.selection.uids, owner)
     except Exception as exc:
         raise api_http_error(exc) from exc
+    blockers = [f"Missing account: {uid}" for uid in missing]
     return {
         "contract": "command-center.bulk_action_preflight@v1",
         "allowed": not blockers,
@@ -218,7 +222,7 @@ def accounts_remove_keys(request: BulkActionRequest = Body(...)) -> dict[str, An
         raise HTTPException(status_code=409, detail=preflight)
     owner = acting_owner()
     try:
-        results = [remove_keys(uid, owner=owner) for uid in request.selection.uids]
+        results = remove_keys_of_accounts(request.selection.uids, owner=owner)
     except Exception as exc:
         raise api_http_error(exc) from exc
     for uid in request.selection.uids:
@@ -237,12 +241,22 @@ def accounts_capture_holdings_preflight(
         raise bad_request(
             "Capture holdings accepts no options; complete asset registration is mandatory."
         )
-    require_accounts_access(request.selection.uids, acting_owner())
+    registrations = accessible_account_registrations(request.selection.uids, acting_owner())
+    return _capture_holdings_preflight(request, registrations)
+
+
+def _capture_holdings_preflight(
+    request: BulkActionRequest, registrations: dict[str, dict]
+) -> dict[str, Any]:
+    """Each selected account's capture plan. Alpaca is read once per account: each has its own
+    keys. Their registrations were read once for all of them."""
     results = []
     blockers = []
     for uid in request.selection.uids:
         try:
-            result = preflight_holdings(uid)
+            if uid not in registrations:
+                raise LookupError(uid)
+            result = preflight_holdings(uid, registration=registrations[uid])
             results.append(result)
             if not result.get("allowed", False):
                 blockers.extend(result.get("blockers") or [f"Account {uid} is not ready."])
@@ -265,12 +279,19 @@ def accounts_capture_holdings_preflight(
 
 @router.post("/actions/capture-holdings", response_model=dict[str, Any])
 def accounts_capture_holdings(request: BulkActionRequest = Body(...)) -> dict[str, Any]:
-    preflight = accounts_capture_holdings_preflight(request)
+    if request.options:
+        raise bad_request(
+            "Capture holdings accepts no options; complete asset registration is mandatory."
+        )
+    owner = acting_owner()
+    registrations = accessible_account_registrations(request.selection.uids, owner)
+    preflight = _capture_holdings_preflight(request, registrations)
     if not preflight["allowed"]:
         raise HTTPException(status_code=409, detail=preflight)
-    owner = acting_owner()
     try:
-        results = [capture_holdings(uid) for uid in request.selection.uids]
+        results = [
+            capture_holdings(uid, registration=registrations[uid]) for uid in request.selection.uids
+        ]
     except Exception as exc:
         raise api_http_error(exc) from exc
     for uid in request.selection.uids:
