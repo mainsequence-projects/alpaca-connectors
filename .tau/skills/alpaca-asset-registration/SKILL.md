@@ -15,8 +15,9 @@ inner tool name and arguments with `tools/call`. There is no shell or direct tab
 For project readiness, call `alpaca_project_state` with empty arguments. Select a registered
 Account with `alpaca_query_accounts` operation `list` or `get`; never invent its UID or ask for
 credential values. Query Assets with `alpaca_query_assets`: `list` accepts `search`, `category_uid`,
-`ordering`, `limit` (1–100), and `offset`; `get` requires `asset_uid`. Page only as needed, keeping
-`limit` fixed and increasing `offset` by it.
+`ordering` (`ticker` by default, or `alpaca_asset_id`; a leading `-` reverses it), `limit` (1–100),
+and `offset`; `get` requires `asset_uid`. Page only as needed, keeping `limit` fixed and increasing
+`offset` by it.
 
 Examples below are arguments to `alpaca__call_tool`; replace UID placeholders with returned UIDs:
 

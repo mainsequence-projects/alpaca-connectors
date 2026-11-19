@@ -1,8 +1,13 @@
 from __future__ import annotations
 
 import unittest
+from unittest import mock
 
-from alpaca_connectors.agent_tools import PROJECT_AGENT_TOOL_NAMES, PROJECT_AGENT_TOOLS
+from alpaca_connectors.agent_tools import (
+    PROJECT_AGENT_TOOL_NAMES,
+    PROJECT_AGENT_TOOLS,
+    query_assets,
+)
 
 EXPECTED_TOOL_NAMES = (
     "alpaca_project_state",
@@ -123,6 +128,27 @@ class ProjectAgentToolTests(unittest.TestCase):
                         case["properties"]["confirmation"]["description"],
                         "Exact destructive confirmation text: DELETE <uid>.",
                     )
+
+    def test_asset_list_defaults_to_an_ordering_the_asset_list_accepts(self) -> None:
+        with mock.patch(
+            "alpaca_connectors.api.app.services.assets.list_asset_resources"
+        ) as list_asset_resources:
+            query_assets({"operation": "list"})
+
+        self.assertEqual(list_asset_resources.call_args.kwargs["ordering"], "ticker")
+
+    def test_asset_list_schema_names_the_accepted_orderings(self) -> None:
+        tool = next(tool for tool in PROJECT_AGENT_TOOLS if tool.name == "alpaca_query_assets")
+        list_case = next(
+            case
+            for case in tool.parameters["oneOf"]
+            if case["properties"]["operation"]["const"] == "list"
+        )
+
+        self.assertEqual(
+            list_case["properties"]["ordering"]["enum"],
+            ["ticker", "-ticker", "alpaca_asset_id", "-alpaca_asset_id"],
+        )
 
 
 if __name__ == "__main__":

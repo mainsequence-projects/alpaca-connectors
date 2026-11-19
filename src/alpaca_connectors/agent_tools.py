@@ -234,7 +234,7 @@ def query_assets(arguments: Mapping[str, Any]) -> Any:
         limit=limit,
         offset=offset,
         search=_optional_text(arguments, "search"),
-        ordering=str(arguments.get("ordering") or "name"),
+        ordering=str(arguments.get("ordering") or "ticker"),
         category_uid=_optional_text(arguments, "category_uid"),
         uids=_uids(arguments),
     )
@@ -620,6 +620,12 @@ def get_job_run_status(arguments: Mapping[str, Any]) -> Any:
 PAGE = _page_properties()
 SEARCH = {"search": {"type": "string"}}
 ORDERING = {"ordering": {"type": "string"}}
+ASSET_ORDERING = {
+    "ordering": {
+        "type": "string",
+        "enum": ["ticker", "-ticker", "alpaca_asset_id", "-alpaca_asset_id"],
+    }
+}
 ACCOUNT_BOOLEAN_FILTERS = {
     "active": {"type": "boolean"},
     "is_paper": {"type": "boolean"},
@@ -655,7 +661,7 @@ PROJECT_AGENT_TOOLS: tuple[ProjectAgentTool, ...] = (
                 properties={
                     **PAGE,
                     **SEARCH,
-                    **ORDERING,
+                    **ASSET_ORDERING,
                     **UIDS,
                     "category_uid": _uid("AssetCategory"),
                 },
