@@ -46,6 +46,8 @@
   - [0025 Markets Reads The Instances Through A Second Namespace](adrs/0025_markets_reads_the_instances_through_a_second_namespace.md)
   - [0026 Assets Are Registered With Their Trading Calendar](adrs/0026_assets_are_registered_with_their_trading_calendar.md)
   - [0027 One Portfolio Path](adrs/0027_one_portfolio_path.md)
+  - [0028 Every Portfolio Belongs To One Account](adrs/0028_every_portfolio_belongs_to_one_account.md)
+  - [0029 Interpolated-Price Tables Are Named Like Every Project Table](adrs/0029_interpolated_price_tables_are_named_like_every_project_table.md)
 - Implementation Records
   - [SDK 8 And ms-markets Migration](implementation_tasks/0001_ms_markets_storage_first_migration.md)
   - [Alpaca Account Storage](implementation_tasks/0002_alpaca_account_module.md)

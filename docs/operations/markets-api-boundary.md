@@ -90,8 +90,10 @@ grants every resource that calls Markets `reader` on the `MainSequenceMarkets` b
 
 ## 4. Register The Namespaced Interpolated-Price Tables
 
-As before for revision 0011, a person registers the dynamic interpolated-price tables with the
-documented wrapper and checks them:
+[ADR 0029](../adrs/0029_interpolated_price_tables_are_named_like_every_project_table.md)
+(proposed, waiting for MainSequenceMarkets#95) removes this step: the tables are named after their
+bars profile and the migration Job creates them. Until then, as before for revision 0011, a person
+registers the dynamic interpolated-price tables with the documented wrapper and checks them:
 
 ```bash
 alpaca-connectors portfolio prepare-interpolated-prices
