@@ -206,7 +206,10 @@ def resolve_asset_bindings_from_category_assets(
     assets: Sequence[Any],
     trading_client=None,
 ) -> list[AlpacaBarAssetBinding]:
-    symbol_lookup = build_alpaca_symbol_lookup(trading_client=trading_client)
+    # A canonical Alpaca asset's stored symbol is the one Alpaca's catalog gave at registration,
+    # so it is used as is. Alpaca's whole asset list is read only when some asset is not a
+    # canonical Alpaca one and its ticker must be matched against it.
+    symbol_lookup: dict[str, str] | None = None
     bindings: list[AlpacaBarAssetBinding] = []
     unresolved_assets: list[Any] = []
 
@@ -216,21 +219,18 @@ def resolve_asset_bindings_from_category_assets(
             unresolved_assets.append(asset)
             continue
 
+        # The required AlpacaAssetDetails row is the durable provider identity mapping; FIGI is
+        # never an identity fallback.
         resolved_symbol = None
-        for candidate in _build_symbol_alias_candidates(str(ticker)):
-            resolved_symbol = symbol_lookup.get(candidate)
-            if resolved_symbol is not None:
-                break
-
-        # The required AlpacaAssetDetails row is the durable provider identity
-        # mapping. A symbol can disappear from Alpaca's current catalog while its
-        # canonical Alpaca UUID and last known provider symbol remain valid for
-        # historical data. Reuse that stored symbol only for an exact canonical
-        # Alpaca identity; FIGI is never an identity fallback.
-        if resolved_symbol is None and _is_canonical_alpaca_asset_identifier(
-            str(asset.unique_identifier)
-        ):
+        if _is_canonical_alpaca_asset_identifier(str(asset.unique_identifier)):
             resolved_symbol = str(ticker).strip().upper()
+        else:
+            if symbol_lookup is None:
+                symbol_lookup = build_alpaca_symbol_lookup(trading_client=trading_client)
+            for candidate in _build_symbol_alias_candidates(str(ticker)):
+                resolved_symbol = symbol_lookup.get(candidate)
+                if resolved_symbol is not None:
+                    break
 
         if resolved_symbol is None:
             unresolved_assets.append(asset)

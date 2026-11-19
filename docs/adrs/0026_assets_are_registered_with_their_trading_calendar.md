@@ -10,6 +10,13 @@ none without a calendar (see [Rollout](#rollout)).
 Amended on 2026-11-17 by [ADR 0027](0027_one_portfolio_path.md): `ensure_trading_calendar` is the
 connector's own (`alpaca_connectors.assets.calendars`), with the same rule.
 
+Amended on 2026-11-19 ([issue #46](https://github.com/mainsequence-projects/alpaca-connectors/issues/46)):
+`ensure_trading_calendars_stored` reads the calendars a process has not seen yet in one
+`Calendar.filter` (`unique_identifier__in`) and none it has seen, since a stored calendar is never
+deleted. An account registration or sync sends Markets only the held assets this project does not
+describe yet, so it checks a calendar only when one of them names it, and a sync usually makes no
+calendar read; an already-described held asset keeps the calendar it has.
+
 ## Context
 
 ms-markets 4.0.0 stores a calendar as session rules and exceptions (its ADR 0055) and links

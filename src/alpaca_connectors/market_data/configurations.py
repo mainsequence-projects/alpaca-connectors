@@ -420,6 +420,27 @@ def portfolio_bar_configurations(
     return {str(row.portfolio_configuration_uid): row for row in rows}
 
 
+def bar_configuration_rows_by_uids(
+    configuration_uids: list[uuid.UUID | str],
+) -> dict[str, AlpacaBarsConfiguration]:
+    """Several bars configurations' rows by UID, in one read per ``MARKETS_BATCH_SIZE`` UIDs.
+
+    The rows alone, as ``portfolio_bar_configurations`` answers them: no asset memberships.
+    """
+    from alpaca_connectors.markets_api import read_in_batches
+    from alpaca_connectors.runtime import account_runtime_models, start_markets_engine
+
+    uids = sorted({str(uuid.UUID(str(uid))) for uid in configuration_uids})
+    if not uids:
+        return {}
+    start_markets_engine(models=account_runtime_models())
+    rows = read_in_batches(
+        lambda batch: AlpacaBarsConfiguration.filter(uid__in=batch, limit=len(batch)),
+        uids,
+    )
+    return {str(row.uid): row for row in rows}
+
+
 def bar_configurations_for_account(
     account_uid: uuid.UUID | str,
 ) -> list[AlpacaBarsConfiguration]:
@@ -708,7 +729,9 @@ def list_bar_configurations(
     account_uids: list[uuid.UUID | str] | None = None,
     portfolio_owned: bool | None = None,
     ordering: str = "name",
+    uids: list[uuid.UUID | str] | None = None,
 ) -> tuple[list[AlpacaBarsConfiguration], int]:
+    """A page of bar configurations and their count; ``uids`` keeps only those (issue #46)."""
     from msm.bootstrap import resolve_runtime
     from msm.repositories.base import compile_markets_statement, execute_markets_operation
     from sqlalchemy import func, or_, select
@@ -735,6 +758,10 @@ def list_bar_configurations(
         if not accounts:
             return [], 0
         statement = statement.where(AlpacaBarsConfigurationTable.account_uid.in_(accounts))
+    if uids is not None:
+        statement = statement.where(
+            AlpacaBarsConfigurationTable.uid.in_([uuid.UUID(str(uid)) for uid in uids])
+        )
     if portfolio_owned is not None:
         column = AlpacaBarsConfigurationTable.portfolio_configuration_uid
         statement = statement.where(column.is_not(None) if portfolio_owned else column.is_(None))
@@ -954,6 +981,7 @@ __all__ = [
     "list_bar_configurations",
     "portfolio_bar_configuration",
     "portfolio_bar_configurations",
+    "bar_configuration_rows_by_uids",
     "project_configuration_models",
     "scheduled_bar_configuration_uids",
     "update_bar_configuration",

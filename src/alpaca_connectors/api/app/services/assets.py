@@ -41,6 +41,7 @@ def list_asset_resources(
     search: str | None,
     ordering: str,
     category_uid: str | None = None,
+    uids: list[str] | None = None,
 ):
     items, total = list_assets(
         limit=limit,
@@ -48,6 +49,7 @@ def list_asset_resources(
         search=search,
         ordering=ordering,
         category_uid=category_uid,
+        uids=uids,
     )
     return collection_response(items=items, total=total, limit=limit, offset=offset)
 
@@ -171,6 +173,7 @@ def execute_asset_registration(
         plan_summary=plan.summary(),
         resolution_summary=resolution.summary(),
         assets_by_symbol=serialize_asset_mapping(registration_result["assets"]),
+        registered_assets=registration_result["registered_assets"],
         existing_asset_uids_by_symbol=serialize_asset_mapping(
             registration_result["existing_assets"]
         ),

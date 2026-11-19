@@ -38,8 +38,9 @@ instructions are `.tau/SYSTEM.md`; its tools and skills are described in
 - symbols absent from Alpaca's current catalog may reuse one exact, previously registered
   canonical Alpaca Asset/detail identity; symbols with neither a current catalog identity nor one
   unique registered identity are reported and not registered
-- Alpaca `status` and `tradable` are stored provider facts, not registration gates; resolve exact
-  symbol sets from one all-status bulk catalog request, never one provider request per symbol
+- Alpaca `status` and `tradable` are stored provider facts, not registration gates; exact symbol
+  sets are read from Alpaca one symbol each, concurrently (Alpaca has no read of several assets),
+  and Alpaca's whole asset list is never read for them
 - every registration and account sync links each asset to the trading calendar of its Alpaca
   class: `NYSE` for US equities and options, `CRYPTO_24_7` for crypto
   ([ADR 0026](../adrs/0026_assets_are_registered_with_their_trading_calendar.md)); ms-markets 4
@@ -121,9 +122,9 @@ instructions are `.tau/SYSTEM.md`; its tools and skills are described in
   them, `imported` when they were copied once from Main Sequence Secrets selected by name; live
   holdings and price updates open them at execution time with the
   [account key Secret](#account-key-secret)
-- account registration and holdings capture resolve the whole position set from one Alpaca catalog
-  request and write the account, the held assets Markets lacks and the holdings in one Markets
-  `registerAccount` call, which needs ms-markets 3.4.0 or later on the Markets API
+- account registration and holdings capture resolve the held assets this project describes from its
+  details table and ask Alpaca only about the new ones, then write the account, the new held
+  assets and the holdings in one Markets `registerAccount` call, which needs ms-markets 3.4.0 or later on the Markets API
   ([registration](../account/registration.md#holdings))
 - if a stored bar configuration resolves an asset that is missing or ambiguous in Alpaca, fix its
   source or register the asset correctly instead of loosening the resolver

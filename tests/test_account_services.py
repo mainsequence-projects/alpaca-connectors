@@ -6,7 +6,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from msm.constants import ASSET_TYPE_CURRENCY, ASSET_TYPE_CURRENCY_DEFINITION
-from test_alpaca_us_equities import NEW_EXCHANGES, alpaca_catalog_asset
+from test_alpaca_us_equities import NEW_EXCHANGES, alpaca_asset_from, alpaca_catalog_asset
 
 from alpaca_connectors.account import api_key_fingerprint
 from alpaca_connectors.account.credentials import (
@@ -21,9 +21,9 @@ from alpaca_connectors.account.services import (
     build_account_detail_values,
     ensure_cash_currency_asset,
     plan_alpaca_account,
-    prepare_alpaca_position_assets,
     register_alpaca_account,
     remove_account_keys,
+    resolve_held_assets,
     update_account_registration,
 )
 from alpaca_connectors.holdings import build_account_holdings_rows
@@ -142,6 +142,9 @@ def test_latest_holdings_set_query_is_account_scoped_and_deterministic() -> None
     ]
 
 
+SERVICES = "alpaca_connectors.account.services"
+
+
 class StubTradingClient:
     def __init__(self, account, positions, raw, catalog=()):
         self._account = account
@@ -149,6 +152,7 @@ class StubTradingClient:
         self._raw = raw
         self._catalog = list(catalog)
         self.position_reads = 0
+        self.asset_reads: list[str] = []
 
     def get_account(self):
         return self._account
@@ -162,7 +166,10 @@ class StubTradingClient:
 
     def get(self, path, data=None):
         if path == "/assets":
-            return self._catalog
+            raise AssertionError("Alpaca's whole asset list is never read.")
+        if path.startswith("/assets/"):
+            self.asset_reads.append(path)
+            return alpaca_asset_from(self._catalog, path)
         return self._raw if path == "/account" else {}
 
 
@@ -269,74 +276,14 @@ class AccountServiceShapingTests(unittest.TestCase):
             "ALPACA::11111111-1111-4111-8111-111111111111",
         )
 
-    def test_position_resolver_registers_missing_asset_without_figi_requirement(self) -> None:
-        from alpaca_connectors.account.services import make_position_resolver
+    def test_identity_mismatch_names_asset_and_both_uuids(self) -> None:
+        wrong = alpaca_catalog_asset("WRONG", uuid.UUID("33333333-3333-4333-8333-333333333333"))
+        client = MagicMock()
+        client.get.return_value = wrong
 
-        provider_asset = SimpleNamespace(
-            id=uuid.UUID("11111111-1111-4111-8111-111111111111"),
-            symbol="AAPL",
-            name="Apple Inc.",
-            exchange=SimpleNamespace(value="NASDAQ"),
-            asset_class=SimpleNamespace(value="us_equity"),
-            status=SimpleNamespace(value="active"),
-            tradable=True,
-            marginable=True,
-            shortable=True,
-            easy_to_borrow=True,
-            fractionable=True,
-            attributes=[],
-            model_dump=lambda mode=None: {"id": "11111111-1111-4111-8111-111111111111"},
-        )
-        client = SimpleNamespace(get_asset=lambda _asset_id: provider_asset)
-        with (
-            patch("msm.api.assets.Asset.get_by_unique_identifier", return_value=None),
-            patch(
-                "alpaca_connectors.assets.alpaca_us_equities.classify_alpaca_us_equities",
-                return_value="PLAN",
-            ),
-            patch(
-                "alpaca_connectors.assets.alpaca_us_equities.resolve_alpaca_us_equity_registration_plan",
-                return_value="RESOLUTION",
-            ),
-            patch(
-                "alpaca_connectors.assets.alpaca_us_equities.register_alpaca_us_equity_assets",
-                return_value={"assets": {"AAPL": "ALPACA::11111111-1111-4111-8111-111111111111"}},
-            ) as register,
-        ):
-            result = make_position_resolver(
-                trading_client=client,
-                register_missing=True,
-            )(_stub_positions()[0])
-
-        self.assertEqual(result, "ALPACA::11111111-1111-4111-8111-111111111111")
-        register.assert_called_once_with(registration_resolution="RESOLUTION")
-
-    def test_position_identity_mismatch_names_asset_and_both_uuids(self) -> None:
-        from alpaca_connectors.account.services import make_position_resolver
-
-        provider_asset = SimpleNamespace(
-            id=uuid.UUID("33333333-3333-4333-8333-333333333333"),
-            symbol="WRONG",
-            name="Wrong asset",
-            exchange=SimpleNamespace(value="NASDAQ"),
-            asset_class=SimpleNamespace(value="us_equity"),
-            status=SimpleNamespace(value="active"),
-            tradable=True,
-            marginable=True,
-            shortable=True,
-            easy_to_borrow=True,
-            fractionable=True,
-            attributes=[],
-            model_dump=lambda mode=None: {"id": "33333333-3333-4333-8333-333333333333"},
-        )
-        client = SimpleNamespace(get_asset=lambda _asset_id: provider_asset)
-
-        with patch("msm.api.assets.Asset.get_by_unique_identifier", return_value=None):
+        with patch(f"{SERVICES}._described_held_assets", return_value=(set(), {})):
             with self.assertRaises(ValueError) as raised:
-                make_position_resolver(
-                    trading_client=client,
-                    register_missing=True,
-                )(_stub_positions()[0])
+                resolve_held_assets(trading_client=client, positions=[_stub_positions()[0]])
 
         message = str(raised.exception)
         self.assertIn("AAPL", message)
@@ -344,105 +291,62 @@ class AccountServiceShapingTests(unittest.TestCase):
         self.assertIn("WRONG", message)
         self.assertIn("33333333-3333-4333-8333-333333333333", message)
 
-    def test_position_set_uses_one_provider_catalog_and_one_registration_batch(self) -> None:
+    def test_new_held_assets_are_read_one_each_never_the_whole_list(self) -> None:
         positions = _stub_positions()
-        provider_assets = [
+        catalog = [
             alpaca_catalog_asset(
-                "AAPL",
-                uuid.UUID("11111111-1111-4111-8111-111111111111"),
-                name="Apple Inc.",
+                "AAPL", uuid.UUID("11111111-1111-4111-8111-111111111111"), name="Apple Inc."
             ),
             alpaca_catalog_asset(
                 "BTC/USD",
                 uuid.UUID("276e2673-764b-4ab6-a611-caf665ca6340"),
                 exchange="CRYPTO",
                 asset_class="crypto",
-                name="Bitcoin / US Dollar",
-                marginable=False,
-                shortable=False,
-                easy_to_borrow=False,
             ),
         ]
-        client = MagicMock()
-        client.get.return_value = provider_assets
-        resolution = SimpleNamespace(missing_assets=[])
+        client = StubTradingClient(_stub_account(), positions, raw={}, catalog=catalog)
 
-        with (
-            patch(
-                "alpaca_connectors.assets.alpaca_us_equities.resolve_alpaca_us_equity_registration_plan",
-                return_value=resolution,
-            ) as resolve_registration,
-            patch(
-                "alpaca_connectors.assets.alpaca_us_equities.register_alpaca_us_equity_assets"
-            ) as register_assets,
-        ):
-            identifiers, result_resolution = prepare_alpaca_position_assets(
-                trading_client=client,
-                positions=positions,
-                register_missing=True,
-            )
+        with patch(f"{SERVICES}._described_held_assets", return_value=(set(), {})):
+            resolution = resolve_held_assets(trading_client=client, positions=positions)
 
-        self.assertIs(result_resolution, resolution)
         self.assertEqual(
-            identifiers,
+            resolution.identifiers_by_position_id,
             {
                 id(positions[0]): "ALPACA::11111111-1111-4111-8111-111111111111",
                 id(positions[1]): "ALPACA::276e2673-764b-4ab6-a611-caf665ca6340",
             },
         )
-        client.get.assert_called_once_with("/assets", {})
-        client.get_all_assets.assert_not_called()
-        client.get_asset.assert_not_called()
-        resolve_registration.assert_called_once()
-        self.assertEqual(len(resolve_registration.call_args.args[0].alpaca_assets), 2)
-        register_assets.assert_called_once_with(registration_resolution=resolution)
-
-    def test_crypto_position_resolves_catalog_uuid_by_symbol(self) -> None:
-        from alpaca_connectors.account.services import make_position_resolver
-
-        provider_asset = SimpleNamespace(
-            id=uuid.UUID("276e2673-764b-4ab6-a611-caf665ca6340"),
-            symbol="BTC/USD",
-            name="Bitcoin / US Dollar",
-            exchange=SimpleNamespace(value="CRYPTO"),
-            asset_class=SimpleNamespace(value="crypto"),
-            status=SimpleNamespace(value="active"),
-            tradable=True,
-            marginable=False,
-            shortable=False,
-            easy_to_borrow=False,
-            fractionable=True,
-            attributes=[],
-            model_dump=lambda mode=None: {"id": "276e2673-764b-4ab6-a611-caf665ca6340"},
+        self.assertEqual(
+            sorted(client.asset_reads),
+            ["/assets/11111111-1111-4111-8111-111111111111", "/assets/BTCUSD"],
         )
-        client = MagicMock()
-        client.get_asset.return_value = provider_asset
-        canonical_identifier = "ALPACA::276e2673-764b-4ab6-a611-caf665ca6340"
+        self.assertEqual(
+            sorted(record.symbol for record in resolution.new_assets), ["AAPL", "BTC/USD"]
+        )
 
-        with (
-            patch("msm.api.assets.Asset.get_by_unique_identifier", return_value=None),
-            patch(
-                "alpaca_connectors.assets.alpaca_us_equities.resolve_alpaca_us_equity_registration_plan",
-                return_value="RESOLUTION",
-            ),
-            patch(
-                "alpaca_connectors.assets.alpaca_us_equities.register_alpaca_us_equity_assets",
-                return_value={"assets": {"BTC/USD": canonical_identifier}},
+    def test_described_held_assets_need_no_alpaca_read(self) -> None:
+        positions = _stub_positions()
+        client = StubTradingClient(_stub_account(), positions, raw={}, catalog=[])
+
+        with patch(
+            f"{SERVICES}._described_held_assets",
+            return_value=(
+                {"11111111-1111-4111-8111-111111111111"},
+                {"BTCUSD": "276e2673-764b-4ab6-a611-caf665ca6340"},
             ),
         ):
-            result = make_position_resolver(
-                trading_client=client,
-                register_missing=True,
-            )(_stub_positions()[1])
+            resolution = resolve_held_assets(trading_client=client, positions=positions)
 
-        self.assertEqual(result, canonical_identifier)
-        client.get_asset.assert_called_once_with("BTCUSD")
+        self.assertEqual(client.asset_reads, [])
+        self.assertEqual(resolution.new_assets, [])
+        self.assertEqual(
+            resolution.identifiers_by_position_id[id(positions[1])],
+            "ALPACA::276e2673-764b-4ab6-a611-caf665ca6340",
+        )
 
     def test_unresolved_position_blocks_snapshot_before_storage(self) -> None:
         client = StubTradingClient(_stub_account(), [], raw={}, catalog=[])
-        with patch(
-            "alpaca_connectors.assets.alpaca_us_equities.alpaca_asset_ids_with_details"
-        ) as described:
+        with patch(f"{SERVICES}._described_held_assets", return_value=(set(), {})) as described:
             with self.assertRaisesRegex(
                 AccountHoldingsRegistryError,
                 "11111111-1111-4111-8111-111111111111",
@@ -453,15 +357,17 @@ class AccountServiceShapingTests(unittest.TestCase):
                     cash="0",
                 )
 
-        described.assert_not_called()
+        # One details read, then Alpaca, which does not know the asset: nothing is written.
+        described.assert_called_once()
+        self.assertEqual(client.asset_reads, ["/assets/11111111-1111-4111-8111-111111111111"])
 
     def test_crypto_position_is_not_rejected_by_class(self) -> None:
         btc_id = uuid.UUID("276e2673-764b-4ab6-a611-caf665ca6340")
         catalog = [alpaca_catalog_asset("BTC/USD", btc_id, exchange="CRYPTO", asset_class="crypto")]
         client = StubTradingClient(_stub_account(), [], raw={}, catalog=catalog)
         with patch(
-            "alpaca_connectors.assets.alpaca_us_equities.alpaca_asset_ids_with_details",
-            return_value=set(),
+            f"{SERVICES}._described_held_assets",
+            return_value=(set(), {}),
         ):
             holdings = resolve_account_registration_holdings(
                 trading_client=client,
@@ -573,7 +479,6 @@ def _registration_holdings(*identifiers: str) -> AccountRegistrationHoldings:
             for identifier in identifiers
         ],
         assets=[],
-        described_asset_ids=frozenset(),
         cash_currency="USD",
     )
 
@@ -671,8 +576,8 @@ class RegisterAlpacaAccountTests(unittest.TestCase):
                         return_value=None,
                     ),
                     patch(
-                        "alpaca_connectors.assets.alpaca_us_equities.alpaca_asset_ids_with_details",
-                        return_value=set(),
+                        f"{SERVICES}._described_held_assets",
+                        return_value=(set(), {}),
                     ),
                     patch(
                         "alpaca_connectors.holdings.services.register_account_holdings",

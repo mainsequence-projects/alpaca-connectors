@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import datetime as dt
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
 from typing import Any
@@ -286,23 +286,45 @@ def _normalized_alpaca_symbol(value: Any) -> str:
     return str(value or "").strip().upper().replace("/", "")
 
 
+CRYPTO_ASSET_CLASSES = frozenset({"crypto", "crypto_perp"})
+
+
+def read_alpaca_asset_record(trading_client: Any, lookup_key: str) -> Any | None:
+    from alpaca_connectors.assets.alpaca_us_equities import read_alpaca_asset_record as read
+
+    return read(trading_client, lookup_key)
+
+
+def read_alpaca_asset_records(trading_client: Any, lookup_keys: list[str]) -> dict[str, Any]:
+    from alpaca_connectors.assets.alpaca_us_equities import read_alpaca_asset_records as read
+
+    return read(trading_client, lookup_keys)
+
+
+def _is_crypto(position: Any) -> bool:
+    return (_enum_str(getattr(position, "asset_class", None)) or "").lower() in CRYPTO_ASSET_CLASSES
+
+
+def _alpaca_lookup_key(position: Any) -> str:
+    """What Alpaca's ``GET /assets/{symbol_or_asset_id}`` finds the held asset by.
+
+    A crypto position can carry a position UUID that is not its asset's, so it is read by symbol.
+    """
+    if _is_crypto(position):
+        return str(getattr(position, "symbol", "") or "")
+    return str(getattr(position, "asset_id", None) or getattr(position, "id", None))
+
+
 def resolve_alpaca_asset_record_for_position(
     *,
     trading_client: Any,
     position: Any,
 ):
-    """Return the authoritative Alpaca Asset catalog record for one held position."""
-    from alpaca_connectors.assets.alpaca_us_equities import AlpacaAssetRecord
-
+    """Return the authoritative Alpaca asset record for one held position."""
     held_symbol = str(getattr(position, "symbol", "") or "unknown")
-    asset_class = (_enum_str(getattr(position, "asset_class", None)) or "").lower()
-    lookup_key = (
-        held_symbol
-        if asset_class in {"crypto", "crypto_perp"}
-        else str(getattr(position, "asset_id", None) or getattr(position, "id", None))
-    )
-    provider_asset = trading_client.get_asset(lookup_key)
-    alpaca_asset = AlpacaAssetRecord.from_trading_asset(provider_asset)
+    alpaca_asset = read_alpaca_asset_record(trading_client, _alpaca_lookup_key(position))
+    if alpaca_asset is None:
+        raise LookupError(f"Alpaca does not know the held asset {held_symbol!r}.")
     _validate_alpaca_asset_record_for_position(position=position, alpaca_asset=alpaca_asset)
     return alpaca_asset
 
@@ -334,134 +356,123 @@ def _validate_alpaca_asset_record_for_position(*, position: Any, alpaca_asset: A
         )
 
 
-def resolve_alpaca_asset_records_for_positions(
-    *,
-    trading_client: Any,
-    positions: list[Any],
-) -> dict[int, Any]:
-    """Resolve every held position from one unfiltered Alpaca catalog request."""
-    from alpaca_connectors.assets.alpaca_asset_details import normalize_alpaca_asset_id
-    from alpaca_connectors.assets.alpaca_us_equities import fetch_alpaca_asset_catalog
+@dataclass(frozen=True)
+class HeldAssetResolution:
+    """Each held position's canonical asset identifier, and the held assets new to this project.
 
-    positions_with_identity = [
-        position
-        for position in positions
-        if canonical_identifier_for_position(position) is not None
-    ]
-    if not positions_with_identity:
-        return {}
+    ``identifiers_by_position_id`` maps ``id(position)`` to ``ALPACA::<alpaca_asset_id>``;
+    ``new_assets`` are the Alpaca records of the held assets this project's details table has no
+    row for, the only ones Alpaca is asked about.
+    """
 
-    catalog = fetch_alpaca_asset_catalog(trading_client=trading_client)
-    records_by_id = {str(asset.alpaca_asset_id): asset for asset in catalog}
-    records_by_symbol = {_normalized_alpaca_symbol(asset.symbol): asset for asset in catalog}
-    resolved: dict[int, Any] = {}
-    for position in positions_with_identity:
-        held_asset_id = normalize_alpaca_asset_id(
-            getattr(position, "asset_id", None) or getattr(position, "id", None)
-        )
-        held_symbol = str(getattr(position, "symbol", "") or "")
-        asset_class = (_enum_str(getattr(position, "asset_class", None)) or "").lower()
-        if asset_class in {"crypto", "crypto_perp"}:
-            alpaca_asset = records_by_symbol.get(_normalized_alpaca_symbol(held_symbol))
-        else:
-            alpaca_asset = records_by_id.get(str(held_asset_id))
-            if alpaca_asset is None:
-                alpaca_asset = records_by_symbol.get(_normalized_alpaca_symbol(held_symbol))
-        if alpaca_asset is None:
-            continue
-        _validate_alpaca_asset_record_for_position(
-            position=position,
-            alpaca_asset=alpaca_asset,
-        )
-        resolved[id(position)] = alpaca_asset
-    return resolved
+    identifiers_by_position_id: dict[int, str]
+    new_assets: list[Any]
 
 
-def prepare_alpaca_position_assets(
-    *,
-    trading_client: Any,
-    positions: list[Any],
-    register_missing: bool,
-) -> tuple[dict[int, str], Any]:
-    """Plan or bulk-register one position set and return canonical identifiers."""
-    from alpaca_connectors.assets.alpaca_asset_details import build_alpaca_unique_identifier
-    from alpaca_connectors.assets.alpaca_us_equities import (
-        AlpacaEquityRegistrationPlan,
-        register_alpaca_us_equity_assets,
-        resolve_alpaca_us_equity_registration_plan,
-    )
+def _described_held_assets(positions: list[Any]) -> tuple[set[str], dict[str, str]]:
+    """The held assets this project already describes, in one read of its details table.
 
-    records_by_position_id = resolve_alpaca_asset_records_for_positions(
-        trading_client=trading_client,
-        positions=positions,
-    )
-    unique_records = {
-        str(record.alpaca_asset_id): record for record in records_by_position_id.values()
-    }
-    plan = AlpacaEquityRegistrationPlan(
-        alpaca_assets=list(unique_records.values()),
-        classification_passes=[],
-        matches_by_symbol={},
-        openfigi_enrichment_skipped=True,
-    )
-    resolution = resolve_alpaca_us_equity_registration_plan(plan)
-    if register_missing and plan.alpaca_assets:
-        register_alpaca_us_equity_assets(registration_resolution=resolution)
-    identifiers_by_position_id = {
-        position_id: build_alpaca_unique_identifier(record.alpaca_asset_id)
-        for position_id, record in records_by_position_id.items()
-    }
-    return identifiers_by_position_id, resolution
-
-
-def make_position_resolver(
-    *,
-    trading_client: Any,
-    register_missing: bool,
-) -> Callable[[Any], str | None]:
-    """Resolve/register positions by immutable Alpaca asset UUID, never by ticker or FIGI."""
-    from msm.api.assets import Asset
+    Returns the described Alpaca asset ids of the non-crypto positions, and the described crypto
+    assets' Alpaca ids by normalized symbol (crypto is matched by symbol; see
+    :func:`canonical_identifier_for_position`).
+    """
+    from msm.api.base import operation_result_rows
+    from msm.repositories.base import compile_markets_statement, execute_markets_operation
+    from sqlalchemy import or_, select
 
     from alpaca_connectors.assets.alpaca_asset_details import (
-        alpaca_details_for_asset_uid,
+        AlpacaAssetDetailsTable,
+        normalize_alpaca_asset_id,
+    )
+    from alpaca_connectors.runtime import account_runtime_models, start_markets_engine
+
+    asset_ids = sorted(
+        {
+            normalize_alpaca_asset_id(getattr(p, "asset_id", None) or getattr(p, "id", None))
+            for p in positions
+            if not _is_crypto(p)
+        },
+        key=str,
+    )
+    holds_crypto = any(_is_crypto(position) for position in positions)
+    if not asset_ids and not holds_crypto:
+        return set(), {}
+    details = AlpacaAssetDetailsTable.__table__.c
+    conditions = []
+    if asset_ids:
+        conditions.append(details.alpaca_asset_id.in_(asset_ids))
+    if holds_crypto:
+        conditions.append(details.asset_class.in_(sorted(CRYPTO_ASSET_CLASSES)))
+    runtime = start_markets_engine(models=account_runtime_models())
+    statement = select(details.alpaca_asset_id, details.symbol, details.asset_class).where(
+        or_(*conditions)
+    )
+    rows = operation_result_rows(
+        execute_markets_operation(
+            compile_markets_statement(statement, context=runtime.context, operation="select"),
+            context=runtime.context,
+        )
+    )
+    described_ids: set[str] = set()
+    crypto_by_symbol: dict[str, str] = {}
+    for row in rows:
+        alpaca_asset_id = str(normalize_alpaca_asset_id(row["alpaca_asset_id"]))
+        if str(row.get("asset_class") or "").lower() in CRYPTO_ASSET_CLASSES:
+            crypto_by_symbol[_normalized_alpaca_symbol(row.get("symbol"))] = alpaca_asset_id
+        else:
+            described_ids.add(alpaca_asset_id)
+    return described_ids, crypto_by_symbol
+
+
+def resolve_held_assets(*, trading_client: Any, positions: list[Any]) -> HeldAssetResolution:
+    """Resolve every held position to its canonical asset identifier, writing nothing.
+
+    One read of this project's details table finds the held assets it already describes; Alpaca
+    is asked only about the others, one ``GET /assets/{id}`` each, concurrently (Alpaca has no read
+    of several assets by id). Alpaca's whole asset list is never read. A position Alpaca does not
+    know is left out of the answer, so the caller reports it unresolved.
+    """
+    from alpaca_connectors.assets.alpaca_asset_details import (
         build_alpaca_unique_identifier,
+        normalize_alpaca_asset_id,
     )
 
-    def resolve(position: Any) -> str | None:
-        if canonical_identifier_for_position(position) is None:
-            return None
-
-        from alpaca_connectors.assets.alpaca_us_equities import (
-            AlpacaEquityRegistrationPlan,
-            classify_alpaca_us_equities,
-            register_alpaca_us_equity_assets,
-            resolve_alpaca_us_equity_registration_plan,
-        )
-
-        alpaca_asset = resolve_alpaca_asset_record_for_position(
-            trading_client=trading_client,
-            position=position,
-        )
-        canonical_identifier = build_alpaca_unique_identifier(alpaca_asset.alpaca_asset_id)
-        existing = Asset.get_by_unique_identifier(canonical_identifier)
-        if existing is not None and alpaca_details_for_asset_uid(existing.uid) is not None:
-            return canonical_identifier
-        if not register_missing:
-            return None
-        if alpaca_asset.asset_class == "us_equity":
-            plan = classify_alpaca_us_equities([alpaca_asset])
-        else:
-            plan = AlpacaEquityRegistrationPlan(
-                alpaca_assets=[alpaca_asset],
-                classification_passes=[],
-                matches_by_symbol={},
-                openfigi_unmatched_symbols=[],
+    held = [p for p in positions if canonical_identifier_for_position(p) is not None]
+    if not held:
+        return HeldAssetResolution(identifiers_by_position_id={}, new_assets=[])
+    described_ids, crypto_by_symbol = _described_held_assets(held)
+    identifiers: dict[int, str] = {}
+    unknown: list[Any] = []
+    for position in held:
+        if _is_crypto(position):
+            alpaca_asset_id = crypto_by_symbol.get(
+                _normalized_alpaca_symbol(getattr(position, "symbol", None))
             )
-        resolution = resolve_alpaca_us_equity_registration_plan(plan)
-        register_alpaca_us_equity_assets(registration_resolution=resolution)
-        return canonical_identifier
-
-    return resolve
+        else:
+            held_id = str(
+                normalize_alpaca_asset_id(
+                    getattr(position, "asset_id", None) or getattr(position, "id", None)
+                )
+            )
+            alpaca_asset_id = held_id if held_id in described_ids else None
+        if alpaca_asset_id is None:
+            unknown.append(position)
+        else:
+            identifiers[id(position)] = build_alpaca_unique_identifier(alpaca_asset_id)
+    records = read_alpaca_asset_records(
+        trading_client, [_alpaca_lookup_key(position) for position in unknown]
+    )
+    new_assets: dict[str, Any] = {}
+    for position in unknown:
+        record = records.get(_alpaca_lookup_key(position))
+        if record is None:
+            continue
+        _validate_alpaca_asset_record_for_position(position=position, alpaca_asset=record)
+        identifiers[id(position)] = build_alpaca_unique_identifier(record.alpaca_asset_id)
+        new_assets[str(record.alpaca_asset_id)] = record
+    return HeldAssetResolution(
+        identifiers_by_position_id=identifiers, new_assets=list(new_assets.values())
+    )
 
 
 # --------------------------------------------------------------------------------------------------
@@ -720,14 +731,13 @@ def plan_alpaca_account(
     unique_identifier = build_account_unique_identifier(
         account_number=str(getattr(account_model, "account_number", "")), is_paper=paper
     )
-    registration_resolution = None
+    resolution = None
     active_asset_resolver = asset_resolver
     if active_asset_resolver is None:
-        identifiers_by_position_id, registration_resolution = prepare_alpaca_position_assets(
-            trading_client=trading_client,
-            positions=snapshot.positions,
-            register_missing=False,
+        resolution = resolve_held_assets(
+            trading_client=trading_client, positions=snapshot.positions
         )
+        identifiers_by_position_id = resolution.identifiers_by_position_id
         active_asset_resolver = lambda position: identifiers_by_position_id.get(id(position))
 
     cash_identifier = str(cash_asset_identifier).strip().upper()
@@ -741,10 +751,7 @@ def plan_alpaca_account(
         currency_identifier=cash_identifier,
     )
     assets_to_register = sorted(
-        str(asset.alpaca_asset_id)
-        for asset in (
-            registration_resolution.missing_assets if registration_resolution is not None else []
-        )
+        str(asset.alpaca_asset_id) for asset in (resolution.new_assets if resolution else [])
     )
     return {
         "account_unique_identifier": unique_identifier,
@@ -782,6 +789,52 @@ def get_account_registration(account_uid: str) -> dict[str, Any] | None:
     return _registration_row(account.model_dump(mode="json"), detail)
 
 
+def get_account_registrations(account_uids: Iterable[str]) -> dict[str, dict[str, Any]]:
+    """The registrations of several accounts, keyed by the uid as given (issue #46).
+
+    One details read for all of them (``account_uid IN``) and their Accounts from Markets in
+    batches, never a read per account. An account without both is absent, as
+    :func:`get_account_registration` answers None for it.
+    """
+    from msm.api.accounts import Account
+    from msm.api.base import operation_result_rows
+    from msm.repositories.base import compile_markets_statement, execute_markets_operation
+    from sqlalchemy import select
+
+    from alpaca_connectors.markets_api import read_in_batches
+    from alpaca_connectors.runtime import account_runtime_models, start_markets_engine
+
+    requested = {str(uid): str(uuid.UUID(str(uid))) for uid in account_uids}
+    runtime = start_markets_engine(models=account_runtime_models())
+    details = ProviderAccountDetails.__table__
+    statement = select(*registration_columns()).where(
+        details.c.account_uid.in_([uuid.UUID(uid) for uid in set(requested.values())])
+    )
+    rows = operation_result_rows(
+        execute_markets_operation(
+            compile_markets_statement(statement, context=runtime.context, operation="select"),
+            context=runtime.context,
+        )
+    )
+    accounts = {
+        str(account.uid): account.model_dump(mode="json")
+        for account in read_in_batches(
+            lambda batch: Account.filter(uid__in=batch, limit=len(batch)),
+            [str(row["account_uid"]) for row in rows],
+        )
+    }
+    registrations = {
+        str(row["account_uid"]): _registration_row(accounts[str(row["account_uid"])], row)
+        for row in rows
+        if str(row["account_uid"]) in accounts
+    }
+    return {
+        given: registrations[canonical]
+        for given, canonical in requested.items()
+        if canonical in registrations
+    }
+
+
 def _listing_values(account: Any) -> dict[str, Any]:
     """The Markets Account fields copied onto the details row for the listing (revision 0019)."""
     return {
@@ -817,13 +870,15 @@ def list_account_registrations(
     is_paper: bool | None = None,
     ordering: str = "account_name",
     owner: AccountOwner | None = None,
+    uids: Iterable[str] | None = None,
 ) -> tuple[list[dict[str, Any]], int]:
     """Return paginated Alpaca registrations, excluding unrelated ms-markets Accounts.
 
     Pages, filters, searches and orders on this project's details table, which carries the
     account identifier, paper flag and copies of the Account's name and active flag; the page's
     Accounts are then read from Markets in one batch (ms-markets ADR 0047, decision 4).
-    ``owner`` keeps only the registrations recorded for that exact owner pair (ADR 0019).
+    ``owner`` keeps only the registrations recorded for that exact owner pair (ADR 0019), and
+    ``uids`` only those accounts (issue #46).
     """
     from msm.api.accounts import Account
     from msm.api.base import operation_result_rows
@@ -836,6 +891,10 @@ def list_account_registrations(
     runtime = start_markets_engine(models=account_runtime_models())
     details = ProviderAccountDetails.__table__
     statement = select(*registration_columns())
+    if uids is not None:
+        statement = statement.where(
+            details.c.account_uid.in_([uuid.UUID(str(uid)) for uid in uids])
+        )
     if active is not None:
         statement = statement.where(details.c.account_is_active == active)
     if is_paper is not None:
@@ -1079,6 +1138,39 @@ def remove_account_keys(account_uid: str, *, actor_user_uid: str | None = None) 
     return {"account_uid": str(account_uid), "keys_removed": True}
 
 
+def remove_accounts_keys(
+    account_uids: Iterable[str], *, actor_user_uid: str | None = None
+) -> list[dict[str, Any]]:
+    """Clear the keys of several accounts in one update statement (issue #46).
+
+    What :func:`remove_account_keys` does for one account; the caller has read the selected
+    registrations already (``get_account_registrations``), so nothing is read again here.
+    """
+    from msm.repositories.base import compile_markets_statement, execute_markets_operation
+    from sqlalchemy import update
+
+    from alpaca_connectors.account.credentials import cleared_credential_values
+    from alpaca_connectors.runtime import account_runtime_models, start_markets_engine
+
+    selected = [str(uid) for uid in account_uids]
+    runtime = start_markets_engine(models=account_runtime_models())
+    table = ProviderAccountDetails.__table__
+    values = cleared_credential_values(
+        updated_at=dt.datetime.now(dt.timezone.utc).replace(microsecond=0),
+        actor_user_uid=actor_user_uid,
+    )
+    statement = (
+        update(ProviderAccountDetails)
+        .where(table.c.account_uid.in_([uuid.UUID(uid) for uid in dict.fromkeys(selected)]))
+        .values({getattr(ProviderAccountDetails, key): value for key, value in values.items()})
+    )
+    execute_markets_operation(
+        compile_markets_statement(statement, context=runtime.context, operation="update"),
+        context=runtime.context,
+    )
+    return [{"account_uid": uid, "keys_removed": True} for uid in selected]
+
+
 def build_registered_account_client(registration: dict[str, Any]):
     credentials = resolve_registered_alpaca_credentials(registration)
     return build_alpaca_trading_client(
@@ -1146,15 +1238,18 @@ __all__ = [
     "enabled_account_configurations",
     "ensure_cash_currency_asset",
     "get_account_registration",
+    "get_account_registrations",
     "list_account_registrations",
-    "make_position_resolver",
     "plan_alpaca_account",
-    "prepare_alpaca_position_assets",
     "read_alpaca_account",
     "refresh_alpaca_account",
     "remove_account_keys",
+    "remove_accounts_keys",
     "register_alpaca_account",
     "resolve_alpaca_asset_record_for_position",
-    "resolve_alpaca_asset_records_for_positions",
+    "read_alpaca_asset_record",
+    "read_alpaca_asset_records",
+    "resolve_held_assets",
+    "HeldAssetResolution",
     "update_account_registration",
 ]

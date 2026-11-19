@@ -519,8 +519,15 @@ def test_an_external_person_reaches_no_other_persons_account(vouching) -> None:
             "alpaca_connectors.api.app.services.accounts.get_account_registration",
             return_value=others,
         ),
+        patch(
+            "alpaca_connectors.api.app.services.accounts.get_account_registrations",
+            return_value={"account-uid": others},
+        ),
         patch("alpaca_connectors.api.app.routers.accounts.update_account") as update,
         patch("alpaca_connectors.api.app.routers.accounts.remove_keys") as remove,
+        patch(
+            "alpaca_connectors.api.app.routers.accounts.remove_keys_of_accounts"
+        ) as remove_several,
         patch("alpaca_connectors.api.app.routers.accounts.delete_account") as delete,
         patch("alpaca_connectors.api.app.routers.accounts.preflight_delete") as plan_delete,
         patch("alpaca_connectors.api.app.routers.accounts.refresh_account") as refresh,
@@ -530,7 +537,17 @@ def test_an_external_person_reaches_no_other_persons_account(vouching) -> None:
     ):
         answers = _scoped_routes(vouching.client, vouching.headers(**baggage()))
     assert set(answers.values()) == {404}, answers
-    for touched in (update, remove, delete, plan_delete, refresh, sync, capture, submit):
+    for touched in (
+        update,
+        remove,
+        remove_several,
+        delete,
+        plan_delete,
+        refresh,
+        sync,
+        capture,
+        submit,
+    ):
         touched.assert_not_called()
 
 

@@ -35,14 +35,20 @@ Assets are written through the typed ms-markets API (`msm.api.assets`), not the 
 
 A symbol is eligible for registration when:
 
-1. Alpaca resolves it as a US equity in one all-status bulk catalog request
+1. Alpaca resolves it as a US equity when asked about that symbol (`GET /v2/assets/{symbol}`,
+   then its alias forms such as `BRK.B`)
 2. Alpaca provides a valid immutable asset UUID
 3. it is missing from Main Sequence when checked by `ALPACA::<uuid>`
 
-The catalog request is read as Alpaca sends it (`fetch_alpaca_asset_catalog`): exchange, class
-and status keep Alpaca's strings, so a value `alpaca-py` does not know yet, such as a new exchange,
-never fails the catalog, and an entry that is not an asset record is skipped and logged. The raw
-payload stored on `AlpacaAssetDetails` is that catalog entry.
+Only the requested symbols are read, concurrently, because Alpaca has no read of several assets
+at once; Alpaca's whole asset list is never read for a symbol list (issue #46). Each asset is read
+as Alpaca sends it: exchange, class and status keep Alpaca's strings, so a value `alpaca-py` does
+not know yet, such as a new exchange, never fails the read. The raw payload stored on
+`AlpacaAssetDetails` is that entry.
+
+An execution answers `registered_assets`: each asset's `symbol`, `uid`, `unique_identifier`,
+`alpaca_asset_id`, `name`, `tradable` and `fractionable`, registered now or before, so a caller
+needs no per-asset read afterwards.
 
 Missing or failed OpenFIGI enrichment is returned as a warning. The asset remains eligible.
 Alpaca `status` and `tradable` values are stored on `AlpacaAssetDetails`; inactive and
@@ -55,7 +61,7 @@ single long-running response. The API persists these real orchestration boundari
 
 1. prepare required exact-symbol input;
 2. resolve the selected registered Alpaca account and its stored Secret references;
-3. resolve all requested US-equity identities from one all-status catalog request;
+3. resolve the requested US-equity identities, asking Alpaca about those symbols only;
 4. validate immutable Alpaca asset UUIDs;
 5. attempt optional OpenFIGI enrichment;
 6. check canonical Alpaca identifiers against registered Main Sequence assets;

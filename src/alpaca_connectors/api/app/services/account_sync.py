@@ -8,17 +8,27 @@ and allocates the snapshot to the account's funds (ADR 0023). It is recorded as 
 
 from __future__ import annotations
 
+import logging
+import time
 import uuid
+from collections.abc import Callable, Mapping
+from dataclasses import asdict
 from typing import Any
 
 from msm.api.http import OperationError
 from pydantic import ValidationError
 
+from alpaca_connectors.account.credentials import (
+    build_alpaca_trading_client,
+    resolve_registered_alpaca_credentials,
+)
 from alpaca_connectors.account.ownership import AccountOwner
+from alpaca_connectors.account.services import get_account_registration
+from alpaca_connectors.holdings import capture_alpaca_account_holdings
 from alpaca_connectors.holdings.allocation import (
     FundAllocationResult,
+    account_price_reader,
     allocate_sized_target,
-    registered_account_price_reader,
     size_account_target,
 )
 from alpaca_connectors.operations.account_sync import (
@@ -34,7 +44,8 @@ from alpaca_connectors.operations.account_sync import (
 
 from ..errors import api_http_error
 from ..schemas import AccountSyncOperationResponse, AccountSyncResult
-from .holdings import capture_snapshot as capture_holdings
+
+logger = logging.getLogger(__name__)
 
 SYNC_FAILED = OperationError(
     code="account_sync_failed",
@@ -99,35 +110,109 @@ def sync_result(
     )
 
 
+class _AlpacaTime:
+    """Seconds spent in Alpaca calls during one sync, for the sync's timing log line."""
+
+    def __init__(self) -> None:
+        self.seconds = 0.0
+
+    def timed(self, call: Callable[..., Any]) -> Callable[..., Any]:
+        def run(*args: Any, **kwargs: Any) -> Any:
+            started = time.monotonic()
+            try:
+                return call(*args, **kwargs)
+            finally:
+                self.seconds += time.monotonic() - started
+
+        return run
+
+
+class _TimedClient:
+    """An Alpaca trading client whose calls add to ``_AlpacaTime``."""
+
+    def __init__(self, client: Any, alpaca: _AlpacaTime) -> None:
+        self._client = client
+        self._alpaca = alpaca
+
+    def __getattr__(self, name: str) -> Any:
+        value = getattr(self._client, name)
+        return self._alpaca.timed(value) if callable(value) else value
+
+
+def capture_holdings(
+    account_uid: str, *, registration: Mapping[str, Any], client: Any
+) -> dict[str, Any]:
+    """The capture with Alpaca's reported equity, from the registration and client in hand."""
+    return asdict(
+        capture_alpaca_account_holdings(account_uid, registration=registration, client=client)
+    )
+
+
+def _log_timings(account_uid: str, status: str, steps: dict[str, float], alpaca: float) -> None:
+    logger.info(
+        "account sync %s account=%s %s alpaca_seconds=%.2f",
+        status,
+        account_uid,
+        " ".join(f"{step}_seconds={seconds:.2f}" for step, seconds in steps.items()),
+        alpaca,
+    )
+
+
 def sync_account(account_uid: str, *, owner: AccountOwner) -> AccountSyncOperationResponse:
     """Capture the holdings, size the target, allocate, and answer the terminal operation.
 
-    A step that fails is the operation's ``failed`` outcome at that step, not an HTTP error; only
-    a failure to record the operation itself propagates. A snapshot published before a later step
-    failed stays published. An account with no target, or a capture that published no snapshot,
-    ends after the capture with the two other steps skipped.
+    The registration and the keys are read once and serve the capture and the sizing's latest
+    trades. A step that fails is the operation's ``failed`` outcome at that step, not an HTTP
+    error; only a failure to record the operation itself propagates. A snapshot published before a
+    later step failed stays published. An account with no target, or a capture that published no
+    snapshot, ends after the capture with the two other steps skipped. Each step's duration and
+    the time spent in Alpaca are logged in one line when the sync ends.
     """
     operation = start_account_sync_operation(account_uid=account_uid, owner=owner)
     step = CAPTURE_STEP
+    alpaca = _AlpacaTime()
+    durations: dict[str, float] = {}
+    started = time.monotonic()
+
+    def finish_step(next_step: str) -> None:
+        nonlocal step, started
+        now = time.monotonic()
+        durations[step] = now - started
+        step, started = next_step, now
+
     try:
-        captured = capture_holdings(account_uid)
+        registration = get_account_registration(account_uid)
+        if registration is None:
+            raise LookupError(f"Alpaca account registration {account_uid!s} does not exist.")
+        credentials = resolve_registered_alpaca_credentials(registration)
+        client = _TimedClient(
+            build_alpaca_trading_client(
+                credentials=credentials, paper=bool(registration["is_paper"])
+            ),
+            alpaca,
+        )
+        captured = capture_holdings(account_uid, registration=registration, client=client)
         allocation = None
         if captured.get("holdings_set_uid") is not None:
-            step = SIZE_STEP
+            finish_step(SIZE_STEP)
             sized = size_account_target(
                 account_uid,
                 valuation_time=captured["time_index"],
                 equity=captured.get("equity"),
-                price_reader=registered_account_price_reader(account_uid),
+                price_reader=alpaca.timed(account_price_reader(credentials)),
             )
             if sized is not None:
-                step = ALLOCATE_STEP
+                finish_step(ALLOCATE_STEP)
                 allocation = allocate_sized_target(account_uid, sized)
         result = sync_result(captured, allocation)
     except Exception as exc:
+        finish_step(step)
+        _log_timings(account_uid, "failed", durations, alpaca.seconds)
         return operation_response(
             fail_account_sync_operation(operation, error=sync_error(exc), step=step)
         )
+    finish_step(step)
+    _log_timings(account_uid, "succeeded", durations, alpaca.seconds)
     return operation_response(
         succeed_account_sync_operation(
             operation,

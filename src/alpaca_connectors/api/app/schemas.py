@@ -114,11 +114,32 @@ class AssetRegistrationDiscoveryResponse(BaseModel):
     warnings_by_symbol: dict[str, str]
 
 
+class RegisteredAssetResponse(BaseModel):
+    """One asset a registration answers for, with what a caller needs next (issue #46)."""
+
+    symbol: str = Field(description="Alpaca symbol of the asset.")
+    uid: str = Field(description="Main Sequence asset UID.")
+    unique_identifier: str = Field(description="Canonical identifier, ALPACA::<alpaca_asset_id>.")
+    alpaca_asset_id: str = Field(description="Immutable Alpaca asset UUID.")
+    name: str | None = Field(default=None, description="Alpaca asset name.")
+    tradable: bool | None = Field(default=None, description="Whether Alpaca lets it trade.")
+    fractionable: bool | None = Field(
+        default=None, description="Whether Alpaca accepts fractional quantities of it."
+    )
+
+
 class AssetRegistrationExecuteResponse(BaseModel):
     request: AssetRegistrationRequest
     plan_summary: dict[str, Any]
     resolution_summary: dict[str, Any]
     assets_by_symbol: dict[str, str]
+    registered_assets: list[RegisteredAssetResponse] = Field(
+        default_factory=list,
+        description=(
+            "Every asset the registration answers for, registered now or before, with its uid, "
+            "canonical identifier, name and trading flags, so no per-asset read is needed."
+        ),
+    )
     existing_asset_uids_by_symbol: dict[str, str]
     created_asset_uids_by_symbol: dict[str, str]
     not_registered_missing_alpaca_symbols: list[str]

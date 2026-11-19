@@ -63,11 +63,16 @@ def configuration(**overrides) -> AlpacaPortfolioConfiguration:
     return AlpacaPortfolioConfiguration.model_validate(values)
 
 
+DEFINITIONS = "alpaca_connectors.portfolios.signal_definitions"
+# The definition revision 0029 gave the portfolio: its signal's key is still the configuration UID.
+DEFINITION = SimpleNamespace(uid=DEFINITION_UID, signal_key=str(CONFIGURATION_UID))
+
+
 def _removal(row, *, retire=None):
     """Run the removal with Markets and storage replaced; return the recorder of their calls.
 
     The signal is the one revision 0029 gave the portfolio: its key is still the configuration
-    UID, so its UID is ``provided_signal_uid``.
+    UID, so its UID is ``provided_signal_uid``. Each kind is one set-based call (issue #46).
     """
     calls = MagicMock()
     calls.retire.side_effect = retire or (
@@ -76,23 +81,21 @@ def _removal(row, *, retire=None):
     patches = (
         patch(f"{CONFIGURATIONS}.get_portfolio_configuration", return_value=row),
         patch("alpaca_connectors.markets_api.retire_portfolio", calls.retire),
-        patch(f"{CONFIGURATIONS}.record_ended_portfolio", calls.record),
-        patch(f"{CONFIGURATIONS}.delete_portfolio_configuration_row", calls.delete),
+        patch(f"{CONFIGURATIONS}.record_ended_portfolios", calls.record),
+        patch(f"{CONFIGURATIONS}.delete_portfolio_configuration_rows", calls.delete),
         patch(
-            "alpaca_connectors.portfolios.signal_definitions.get_signal_definition",
-            return_value=SimpleNamespace(signal_key=str(CONFIGURATION_UID)),
+            f"{DEFINITIONS}.signal_definitions_by_uids",
+            return_value={str(DEFINITION_UID): DEFINITION},
         ),
-        patch(
-            "alpaca_connectors.portfolios.signal_definitions.delete_signal_definition",
-            calls.definition,
-        ),
+        patch(f"{DEFINITIONS}.end_signal_definitions", calls.definition),
         # A shared rebalance rule: none was created with this portfolio (issue #42).
-        patch.object(PortfolioRebalanceConfiguration, "filter", return_value=[]),
+        patch(f"{CONFIGURATIONS}.inline_rebalance_configurations", return_value={}),
     )
     calls.definition.return_value = {
-        "uid": str(DEFINITION_UID),
-        "deleted": True,
-        "signal": {"uid": provided_signal_uid(CONFIGURATION_UID), "state": "kept"},
+        str(DEFINITION_UID): {
+            "state": "deleted",
+            "signal": {"uid": provided_signal_uid(CONFIGURATION_UID), "state": "kept"},
+        }
     }
     return calls, patches
 
@@ -100,10 +103,14 @@ def _removal(row, *, retire=None):
 def _recorded():
     """The record the account delete finishes: the retired Portfolio and its signal."""
     return call.record(
-        account_uid=str(ACCOUNT_UID),
-        portfolio_uid=str(PORTFOLIO_UID),
-        portfolio_configuration_uid=CONFIGURATION_UID,
-        signal_uid=provided_signal_uid(CONFIGURATION_UID),
+        [
+            {
+                "account_uid": str(ACCOUNT_UID),
+                "portfolio_uid": str(PORTFOLIO_UID),
+                "portfolio_configuration_uid": CONFIGURATION_UID,
+                "signal_uid": provided_signal_uid(CONFIGURATION_UID),
+            }
+        ]
     )
 
 
@@ -118,8 +125,8 @@ def test_the_owner_retires_the_portfolio_then_deletes_its_configuration() -> Non
     assert calls.mock_calls == [
         call.retire(str(PORTFOLIO_UID)),
         _recorded(),
-        call.delete(CONFIGURATION_UID),
-        call.definition(str(DEFINITION_UID)),
+        call.delete([CONFIGURATION_UID]),
+        call.definition([DEFINITION]),
     ]
     assert removal.summary() == {
         "configuration_uid": str(CONFIGURATION_UID),
@@ -138,12 +145,8 @@ def test_the_owner_retires_the_portfolio_then_deletes_its_configuration() -> Non
 
 
 def test_a_definition_another_portfolio_follows_stays() -> None:
-    from alpaca_connectors.portfolios.signal_definitions import SignalDefinitionError
-
     calls, patches = _removal(configuration())
-    calls.definition.side_effect = SignalDefinitionError(
-        "signal_followed", "Portfolios follow this signal; delete them first.", status_code=409
-    )
+    calls.definition.return_value = {str(DEFINITION_UID): {"state": "followed", "signal": None}}
     with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6]:
         removal = delete_provided_weights_portfolio(CONFIGURATION_UID, owner=OWNER)
 
@@ -161,7 +164,7 @@ def test_a_definition_whose_delete_fails_never_fails_the_portfolio_delete() -> N
     with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6]:
         removal = delete_provided_weights_portfolio(CONFIGURATION_UID, owner=OWNER)
 
-    assert calls.delete.call_args == call(CONFIGURATION_UID)
+    assert calls.delete.call_args == call([CONFIGURATION_UID])
     assert removal.summary()["portfolio"]["state"] == "retired"
     assert removal.summary()["signal_definition"] == {
         "uid": str(DEFINITION_UID),
@@ -202,6 +205,41 @@ def test_a_portfolio_an_account_targets_is_refused_and_nothing_changes() -> None
     calls.delete.assert_not_called()
 
 
+def test_several_portfolios_end_together_and_a_refusal_keeps_the_rest() -> None:
+    # The account delete ends its portfolios in one pass (issue #46): retiring is one call per
+    # portfolio, everything else one call for all. A refusal keeps that portfolio and those
+    # after it unchanged; those before it end as they would have one at a time.
+    from alpaca_connectors.portfolios.provided_weights import end_portfolio_configurations
+
+    first = configuration()
+    held = configuration(uid=uuid.UUID(int=2), portfolio_uid=uuid.UUID(int=3))
+    later = configuration(uid=uuid.UUID(int=4), portfolio_uid=uuid.UUID(int=5))
+    refusal = MarketsConflictError("an account's current target names it")
+
+    def retire(uid):
+        if uid == str(held.portfolio_uid):
+            raise refusal
+        return SimpleNamespace(uid=uid, retired_at=RETIRED_AT)
+
+    calls, patches = _removal(first, retire=retire)
+    with (
+        patches[1],
+        patches[2],
+        patches[3],
+        patches[4],
+        patches[5],
+        patches[6],
+        pytest.raises(ProvidedWeightsError) as raised,
+    ):
+        end_portfolio_configurations([first, held, later])
+
+    assert raised.value.code == "portfolio_in_account_target"
+    assert calls.retire.call_args_list == [call(str(PORTFOLIO_UID)), call(str(held.portfolio_uid))]
+    assert calls.record.call_args == _recorded()
+    calls.delete.assert_called_once_with([CONFIGURATION_UID])
+    calls.definition.assert_called_once_with([DEFINITION])
+
+
 def test_only_the_owner_ends_it() -> None:
     calls, patches = _removal(configuration())
     with (
@@ -227,7 +265,7 @@ def test_a_configuration_without_a_portfolio_is_deleted_without_retiring() -> No
 
     calls.retire.assert_not_called()
     calls.record.assert_not_called()
-    calls.delete.assert_called_once_with(CONFIGURATION_UID)
+    calls.delete.assert_called_once_with([CONFIGURATION_UID])
     assert removal.summary()["portfolio"]["state"] == "absent"
 
 
@@ -352,8 +390,8 @@ def test_the_cli_ends_any_portfolio_for_the_operator() -> None:
     assert calls.mock_calls == [
         call.retire(str(PORTFOLIO_UID)),
         _recorded(),
-        call.delete(CONFIGURATION_UID),
-        call.definition(str(DEFINITION_UID)),
+        call.delete([CONFIGURATION_UID]),
+        call.definition([DEFINITION]),
     ]
 
 
@@ -373,20 +411,12 @@ def _end_with_inline_rebalance(*, named_by_another: bool = False, delete_error=N
         patches[3],
         patches[4],
         patches[5],
-        patch.object(
-            PortfolioRebalanceConfiguration,
-            "filter",
-            calls.rebalances,
-        ),
-        patch.object(
-            AlpacaPortfolioConfiguration,
-            "filter",
-            calls.portfolios,
-        ),
-        patch(f"{CONFIGURATIONS}.delete_rebalance_configuration", calls.delete_rebalance),
+        patch(f"{CONFIGURATIONS}.inline_rebalance_configurations", calls.rebalances),
+        patch(f"{CONFIGURATIONS}.rebalance_configuration_uids_named", calls.portfolios),
+        patch(f"{CONFIGURATIONS}.delete_rebalance_configuration_rows", calls.delete_rebalance),
     ):
-        calls.rebalances.return_value = [SimpleNamespace(uid=REBALANCE_UID)]
-        calls.portfolios.return_value = [object()] if named_by_another else []
+        calls.rebalances.return_value = {str(CONFIGURATION_UID): SimpleNamespace(uid=REBALANCE_UID)}
+        calls.portfolios.return_value = {str(REBALANCE_UID)} if named_by_another else set()
         removal = delete_provided_weights_portfolio(CONFIGURATION_UID, owner=OWNER)
     return calls, removal.summary()["rebalance_configuration"]
 
@@ -395,9 +425,9 @@ def test_an_inline_rebalance_configuration_is_deleted_with_its_portfolio() -> No
     calls, rebalance = _end_with_inline_rebalance()
 
     # Found by the portfolio it was created with, after the configuration row is gone.
-    calls.rebalances.assert_called_once_with(portfolio_configuration_uid=CONFIGURATION_UID, limit=1)
-    calls.portfolios.assert_called_once_with(rebalance_configuration_uid=REBALANCE_UID, limit=1)
-    calls.delete_rebalance.assert_called_once_with(str(REBALANCE_UID))
+    calls.rebalances.assert_called_once_with([CONFIGURATION_UID])
+    calls.portfolios.assert_called_once_with([REBALANCE_UID])
+    calls.delete_rebalance.assert_called_once_with([REBALANCE_UID])
     assert rebalance == {"uid": str(REBALANCE_UID), "state": "deleted"}
     names = [entry[0] for entry in calls.mock_calls]
     assert names.index("delete") < names.index("delete_rebalance")
@@ -413,5 +443,5 @@ def test_an_inline_rebalance_configuration_another_portfolio_names_stays() -> No
 def test_a_failed_rebalance_delete_never_fails_the_portfolio_s_delete() -> None:
     calls, rebalance = _end_with_inline_rebalance(delete_error=RuntimeError("storage unavailable"))
 
-    calls.delete.assert_called_once_with(CONFIGURATION_UID)
+    calls.delete.assert_called_once_with([CONFIGURATION_UID])
     assert rebalance == {"uid": str(REBALANCE_UID), "state": "failed"}

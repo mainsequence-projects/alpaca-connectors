@@ -123,34 +123,38 @@ alpaca-connectors holdings capture --account-uid <ACCOUNT_UID> --execute
 ```
 
 Account registration always creates an initial holdings snapshot and enforces the same hard
-registry as every later holdings capture. Every non-zero position is resolved to the Alpaca Asset
-catalog and stored as `ALPACA::<alpaca_catalog_asset_uuid>`, for every supported Alpaca asset
-class. The whole position set uses one unfiltered Alpaca catalog request; it never performs one
-backend operation per position. The catalog is read as Alpaca sends it, so an asset on an exchange
-(or with a class or status) the installed `alpaca-py` does not know yet keeps Alpaca's value instead
-of failing the read; a catalog entry that is not an asset record is skipped and logged. If a
-position lacks a valid Alpaca UUID, Alpaca cannot return its asset record, or the asset catalog
-returns a conflicting identity, the operation reports the affected symbol and identifiers and
-writes nothing.
+registry as every later holdings capture. Every non-zero position is resolved to its Alpaca asset
+and stored as `ALPACA::<alpaca_catalog_asset_uuid>`, for every supported Alpaca asset class. One
+read of this project's `AlpacaAssetDetails` table finds the held assets it already describes; those
+need nothing from Alpaca. Alpaca is asked only about the others, one `GET /v2/assets/{id}` each,
+read concurrently, because Alpaca has no read of several assets by id; Alpaca's whole asset list is
+never read (issue #46). Each asset is read as Alpaca sends it, so an asset on an exchange (or with
+a class or status) the installed `alpaca-py` does not know yet keeps Alpaca's value instead of
+failing the read. If a position lacks a valid Alpaca UUID, Alpaca cannot return its asset record,
+or Alpaca returns a conflicting identity, the operation reports the affected symbol and identifiers
+and writes nothing.
 
 Registration and capture then write to Markets in one ms-markets `registerAccount` call
 (`POST /api/v1/account/registration/`, ms-markets ADR 0051), one Markets transaction that:
 
-- creates each held asset, with its asset type, that Markets does not have yet, and writes an
-  asset snapshot (name, ticker, exchange) only where it differs from the asset's latest one, a
-  comparison Markets makes, not the connector;
+- creates each new held asset, with its asset type and trading calendar, and writes its asset
+  snapshot (name, ticker, exchange); only the held assets this project does not describe yet are
+  sent, since Markets accepts a position whose asset it already has without the asset being
+  listed, so a capture does not refresh the snapshot of an asset it already holds;
 - creates the shared ms-markets currency Asset `USD`, which cash is stored against, when it is
   missing (no Alpaca asset-detail row and no currency-pair `CurrencySpot` record);
 - creates the Account or changes only its differing fields; a capture sends the Account's current
   name and no flags, so it leaves the Account as it is;
 - writes the holdings set, replacing a snapshot at the same time, as a holdings publish always did.
 
-This project's own rows follow the call: an `AlpacaAssetDetails` row for each held asset that has
-none yet, keyed by the uid Markets answered, and, for a registration, the account's details row.
-A registration of a known account therefore makes one Markets call (`registerAccount`) and, on this
-project's tables, reads the account's details row and which held assets have detail rows, and
-writes the account's details row. A capture makes two Markets calls (the Account read and
-`registerAccount`) and the same two reads. The API answers a registration from what it wrote,
+This project's own rows follow the call: an `AlpacaAssetDetails` row for each new held asset,
+keyed by the uid Markets answered, and, for a registration, the account's details row. The trading
+calendars are checked only when a new asset names one, once per process
+([ADR 0026](../adrs/0026_assets_are_registered_with_their_trading_calendar.md)). A registration of
+a known account whose held assets are all described therefore makes one Markets call
+(`registerAccount`), asks Alpaca about no asset and, on this project's tables, reads the account's
+details row and which held assets have detail rows, and writes the account's details row. A
+capture makes two Markets calls (the Account read and `registerAccount`) and the same two reads. The API answers a registration from what it wrote,
 without reading it back. A dry run reports which assets and whether the `USD` Asset would be
 created, and writes nothing. OpenFIGI enrichment is optional. There is no option to skip or relax
 initial holdings capture.
@@ -171,6 +175,7 @@ a target in ms-markets, the sync also sizes it and allocates the snapshot to the
 Agent's `capture_holdings` publish the snapshot only.
 
 For crypto, Alpaca positions and its Asset catalog can expose different UUIDs for the same pair.
-The connector matches the position to the already-loaded catalog by normalized symbol (for example,
-`BTCUSD` resolving to catalog asset `BTC/USD`) and stores the immutable catalog Asset UUID. For
-non-crypto assets, the position UUID and catalog UUID must match exactly.
+The connector matches a crypto position by normalized symbol, first against the crypto assets this
+project describes, then by asking Alpaca for the symbol (for example, `BTCUSD` resolving to asset
+`BTC/USD`), and stores the immutable catalog Asset UUID. For non-crypto assets, the position UUID
+and catalog UUID must match exactly.

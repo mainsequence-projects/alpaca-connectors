@@ -283,40 +283,31 @@ def test_a_missing_snapshot_is_not_found_and_other_failures_pass_through() -> No
 
 
 # ------------------------------------------------------------------------------------------------
-# The three lookups are set-based
+# The lookups are set-based
 # ------------------------------------------------------------------------------------------------
-def test_asset_terms_are_read_in_three_set_based_calls(monkeypatch) -> None:
-    from alpaca_connectors import markets_api
+def test_asset_terms_are_one_details_read_and_one_price_read(monkeypatch) -> None:
+    from alpaca_connectors.assets import resolution
 
-    aapl, msft, gone = (str(uuid.uuid4()) for _ in range(3))
+    aapl, msft = (str(uuid.uuid4()) for _ in range(2))
     calls: list[Any] = []
 
-    def by_identifier(identifiers: Any) -> dict[str, Any]:
-        calls.append(("assets", list(identifiers)))
+    def details(identifiers: Any) -> dict[str, Any]:
+        calls.append(("details", list(identifiers)))
+        # "GONE" has no Alpaca details row, so it is absent; no Markets read is made.
         return {
-            "AAPL": SimpleNamespace(uid=aapl),
-            "MSFT": SimpleNamespace(uid=msft),
-            "GONE": SimpleNamespace(uid=gone),
+            "AAPL": {"asset_uid": aapl, "symbol": "AAPL", "fractionable": True},
+            "MSFT": {"asset_uid": msft, "symbol": "MSFT", "fractionable": False},
         }
-
-    def details(asset_uids: Any) -> dict[str, tuple[str, bool]]:
-        calls.append(("details", list(asset_uids)))
-        return {aapl: ("AAPL", True), msft: ("MSFT", False)}
 
     def prices(symbols: Any) -> dict[str, float]:
         calls.append(("prices", list(symbols)))
         return {"AAPL": 200.0}
 
-    monkeypatch.setattr(markets_api, "assets_by_identifier", by_identifier)
-    monkeypatch.setattr(allocation, "read_alpaca_details", details)
+    monkeypatch.setattr(resolution, "alpaca_details_by_identifier", details)
 
     terms = read_asset_terms(["AAPL", "MSFT", "GONE"], price_reader=prices)
 
-    assert calls == [
-        ("assets", ["AAPL", "MSFT", "GONE"]),
-        ("details", [aapl, msft, gone]),
-        ("prices", ["AAPL", "MSFT"]),
-    ]
+    assert calls == [("details", ["AAPL", "MSFT", "GONE"]), ("prices", ["AAPL", "MSFT"])]
     # An asset with no Alpaca details is left out, and one with no latest trade has no price.
     assert terms == {
         "AAPL": AssetTerms(asset_uid=aapl, price=200.0, fractionable=True),

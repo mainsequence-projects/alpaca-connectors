@@ -830,7 +830,9 @@ def list_rebalance_configurations(
     offset: int = 0,
     search: str | None = None,
     ordering: str = "name",
+    uids: Sequence[uuid.UUID | str] | None = None,
 ) -> tuple[list[PortfolioRebalanceConfiguration], int]:
+    """A page of rebalance configurations; ``uids`` keeps only those (issue #46)."""
     from msm.bootstrap import resolve_runtime
     from msm.repositories.base import compile_markets_statement, execute_markets_operation
     from sqlalchemy import func, or_, select
@@ -841,6 +843,10 @@ def list_rebalance_configurations(
         row_model_name="PortfolioRebalanceConfiguration",
     )
     statement = select(PortfolioRebalanceConfigurationTable)
+    if uids is not None:
+        statement = statement.where(
+            PortfolioRebalanceConfigurationTable.uid.in_([uuid.UUID(str(uid)) for uid in uids])
+        )
     if search:
         pattern = f"%{search.strip()}%"
         statement = statement.where(
@@ -967,12 +973,15 @@ def create_portfolio_configuration_row(
     commission_fee: float = 0.00018,
     scheduled: bool = True,
     uid: uuid.UUID | str | None = None,
+    rebalance: PortfolioRebalanceConfiguration | None = None,
 ) -> AlpacaPortfolioConfiguration:
     """Store one portfolio configuration of an account, and its owner; it touches no platform Job.
 
     The account's owner owns its portfolios (ADR 0028, decision 3): the caller has checked that
     the owner given here owns ``account_uid``. ``signal_definition_uid`` is ``None`` only while
-    the route of ADR 0024 creates the portfolio's own definition right after.
+    the route of ADR 0024 creates the portfolio's own definition right after. ``rebalance`` is
+    the named rule when the caller already holds it (it resolved it, or just created it), so it
+    is not read again (issue #46).
     """
     from msm.bootstrap import resolve_runtime
     from msm.repositories.crud import create_model
@@ -983,7 +992,8 @@ def create_portfolio_configuration_row(
     if commission_fee < 0:
         raise ValueError("commission_fee must be greater than or equal to zero.")
     _start_runtime()
-    validate_portfolio_references(rebalance_configuration_uid=rebalance_uid)
+    if rebalance is None:
+        validate_portfolio_references(rebalance_configuration_uid=rebalance_uid)
     now = utc_now()
     values = {
         "uid": uuid.UUID(str(uid)) if uid is not None else new_markets_uid(),
@@ -1052,9 +1062,10 @@ def list_portfolio_configurations(
     signal_definition_uid: uuid.UUID | str | None = None,
     key: str | None = None,
     ordering: str = "name",
+    uids: Sequence[uuid.UUID | str] | None = None,
 ) -> tuple[list[AlpacaPortfolioConfiguration], int]:
     """A page of portfolio configurations; ``key`` keeps those whose signal definition has it,
-    the key a provided-weights create was given (issue #43)."""
+    the key a provided-weights create was given (issue #43), and ``uids`` only those (#46)."""
     from msm.bootstrap import resolve_runtime
     from msm.repositories.base import compile_markets_statement, execute_markets_operation
     from sqlalchemy import func, or_, select
@@ -1070,6 +1081,10 @@ def list_portfolio_configurations(
         if not accounts:
             return [], 0
         statement = statement.where(AlpacaPortfolioConfigurationTable.account_uid.in_(accounts))
+    if uids is not None:
+        statement = statement.where(
+            AlpacaPortfolioConfigurationTable.uid.in_([uuid.UUID(str(uid)) for uid in uids])
+        )
     if signal_definition_uid is not None:
         statement = statement.where(
             AlpacaPortfolioConfigurationTable.signal_definition_uid
@@ -1125,12 +1140,18 @@ def update_portfolio_configuration_row(
     *,
     values: dict[str, Any],
 ) -> AlpacaPortfolioConfiguration:
-    if get_portfolio_configuration(configuration_uid) is None:
-        raise LookupError(f"Portfolio configuration {configuration_uid!s} does not exist.")
-    return AlpacaPortfolioConfiguration.update(
-        configuration_uid,
-        {**values, "updated_at": utc_now()},
-    )
+    """Write ``values`` to one row in one statement; its ``RETURNING`` row is the answer.
+
+    No read first (issue #46): an update that returns no row finds no configuration.
+    """
+    _start_runtime()
+    try:
+        return AlpacaPortfolioConfiguration.update(
+            configuration_uid,
+            {**values, "updated_at": utc_now()},
+        )
+    except LookupError as exc:
+        raise LookupError(f"Portfolio configuration {configuration_uid!s} does not exist.") from exc
 
 
 def update_portfolio_configuration(
@@ -1247,6 +1268,99 @@ def delete_portfolio_configuration_row(configuration_uid: uuid.UUID | str) -> di
     return AlpacaPortfolioConfiguration.delete(configuration_uid)
 
 
+def _uuid_list(values: Sequence[Any]) -> list[uuid.UUID]:
+    return list(dict.fromkeys(uuid.UUID(str(value)) for value in values if value is not None))
+
+
+def _select_rows(table: type[MarketsBase], statement: Any) -> list[dict[str, Any]]:
+    """Run one select of this application's own tables and answer its rows."""
+    from msm.bootstrap import resolve_runtime
+    from msm.repositories.base import compile_markets_statement, execute_markets_operation
+
+    _start_runtime()
+    runtime = resolve_runtime(models=[table], row_model_name=table.__markets_base_identifier__)
+    operation = compile_markets_statement(statement, context=runtime.context, operation="select")
+    return operation_result_rows(execute_markets_operation(operation, context=runtime.context))
+
+
+def delete_rows_in(table: type[MarketsBase], column: str, values: Sequence[Any]) -> None:
+    """Delete the rows whose ``column`` is one of ``values``: one statement per batch (#46)."""
+    from msm.bootstrap import resolve_runtime
+    from msm.repositories.base import compile_markets_statement, execute_markets_operation
+    from sqlalchemy import delete
+
+    from alpaca_connectors.markets_api import write_in_batches
+
+    if not values:
+        return
+    _start_runtime()
+    runtime = resolve_runtime(models=[table], row_model_name=table.__markets_base_identifier__)
+
+    def write(batch: list[Any]) -> None:
+        operation = compile_markets_statement(
+            delete(table).where(getattr(table, column).in_(batch)),
+            context=runtime.context,
+            operation="delete",
+        )
+        execute_markets_operation(operation, context=runtime.context)
+
+    write_in_batches(write, values)
+
+
+def delete_portfolio_configuration_rows(configuration_uids: Sequence[uuid.UUID | str]) -> None:
+    """Delete several portfolio configurations in one statement; their own bars go with them."""
+    delete_rows_in(AlpacaPortfolioConfigurationTable, "uid", _uuid_list(configuration_uids))
+
+
+def inline_rebalance_configurations(
+    portfolio_configuration_uids: Sequence[uuid.UUID | str],
+) -> dict[str, PortfolioRebalanceConfiguration]:
+    """The rules created inline with these portfolios (issue #42), by portfolio, in one read."""
+    from sqlalchemy import select
+
+    from alpaca_connectors.markets_api import read_in_batches
+
+    table = PortfolioRebalanceConfigurationTable
+    rows = read_in_batches(
+        lambda batch: _select_rows(
+            table, select(table).where(table.portfolio_configuration_uid.in_(batch))
+        ),
+        _uuid_list(portfolio_configuration_uids),
+    )
+    return {
+        str(uuid.UUID(str(row["portfolio_configuration_uid"]))): (
+            PortfolioRebalanceConfiguration.model_validate(row)
+        )
+        for row in rows
+    }
+
+
+def rebalance_configuration_uids_named(
+    rebalance_configuration_uids: Sequence[uuid.UUID | str],
+) -> set[str]:
+    """Which of these rules a portfolio configuration names, in one read."""
+    from sqlalchemy import select
+
+    from alpaca_connectors.markets_api import read_in_batches
+
+    table = AlpacaPortfolioConfigurationTable
+    rows = read_in_batches(
+        lambda batch: _select_rows(
+            table,
+            select(table.rebalance_configuration_uid)
+            .where(table.rebalance_configuration_uid.in_(batch))
+            .distinct(),
+        ),
+        _uuid_list(rebalance_configuration_uids),
+    )
+    return {str(uuid.UUID(str(row["rebalance_configuration_uid"]))) for row in rows}
+
+
+def delete_rebalance_configuration_rows(configuration_uids: Sequence[uuid.UUID | str]) -> None:
+    """Delete several rebalance configurations in one statement."""
+    delete_rows_in(PortfolioRebalanceConfigurationTable, "uid", _uuid_list(configuration_uids))
+
+
 def portfolio_configurations_of_account(
     account_uid: uuid.UUID | str,
 ) -> list[AlpacaPortfolioConfiguration]:
@@ -1267,22 +1381,25 @@ def portfolio_configurations_naming_bars(
     bars_configuration_uid: uuid.UUID | str,
 ) -> list[AlpacaPortfolioConfiguration]:
     """The portfolios that name a bars feed: those not yet adopted, priced by it (ADR 0024)."""
-    from msm.bootstrap import resolve_runtime
-    from msm.repositories.base import compile_markets_statement, execute_markets_operation
+    return portfolio_configurations_naming_any_bars([bars_configuration_uid])
+
+
+def portfolio_configurations_naming_any_bars(
+    bars_configuration_uids: Sequence[uuid.UUID | str],
+) -> list[AlpacaPortfolioConfiguration]:
+    """The portfolios that name any of these bars feeds, in one read (issue #46)."""
     from sqlalchemy import select
 
+    from alpaca_connectors.markets_api import read_in_batches
+
     table = AlpacaPortfolioConfigurationTable
-    _start_runtime()
-    runtime = resolve_runtime(models=[table], row_model_name="AlpacaPortfolioConfiguration")
-    operation = compile_markets_statement(
-        select(table).where(table.bars_configuration_uid == uuid.UUID(str(bars_configuration_uid))),
-        context=runtime.context,
-        operation="select",
-    )
     return [
         AlpacaPortfolioConfiguration.model_validate(row)
-        for row in operation_result_rows(
-            execute_markets_operation(operation, context=runtime.context)
+        for row in read_in_batches(
+            lambda batch: _select_rows(
+                table, select(table).where(table.bars_configuration_uid.in_(batch))
+            ),
+            _uuid_list(bars_configuration_uids),
         )
     ]
 
@@ -1353,17 +1470,72 @@ def record_ended_portfolio(
     reads it to delete them (ADR 0028, decision 8). Recording the same portfolio again returns
     the record already stored.
     """
-    _start_runtime()
-    existing = EndedPortfolio.filter(portfolio_uid=uuid.UUID(str(portfolio_uid)), limit=1)
-    if existing:
-        return existing[0]
-    return EndedPortfolio.create(
-        account_uid=uuid.UUID(str(account_uid)),
-        portfolio_uid=uuid.UUID(str(portfolio_uid)),
-        portfolio_configuration_uid=uuid.UUID(str(portfolio_configuration_uid)),
-        signal_uid=str(signal_uid),
-        ended_at=utc_now(),
-    )
+    return record_ended_portfolios(
+        [
+            {
+                "account_uid": account_uid,
+                "portfolio_uid": portfolio_uid,
+                "portfolio_configuration_uid": portfolio_configuration_uid,
+                "signal_uid": signal_uid,
+            }
+        ]
+    )[0]
+
+
+def record_ended_portfolios(records: Sequence[dict[str, Any]]) -> list[EndedPortfolio]:
+    """Record several retired ``Portfolio`` rows and their signals: one read, one insert (#46).
+
+    Each record names ``account_uid``, ``portfolio_uid``, ``portfolio_configuration_uid`` and
+    ``signal_uid``. A portfolio recorded already keeps the record stored; the answer is each
+    portfolio's record, in the order given.
+    """
+    from msm.bootstrap import resolve_runtime
+    from msm.repositories.crud import bulk_upsert_model
+    from sqlalchemy import select
+
+    from alpaca_connectors.markets_api import read_in_batches
+
+    if not records:
+        return []
+    table = EndedPortfolioTable
+    portfolio_uids = _uuid_list([record["portfolio_uid"] for record in records])
+    stored = {
+        str(row.portfolio_uid): row
+        for row in (
+            EndedPortfolio.model_validate(row)
+            for row in read_in_batches(
+                lambda batch: _select_rows(
+                    table, select(table).where(table.portfolio_uid.in_(batch))
+                ),
+                portfolio_uids,
+            )
+        )
+    }
+    now = utc_now()
+    missing = {
+        str(uuid.UUID(str(record["portfolio_uid"]))): {
+            "uid": new_markets_uid(),
+            "account_uid": uuid.UUID(str(record["account_uid"])),
+            "portfolio_uid": uuid.UUID(str(record["portfolio_uid"])),
+            "portfolio_configuration_uid": uuid.UUID(str(record["portfolio_configuration_uid"])),
+            "signal_uid": str(record["signal_uid"]),
+            "ended_at": now,
+        }
+        for record in records
+        if str(uuid.UUID(str(record["portfolio_uid"]))) not in stored
+    }
+    if missing:
+        runtime = resolve_runtime(models=[table], row_model_name=table.__markets_base_identifier__)
+        result = bulk_upsert_model(
+            runtime.context,
+            model=table,
+            values=list(missing.values()),
+            conflict_columns=("portfolio_uid",),
+        )
+        for row in operation_result_rows(result):
+            created = EndedPortfolio.model_validate(row)
+            stored[str(created.portfolio_uid)] = created
+    return [stored[str(uuid.UUID(str(record["portfolio_uid"])))] for record in records]
 
 
 def ended_portfolios_of_account(account_uid: uuid.UUID | str) -> list[EndedPortfolio]:
@@ -1385,7 +1557,29 @@ def ended_portfolios_of_account(account_uid: uuid.UUID | str) -> list[EndedPortf
 
 def forget_ended_portfolio(record: EndedPortfolio) -> None:
     """Delete the record once its ``Portfolio`` is deleted."""
-    EndedPortfolio.delete(record.uid)
+    forget_ended_portfolios([record])
+
+
+def forget_ended_portfolios(records: Sequence[EndedPortfolio]) -> None:
+    """Delete several records, once their ``Portfolio`` rows are deleted, in one statement."""
+    delete_rows_in(EndedPortfolioTable, "uid", _uuid_list([record.uid for record in records]))
+
+
+def ended_signal_uids(signal_uids: Sequence[str]) -> set[str]:
+    """Which of these signals a recorded, retired ``Portfolio`` still follows, in one read."""
+    from sqlalchemy import select
+
+    from alpaca_connectors.markets_api import read_in_batches
+
+    table = EndedPortfolioTable
+    values = list(dict.fromkeys(str(uid) for uid in signal_uids))
+    rows = read_in_batches(
+        lambda batch: _select_rows(
+            table, select(table.signal_uid).where(table.signal_uid.in_(batch)).distinct()
+        ),
+        values,
+    )
+    return {str(row["signal_uid"]) for row in rows}
 
 
 def project_portfolio_configuration_models() -> list[type[MarketsBase]]:
@@ -1406,7 +1600,16 @@ __all__ = [
     "EndedPortfolio",
     "EndedPortfolioTable",
     "ended_portfolios_of_account",
+    "delete_portfolio_configuration_rows",
+    "delete_rows_in",
+    "delete_rebalance_configuration_rows",
+    "ended_signal_uids",
     "forget_ended_portfolio",
+    "forget_ended_portfolios",
+    "inline_rebalance_configurations",
+    "portfolio_configurations_naming_any_bars",
+    "rebalance_configuration_uids_named",
+    "record_ended_portfolios",
     "portfolio_configurations_of_account",
     "portfolio_counts_by_definition",
     "record_ended_portfolio",

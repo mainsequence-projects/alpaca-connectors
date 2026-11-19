@@ -103,10 +103,11 @@ class MarketsDouble:
             return [
                 {
                     "uid": str(uuid.uuid4()),
-                    "unique_identifier": arguments["unique_identifier"],
-                    "display_name": "NYSE trading sessions",
+                    "unique_identifier": identifier,
+                    "display_name": f"{identifier} trading sessions",
                     "calendar_type": "TRADING",
                 }
+                for identifier in arguments["unique_identifier__in"]
             ]
         raise AssertionError(f"Unexpected Markets row call {resource}.{operation}.")
 
@@ -235,17 +236,17 @@ def _known_account(own_tables: OwnTables) -> None:
 # ------------------------------------------------------------------------------------------------
 # How many calls
 # ------------------------------------------------------------------------------------------------
-def test_registering_a_known_account_is_one_calendar_read_and_one_markets_call(
-    markets, own_tables
-) -> None:
+def test_registering_a_known_account_is_one_markets_call(markets, own_tables) -> None:
     _known_account(own_tables)
     client = _client(_position("AAPL", AAPL_ID, "10"), _position("SPY", SPY_ID, "3", "short"))
 
     result = _register(client, owner=OWNER, account_name="Paper")
 
-    # The registration read, the held assets' calendar read, one registerAccount, the
-    # details-row write: nothing else.
-    assert markets.calls == ["calendar.filter", "account.registration"]
+    # The registration read, the held assets' details read, one registerAccount, the
+    # details-row write: nothing else. No held asset is new, so no calendar is read and Alpaca is
+    # not asked about any asset.
+    assert markets.calls == ["account.registration"]
+    assert client.asset_reads == []
     assert own_tables.operations == [
         f"select {ACCOUNT_DETAILS}",
         f"select {ASSET_DETAILS}",
@@ -262,9 +263,10 @@ def test_a_sync_is_one_registration_read_and_one_markets_call(markets, own_table
     result = capture_alpaca_account_holdings(ACCOUNT_UID, snapshot_time=WHEN, client=client)
 
     # One registration read (the Account and its details row), one read of the held assets'
-    # calendar, one registerAccount, no writes: no held asset is registered again and no cash
-    # asset is ensured.
-    assert markets.calls == ["account.get_by_uid", "calendar.filter", "account.registration"]
+    # details, one registerAccount, no writes: no held asset is new, so none is read from Alpaca,
+    # registered again or given a calendar read, and no cash asset is ensured.
+    assert markets.calls == ["account.get_by_uid", "account.registration"]
+    assert client.asset_reads == []
     assert own_tables.operations == [f"select {ACCOUNT_DETAILS}", f"select {ASSET_DETAILS}"]
     assert own_tables.writes == []
     assert result.holdings_rows == 3
@@ -277,6 +279,8 @@ def test_new_held_assets_get_their_details_rows_after_the_call(markets, own_tabl
 
     _register(client)
 
+    # Only the new asset is read from Alpaca, and only its calendar is checked.
+    assert client.asset_reads == [f"/assets/{SPY_ID}"]
     assert markets.calls == ["calendar.filter", "account.registration"]
     assert own_tables.operations == [
         f"select {ACCOUNT_DETAILS}",
@@ -294,7 +298,7 @@ def test_new_held_assets_get_their_details_rows_after_the_call(markets, own_tabl
 # ------------------------------------------------------------------------------------------------
 # What one call carries
 # ------------------------------------------------------------------------------------------------
-def test_the_call_carries_the_account_every_held_asset_cash_and_the_positions(
+def test_the_call_carries_the_account_every_new_held_asset_cash_and_the_positions(
     markets, own_tables
 ) -> None:
     client = _client(_position("AAPL", AAPL_ID, "10"), _position("SPY", SPY_ID, "3", "short"))
@@ -347,7 +351,8 @@ def test_a_sync_keeps_the_account_as_it_is(markets, own_tables) -> None:
         "is_paper": None,
         "account_is_active": None,
     }
-    assert [asset.unique_identifier for asset in request.assets] == [AAPL]
+    # The held asset this project already describes is not sent: Markets has it.
+    assert request.assets == []
 
 
 def test_the_response_is_built_from_what_was_written(markets, own_tables) -> None:
@@ -465,12 +470,8 @@ def test_sending_a_registration_again_succeeds_and_updates_the_same_row(
     second = _register(client)
 
     assert first.account_uid == second.account_uid == str(ACCOUNT_UID)
-    assert markets.calls == [
-        "calendar.filter",
-        "account.registration",
-        "calendar.filter",
-        "account.registration",
-    ]
+    # The first time AAPL is new, so its calendar is checked; the second time it is described.
+    assert markets.calls == ["calendar.filter", "account.registration", "account.registration"]
     # The same holdings_date: Markets writes nothing the second time (ADR 0051).
     assert markets.requests[0].holdings_date == markets.requests[1].holdings_date
     account_writes = [write for write in own_tables.writes if write["table"] == ACCOUNT_DETAILS]

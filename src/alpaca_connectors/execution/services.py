@@ -20,6 +20,7 @@ import logging
 import time
 import uuid
 from collections.abc import Callable, Mapping, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
@@ -435,6 +436,10 @@ def _account_checks(registration: dict[str, Any], account: Any) -> list[PreTrade
     return checks
 
 
+# Alpaca asset reads one order batch runs at once: Alpaca reads one asset per request (issue #46).
+ALPACA_ASSET_READ_WORKERS = 8
+
+
 def _live_alpaca_asset(client: Any, asset_id: uuid.UUID) -> Any | None:
     """One Alpaca asset by immutable id, or ``None`` when Alpaca does not know it."""
     from alpaca.common.exceptions import APIError
@@ -452,7 +457,8 @@ def _resolve_assets(
     """Resolve each leg's canonical identifier to the live Alpaca asset and check it is tradable.
 
     The registered set is one markets query. Alpaca offers no batched asset lookup by id, so the
-    live state is one request per distinct asset of the batch; the stored ``AlpacaAssetDetails``
+    live state is one request per distinct asset of the batch, at most
+    ``ALPACA_ASSET_READ_WORKERS`` of them at once (issue #46); the stored ``AlpacaAssetDetails``
     are registration-time facts and not a pre-trade gate.
     """
     checks: list[PreTradeCheck] = []
@@ -465,11 +471,21 @@ def _resolve_assets(
     registered = deps.ledger.registered_asset_identifiers(
         [identifier for identifier, asset_id in asset_ids.items() if asset_id is not None]
     )
-    live_assets: dict[str, Any] = {
-        identifier: _live_alpaca_asset(deps.client, asset_id)
-        for identifier, asset_id in asset_ids.items()
-        if asset_id is not None
+    readable = {
+        identifier: asset_id for identifier, asset_id in asset_ids.items() if asset_id is not None
     }
+    with ThreadPoolExecutor(
+        max_workers=max(1, min(ALPACA_ASSET_READ_WORKERS, len(readable)))
+    ) as pool:
+        live_assets: dict[str, Any] = dict(
+            zip(
+                readable,
+                pool.map(
+                    lambda asset_id: _live_alpaca_asset(deps.client, asset_id), readable.values()
+                ),
+                strict=True,
+            )
+        )
     for leg in submission.legs:
         record = OrderRecord.from_leg(leg)
         asset_id = asset_ids[leg.asset_identifier]

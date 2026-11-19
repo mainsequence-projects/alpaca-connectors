@@ -7,6 +7,8 @@ creates or changes it. Rebalance configurations stay independent rules (ADR 0028
 
 from __future__ import annotations
 
+import uuid
+
 from fastapi import APIRouter, Body, Query
 
 from ..errors import api_http_error, not_found
@@ -66,6 +68,10 @@ def portfolio_configurations_list(
         description="Only the portfolio a provided-weights create made with this key.",
     ),
     ordering: str = "name",
+    uid: list[uuid.UUID] | None = Query(
+        default=None,
+        description="Only these UIDs; repeat the parameter to read several in one request.",
+    ),
 ) -> ResourceCollection:
     validate_page_window(limit=limit, offset=offset)
     validate_ordering(ordering, allowed_fields={"name", "updated_at"})
@@ -78,6 +84,7 @@ def portfolio_configurations_list(
             signal_definition_uid=signal_definition_uid,
             key=key,
             ordering=ordering,
+            uids=[str(value) for value in uid] if uid else None,
         )
     except Exception as exc:
         raise api_http_error(exc) from exc
@@ -250,11 +257,21 @@ def rebalance_configurations_list(
     offset: int = Query(default=0, ge=0),
     search: str | None = None,
     ordering: str = "name",
+    uid: list[uuid.UUID] | None = Query(
+        default=None,
+        description="Only these UIDs; repeat the parameter to read several in one request.",
+    ),
 ) -> ResourceCollection:
     validate_page_window(limit=limit, offset=offset)
     validate_ordering(ordering, allowed_fields={"name", "updated_at"})
     try:
-        return list_rebalances(limit=limit, offset=offset, search=search, ordering=ordering)
+        return list_rebalances(
+            limit=limit,
+            offset=offset,
+            search=search,
+            ordering=ordering,
+            uids=[str(value) for value in uid] if uid else None,
+        )
     except Exception as exc:
         raise api_http_error(exc) from exc
 

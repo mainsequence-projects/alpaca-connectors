@@ -135,14 +135,28 @@ def _sync(
             "alpaca_connectors.api.app.routers.accounts.get_account",
             return_value=registration(None) if registered is None else registered,
         ),
+        patch(
+            f"{SERVICE}.get_account_registration",
+            return_value=registration(None) if registered is None else registered,
+        ) as read_registration,
+        patch(
+            f"{SERVICE}.resolve_registered_alpaca_credentials", return_value="credentials"
+        ) as open_keys,
+        patch(f"{SERVICE}.build_alpaca_trading_client", return_value=MagicMock()),
+        patch(f"{SERVICE}.account_price_reader", return_value=lambda symbols: {}) as prices,
         _replaced("capture_holdings", captured) as capture_holdings,
         _replaced("size_account_target", sized) as size,
         _replaced("allocate_sized_target", allocated) as allocate,
-        patch(f"{SERVICE}.registered_account_price_reader", return_value="price-reader"),
     ):
         response = client.post(f"/v1/accounts/{ACCOUNT_UID}/actions/sync", **kwargs)
     if steps is not None:
-        steps.update(size=size, allocate=allocate)
+        steps.update(
+            size=size,
+            allocate=allocate,
+            read_registration=read_registration,
+            open_keys=open_keys,
+            prices=prices,
+        )
     return response, capture_holdings
 
 
@@ -153,7 +167,8 @@ def test_a_sync_publishes_one_snapshot_and_answers_succeeded(client, rows) -> No
     response, capture = _sync(client)
 
     assert response.status_code == 200
-    capture.assert_called_once_with(ACCOUNT_UID)
+    capture.assert_called_once()
+    assert capture.call_args.args == (ACCOUNT_UID,)
     body = response.json()
     operation = AccountSyncOperationResponse.model_validate(body)
     assert isinstance(operation, ObservableOperation)
@@ -244,16 +259,28 @@ def test_a_sync_sizes_the_target_and_allocates_the_snapshot(client, rows) -> Non
         ("allocate_funds", "succeeded"),
     ]
     # The target is sized at the snapshot's time, with the equity of the same Alpaca read.
-    steps["size"].assert_called_once_with(
-        ACCOUNT_UID,
-        valuation_time=SNAPSHOT_TIME,
-        equity=1_000_000.0,
-        price_reader="price-reader",
-    )
+    steps["size"].assert_called_once()
+    assert steps["size"].call_args.args == (ACCOUNT_UID,)
+    assert steps["size"].call_args.kwargs["valuation_time"] == SNAPSHOT_TIME
+    assert steps["size"].call_args.kwargs["equity"] == 1_000_000.0
     steps["allocate"].assert_called_once_with(ACCOUNT_UID, SIZED)
+    # The registration and the keys are read once: the latest trades use the same keys.
+    steps["read_registration"].assert_called_once_with(ACCOUNT_UID)
+    steps["open_keys"].assert_called_once()
+    steps["prices"].assert_called_once_with("credentials")
     assert operation.result.position_set_uid == POSITION_SET_UID
     assert operation.result.allocation_applied is True
     assert operation.result.lines == [LINE]
+
+
+def test_a_sync_logs_each_steps_duration_and_the_alpaca_time(client, rows, caplog) -> None:
+    with caplog.at_level(logging.INFO, logger=SERVICE):
+        _sync(client, sized=SIZED)
+
+    (line,) = [r.getMessage() for r in caplog.records if r.getMessage().startswith("account sync")]
+    assert line.startswith(f"account sync succeeded account={ACCOUNT_UID} ")
+    for name in ("capture_holdings", "size_targets", "allocate_funds", "alpaca"):
+        assert f"{name}_seconds=" in line
 
 
 def test_a_capture_that_published_no_snapshot_allocates_nothing(client, rows) -> None:
@@ -292,7 +319,8 @@ def test_a_failure_after_the_capture_fails_at_its_step(
 
     operation = AccountSyncOperationResponse.model_validate(response.json())
     # The snapshot was published before the step failed, and it stays.
-    capture.assert_called_once_with(ACCOUNT_UID)
+    capture.assert_called_once()
+    assert capture.call_args.args == (ACCOUNT_UID,)
     assert (operation.status, operation.current_step, operation.result) == ("failed", step, None)
     assert [item.status for item in operation.steps] == statuses
     assert operation.error.code == failure.get("allocated", failure["sized"]).code

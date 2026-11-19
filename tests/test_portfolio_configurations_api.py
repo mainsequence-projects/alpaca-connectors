@@ -238,6 +238,36 @@ def test_portfolio_response_resolves_linked_metatables_with_bulk_uid_queries() -
     assert result[0].key == "key"
 
 
+def test_a_create_answers_from_what_it_wrote_without_reading_it_back() -> None:
+    row = portfolio_row()
+    with (
+        patch.object(
+            portfolio_service,
+            "configuration_job_state",
+            return_value=ConfigurationJobState(job=None, latest_runs={}),
+        ) as job_state,
+        patch.object(portfolio_service, "rebalance_configurations_by_uids") as rebalances,
+        patch(
+            "alpaca_connectors.portfolios.signal_definitions.signal_definitions_by_uids"
+        ) as definitions,
+        patch(
+            "alpaca_connectors.market_data.configurations.portfolio_bar_configurations"
+        ) as own_bars,
+    ):
+        [result] = portfolio_service._responses(
+            [row],
+            rebalance_configurations={REBALANCE_CONFIGURATION_UID: rebalance_row()},
+            definitions={DEFINITION_UID: SimpleNamespace(key="key", signal_key="account/key")},
+            own_bars={CONFIGURATION_UID: SimpleNamespace(uid=BARS_CONFIGURATION_UID)},
+        )
+
+    job_state.assert_called_once()
+    rebalances.assert_not_called()
+    definitions.assert_not_called()
+    own_bars.assert_not_called()
+    assert (result.bars_configuration_uid, result.key) == (BARS_CONFIGURATION_UID, "key")
+
+
 def test_rebalance_crud_serializes_storage_domain_models(api_client) -> None:
     row = rebalance_row()
     request = {
@@ -573,15 +603,24 @@ def _create_and_run(*, run: bool, created: bool = True, run_error=None):
     from alpaca_connectors.account.ownership import AccountOwner
     from alpaca_connectors.api.app.schemas import ProvidedWeightsPortfolioCreateRequest
     from alpaca_connectors.api.app.services import portfolio_configurations as service
+    from alpaca_connectors.operations import ConfigurationJobSubmission
+    from alpaca_connectors.portfolios.provided_weights import PublishedWeights
 
+    observed = dt.datetime(2026, 11, 16, 14, tzinfo=dt.UTC)
     creation = SimpleNamespace(
         configuration=SimpleNamespace(uid=uuid.UUID(CONFIGURATION_UID)),
-        published=None,
+        # What the create published; a repeated create publishes nothing.
+        published=(
+            PublishedWeights("signal-uid", 1, 2, observed, observed) if created and run else None
+        ),
         portfolio_uid="77777777-7777-4777-8777-000000000007",
         portfolio_unique_identifier="ALPACA_PORTFOLIO__X",
         created=created,
         bars_configuration_created=created,
         rebalance_configuration_created=False,
+        rebalance_configuration=SimpleNamespace(uid=REBALANCE_CONFIGURATION_UID),
+        bars_configuration=SimpleNamespace(uid=BARS_CONFIGURATION_UID),
+        signal_definition=SimpleNamespace(uid=DEFINITION_UID),
     )
     accepted = PortfolioJobRunAcceptedResponse(
         configuration_uid=CONFIGURATION_UID,
@@ -594,16 +633,18 @@ def _create_and_run(*, run: bool, created: bool = True, run_error=None):
         {**create_request(), "key": "hunch-17", "run": run}
     )
     owner = AccountOwner.main_sequence_user("owner-uid")
+    submission = ConfigurationJobSubmission(CONFIGURATION_UID, JOB_UID, JOB_RUN_UID, "PENDING")
     with (
         patch.object(service, "create_provided_weights_portfolio", return_value=creation) as make,
-        patch.object(service, "_responses", return_value=["configuration"]),
+        patch.object(service, "_responses", return_value=["configuration"]) as answer,
         patch.object(
-            service, "run_configuration", side_effect=run_error, return_value=accepted
+            service, "launch_portfolio_job", side_effect=run_error, return_value=submission
         ) as start,
         # The answer's fields, without validating the stand-in configuration.
         patch.object(service, "ProvidedWeightsPortfolioCreateResponse", SimpleNamespace),
     ):
         response = service.create_provided_configuration(request, owner=owner)
+    start.answer = answer
     return make, start, response, accepted
 
 
@@ -613,7 +654,22 @@ def test_the_create_starts_the_first_run_and_answers_it() -> None:
     # The key reaches the create; run is the API's, not the package's.
     assert make.call_args.kwargs["key"] == "hunch-17"
     assert "run" not in make.call_args.kwargs
-    start.assert_called_once_with(CONFIGURATION_UID)
+    # The run starts from what the create wrote, which its preflight does not read again
+    # (issue #46): the configuration, its rule, its own bars, its definition and the bounds of
+    # the observations it published.
+    start.assert_called_once()
+    assert start.call_args.args == (uuid.UUID(CONFIGURATION_UID),)
+    assert start.call_args.kwargs["configuration"].uid == uuid.UUID(CONFIGURATION_UID)
+    held = start.call_args.kwargs["held"]
+    assert list(held.rebalance_configurations) == [REBALANCE_CONFIGURATION_UID]
+    assert list(held.bars_configurations) == [CONFIGURATION_UID]
+    assert list(held.definitions) == [DEFINITION_UID]
+    assert held.signal_bounds["signal-uid"].first_observation_at is not None
+    # The answer reads nothing the create wrote: only the Job state stays a read.
+    kwargs = start.answer.call_args.kwargs
+    assert list(kwargs["rebalance_configurations"]) == [REBALANCE_CONFIGURATION_UID]
+    assert list(kwargs["definitions"]) == [DEFINITION_UID]
+    assert kwargs["own_bars"][CONFIGURATION_UID].uid == BARS_CONFIGURATION_UID
     assert (response.run, response.run_error, response.created) == (accepted, None, True)
 
 

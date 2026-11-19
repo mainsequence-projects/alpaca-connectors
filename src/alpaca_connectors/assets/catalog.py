@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from collections.abc import Sequence
 from typing import Any
 
 
@@ -45,13 +46,15 @@ def list_assets(
     search: str | None = None,
     ordering: str = "ticker",
     category_uid: uuid.UUID | str | None = None,
+    uids: Sequence[uuid.UUID | str] | None = None,
 ) -> tuple[list[dict[str, Any]], int]:
     """Page this project's Alpaca asset details and add each page's Markets fields.
 
     The page and the count are compiled statements on ``AlpacaAssetDetailsTable`` alone; the
     canonical identifier is ``ALPACA::<alpaca_asset_id>`` by construction (ADR 0004). A category
     filter reads the category's memberships from Markets first, and the page's Assets and
-    OpenFIGI details come from Markets in one batched read each (ms-markets ADR 0047).
+    OpenFIGI details come from Markets in one batched read each (ms-markets ADR 0047). ``uids``
+    keeps only those assets, in the same statements (issue #46).
     """
     from msm.api.base import operation_result_rows
     from msm.repositories.base import compile_markets_statement, execute_markets_operation
@@ -87,6 +90,8 @@ def list_assets(
         if not member_uids:
             return [], 0
         statement = statement.where(details.asset_uid.in_(member_uids))
+    if uids is not None:
+        statement = statement.where(details.asset_uid.in_([uuid.UUID(str(uid)) for uid in uids]))
     if search:
         pattern = f"%{search.strip()}%"
         statement = statement.where(

@@ -14,6 +14,7 @@ from alpaca_connectors.account.ownership import (
 )
 from alpaca_connectors.account.services import (
     get_account_registration,
+    get_account_registrations,
     list_account_registrations,
     plan_alpaca_account,
     refresh_alpaca_account,
@@ -67,6 +68,7 @@ def list_accounts(
     is_paper: bool | None,
     ordering: str,
     owner: AccountOwner | None = None,
+    uids: list[str] | None = None,
 ):
     items, total = list_account_registrations(
         limit=limit,
@@ -76,6 +78,7 @@ def list_accounts(
         is_paper=is_paper,
         ordering=ordering,
         owner=owner,
+        uids=uids,
     )
     safe_items = [AccountResponse.model_validate(item) for item in items]
     return collection_response(items=safe_items, total=total, limit=limit, offset=offset)
@@ -164,18 +167,59 @@ def require_account_owned_by(account_uid: object, owner: AccountOwner) -> None:
     gets ``409 account_owned_by_another`` for another owner's account, ``409
     account_without_owner`` for one without an owner, and ``404`` for a missing one.
     """
+    _require_registration_owned_by(get_account_registration(str(account_uid)), owner)
+
+
+def _require_registration_owned_by(registration: dict | None, owner: AccountOwner) -> None:
+    """``require_account_owned_by`` on a registration already read (one read, issue #46)."""
     from alpaca_connectors.account.ownership import require_account_owner
 
-    require_account_access(str(account_uid), owner)
-    registration = get_account_registration(str(account_uid))
-    if registration is None:
+    # An external person's call reaches only their own account (ADR 0019), like a missing one.
+    if registration is None or (owner.is_external and registered_owner(registration) != owner):
         raise not_found("Account registration not found.")
     require_account_owner(registration, owner)
 
 
 def require_accounts_access(account_uids: Iterable[str], owner: AccountOwner) -> None:
-    for account_uid in account_uids:
-        require_account_access(account_uid, owner)
+    """``require_account_access`` for several accounts, with one read of them all (issue #46)."""
+    if not owner.is_external:
+        return
+    selected = list(account_uids)
+    registrations = get_account_registrations(selected)
+    if any(registered_owner(registrations.get(uid)) != owner for uid in selected):
+        raise not_found("Account registration not found.")
+
+
+def accessible_account_registrations(
+    account_uids: Iterable[str], owner: AccountOwner
+) -> dict[str, dict]:
+    """The registrations of several accounts, read once, after ``require_accounts_access``.
+
+    One read serves both the access check and the work that follows; an account that does not
+    exist is absent.
+    """
+    selected = list(account_uids)
+    registrations = get_account_registrations(selected)
+    if owner.is_external and any(
+        registered_owner(registrations.get(uid)) != owner for uid in selected
+    ):
+        raise not_found("Account registration not found.")
+    return registrations
+
+
+def require_accounts_owned_by(account_uids: Iterable[str], owner: AccountOwner) -> list[str]:
+    """``require_account_owned_by`` for several accounts with one read; answers the missing ones.
+
+    An account that does not exist is returned, not refused, for the bulk preflight to report;
+    every other selected account must be the owner's (ADR 0028, decision 3).
+    """
+    selected = list(account_uids)
+    registrations = get_account_registrations(selected)
+    missing = [uid for uid in selected if uid not in registrations]
+    for uid in selected:
+        if uid in registrations:
+            _require_registration_owned_by(registrations[uid], owner)
+    return missing
 
 
 def require_path_account_access(account_uid: str) -> None:
@@ -282,6 +326,13 @@ def remove_keys(account_uid: str, *, owner: AccountOwner) -> dict:
     return remove_account_keys(account_uid, actor_user_uid=owner.user_uid)
 
 
+def remove_keys_of_accounts(account_uids: Iterable[str], *, owner: AccountOwner) -> list[dict]:
+    """Clear the keys of accounts ``require_accounts_owned_by`` cleared, in one statement."""
+    from alpaca_connectors.account.services import remove_accounts_keys
+
+    return remove_accounts_keys(account_uids, actor_user_uid=owner.user_uid)
+
+
 def preflight_delete(account_uid: str, *, owner: AccountOwner) -> dict:
     """What deleting the account would delete, and what refuses it; nothing changes."""
     from alpaca_connectors.account.deletion import preflight_account_delete
@@ -308,9 +359,11 @@ __all__ = [
     "preflight_delete",
     "refresh_account",
     "remove_keys",
+    "remove_keys_of_accounts",
     "require_account_access",
     "require_account_owned_by",
     "require_accounts_access",
+    "require_accounts_owned_by",
     "require_named_account_access",
     "require_owner_may_configure_account",
     "require_path_account_access",

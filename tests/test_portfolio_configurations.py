@@ -196,28 +196,173 @@ def test_calculation_updates_still_validate_their_references() -> None:
 def test_preflight_reports_resolution_blockers_without_writing() -> None:
     row = portfolio_configuration()
     with (
-        patch.object(execution, "get_portfolio_configuration", return_value=row),
+        patch.object(execution, "get_portfolio_configuration", return_value=row) as read,
         patch.object(
             execution,
-            "resolve_portfolio_configuration",
-            side_effect=ValueError("Signal x has no published observations."),
+            "_resolve_inputs",
+            return_value={
+                str(CONFIGURATION_UID): ValueError("Signal x has no published observations.")
+            },
         ) as resolve,
     ):
         blocked = preflight_portfolio_configuration(CONFIGURATION_UID)
     with (
         patch.object(execution, "get_portfolio_configuration", return_value=row),
-        patch.object(execution, "resolve_portfolio_configuration") as resolve_allowed,
+        patch.object(
+            execution, "_resolve_inputs", return_value={str(CONFIGURATION_UID): object()}
+        ) as resolve_allowed,
     ):
         allowed = preflight_portfolio_configuration(CONFIGURATION_UID)
 
-    resolve.assert_called_once_with(CONFIGURATION_UID)
-    resolve_allowed.assert_called_once_with(CONFIGURATION_UID)
+    # The configuration is read once, and its inputs resolved from that row.
+    read.assert_called_once_with(CONFIGURATION_UID)
+    resolve.assert_called_once_with([row], held=None)
+    resolve_allowed.assert_called_once_with([row], held=None)
     assert blocked == PortfolioPreflight(
         configuration_uid=str(CONFIGURATION_UID),
         blockers=("Signal x has no published observations.",),
     )
     assert not blocked.allowed
     assert allowed.allowed
+
+
+def _input_reads(rows, *, bounds, rebalance=None, own_bars=None):
+    """Replace each batch read of a preflight; answer the recorder of their calls."""
+    reads = Mock()
+    reads.rebalances.return_value = {
+        str(REBALANCE_CONFIGURATION_UID): rebalance or rebalance_configuration()
+    }
+    reads.own_bars.return_value = (
+        own_bars
+        if own_bars is not None
+        else {
+            str(row.uid): SimpleNamespace(
+                uid=uuid.uuid4(), enabled=True, frequency_id="1d", feed="sip", adjustment="all"
+            )
+            for row in rows
+        }
+    )
+    reads.named_bars.return_value = {}
+    reads.definitions.return_value = {
+        str(row.signal_definition_uid): SimpleNamespace(signal_key=f"key-{row.uid}") for row in rows
+    }
+    reads.bounds.side_effect = lambda signals: {signal: bounds for signal in signals}
+    reads.sources.return_value = {("1d", "sip", "all"): "source-table-uid"}
+    patches = (
+        patch(f"{CONFIGURATIONS}.rebalance_configurations_by_uids", reads.rebalances),
+        patch(f"{BARS}.portfolio_bar_configurations", reads.own_bars),
+        patch(f"{BARS}.bar_configuration_rows_by_uids", reads.named_bars),
+        patch(f"{DEFINITIONS}.signal_definitions_by_uids", reads.definitions),
+        patch(f"{HISTORY}.read_signal_observation_bounds_by_signal", reads.bounds),
+        patch.object(execution, "resolve_alpaca_bars_time_index_meta_table_uids", reads.sources),
+    )
+    return reads, patches
+
+
+CONFIGURATIONS = "alpaca_connectors.portfolios.configurations"
+BARS = "alpaca_connectors.market_data.configurations"
+DEFINITIONS = "alpaca_connectors.portfolios.signal_definitions"
+HISTORY = "alpaca_connectors.portfolios.signal_history"
+OBSERVED = SignalObservationBounds(
+    signal_uid="any",
+    first_observation_at=dt.datetime(2026, 9, 3, 8, tzinfo=dt.UTC),
+    last_observation_at=dt.datetime(2026, 9, 5, 8, tzinfo=dt.UTC),
+)
+
+
+def test_many_preflights_read_each_kind_of_input_once() -> None:
+    rows = [
+        portfolio_configuration(
+            uid=uuid.UUID(int=index), signal_definition_uid=uuid.UUID(int=100 + index)
+        )
+        for index in range(1, 4)
+    ]
+    reads, patches = _input_reads(rows, bounds=OBSERVED)
+    # The third has a disabled feed: blocked, the others are not.
+    reads.own_bars.return_value[str(rows[2].uid)] = SimpleNamespace(
+        uid=BARS_CONFIGURATION_UID, enabled=False, frequency_id="1d", feed="sip", adjustment="all"
+    )
+    with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5]:
+        answers = execution.preflight_portfolio_configurations(rows)
+
+    # One read per kind for all of them (issue #46), never one per configuration.
+    for read in (reads.rebalances, reads.own_bars, reads.definitions, reads.bounds, reads.sources):
+        read.assert_called_once()
+    reads.rebalances.assert_called_once_with([str(REBALANCE_CONFIGURATION_UID)] * 3)
+    assert len(reads.bounds.call_args.args[0]) == 2
+    assert [answers[str(row.uid)].allowed for row in rows] == [True, True, False]
+    assert answers[str(rows[2].uid)].blockers == (
+        f"Bars configuration {BARS_CONFIGURATION_UID} is disabled.",
+    )
+
+
+def test_a_signal_without_observations_blocks_its_portfolio() -> None:
+    row = portfolio_configuration()
+    empty = SignalObservationBounds(
+        signal_uid="any", first_observation_at=None, last_observation_at=None
+    )
+    reads, patches = _input_reads([row], bounds=empty)
+    with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5]:
+        answer = execution.preflight_portfolio_configurations([row])[str(row.uid)]
+    assert not answer.allowed
+    assert "has no published observations" in answer.blockers[0]
+
+
+def test_held_inputs_are_not_read_again() -> None:
+    # A create starts its first run with what it just wrote (issue #46).
+    row = portfolio_configuration()
+    bars = SimpleNamespace(
+        uid=BARS_CONFIGURATION_UID, enabled=True, frequency_id="1d", feed="sip", adjustment="all"
+    )
+    definition = SimpleNamespace(signal_key="key")
+    from alpaca_connectors.portfolios.signal_definitions import signal_uid_for_key
+
+    held = execution.HeldPortfolioInputs(
+        rebalance_configurations={str(REBALANCE_CONFIGURATION_UID): rebalance_configuration()},
+        bars_configurations={str(row.uid): bars},
+        definitions={str(DEFINITION_UID): definition},
+        signal_bounds={signal_uid_for_key("key"): OBSERVED},
+    )
+    reads, patches = _input_reads([row], bounds=OBSERVED)
+    # Asked for nothing, each read answers nothing.
+    for read in (reads.rebalances, reads.own_bars, reads.definitions):
+        read.return_value = {}
+    with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5]:
+        answer = execution.preflight_portfolio_configurations([row], held=held)[str(row.uid)]
+
+    assert answer.allowed
+    for read in (
+        reads.rebalances,
+        reads.own_bars,
+        reads.named_bars,
+        reads.definitions,
+        reads.bounds,
+    ):
+        assert read.call_args.args[0] in ([], ()) or not list(read.call_args.args[0])
+    reads.sources.assert_called_once()
+
+
+def test_a_configuration_row_update_is_one_statement() -> None:
+    # No read first (issue #46): the update's RETURNING row answers, and none means none exists.
+    row = portfolio_configuration()
+    with (
+        patch.object(configurations, "_start_runtime"),
+        patch.object(AlpacaPortfolioConfiguration, "get_by_uid") as read,
+        patch.object(AlpacaPortfolioConfiguration, "update", return_value=row) as update,
+    ):
+        assert (
+            configurations.update_portfolio_configuration_row(
+                CONFIGURATION_UID, values={"scheduled": False}
+            )
+            is row
+        )
+        update.side_effect = LookupError("no row")
+        with pytest.raises(LookupError, match=f"Portfolio configuration {CONFIGURATION_UID}"):
+            configurations.update_portfolio_configuration_row(
+                CONFIGURATION_UID, values={"scheduled": False}
+            )
+    read.assert_not_called()
+    assert update.call_args.args[1]["scheduled"] is False
 
 
 def test_preflight_of_a_missing_configuration_is_not_found() -> None:
@@ -230,14 +375,6 @@ def test_preflight_of_a_missing_configuration_is_not_found() -> None:
 
 def test_portfolio_resolution_uses_published_signal_and_selected_bars_profile() -> None:
     row = portfolio_configuration()
-    bars_configuration = SimpleNamespace(
-        uid=BARS_CONFIGURATION_UID,
-        enabled=True,
-        frequency_id="1d",
-        feed="sip",
-        adjustment="all",
-    )
-    rebalance = rebalance_configuration()
     matrix = SignalObservationMatrix(
         signal_uid="signal-uid",
         time_indexes=(dt.datetime(2026, 9, 5, 8, tzinfo=dt.UTC),),
@@ -246,27 +383,17 @@ def test_portfolio_resolution_uses_published_signal_and_selected_bars_profile() 
             SignalObservationAsset("ALPACA::asset-a", "A", None, (0.6,)),
         ),
     )
-    bounds = SignalObservationBounds(
-        signal_uid="signal-uid",
-        first_observation_at=dt.datetime(2026, 9, 3, 8, tzinfo=dt.UTC),
-        last_observation_at=dt.datetime(2026, 9, 5, 8, tzinfo=dt.UTC),
-    )
+    reads, patches = _input_reads([row], bounds=OBSERVED)
 
     with (
+        patches[0],
+        patches[1],
+        patches[2],
+        patches[3],
+        patches[4],
+        patches[5],
         patch(
             "alpaca_connectors.portfolios.execution.get_portfolio_configuration", return_value=row
-        ),
-        patch(
-            "alpaca_connectors.portfolios.execution.validate_portfolio_references",
-            return_value=rebalance,
-        ),
-        patch(
-            "alpaca_connectors.market_data.configurations.portfolio_bar_configuration",
-            return_value=bars_configuration,
-        ),
-        patch(
-            "alpaca_connectors.portfolios.provided_weights.portfolio_signal_uid",
-            return_value="signal-uid",
         ),
         patch(
             "alpaca_connectors.portfolios.signal_assets.assets_for_signals",
@@ -276,22 +403,19 @@ def test_portfolio_resolution_uses_published_signal_and_selected_bars_profile() 
             "alpaca_connectors.portfolios.execution.read_signal_observation_matrix",
             return_value=matrix,
         ) as read_signal,
-        patch(
-            "alpaca_connectors.portfolios.execution.read_signal_observation_bounds",
-            return_value=bounds,
-        ) as read_bounds,
-        patch(
-            "alpaca_connectors.portfolios.execution.resolve_alpaca_bars_time_index_meta_table_uid",
-            return_value="source-table-uid",
-        ) as resolve_bars,
     ):
         resolved = resolve_portfolio_configuration(CONFIGURATION_UID)
 
+    from alpaca_connectors.portfolios.signal_definitions import signal_uid_for_key
+
+    signal_uid = signal_uid_for_key(f"key-{row.uid}")
+    assert resolved.signal_uid == signal_uid
     assert resolved.asset_identifiers == ("ALPACA::asset-a", "ALPACA::asset-b")
-    assert resolved.signal_start_time == bounds.first_observation_at
-    read_signal.assert_called_once_with(signal_uid="signal-uid", observation_limit=1)
-    read_bounds.assert_called_once_with(signal_uid="signal-uid")
-    resolve_bars.assert_called_once_with(frequency_id="1d", feed="sip", adjustment="all")
+    assert resolved.signal_start_time == OBSERVED.first_observation_at
+    assert resolved.source_time_index_meta_table_uid == "source-table-uid"
+    read_signal.assert_called_once_with(signal_uid=signal_uid, observation_limit=1)
+    reads.bounds.assert_called_once_with([signal_uid])
+    reads.sources.assert_called_once_with([("1d", "sip", "all")])
 
 
 def test_execution_updates_each_released_stage_without_tree_walk() -> None:

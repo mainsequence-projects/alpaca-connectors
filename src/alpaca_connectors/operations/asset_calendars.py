@@ -95,13 +95,16 @@ def link_alpaca_asset_calendars(*, execute: bool = False) -> dict[str, Any]:
     if not execute:
         return {"execute": False, "calendars": calendars, "succeeded": True}
 
-    from alpaca_connectors.assets.calendars import ensure_trading_calendar
+    from alpaca_connectors.assets.calendars import ensure_trading_calendars_stored
 
+    ensure_trading_calendars_stored(
+        calendar for calendar, targets in targets_by_calendar.items() if targets
+    )
     for calendar, targets in targets_by_calendar.items():
         if not targets:
             calendars[calendar]["linked"] = 0
             continue
-        ensure_trading_calendar(calendar)
+        # One link call per calendar: Markets links a set of assets to one calendar at a time.
         result = AssetCalendar.link_many(targets, calendar_identifier=calendar, relink=False)
         calendars[calendar].update(
             linked=len(result.linked),
