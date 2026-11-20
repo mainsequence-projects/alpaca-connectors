@@ -107,7 +107,7 @@ class PortfolioRunPlan:
     The valuation source, its interpolated prices, is in ``portfolio_configuration``.
     """
 
-    # None for immediate_signal, which trades at the signal's own times and reads no calendar.
+    # The calendar's session events, private to this application; the strategy reads them.
     calendar_events: Any
     portfolio_configuration: Any
     portfolio_description: str
@@ -165,6 +165,7 @@ def _resolve_inputs(
         bar_configuration_rows_by_uids,
         portfolio_bar_configurations,
     )
+    from alpaca_connectors.markets_api import portfolios_without_rebalance_book
     from alpaca_connectors.portfolios.configurations import (
         normalize_rebalance_strategy,
         rebalance_configurations_by_uids,
@@ -245,6 +246,15 @@ def _resolve_inputs(
         resolved[uid] = (configuration, rebalance, bars, signal_uid_for_key(signal_key))
 
     pending = {uid: value for uid, value in resolved.items() if isinstance(value, tuple)}
+    # A portfolio whose published weights were computed before trades waited for the next
+    # observed price (ms-markets ADR 0058) carries no rebalance book. How such a portfolio goes
+    # on is the owner's decision (ADR 0031, Implementation Notes): until then it does not run.
+    # A create's own portfolio (its signal bounds are held) has no weights yet and is not read.
+    unbooked = portfolios_without_rebalance_book(
+        portfolio_unique_identifier(value[0].uid)
+        for value in pending.values()
+        if value[0].portfolio_uid is not None and value[3] not in held.signal_bounds
+    )
     bounds = dict(held.signal_bounds)
     bounds.update(
         read_signal_observation_bounds_by_signal(
@@ -271,6 +281,13 @@ def _resolve_inputs(
             resolved[uid] = ValueError(
                 f"Signal {signal_uid} has no published observations. "
                 "Publish weights to the portfolio's signal before running it."
+            )
+            continue
+        if portfolio_unique_identifier(configuration.uid) in unbooked:
+            resolved[uid] = ValueError(
+                f"Portfolio configuration {uid}'s published weights were computed before trades "
+                "waited for the next observed price (ms-markets ADR 0058). It does not run until "
+                "the owner decides how existing portfolios go on (ADR 0031)."
             )
             continue
         source = sources[(bars.frequency_id, bars.feed, bars.adjustment)]
@@ -388,11 +405,13 @@ def build_portfolio_run(resolved: ResolvedPortfolioConfiguration) -> PortfolioRu
         ValuationAlignmentPolicy,
     )
     from msm_portfolios.rebalance_strategy import CalendarEventSignal, ImmediateSignal
+    from msm_portfolios.rebalance_strategy.immediate_signal import SESSION_EVENT_TYPES
     from msm_portfolios.time_index import (
         PortfolioCalendarEvents,
         PortfolioCalendarEventsConfiguration,
     )
 
+    from alpaca_connectors.holdings.account import DEFAULT_CASH_ASSET_IDENTIFIER
     from alpaca_connectors.instances import AlpacaPortfolioCalendarEventsStorage
     from alpaca_connectors.portfolios.provided_weights import portfolio_signal_key
     from alpaca_connectors.portfolios.signal_definitions import weights_signal
@@ -419,24 +438,31 @@ def build_portfolio_run(resolved: ResolvedPortfolioConfiguration) -> PortfolioRu
         raise RuntimeError(
             "The stored Portfolio calendar does not match the rebalance configuration."
         )
+    # Both strategies read the sessions of the portfolio's calendar (ms-markets ADR 0058): a
+    # trade waits for the market to be open, and each asset trades at its next observed price.
+    # The events table publishes both session boundaries; `calendar_event_signal`'s own event is
+    # one of them. They are this application's private rows.
+    calendar_events = PortfolioCalendarEvents(
+        config=PortfolioCalendarEventsConfiguration(
+            offset_start=resolved.signal_start_time,
+            calendar_identifier=rebalance.calendar_identifier,
+            session_label=rebalance.session_label,
+            event_types=SESSION_EVENT_TYPES,
+        ),
+        output_table=AlpacaPortfolioCalendarEventsStorage,
+    )
     if rebalance.strategy == "immediate_signal":
-        # Each set of weights is traded at its own observation time (ms-markets ImmediateSignal);
-        # no calendar event is read. The calendar above is the `Portfolio` row's.
-        calendar_events = None
-        rebalance_strategy = ImmediateSignal()
+        rebalance_strategy = ImmediateSignal(
+            calendar_events_instance=calendar_events,
+            calendar_identifier=rebalance.calendar_identifier,
+            session_label=rebalance.session_label,
+        )
         rebalance_strategy_description = (
-            "Trade to each set of weights the application provides, at the time it was observed."
+            "Trade to each set of weights the application provides: from the time it was "
+            f"observed while the {rebalance.calendar_identifier} market is open, otherwise from "
+            "the next open, each asset at its next observed price."
         )
     else:
-        calendar_events = PortfolioCalendarEvents(
-            config=PortfolioCalendarEventsConfiguration(
-                offset_start=resolved.signal_start_time,
-                calendar_identifier=rebalance.calendar_identifier,
-                session_label=rebalance.session_label,
-                event_types=(rebalance.rebalance_event,),
-            ),
-            output_table=AlpacaPortfolioCalendarEventsStorage,
-        )
         rebalance_strategy = CalendarEventSignal(
             calendar_events_instance=calendar_events,
             calendar_identifier=rebalance.calendar_identifier,
@@ -448,7 +474,8 @@ def build_portfolio_run(resolved: ResolvedPortfolioConfiguration) -> PortfolioRu
         )
         rebalance_strategy_description = (
             "Select the latest signal observed at or before the configured persisted "
-            f"{rebalance.calendar_identifier} {rebalance.rebalance_event} event."
+            f"{rebalance.calendar_identifier} {rebalance.rebalance_event} event; each asset "
+            "trades at its next observed price from then, while the market is open."
         )
     description = configuration.description or (
         "Analytical portfolio following weights its owner application provides, valued with "
@@ -463,6 +490,8 @@ def build_portfolio_run(resolved: ResolvedPortfolioConfiguration) -> PortfolioRu
         portfolio_build_configuration=PortfolioBuildConfiguration(
             valuation_source_instance=valuation_source,
             valuation_column=configuration.valuation_column,
+            # The portfolio's currency (ms-markets ADR 0059): an Alpaca account's cash, US dollars.
+            valuation_asset_identifier=DEFAULT_CASH_ASSET_IDENTIFIER,
             valuation_alignment_policy=ValuationAlignmentPolicy(
                 maximum_staleness=dt.timedelta(
                     seconds=configuration.valuation_maximum_staleness_seconds

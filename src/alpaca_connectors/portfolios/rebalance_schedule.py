@@ -1,10 +1,15 @@
 """When a portfolio's first rebalance is (issue #41).
 
-A portfolio has weights only from its first rebalance. With ``immediate_signal`` that is its
-signal's first observation. With ``calendar_event_signal`` (NYSE ``market_close`` by default,
-ADR 0009) it is the first configured event at or after that observation: a run before that event
-succeeds with no weights, and a sync of an account that targets the portfolio finds none. Both
-say so, with the time of the first rebalance.
+A portfolio has weights only from its first rebalance: a run before it succeeds with no weights,
+and a sync of an account that targets the portfolio finds none. Both say so, with its time.
+
+A trade happens at the next observed price (ms-markets ADR 0058). The strategy's moment is the
+signal's first observation for ``immediate_signal``, and the first configured event at or after
+it for ``calendar_event_signal`` (NYSE ``market_close`` by default, ADR 0009). The earliest moment
+is that moment while the calendar is in session, otherwise the next open; each asset then trades
+at its first price observed at or after it, strictly after the signal, inside a session. This
+application's prices are daily Alpaca bars, stamped at the session's close, so the first
+rebalance is the first session close at or after the earliest moment and after the signal.
 
 The events are the stored calendar's sessions from ms-markets (``Calendar.sessions``), selected as
 ``CalendarEventSignal`` selects them: the configured event of the configured session, moved by the
@@ -46,15 +51,48 @@ def first_rebalance_event(
     return min(events, default=None)
 
 
+def first_trade_at(
+    sessions: Iterable[Any],
+    *,
+    starts_at: dt.datetime,
+    rebalance: Any,
+) -> dt.datetime | None:
+    """The first rebalance among ``sessions`` for a signal first observed at ``starts_at``.
+
+    The strategy's moment (the first weights, or the first configured event after them), moved to
+    the next open when the market is closed then, and filled at the first session close at or after
+    it and after the weights: the daily bar observed then. None when ``sessions`` hold none.
+    """
+    starts_at = starts_at.astimezone(dt.UTC)
+    bounds = sorted(
+        (session.opens_at.astimezone(dt.UTC), session.closes_at.astimezone(dt.UTC))
+        for session in sessions
+        if session.opens_at is not None and session.closes_at is not None
+    )
+    if rebalance.strategy == "immediate_signal":
+        moment: dt.datetime | None = starts_at
+    else:
+        moment = first_rebalance_event(sessions, starts_at=starts_at, rebalance=rebalance)
+    if moment is None:
+        return None
+    if any(opens <= moment <= closes for opens, closes in bounds):
+        earliest = moment
+    else:
+        earliest = min((opens for opens, _ in bounds if opens > moment), default=None)
+    if earliest is None:
+        return None
+    return min(
+        (closes for _, closes in bounds if closes >= earliest and closes > starts_at),
+        default=None,
+    )
+
+
 def first_rebalance_at(rebalance: Any, *, starts_at: dt.datetime) -> dt.datetime | None:
     """The portfolio's first rebalance for a signal first observed at ``starts_at``.
 
-    ``immediate_signal`` trades at the first weights themselves. For ``calendar_event_signal``,
-    None when the stored calendar has no configured event in the ``FIRST_REBALANCE_SEARCH_DAYS``
-    after them, or does not cover those dates.
+    None when the stored calendar has no rebalance in the ``FIRST_REBALANCE_SEARCH_DAYS`` after
+    the first weights, or does not cover those dates.
     """
-    if rebalance.strategy == "immediate_signal":
-        return starts_at.astimezone(dt.UTC)
     from msm.api.calendars import Calendar
 
     from alpaca_connectors.assets.calendars import ensure_trading_calendar
@@ -72,13 +110,14 @@ def first_rebalance_at(rebalance: Any, *, starts_at: dt.datetime) -> dt.datetime
     except ValueError:
         # ms-markets' CalendarRangeError, a ValueError: the calendar does not cover these dates.
         return None
-    return first_rebalance_event(sessions, starts_at=starts_at, rebalance=rebalance)
+    return first_trade_at(sessions, starts_at=starts_at, rebalance=rebalance)
 
 
 def describe_event(rebalance: Any) -> str:
-    """The configured event in words, as ``NYSE market_close`` or ``its first weights``."""
+    """The configured event in words, as ``NYSE market_close`` or ``NYSE close after its first
+    weights``."""
     if rebalance.strategy == "immediate_signal":
-        return "its first weights"
+        return f"{rebalance.calendar_identifier} close after its first weights"
     return f"{rebalance.calendar_identifier} {rebalance.rebalance_event}"
 
 
@@ -160,5 +199,6 @@ __all__ = [
     "first_rebalance_at",
     "first_rebalance_event",
     "first_rebalance_state",
+    "first_trade_at",
     "missing_weights_message",
 ]

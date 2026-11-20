@@ -310,9 +310,70 @@ def test_a_signal_without_observations_blocks_its_portfolio() -> None:
     assert "has no published observations" in answer.blockers[0]
 
 
+def test_a_portfolio_whose_history_predates_the_next_observed_price_does_not_run() -> None:
+    """Owner's decision pending (ADR 0031): such a portfolio is blocked, loudly, until then."""
+    existing = portfolio_configuration(portfolio_uid=PORTFOLIO_UID)
+    other = portfolio_configuration(
+        uid=uuid.UUID(int=31),
+        signal_definition_uid=uuid.UUID(int=131),
+        portfolio_uid=uuid.UUID(int=32),
+    )
+    reads, patches = _input_reads([existing, other], bounds=OBSERVED)
+    identifier = execution.portfolio_unique_identifier(existing.uid)
+    with (
+        patches[0],
+        patches[1],
+        patches[2],
+        patches[3],
+        patches[4],
+        patches[5],
+        patch(
+            "alpaca_connectors.markets_api.portfolios_without_rebalance_book",
+            return_value={identifier},
+        ) as unbooked,
+    ):
+        answers = execution.preflight_portfolio_configurations([existing, other])
+
+    # One read for every portfolio that has a Portfolio row (issue #46).
+    assert sorted(unbooked.call_args.args[0]) == sorted(
+        [identifier, execution.portfolio_unique_identifier(other.uid)]
+    )
+    assert not answers[str(existing.uid)].allowed
+    assert "ms-markets ADR 0058" in answers[str(existing.uid)].blockers[0]
+    assert answers[str(other.uid)].allowed
+
+
+def test_the_book_check_reads_the_latest_published_weights(recipes) -> None:
+    import pandas as pd
+
+    from alpaca_connectors import markets_api
+
+    at = dt.datetime(2026, 11, 18, 21, tzinfo=dt.UTC)
+    recipes.answer(
+        "weights_as_of",
+        pd.DataFrame(
+            [
+                (at, "OLD", "ALPACA::a", 0.5, None),
+                (at, "NEW", "ALPACA::a", 0.5, 12.0),
+                (at, "NEW", "ALPACA::b", 0.0, 0.0),
+            ],
+            columns=[
+                "time_index",
+                "portfolio_identifier",
+                "asset_identifier",
+                "weight",
+                "held_shares",
+            ],
+        ).set_index(["time_index", "portfolio_identifier", "asset_identifier"]),
+    )
+    assert markets_api.portfolios_without_rebalance_book(["OLD", "NEW", "NONE"]) == {"OLD"}
+    assert recipes.calls == [("weights_as_of", {"portfolio_identifiers": ["OLD", "NEW", "NONE"]})]
+    assert markets_api.portfolios_without_rebalance_book([]) == set()
+
+
 def test_held_inputs_are_not_read_again() -> None:
-    # A create starts its first run with what it just wrote (issue #46).
-    row = portfolio_configuration()
+    # A create starts its first run with what it just wrote (issue #46), its Portfolio included.
+    row = portfolio_configuration(portfolio_uid=PORTFOLIO_UID)
     bars = SimpleNamespace(
         uid=BARS_CONFIGURATION_UID, enabled=True, frequency_id="1d", feed="sip", adjustment="all"
     )
@@ -329,10 +390,22 @@ def test_held_inputs_are_not_read_again() -> None:
     # Asked for nothing, each read answers nothing.
     for read in (reads.rebalances, reads.own_bars, reads.definitions):
         read.return_value = {}
-    with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5]:
+    with (
+        patches[0],
+        patches[1],
+        patches[2],
+        patches[3],
+        patches[4],
+        patches[5],
+        patch(
+            "alpaca_connectors.markets_api.portfolios_without_rebalance_book", return_value=set()
+        ) as unbooked,
+    ):
         answer = execution.preflight_portfolio_configurations([row], held=held)[str(row.uid)]
 
     assert answer.allowed
+    # Its new portfolio has no published weights: they are not read.
+    assert list(unbooked.call_args.args[0]) == []
     for read in (
         reads.rebalances,
         reads.own_bars,
@@ -567,80 +640,117 @@ def test_a_run_whose_portfolio_is_stored_does_not_store_it_again(recipes) -> Non
     assert result.first_rebalance == {"rebalanced": False, "message": "No rebalance yet."}
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "Gap (ADR 0031 decision 5): since ms-markets 4.1.0 (its ADR 0058) ImmediateSignal requires "
-        "calendar_events_instance and calendar_identifier, so immediate_signal cannot run without "
-        "calendar events; the owner decides."
-    ),
-)
-def test_an_immediate_rebalance_builds_immediate_signal_and_no_calendar_events() -> None:
-    """immediate_signal trades each set of weights at its own time and reads no calendar."""
-    from msm_portfolios.rebalance_strategy import ImmediateSignal
+def _real_run_plan(strategy: str):
+    """``build_portfolio_run`` with the real ms-markets objects, offline.
 
-    from alpaca_connectors.portfolios.execution import build_portfolio_run
+    Only what needs the MetaTables backend is replaced: the registration of the calendar-events
+    table, the bars source (a real ``TimeIndexTableRef`` of an unregistered table) and the stored
+    calendar. Every configuration and strategy object is ms-markets' own, so a field it requires,
+    refuses or no longer has fails here.
+    """
+    import metatables.updaters.updaters as updaters
+    from alpaca_connectors.portfolios.signal_definitions import signal_uid_for_key
+    from metatables import TimeIndexMetaTable, TimeIndexTableRef
 
-    def graph(strategy: str):
-        rebalance = rebalance_configuration().model_copy(update={"strategy": strategy})
-        resolved = resolved_configuration()
-        resolved = ResolvedPortfolioConfiguration(
-            **{
-                **{name: getattr(resolved, name) for name in resolved.__slots__},
-                "rebalance_configuration": rebalance,
-            }
-        )
-        with (
-            patch(
-                "alpaca_connectors.portfolios.signal_definitions.weights_signal",
-                return_value=Mock(signal_uid="signal-uid"),
+    resolved = resolved_configuration()
+    resolved = ResolvedPortfolioConfiguration(
+        **{
+            **{name: getattr(resolved, name) for name in resolved.__slots__},
+            "rebalance_configuration": rebalance_configuration().model_copy(
+                update={"strategy": strategy}
             ),
-            patch(
-                "alpaca_connectors.portfolios.provided_weights.portfolio_signal_key",
-                return_value="signal-key",
-            ),
-            patch(
-                "alpaca_connectors.portfolios.execution.build_alpaca_interpolated_prices",
-                return_value=Mock(),
-            ),
-            patch(
-                "alpaca_connectors.portfolios.execution.ensure_trading_calendar",
-                return_value=SimpleNamespace(uid="calendar-uid", unique_identifier="NYSE"),
-            ),
-            patch("msm_portfolios.time_index.PortfolioCalendarEvents") as calendar_events,
-            patch("msm_portfolios.rebalance_strategy.CalendarEventSignal") as calendar_signal,
-            patch("msm_portfolios.configuration.BacktestingWeightsConfig") as weights_config,
-            patch("msm_portfolios.configuration.PortfolioBuildConfiguration"),
-            patch("msm_portfolios.configuration.PortfolioConfiguration"),
-            patch("msm_portfolios.configuration.PortfolioMarketsConfig"),
-            patch("msm_portfolios.configuration.FrontEndDetails") as front_end,
-            patch("msm.api.portfolios.Portfolio.upsert") as upsert,
-        ):
-            built = build_portfolio_run(resolved)
-        # The recipe creates or updates the Portfolio, not this application (ADR 0031).
-        upsert.assert_not_called()
-        return SimpleNamespace(
-            built=built,
-            calendar_events=calendar_events,
-            calendar_signal=calendar_signal,
-            strategy=weights_config.call_args.kwargs["rebalance_strategy_instance"],
-            name=front_end.call_args.kwargs["rebalance_strategy_name"],
-        )
-
-    immediate = graph("immediate_signal")
-    assert type(immediate.strategy) is ImmediateSignal
-    assert immediate.built.calendar_events is None
-    immediate.calendar_events.assert_not_called()
-    immediate.calendar_signal.assert_not_called()
-    assert immediate.name == "ImmediateSignal"
-
-    calendar = graph("calendar_event_signal")
-    assert calendar.strategy is calendar.calendar_signal.return_value
-    assert calendar.built.calendar_events is calendar.calendar_events.return_value
-    assert calendar.calendar_signal.call_args.kwargs["calendar_events_instance"] is (
-        calendar.calendar_events.return_value
+            "signal_uid": signal_uid_for_key("signal-key"),
+        }
     )
-    assert calendar.calendar_signal.call_args.kwargs["rebalance_event"] == "market_close"
+    prices = TimeIndexTableRef(
+        output_table=TimeIndexMetaTable.model_construct(
+            uid=str(uuid.UUID(int=21)),
+            data_source_uid=str(uuid.UUID(int=22)),
+            identifier="alpaca_connectors__interpolated_prices__t_x",
+            physical_table_name="alpaca_connectors__interpolated_prices__t_x",
+        )
+    )
+    with (
+        patch.object(
+            updaters,
+            "ensure_registered_output_table",
+            lambda output_table, context: output_table,
+        ),
+        patch.object(execution, "build_alpaca_interpolated_prices", return_value=prices),
+        patch.object(
+            execution,
+            "ensure_trading_calendar",
+            return_value=SimpleNamespace(uid="calendar-uid", unique_identifier="NYSE"),
+        ),
+        patch(
+            "alpaca_connectors.portfolios.provided_weights.portfolio_signal_key",
+            return_value="signal-key",
+        ),
+        patch("msm.api.portfolios.Portfolio.upsert") as upsert,
+    ):
+        plan = execution.build_portfolio_run(resolved)
+    # The run creates or updates the Portfolio, not the build (ADR 0031).
+    upsert.assert_not_called()
+    return plan
+
+
+@pytest.mark.parametrize("strategy", ["immediate_signal", "calendar_event_signal"])
+def test_both_strategies_read_the_calendar_sessions_and_build_with_ms_markets(strategy) -> None:
+    """ms-markets ADR 0058: every rebalance waits for an open market and trades at the next
+    observed price, so both strategies read the portfolio calendar's open and close."""
+    from msm_portfolios.configuration import PortfolioConfiguration
+    from msm_portfolios.contrib.signals import ApplicationWeights
+    from msm_portfolios.rebalance_strategy import CalendarEventSignal, ImmediateSignal
+    from msm_portfolios.rebalance_strategy.base import require_observed_price_column
+    from msm_portfolios.time_index import PortfolioCalendarEvents
+
+    from alpaca_connectors.instances import AlpacaPortfolioCalendarEventsStorage
+
+    plan = _real_run_plan(strategy)
+
+    assert isinstance(plan.portfolio_configuration, PortfolioConfiguration)
+    build = plan.portfolio_configuration.portfolio_build_configuration
+    weights = build.backtesting_weights_configuration
+    rule = weights.rebalance_strategy_instance
+    expected = ImmediateSignal if strategy == "immediate_signal" else CalendarEventSignal
+    assert type(rule) is expected
+    assert isinstance(weights.signal_weights_instance, ApplicationWeights)
+    # The private calendar-events table, publishing both session boundaries of the calendar.
+    events = plan.calendar_events
+    assert isinstance(events, PortfolioCalendarEvents)
+    assert rule.calendar_events_instance is events
+    assert events.output_table is AlpacaPortfolioCalendarEventsStorage
+    assert tuple(events.config.event_types) == ("market_open", "market_close")
+    assert (events.config.calendar_identifier, events.config.session_label) == ("NYSE", "regular")
+    assert events.config.offset_start == resolved_configuration().signal_start_time
+    assert (rule.calendar_identifier, rule.session_label) == ("NYSE", "regular")
+    # Trades at the next observed price, with ms-markets' execution policy defaults.
+    assert rule.fill_rule == "next_observed_price"
+    assert rule.execution_policy == type(rule.execution_policy)()
+    # The portfolio's currency is the Alpaca account's cash (ms-markets ADR 0059).
+    assert build.valuation_asset_identifier == "USD"
+    assert build.fx_source_instance is None
+    require_observed_price_column(build.valuation_column)
+    if strategy == "calendar_event_signal":
+        assert (rule.rebalance_event, rule.rebalance_cadence) == ("market_close", "every_session")
+    front_end = plan.portfolio_configuration.portfolio_markets_configuration.front_end_details
+    assert front_end.rebalance_strategy_name == expected.__name__
+    assert "next observed price" in front_end.rebalance_strategy_description
+
+
+def test_ms_markets_refuses_a_calendar_rule_without_both_session_events() -> None:
+    """Why the events table publishes both: one event type is refused (ms-markets ADR 0058)."""
+    from msm_portfolios.rebalance_strategy import CalendarEventSignal
+
+    plan = _real_run_plan("calendar_event_signal")
+    events = plan.calendar_events
+    events.config = events.config.model_copy(update={"event_types": ("market_close",)})
+    with pytest.raises(ValueError, match="market_open"):
+        CalendarEventSignal(
+            calendar_events_instance=events,
+            calendar_identifier="NYSE",
+            rebalance_event="market_close",
+        )
 
 
 def test_both_rebalance_strategies_are_accepted() -> None:

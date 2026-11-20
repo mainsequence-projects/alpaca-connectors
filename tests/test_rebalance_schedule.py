@@ -182,16 +182,62 @@ def test_the_sync_refuses_with_the_first_rebalance(monkeypatch, portfolio) -> No
     assert "its first is at 2026-11-18T21:00:00+00:00 (NYSE market_close)" in str(refused.value)
 
 
-def test_an_immediate_portfolio_rebalances_at_its_first_weights() -> None:
-    from alpaca_connectors.portfolios.rebalance_schedule import first_rebalance_at
+def test_an_immediate_portfolio_trades_at_the_next_observed_price() -> None:
+    """ms-markets ADR 0058: in session from the weights, else from the next open; each asset at
+    its next observed price, here the daily bar stamped at the session's close."""
+    from alpaca_connectors.portfolios.rebalance_schedule import first_trade_at
 
     immediate = _rebalance(strategy="immediate_signal")
-    # No calendar is read: the first weights are the first rebalance.
-    assert first_rebalance_at(immediate, starts_at=FIRST_WEIGHTS) == FIRST_WEIGHTS
+    # Weights during Wednesday's session: Wednesday's close.
+    assert first_trade_at(SESSIONS, starts_at=FIRST_WEIGHTS, rebalance=immediate) == CLOSE
+    # Weights on Saturday: Monday's open is the earliest moment, Monday's close the price.
+    saturday = dt.datetime(2026, 11, 21, 12, tzinfo=UTC)
+    assert first_trade_at(SESSIONS, starts_at=saturday, rebalance=immediate) == (
+        dt.datetime(2026, 11, 23, 21, 0, tzinfo=UTC)
+    )
+    # Weights at the close itself: the price must be observed strictly after them.
+    assert first_trade_at(SESSIONS, starts_at=CLOSE, rebalance=immediate) == (
+        dt.datetime(2026, 11, 19, 21, 0, tzinfo=UTC)
+    )
+    assert first_trade_at([], starts_at=FIRST_WEIGHTS, rebalance=immediate) is None
+
+
+def test_a_calendar_rule_trades_at_the_close_on_or_after_its_event() -> None:
+    from alpaca_connectors.portfolios.rebalance_schedule import first_trade_at
+
+    # The close event is in session: its own close bar is the price, as before.
+    assert first_trade_at(SESSIONS, starts_at=FIRST_WEIGHTS, rebalance=_rebalance()) == CLOSE
+    # The open event is the earliest moment; the price is that session's close bar.
+    opens = _rebalance(rebalance_event="market_open")
+    assert first_trade_at(SESSIONS, starts_at=FIRST_WEIGHTS, rebalance=opens) == (
+        dt.datetime(2026, 11, 19, 21, 0, tzinfo=UTC)
+    )
+
+
+def test_the_first_rebalance_reads_the_stored_calendar_for_both_rules(monkeypatch) -> None:
+    from msm.api.calendars import Calendar
+
+    from alpaca_connectors.assets import calendars
+    from alpaca_connectors.portfolios.rebalance_schedule import first_rebalance_at
+
+    read = []
+    monkeypatch.setattr(
+        calendars, "ensure_trading_calendar", lambda identifier: SimpleNamespace(uid="nyse-uid")
+    )
+    monkeypatch.setattr(
+        Calendar,
+        "sessions",
+        classmethod(lambda cls, uid, start, end, session_label: read.append(uid) or SESSIONS),
+    )
+    immediate = _rebalance(strategy="immediate_signal")
+    assert first_rebalance_at(immediate, starts_at=FIRST_WEIGHTS) == CLOSE
+    assert first_rebalance_at(_rebalance(), starts_at=FIRST_WEIGHTS) == CLOSE
+    assert read == ["nyse-uid", "nyse-uid"]
     state = first_rebalance_state(
         immediate, starts_at=FIRST_WEIGHTS, at=dt.datetime(2026, 11, 18, 16, 8, tzinfo=UTC)
     )
-    assert state == {"rebalanced": True, "first_rebalance_at": "2026-11-18T16:07:00+00:00"}
+    assert state["rebalanced"] is False
+    assert "(NYSE close after its first weights)" in state["message"]
 
 
 def test_a_sync_before_an_immediate_portfolio_s_first_run_says_so(monkeypatch, portfolio) -> None:
@@ -209,6 +255,6 @@ def test_a_sync_before_an_immediate_portfolio_s_first_run_says_so(monkeypatch, p
 
     assert missing_weights_message(identifier, at=CLOSE) == (
         "A portfolio of the account target has no weights recorded yet: its first rebalance was "
-        "at 2026-11-18T16:07:00+00:00 (its first weights), and no portfolio run has recorded it "
-        "since."
+        "at 2026-11-18T16:07:00+00:00 (NYSE close after its first weights), and no portfolio run "
+        "has recorded it since."
     )

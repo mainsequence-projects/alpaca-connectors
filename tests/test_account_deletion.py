@@ -270,27 +270,40 @@ def test_the_preflight_and_the_signal_delete_call_their_ms_markets_routes(recipe
 def test_several_portfolios_are_preflighted_and_deleted_in_one_request_each() -> None:
     from alpaca_connectors import markets_api
 
+    held = "Account target rows name this portfolio (count=2)."
+    missing = uuid.UUID(int=77)
     client = MagicMock()
+    # ms-markets 4.2.0's preflight: each portfolio with its own blockers, and the request's
+    # blockers labelled by unique identifier, or by uid for one it did not find.
     client.request.side_effect = [
         {
             "allowed": False,
             "blockers": [
-                f"Portfolio {KEPT_PORTFOLIO}: TargetPositionsStorage.portfolio_uid references "
-                "this portfolio (count=2).",
+                f"Portfolio 'ALPACA_PORTFOLIO__KEPT': {held}",
+                f"Portfolio {missing} was not found.",
+            ],
+            "portfolios": [
+                {"uid": str(PORTFOLIO), "unique_identifier": "ALPACA_PORTFOLIO__P", "blockers": []},
+                {
+                    "uid": str(KEPT_PORTFOLIO),
+                    "unique_identifier": "ALPACA_PORTFOLIO__KEPT",
+                    "blockers": [held],
+                },
             ],
         },
-        {"deleted_count": 1},
+        {"deleted_count": 1, "deleted": [], "failed": []},
     ]
     with patch(
         "alpaca_connectors.runtime.use_markets_api", return_value=SimpleNamespace(client=client)
     ):
-        blockers = markets_api.portfolios_delete_blockers([PORTFOLIO, KEPT_PORTFOLIO])
+        blockers = markets_api.portfolios_delete_blockers([PORTFOLIO, KEPT_PORTFOLIO, missing])
         markets_api.delete_portfolios([str(PORTFOLIO)])
 
-    # Each blocker goes to the portfolio ms-markets names in it.
+    # Each blocker goes to its portfolio; the others are not blocked by it.
     assert blockers[str(PORTFOLIO)] == []
-    assert len(blockers[str(KEPT_PORTFOLIO)]) == 1
-    both = [str(PORTFOLIO), str(KEPT_PORTFOLIO)]
+    assert blockers[str(KEPT_PORTFOLIO)] == [held]
+    assert blockers[str(missing)] == [f"Portfolio {missing} was not found."]
+    both = [str(PORTFOLIO), str(KEPT_PORTFOLIO), str(missing)]
     assert client.request.call_args_list == [
         call(
             "POST",
@@ -309,12 +322,30 @@ def test_a_blocker_that_names_no_portfolio_blocks_them_all() -> None:
     from alpaca_connectors import markets_api
 
     client = MagicMock()
-    client.request.return_value = {"blockers": ["You may not write the table it reaches."]}
+    client.request.return_value = {
+        "blockers": ["You may not write the table it reaches."],
+        "portfolios": [
+            {"uid": str(uid), "unique_identifier": f"P{index}", "blockers": []}
+            for index, uid in enumerate((PORTFOLIO, KEPT_PORTFOLIO))
+        ],
+    }
     with patch(
         "alpaca_connectors.runtime.use_markets_api", return_value=SimpleNamespace(client=client)
     ):
         blockers = markets_api.portfolios_delete_blockers([PORTFOLIO, KEPT_PORTFOLIO])
     assert all(blockers.values())
+
+
+def test_one_portfolio_is_deleted_through_the_route() -> None:
+    # Portfolio.delete deletes nothing since ms-markets 4.2.0; the route deletes its datasets.
+    from alpaca_connectors import markets_api
+
+    client = MagicMock()
+    with patch(
+        "alpaca_connectors.runtime.use_markets_api", return_value=SimpleNamespace(client=client)
+    ):
+        markets_api.delete_portfolio(str(PORTFOLIO))
+    client.request.assert_called_once_with("DELETE", f"/api/v1/portfolio/{PORTFOLIO}/")
 
 
 def test_current_targets_are_read_in_pages() -> None:

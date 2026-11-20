@@ -39,8 +39,9 @@ from sqlalchemy.types import Uuid
 from alpaca_connectors.metatables import AlpacaMarketsMetaTableMixin, ProjectStorageNameMixin
 from alpaca_connectors.portfolios.signal_definitions import SignalDefinitionTable
 
-# calendar_event_signal trades at the configured calendar events; immediate_signal trades at each
-# signal observation's own time, and its calendar only gives the portfolio its calendar.
+# calendar_event_signal rebalances at the configured calendar events; immediate_signal at each
+# signal observation. Both trade at the next observed price while the calendar's market is open
+# (ms-markets ADR 0058), so both read the calendar's sessions.
 RebalanceStrategy = Literal["calendar_event_signal", "immediate_signal"]
 RebalanceEvent = Literal["market_open", "market_close"]
 RebalanceCadence = Literal["every_session", "weekly"]
@@ -135,7 +136,8 @@ class PortfolioRebalanceConfigurationTable(
             "description": (
                 "Rebalance strategy code: calendar_event_signal trades to the latest signal "
                 "weights observed at or before each selected calendar event, immediate_signal "
-                "trades to each signal observation at its own time."
+                "trades to each signal observation; both at the next observed price while the "
+                "calendar's market is open."
             ),
         },
     )

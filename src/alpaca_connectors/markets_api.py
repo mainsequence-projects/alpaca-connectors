@@ -265,10 +265,12 @@ def portfolio_delete_blockers(portfolio_uid: Any) -> list[str]:
 def portfolios_delete_blockers(portfolio_uids: Iterable[Any]) -> dict[str, list[str]]:
     """``portfolio_delete_blockers`` of several portfolios: one preflight per batch (issue #46).
 
-    ms-markets' preflight (``preflightBulkDeletePortfolios``) takes the explicit selection and
-    prefixes each portfolio's blocker with ``Portfolio <uid>``, the uid as sent, so each blocker
-    goes to its portfolio. A blocker that names none (the delete's own table impact) blocks
-    every portfolio of its request.
+    ms-markets' preflight (``preflightBulkDeletePortfolios``, ms-markets 4.2.0) takes the
+    explicit selection and answers ``portfolios``, each with its ``uid`` and its own
+    ``blockers``, and ``blockers`` for the whole request: each portfolio's, prefixed with
+    ``Portfolio '<unique_identifier>'``, ``Portfolio <uid> was not found.`` for a missing one,
+    and those of the delete's own table impact. Each portfolio gets its own blockers and its
+    not-found; any other blocker of the request blocks every portfolio of it.
     """
     from msm.client.client import API_PREFIX
 
@@ -276,15 +278,26 @@ def portfolios_delete_blockers(portfolio_uids: Iterable[Any]) -> dict[str, list[
     uids = list(dict.fromkeys(str(uuid.UUID(str(uid))) for uid in portfolio_uids))
     blockers: dict[str, list[str]] = {uid: [] for uid in uids}
     for batch in batches(uids):
-        preflight = _client().request(
-            "POST",
-            f"{API_PREFIX}/portfolio/bulk-delete/preflight/",
-            json=_explicit_selections(batch),
+        preflight = (
+            _client().request(
+                "POST",
+                f"{API_PREFIX}/portfolio/bulk-delete/preflight/",
+                json=_explicit_selections(batch),
+            )
+            or {}
         )
-        for blocker in (preflight or {}).get("blockers") or []:
+        labels = []
+        for item in preflight.get("portfolios") or []:
+            uid = str(uuid.UUID(str(item["uid"])))
+            labels.append(f"Portfolio {item.get('unique_identifier')!r}: ")
+            if uid in blockers:
+                blockers[uid].extend(str(blocker) for blocker in item.get("blockers") or [])
+        for blocker in preflight.get("blockers") or []:
             text = str(blocker)
-            named = [uid for uid in batch if text.startswith(f"Portfolio {uid}")]
-            for uid in named or batch:
+            if any(text.startswith(label) for label in labels):
+                continue
+            missing = [uid for uid in batch if text == f"Portfolio {uid} was not found."]
+            for uid in missing or batch:
                 blockers[uid].append(text)
     return blockers
 
@@ -307,15 +320,17 @@ def delete_portfolios(portfolio_uids: Iterable[Any]) -> list[dict[str, Any]]:
 
 
 def delete_portfolio(portfolio_uid: Any) -> dict[str, Any]:
-    """Delete a portfolio nothing references (``deletePortfolio``, ms-markets ADR 0049).
+    """Delete a portfolio nothing references (``DELETE /portfolio/{uid}/``, ms-markets ADR 0049).
 
-    Its weights and values, which are Markets' own rows (ADR 0031), go with it. This
-    application's private rows that reference it (rebalance state) refuse the delete with
-    ``RESTRICT``, so ``delete_private_series`` deletes them first.
+    Its datasets in Markets, its weights and values among them (ADR 0031), go with it in one
+    transaction. ``Portfolio.delete`` deletes nothing since ms-markets 4.2.0, so the route is
+    called. This application's private rows that reference it (rebalance state) refuse the
+    delete with ``RESTRICT``, so ``delete_private_series`` deletes them first. Markets refuses a
+    referenced or missing portfolio (``MarketsConflictError``, ``LookupError``).
     """
-    from msm.api.portfolios import Portfolio
+    from msm.client.client import API_PREFIX
 
-    return Portfolio.delete(portfolio_uid)
+    return _client().request("DELETE", f"{API_PREFIX}/portfolio/{uuid.UUID(str(portfolio_uid))}/")
 
 
 # ------------------------------------------------------------------------------------------------
@@ -543,6 +558,32 @@ def portfolio_weights_as_of(
     return weights
 
 
+def portfolios_without_rebalance_book(portfolio_identifiers: Iterable[str]) -> set[str]:
+    """Portfolios whose latest published weights carry no rebalance book (``weights_as_of``).
+
+    Calls ``weights_as_of(batch)`` once per ``MARKETS_BATCH_SIZE`` portfolios. Since ms-markets
+    4.1.0 (its ADRs 0058 and 0059) every executed-weights row of ``ImmediateSignal`` and
+    ``CalendarEventSignal`` carries the book's ``held_shares``; a portfolio whose latest row
+    has none was computed before trades waited for the next observed price. A portfolio with
+    no published weights is not one. Refusals propagate.
+    """
+    from msm_portfolios.recipes import weights_as_of
+
+    unbooked: set[str] = set()
+    for batch in batches(str(identifier) for identifier in portfolio_identifiers):
+        frame = weights_as_of(batch)
+        if frame is None or frame.empty:
+            continue
+        flat = frame.reset_index()
+        if "held_shares" not in flat.columns:
+            unbooked.update(str(value) for value in flat["portfolio_identifier"])
+            continue
+        for identifier, rows in flat.groupby("portfolio_identifier"):
+            if rows["held_shares"].isna().all():
+                unbooked.add(str(identifier))
+    return unbooked
+
+
 @dataclass(frozen=True, slots=True)
 class PortfolioRunAnswer:
     """What a portfolio run wrote, as Markets answered it."""
@@ -681,6 +722,7 @@ __all__ = [
     "portfolio_values",
     "portfolio_weights_as_of",
     "portfolios_delete_blockers",
+    "portfolios_without_rebalance_book",
     "publish_signal_weights",
     "read_all_pages",
     "read_in_batches",

@@ -19,9 +19,10 @@ signals their weights; you never create a portfolio or a signal or give weights.
 so plainly and suggest asking the application that owns the portfolio.
 
 - Each observation of its weights is the whole set at its time; an asset left out is held at zero.
-- Its rebalance rule decides when it trades: at each set of weights as observed
-  (`immediate_signal`), or to the latest observation at the rule's next calendar event
-  (`calendar_event_signal`). It is valued with the daily Alpaca prices its own bars configuration
+- Its rebalance rule decides when it trades: at each set of weights (`immediate_signal`), or to
+  the latest observation at the rule's next calendar event (`calendar_event_signal`). Either way it
+  trades only while its calendar's market is open, each asset at its next daily Alpaca price, which
+  is stamped at the session's close. It is valued with the prices its own bars configuration
   fetches with its Account's keys.
 - A portfolio answering `adopted: false` predates Account ownership; it works as before, on its own
   signal and the bars feed it names, and runs like any other.
@@ -33,8 +34,9 @@ so plainly and suggest asking the application that owns the portfolio.
 Use `alpaca_query_rebalance_configurations` operations `list`/`get` and
 `alpaca_manage_rebalance_configuration` operations `create`/`update`/`delete`.
 The strategy is `immediate_signal` or `calendar_event_signal`. `immediate_signal` trades each set
-of weights at its own time and uses only the calendar identifier. `calendar_event_signal` owns
-market calendar, session, open/close event, offset and cadence. Do not substitute midnight
+of weights from its time, or from the next open when the market is closed, and uses the calendar
+identifier and session. `calendar_event_signal` owns market calendar, session, open/close event,
+offset and cadence. Both trade each asset at its next observed price. Do not substitute midnight
 timestamps or a UTC Job cron for actual market-calendar events. Changing a rule's strategy gives
 every portfolio that uses it a new rebalance history.
 
