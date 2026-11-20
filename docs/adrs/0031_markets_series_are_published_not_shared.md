@@ -8,9 +8,8 @@ release, with no intermediate steps (see [Rollout](#rollout)). Implemented on th
 ms-markets ADR 0060 ("Producers Publish, Markets Reads Only Its Own Tables"), which this ADR
 applies to this application. The same release adapts this application to ms-markets 4.1.0's
 rule that a trade happens at the next observed price (ms-markets ADR 0058, decided by the owner
-for this application on 2026-11-20; decision 5). It waits for ms-markets 4.2.0 to be published,
-and for the owner's decision on existing portfolios in
-[Implementation Notes](#implementation-notes).
+for this application on 2026-11-20; decision 5). The portfolios that exist before it are deleted
+(owner, 2026-11-20; [Rollout](#rollout)). It runs on ms-markets 4.2.0 as published.
 
 When implemented it withdraws
 [ADR 0025](0025_markets_reads_the_instances_through_a_second_namespace.md), removes
@@ -67,8 +66,8 @@ table of another application. It ships the series operations and the recipes a p
 1. **This application has no table for signal weights, portfolio weights or portfolio values.**
    It publishes them to Markets and reads them back from Markets. The instances
    `AlpacaSignalWeightsStorage`, `AlpacaPortfolioWeightsStorage` and `AlpacaPortfoliosStorage`
-   are dropped by revision 0033 of the same release, whose push comes after their history is
-   published to Markets and verified (Rollout).
+   are dropped by revision 0033 of the same release, with their rows: the portfolios that exist
+   before it are deleted, not carried across (Rollout).
 2. **Its private tables stay in `alpaca-connectors`, and Markets never reads them:** rebalance
    state, calendar events, interpolated prices, bars, orders and trades, and every table of its
    own. Their `RESTRICT` keys to Markets registries stay.
@@ -125,8 +124,10 @@ table of another application. It ships the series operations and the recipes a p
    `calendar_event_signal` portfolio on `market_close` trades at the same close as before; on
    `market_open` it trades at that session's close instead of its open. Both hold shares and cash
    between rebalances, so their weights drift with prices instead of returning to target at every
-   price, and a buy that cash cannot cover is cut. An existing portfolio's history was computed
-   under the earlier rule; how it goes on is open (Implementation Notes).
+   price, and a buy that cash cannot cover is cut. A portfolio that exists before this release is
+   deleted (Rollout): left in place, its run would recompute its rebalance state under the new
+   rule next to the rows of the earlier one, and its weights would jump from one to the other at
+   its next trade.
 6. **Reads of the three series come from Markets, through its recipes.** Each business use stays:
 
    | Use | Today | After |
@@ -161,37 +162,30 @@ table of another application. It ships the series operations and the recipes a p
 
 ## Rollout
 
-One release, in each Environment, in this order (owner's decision of 2026-11-20). A person runs
+One release, in each Environment, in this order (owner's decisions of 2026-11-20). A person runs
 every step that is not a push; the [runbook](../operations/markets-api-boundary.md#5-markets-reads-no-table-of-this-application)
 has the commands.
 
 1. The Markets API runs ms-markets 4.2.0, and its migration has run.
 2. Hold the scheduled portfolio runs, as in step 2 of the runbook, and ask the applications that
-   give weights (the weights routes) to pause until step 6: the release still running writes
-   them to the instances, after their history is published.
-3. An Organization admin makes the person who publishes the history the manager of this
-   application's `Portfolio` and `SignalMetadata` rows (`msm registry assign-manager`, with
-   `--attach` so that signals are assigned too): rows created before ms-markets ADR 0060 have
-   no manager and accept no publish, and through the Markets API only a row's manager publishes.
-4. That person publishes the history of the three instances to Markets with
-   `msm series publish`, then runs it again as a dry run: every key must be verified (Markets
-   holds the instance's first and last time and at least its rows). A key that fails is resolved
-   before going on; the push drops the instances.
-5. The admin makes this application's branch in the Environment the manager of the same rows
-   (`msm registry assign-manager --manager branch:<uid>`).
-6. Push this release. Its migration Job applies revision 0033, which drops the three instances
-   with their rows, and removes the instances' memberships of `alpaca-connectors-markets`, which
-   the code no longer declares. Release the scheduled runs and the applications; check one
-   publication of weights and one run. A run publishes the calendar's opens and closes into the
-   private calendar-events table by itself (decision 5). Until the owner decides how existing
-   portfolios go on (Implementation Notes), their preflight answers why they do not run; a
-   portfolio created after the push runs.
-7. The owner of `alpaca-connectors-markets` revokes the `MainSequenceMarkets` branch's
+   create portfolios to wait until step 5.
+3. Delete every existing portfolio with this application's portfolio delete, before the push:
+   left in place, a portfolio would run on this release and recompute its rebalance state under
+   the new trading rule next to its old rows. The delete retires its `Portfolio`, which needs no
+   manager, so the rows created before ms-markets ADR 0060 need no assignment; it deletes the
+   configuration, its own bars configuration, its inline rebalance configuration and its signal
+   definition (ADR 0027, ADR 0028).
+4. Push this release. Its migration Job applies revision 0033, which drops the three instances
+   with every row of the deleted portfolios' signals, weights and values, and removes the
+   instances' memberships of `alpaca-connectors-markets`, which the code no longer declares.
+5. Release the scheduled runs and the applications. They create their portfolios again as
+   usual; check one create, one publication of weights and one run.
+6. The owner of `alpaca-connectors-markets` revokes the `MainSequenceMarkets` branch's
    `data_viewer` and removes the namespace.
 
 There is no later release for this ADR. The release before this one cannot run on ms-markets
-4.2.0, and after revision 0033 the instances' rows exist only in Markets, so going back means
-going forward: the revision's downgrade recreates the three tables empty.
+4.2.0, and after revision 0033 the old series are gone, so going back means going forward: the
+revision's downgrade recreates the three tables empty.
 
 ## Consequences
 
@@ -245,27 +239,27 @@ Checked against ms-markets 4.2.0 on 2026-11-20. Every recipe call is a composite
     same time, calendar, session and type) are written again with equal values: MetaTables
     overwrites on its unique index (`metatables/models.py`, `upsert_data_into_table`). So the
     history gains its opens and closes from the first run of this release, with no person's step.
-- **What is not decided: existing portfolios.** ms-markets 4.1.0 gives every portfolio
-  configuration a new hash (`fill_rule`, `execution_policy`), and its changelog says to retire
-  existing portfolios and keep them as history. This application's `Portfolio` is its
-  configuration's `ALPACA_PORTFOLIO__<hex>`, so the run continues the same row. Its
-  `PortfolioRebalance` gets a new identity and recomputes the private rebalance state from the
-  signal's first observation under the new rule (`time_index/portfolios/rebalance.py`, lines
-  104-112 and 221-243), next to the rows of the earlier rule; `PortfolioWeights` reads every
-  rebalance row of the portfolio after its last published weights (`weights.py`, lines 171-183),
-  and the values continue from the last published close. The weights would jump from the history
-  of the earlier rule to the book of the new one at the next trade. Until the owner decides, a
-  portfolio whose latest published weights carry no rebalance book (`held_shares`, which every
-  row of the new rule has) does not run: its preflight answers why
-  (`execution._resolve_inputs`, `markets_api.portfolios_without_rebalance_book`). Options:
-  1. **Continue.** Remove the check: the history stays as it was computed, the new rule applies
-     from the next trade, with the jump above.
-  2. **Restate.** A person deletes each existing portfolio's published weights and values
-     (`delete_after` before its first time, as its manager) and its private rebalance state
-     (`delete_private_series`) before the push; the next run recomputes the whole history under
-     the new rule. The published history of those portfolios changes.
-  3. **Retire.** Each existing portfolio is ended, kept as history (ADR 0027), and its
-     application creates a new one, with a new configuration UID and identifier.
+- **Existing portfolios are deleted (owner, 2026-11-20).** ms-markets 4.1.0 gives every
+  portfolio configuration a new hash (`fill_rule`, `execution_policy`). A portfolio that is not
+  deleted keeps its `ALPACA_PORTFOLIO__<hex>` row, but its `PortfolioRebalance` gets a new
+  identity and recomputes the private rebalance state from the signal's first observation under
+  the new rule (`time_index/portfolios/rebalance.py`, lines 104-112 and 221-243), next to the rows
+  of the earlier rule, and `PortfolioWeights` reads every rebalance row of the portfolio after its
+  last published weights (`weights.py`, lines 171-183). So each one is deleted before the push,
+  with this application's portfolio delete (`DELETE /v1/portfolio-configurations/{uid}` or
+  `alpaca-connectors portfolio delete <uid> --execute`):
+  - it works on rows that have no manager: retiring checks none (ms-markets
+    `msm/services/portfolio_lifecycle.py`, `retire_portfolio_record`), while a Markets portfolio
+    delete, a signal delete and a publish refuse such rows (`msm/api/managers.py`,
+    `manager_refusal`);
+  - in this application's tables it deletes the configuration, its own bars configuration, its
+    inline rebalance configuration and its signal definition, and records the retired
+    `Portfolio` (`EndedPortfolio`);
+  - the retired `Portfolio`, its `SignalMetadata` and its private rebalance-state rows stay with
+    its account's history, as every deleted portfolio's do (ADR 0027, ADR 0028), and its old
+    signal weights, weights and values go with the instances in revision 0033. The calendar
+    events belong to the calendar, not the portfolio, and stay.
+
 - **Every other ms-markets 4.1.0 and 4.2.0 change checked:** the required
   `PortfolioBuildConfiguration.valuation_asset_identifier` is `USD`, the cash asset this
   application registers for every Alpaca account (`holdings/account.py`); the execution policy
@@ -275,9 +269,10 @@ Checked against ms-markets 4.2.0 on 2026-11-20. Every recipe call is a composite
   `DELETE /portfolio/{uid}/`; the portfolio delete preflight lists each portfolio with its own
   blockers and labels them by unique identifier, which `portfolios_delete_blockers` reads; the
   rebalance-state instance gets ms-markets' `(portfolio_identifier, time_index)` index in
-  revision 0033. A `valuation_column` of `open`, `high`, `low` or `vwap` is refused by ms-markets
-  at the run (a trade's price is a close or a mark); the API still accepts it, which is the
-  owner's to decide. Tests build the real ms-markets configuration and strategy of each rule
+  revision 0033. A `valuation_column` ms-markets cannot trade at (`open`, `high`, `low`, `vwap`:
+  a trade's price is a close or a mark) is refused at create and update with ms-markets' own
+  rule (`require_observed_price_column`), answered `422`; one already stored fails at its run
+  with the same reason. Tests build the real ms-markets configuration and strategy of each rule
   offline (`test_both_strategies_read_the_calendar_sessions_and_build_with_ms_markets`).
 
 ## Open Questions
@@ -285,5 +280,4 @@ Checked against ms-markets 4.2.0 on 2026-11-20. Every recipe call is a composite
 - Whether `alpaca_connectors__signal_asset` (every asset a signal has published) is still
   needed once Markets answers the same from the series. It stays until that is checked against
   the run's pricing scope and the bars scope.
-- How long a run and a first publish of a long history take through the Markets API. Not
-  measured.
+- How long a run of a long history takes through the Markets API. Not measured.

@@ -104,103 +104,43 @@ namespace, nothing is registered in the Markets dataset catalog, and no person g
 anything: a new Environment needs only the `reader` on the `MainSequenceMarkets` branch that the
 workflow declares (step 3). Never grant Markets a role on a table or namespace of this application.
 
-An Environment where the three instances hold history moves with ADR 0031's
-[Rollout](../adrs/0031_markets_series_are_published_not_shared.md#rollout), in one release, while
-the portfolio runs are held (step 2) and the applications that give weights pause:
+An Environment that runs the release before ADR 0031 moves to it with ADR 0031's
+[Rollout](../adrs/0031_markets_series_are_published_not_shared.md#rollout), in one release. The
+portfolios that exist before it are deleted, not carried across:
 
 1. The Markets API runs ms-markets 4.2.0.
-2. Save, outside the repository, a module such as `alpaca_history.py`, and run it from a
-   checkout of this release with your own `mainsequence` session. It attaches this application's
-   runtime (which reaches Markets through the Markets API) and names the three instances by their
-   physical names: ms-markets 4.2.0 no longer builds their classes, and `msm series publish`
-   needs only the name.
-
-   ```python
-   from types import SimpleNamespace
-
-   INSTANCES = {
-       "alpaca_connectors__signalweightsts__main": ("signal-weights", "signal_uid"),
-       "alpaca_connectors__portfolioweightsts__main": ("portfolio-weights", "portfolio_identifier"),
-       "alpaca_connectors__portfoliosts__main": ("portfolio-values", "portfolio_identifier"),
-   }
-
-   def attach():
-       """This application's runtime, and the package that serves signals to assign-manager."""
-       from alpaca_connectors.runtime import start_markets_engine
-
-       start_markets_engine()
-       import msm_portfolios.api  # noqa: F401
-
-   def publishes():
-       attach()
-       from msm_portfolios.series_history import SeriesHistoryPublish
-
-       return [
-           SeriesHistoryPublish(SimpleNamespace(__table__=SimpleNamespace(name=name)), series)
-           for name, (series, _key) in INSTANCES.items()
-       ]
-
-   def keys():
-       """The --signal and --portfolio flags of every key the instances hold."""
-       attach()
-       from metatables import TimeIndexMetaTable, TimeIndexTableRef
-
-       flags = set()
-       for name, (series, key) in INSTANCES.items():
-           (table,) = TimeIndexMetaTable.filter(physical_table_name__in=[name])
-           frame = TimeIndexTableRef.from_meta_table(table).get_df_between_dates(columns=[key])
-           values = frame.index.get_level_values(key) if key in frame.index.names else frame[key]
-           flag = "--signal" if series == "signal-weights" else "--portfolio"
-           flags.update(f"{flag} {value}" for value in values)
-       print(" ".join(sorted(flags)))
-   ```
-
-   An Organization admin makes the person who publishes the history the manager of this
-   application's rows. Rows created before ms-markets ADR 0060 have no manager, and through the
-   Markets API only a row's manager publishes to it. `--attach` loads the package that serves
-   signals; without it only portfolios are assigned:
+2. Hold the portfolio runs (step 2), and ask the applications that create portfolios to wait.
+3. Delete every existing portfolio with this application's portfolio delete: its owner with
+   `DELETE /v1/portfolio-configurations/{uid}`, or the operator with:
 
    ```bash
-   FLAGS=$(PYTHONPATH=. python -c "import alpaca_history; alpaca_history.keys()")
-   PYTHONPATH=. msm registry assign-manager --manager user:<uid> --attach alpaca_history:attach $FLAGS
-   PYTHONPATH=. msm registry assign-manager --manager user:<uid> --attach alpaca_history:attach $FLAGS --execute
+   alpaca-connectors portfolio list                          # every configuration UID
+   alpaca-connectors portfolio delete <uid>                  # dry run
+   alpaca-connectors portfolio delete <uid> --execute
    ```
 
-3. That person publishes the history. `msm series publish` runs each `SeriesHistoryPublish`,
-   which reads its instance with the person's own MetaTables access, by its physical name,
-   publishes its rows key by key, oldest first, and compares each key's first and last time and
-   row count in Markets with the instance; it changes nothing in the instance:
-
-   ```bash
-   PYTHONPATH=. msm series publish alpaca_history:publishes             # dry run: read, compare
-   PYTHONPATH=. msm series publish alpaca_history:publishes --execute
-   PYTHONPATH=. msm series publish alpaca_history:publishes             # every key verified
-   ```
-
-   Publishing again writes nothing. A key whose rows differ from rows Markets already holds (for
-   example rows left in the shared tables before ms-markets ADR 0047, step 10) is reported with its
-   error and is not verified: resolve it before the push, which drops the instances.
-4. The admin makes this application's branch in the Environment the manager of the same rows
-   (`msm registry assign-manager --manager branch:<uid> --attach alpaca_history:attach $FLAGS
-   --execute`), so its workloads publish to them.
-5. Push this release. The migration Job applies revision 0033, which drops the three instances
-   with their rows, and removes the instances' memberships of `alpaca-connectors-markets`, which
-   the code no longer declares. Release the runs and the applications (step 8). Step 9 then
-   removes the namespace.
+   The delete retires the `Portfolio`, which needs no manager, so the rows created before
+   ms-markets ADR 0060 need no assignment, and deletes the configuration, its own bars
+   configuration, its inline rebalance configuration and its signal definition. A portfolio an
+   account's current target names is refused: that account's owner changes the target first.
+4. Push this release. The migration Job applies revision 0033, which drops the three instances
+   with every old signal weight, weight and value, and removes their memberships of
+   `alpaca-connectors-markets`, which the code no longer declares.
+5. Release the runs and the applications (step 8); they create their portfolios again as usual.
+   Step 9 then removes the namespace.
 
 A run of this release publishes the calendar's `market_open` and `market_close` into the private
-calendar-events table by itself, both strategies now read them (ADR 0031, decision 5), and the
-rows already there are written again with equal values; nobody runs a step for them. Until the
-owner decides how existing portfolios go on, a portfolio whose published weights predate the next
-observed-price rule does not run, and its preflight says why (ADR 0031, Implementation Notes).
+calendar-events table by itself, since both strategies read them (ADR 0031, decision 5); the rows
+already there are written again with equal values, and nobody runs a step for them.
 
 ## 6. Move The History
 
 Before [ADR 0031](../adrs/0031_markets_series_are_published_not_shared.md) this step moved the
 history from the shared `ms_markets__*` time series into this application's instances, with the
 `instances backfill` command and ms-markets' series moves. Since that ADR the signal weights,
-portfolio weights and values are published to Markets (step 5) and revision 0033 drops their
-instances; the command, its rollback and the series moves are gone. The rebalance state, calendar
+portfolio weights and values are published to Markets, the portfolios that existed before it are
+deleted (step 5) and revision 0033 drops their instances; the command, its rollback and the series
+moves are gone. The rebalance state, calendar
 events, interpolated prices, orders and trades it moved stay in this application's instances.
 
 As a person who holds `data_writer` on `alpaca-connectors`, copy each registration's account name
@@ -325,8 +265,8 @@ Put the configurations held in step 2 back on the schedule, then check:
 ## Rolling Back
 
 The move of step 6 can no longer be rolled back from this application: the `instances rollback`
-command is gone with ADR 0031, and after revision 0033 the history of the three published series
-is only in Markets. The previous release does not run on ms-markets 4.2.0.
+command is gone with ADR 0031, and revision 0033 drops the three instances with their rows. The
+previous release does not run on ms-markets 4.2.0.
 
 ## 9. Revoke The Markets Roles
 
@@ -346,5 +286,5 @@ Markets `data_viewer` on that namespace, and every other role on it, and removes
 - A later revision drops the revision-0011 tables `ms_markets__interpolated_prices__t_*` once
   every Environment has copied them (revisions add first and drop later).
 - This application's rows written before ms-markets ADR 0047 stayed in the shared Markets time
-  series, which since ADR 0031 are where this application publishes. The publish of step 5 skips
-  the rows equal to them and reports a key whose rows differ.
+  series. They belong to portfolios step 5 deletes, which keep them as their history; their
+  removal is the Markets owners' decision.
