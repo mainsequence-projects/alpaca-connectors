@@ -21,9 +21,8 @@ Repository rules:
   signal definitions and portfolios; every delete retires its `Portfolio` first.
 - Keep planning, registration, holdings, bars and portfolio logic in `alpaca_connectors`. The CLI,
   routes and Jobs only orchestrate; add no one-off scripts.
-- Reach Markets only by `msm.api` row calls and the `markets_api` composites: registration, the
-  sync (ADR 0023), the account delete (ADR 0028), and the ms-markets recipes that publish and read
-  signal weights, portfolio weights and values (ADR 0031). Own tables: markets-api-boundary.md.
+- Reach Markets only by `msm.api` row calls and the `markets_api` composites: registration, sync
+  (ADR 0023), account delete (ADR 0028), series recipes (ADR 0031). Tables: markets-api-boundary.md.
 - Only `.mainsequence/workflows/*.yaml` creates Jobs and sets their schedules; code never does.
   A configuration run (`operations/configuration_jobs.py`) selects it with `--configuration-uid`;
   JobRuns never own configuration. A Job cannot declare access to itself, so each kind's dispatcher
@@ -33,8 +32,7 @@ Repository rules:
 - Hosted schema changes come only from the workflow's migration Job (ADR 0012); never run
   `metatables migrations upgrade` or `downgrade` against a hosted environment. Revisions add first
   and drop later. Use `metatables` for MetaTables interfaces. A person owns each namespace;
-  workloads hold roles (`data_viewer`, `data_writer`, `editor`), never `owner` or a Markets one.
-  Markets reads no table of this application: no grant, namespace or catalog row for it (ADR 0031).
+  workloads hold roles, never `owner` or a Markets one; Markets holds none here (ADR 0031).
 
 FastAPI surface:
 
