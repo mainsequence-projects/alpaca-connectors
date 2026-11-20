@@ -73,7 +73,9 @@ with it, unless a retired `Portfolio` still follows the signal.
 account's), `rebalance_configuration_uid`, the bar profile of its own bars configuration under
 `bars`, the valuation and fee settings (`valuation_column`,
 `valuation_maximum_staleness_seconds`, `fail_on_missing_prices`, `commission_fee`) and
-`scheduled?`. It stores the row, creates its own bars configuration and the `Portfolio` row, in
+`scheduled?`. The valuation column is the price a trade fills at, so a column ms-markets cannot
+trade at (an `open`, `high`, `low` or `vwap`) answers `422`. It stores the row, creates its own
+bars configuration and the `Portfolio` row, in
 that order, and a refused create leaves no row. It answers the configuration, the `Portfolio`
 (`portfolio_uid`, and `portfolio_unique_identifier` `ALPACA_PORTFOLIO__<uid hex>`) and its bars
 configuration.

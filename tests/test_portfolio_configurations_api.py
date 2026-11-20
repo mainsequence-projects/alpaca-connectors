@@ -5,6 +5,8 @@ import uuid
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import pytest
+
 from alpaca_connectors.api.app.schemas import (
     ConfigurationJobResponse,
     PortfolioConfigurationDetailResponse,
@@ -365,6 +367,47 @@ def test_portfolio_create_rejects_unimplemented_rebalance_and_interpolation(api_
     provided = "/v1/portfolio-configurations/provided-weights"
     assert client.post(provided, json=invalid_strategy).status_code == 422
     assert client.post(provided, json=invalid_interpolation).status_code == 422
+
+
+@pytest.mark.parametrize("column", ["open", "High", "low", "vwap"])
+def test_a_valuation_column_ms_markets_cannot_trade_at_is_refused(api_client, column) -> None:
+    """A trade's price is observed at its time, as a close or a mark is (ms-markets ADR 0058)."""
+    from alpaca_connectors.api.app.services import portfolio_configurations as service
+
+    created = {
+        "name": "p",
+        "account_uid": ACCOUNT_UID,
+        "signal_definition_uid": DEFINITION_UID,
+        "rebalance_configuration_uid": REBALANCE_CONFIGURATION_UID,
+        "valuation_column": column,
+    }
+    provided = {**create_request(), "valuation_column": column}
+    with (
+        patch.object(service, "create_portfolio") as create,
+        patch.object(service, "create_provided_weights_portfolio") as create_provided,
+        patch.object(service, "update_portfolio_configuration") as update,
+    ):
+        answers = [
+            api_client.post("/v1/portfolio-configurations", json=created),
+            api_client.post("/v1/portfolio-configurations/provided-weights", json=provided),
+            api_client.patch(
+                f"/v1/portfolio-configurations/{CONFIGURATION_UID}",
+                json={"valuation_column": column},
+            ),
+        ]
+    assert [answer.status_code for answer in answers] == [422, 422, 422]
+    assert all("cannot be a fill price" in answer.text for answer in answers)
+    for call_ in (create, create_provided, update):
+        call_.assert_not_called()
+
+
+def test_the_stored_configuration_refuses_the_same_columns() -> None:
+    from alpaca_connectors.portfolios.configurations import valuation_column_value
+
+    assert valuation_column_value(" close ") == "close"
+    assert valuation_column_value("mark") == "mark"
+    with pytest.raises(ValueError, match="cannot be a fill price"):
+        valuation_column_value("vwap")
 
 
 def test_portfolio_run_returns_jobrun_status_url_without_arguments(api_client) -> None:

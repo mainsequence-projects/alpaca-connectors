@@ -686,9 +686,19 @@ RETIRED_JOB_SETTING_FIELDS = frozenset(
 
 
 class _ConfigurationRequest(BaseModel):
-    """Reject the retired per-configuration Job settings with a message naming the workflow."""
+    """Reject the retired per-configuration Job settings with a message naming the workflow, and
+    a valuation column ms-markets could not trade at."""
 
     model_config = ConfigDict(extra="forbid")
+
+    @model_validator(mode="after")
+    def refuse_unobserved_valuation_column(self) -> Any:
+        column = getattr(self, "valuation_column", None)
+        if column is not None:
+            from alpaca_connectors.portfolios.configurations import valuation_column_value
+
+            valuation_column_value(column)
+        return self
 
     @model_validator(mode="before")
     @classmethod
@@ -947,8 +957,9 @@ class ProvidedWeightsPortfolioCreateRequest(_ConfigurationRequest):
         default=None,
         description=(
             "A new rebalance configuration, created with the portfolio, in place of "
-            "rebalance_configuration_uid: strategy immediate_signal trades each set of weights "
-            "at its own time, calendar_event_signal at the configured calendar events."
+            "rebalance_configuration_uid: strategy immediate_signal trades to each set of weights, "
+            "calendar_event_signal at the configured calendar events, both at the next observed "
+            "price while the market is open."
         ),
     )
     upsample_frequency_id: Literal["1d"] = "1d"

@@ -673,6 +673,21 @@ def _nonempty(value: str, *, label: str, maximum: int) -> str:
     return normalized
 
 
+def valuation_column_value(value: str) -> str:
+    """The valuation column, refused when ms-markets could not trade at it.
+
+    A trade's price must be observed at its row's time, as a close or a mark is (ms-markets ADR
+    0058); ms-markets' own rule (``require_observed_price_column``) decides which columns, and its
+    ``ValueError`` is the refusal. A stored configuration that already holds such a column fails
+    at its run with the same message.
+    """
+    from msm_portfolios.rebalance_strategy.base import require_observed_price_column
+
+    normalized = _nonempty(value, label="valuation_column", maximum=64)
+    require_observed_price_column(normalized)
+    return normalized
+
+
 def _phase_one_value(value: str, *, label: str, expected: str, maximum: int) -> str:
     normalized = _nonempty(value, label=label, maximum=maximum)
     if normalized != expected:
@@ -1023,7 +1038,7 @@ def create_portfolio_configuration_row(
             expected="ffill",
             maximum=16,
         ),
-        "valuation_column": _nonempty(valuation_column, label="valuation_column", maximum=64),
+        "valuation_column": valuation_column_value(valuation_column),
         "valuation_maximum_staleness_seconds": _positive_seconds(
             valuation_maximum_staleness_seconds,
             label="valuation_maximum_staleness_seconds",
@@ -1220,9 +1235,7 @@ def update_portfolio_configuration(
             maximum=16,
         )
     if valuation_column is not None:
-        values["valuation_column"] = _nonempty(
-            valuation_column, label="valuation_column", maximum=64
-        )
+        values["valuation_column"] = valuation_column_value(valuation_column)
     if valuation_maximum_staleness_seconds is not None:
         values["valuation_maximum_staleness_seconds"] = _positive_seconds(
             valuation_maximum_staleness_seconds,

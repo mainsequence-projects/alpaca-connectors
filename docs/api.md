@@ -302,6 +302,11 @@ GET|PATCH|DELETE /v1/portfolio-rebalance-configurations/{configuration_uid}
   registered first, so `503 signal_not_registered` no longer exists. A create that fails stores
   nothing either: it deletes its configuration, its own bars configuration, its `Portfolio` row,
   its signal's rows and its definition (issue #37).
+- **The valuation column** (`valuation_column`, `close` by default) is the price a trade fills
+  at, so it must be observed at its row's time, as a close or a mark is: a create or an update
+  that names a column ms-markets cannot trade at (`open`, `high`, `low`, `vwap`, decided by
+  ms-markets' own rule) answers `422` with ms-markets' reason. A configuration stored with such a
+  column before this rule fails at its run with the same reason (ms-markets ADR 0058).
 - **The owner.** The acting owner at creation owns the portfolio: the account's owner on
   `POST /v1/portfolio-configurations`, the caller on ADR 0024's create. Only that owner gives it
   weights, changes, pauses or deletes it; anyone else gets `403
