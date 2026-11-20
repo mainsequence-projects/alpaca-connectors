@@ -1,4 +1,4 @@
-"""`alpaca-connectors instances grant-markets-access` (ADR 0025)."""
+"""`alpaca-connectors instances grant-markets-access` (ADR 0025, ADR 0030)."""
 
 from __future__ import annotations
 
@@ -8,8 +8,7 @@ import pytest
 
 from alpaca_connectors.operations import markets_access
 
-MARKETS = "11111111-1111-4111-8111-111111111111"
-TEAM = "22222222-2222-4222-8222-222222222222"
+MARKETS_BRANCH = "11111111-1111-4111-8111-111111111111"
 
 
 class _Namespace:
@@ -27,16 +26,7 @@ class _Namespace:
 
 @pytest.fixture
 def catalog(monkeypatch):
-    state = SimpleNamespace(namespace=None, created=[])
-
-    def create(name, *, description=None):
-        state.created.append(name)
-        state.namespace = _Namespace()
-        return state.namespace
-
-    import metatables.models
-
-    monkeypatch.setattr(metatables.models.Namespace, "create", staticmethod(create))
+    state = SimpleNamespace(namespace=_Namespace())
     monkeypatch.setattr(markets_access, "_find_namespace", lambda name: state.namespace)
     monkeypatch.setattr(
         markets_access,
@@ -47,54 +37,52 @@ def catalog(monkeypatch):
 
 
 def test_dry_run_changes_nothing(catalog) -> None:
-    report = markets_access.grant_markets_access(markets_workload_uid=MARKETS)
+    report = markets_access.grant_markets_access(markets_branch_uid=MARKETS_BRANCH)
 
     assert report["executed"] is False
-    assert report["namespace_exists"] is False
-    assert catalog.created == []
-    assert report["grants"] == [
-        {
-            "principal_kind": "user",
-            "principal_uid": MARKETS,
-            "role": "data_viewer",
-            "role_before": None,
-            "granted": False,
-        }
-    ]
+    assert catalog.namespace.granted == []
+    assert report["grant"] == {
+        "principal_kind": "branch",
+        "principal_uid": MARKETS_BRANCH,
+        "role": "data_viewer",
+        "role_before": None,
+        "granted": False,
+    }
     assert report["instances_missing_from_namespace"] == ["alpaca_connectors__ordersts__main"]
 
 
-def test_execute_creates_the_namespace_and_grants(catalog) -> None:
-    report = markets_access.grant_markets_access(
-        markets_workload_uid=MARKETS, editor_team_uid=TEAM, execute=True
-    )
+def test_execute_grants_the_markets_branch(catalog) -> None:
+    report = markets_access.grant_markets_access(markets_branch_uid=MARKETS_BRANCH, execute=True)
 
-    assert catalog.created == ["alpaca-connectors-markets"]
-    assert report["namespace_created"] is True
-    assert catalog.namespace.granted == [
-        ("user", MARKETS, "data_viewer"),
-        ("team", TEAM, "editor"),
-    ]
-    assert [grant["granted"] for grant in report["grants"]] == [True, True]
+    assert catalog.namespace.granted == [("branch", MARKETS_BRANCH, "data_viewer")]
+    assert report["grant"]["granted"] is True
 
 
 def test_a_role_already_held_is_not_granted_again(catalog) -> None:
     catalog.namespace = _Namespace(
-        [{"principal_kind": "user", "principal_uid": MARKETS, "role": "data_viewer"}]
+        [{"principal_kind": "branch", "principal_uid": MARKETS_BRANCH, "role": "data_viewer"}]
     )
 
-    report = markets_access.grant_markets_access(markets_workload_uid=MARKETS, execute=True)
+    report = markets_access.grant_markets_access(markets_branch_uid=MARKETS_BRANCH, execute=True)
 
-    assert catalog.created == []
     assert catalog.namespace.granted == []
-    assert report["grants"][0]["role_before"] == "data_viewer"
-    assert report["grants"][0]["granted"] is False
+    assert report["grant"]["role_before"] == "data_viewer"
+    assert report["grant"]["granted"] is False
+
+
+def test_before_the_first_deployment_there_is_nothing_to_grant_on(catalog) -> None:
+    catalog.namespace = None
+
+    report = markets_access.grant_markets_access(markets_branch_uid=MARKETS_BRANCH, execute=True)
+
+    assert report["succeeded"] is False
+    assert report["namespace_exists"] is False
 
 
 def test_a_malformed_uid_is_refused(catalog) -> None:
     with pytest.raises(ValueError):
-        markets_access.grant_markets_access(markets_workload_uid="not-a-uid", execute=True)
-    assert catalog.created == []
+        markets_access.grant_markets_access(markets_branch_uid="not-a-uid", execute=True)
+    assert catalog.namespace.granted == []
 
 
 def test_the_deploy_report_lists_the_instances_markets_cannot_read(monkeypatch) -> None:

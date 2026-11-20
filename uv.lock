@@ -52,7 +52,7 @@ requires-dist = [
     { name = "fastapi", specifier = ">=0.135.3" },
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "mainsequence", extras = ["mcp"], specifier = ">=9.0.38,<10" },
-    { name = "mainsequence-metatable", specifier = ">=0.1.66,<0.2" },
+    { name = "mainsequence-metatable", specifier = ">=0.1.70,<0.2" },
     { name = "mkdocs", specifier = ">=1.6.1" },
     { name = "mkdocs-material", specifier = ">=9.7.6" },
     { name = "ms-markets", specifier = ">=4.0.1,<5" },
@@ -504,8 +504,8 @@ name = "httpcore2"
 version = "2.13.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "h11" },
-    { name = "truststore" },
+    { name = "h11", marker = "sys_platform != 'emscripten'" },
+    { name = "truststore", marker = "sys_platform != 'emscripten'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/cb/f3/1db7aa2bc2524062192bb0e0323969492d1883152a232fe36eea65f4e35c/httpcore2-2.13.1.tar.gz", hash = "sha256:e0aa977abe17e69a3b820a24542a6fa88702676d83880b8d194dcd18408e5103", size = 68071, upload-time = "2026-09-23T07:47:22.372Z" }
 wheels = [
@@ -776,7 +776,7 @@ mcp = [
 
 [[package]]
 name = "mainsequence-metatable"
-version = "0.1.67"
+version = "0.1.70"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "alembic" },
@@ -809,9 +809,9 @@ dependencies = [
     { name = "urllib3" },
     { name = "uvicorn" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/72/f5/10dfb1bc2c955f53b2bfe0ead82493e0ac2fdb5d65f6f96ca2b46cb080a2/mainsequence_metatable-0.1.67.tar.gz", hash = "sha256:86a802d5fa1446737ed2083210217bdb89cac2c57d4ff16b0dd4dadd83ef2930", size = 1390500, upload-time = "2026-11-17T08:03:14.448Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/ba/aa/97c55d8bdf5a283808d924de83940d57c398bc8b6f1b6ea046a833a5a8bb/mainsequence_metatable-0.1.70.tar.gz", hash = "sha256:ed6b887fa7549b940c93474870eeb06b9199dd58b222341ebccb2c906b10c32a", size = 1426010, upload-time = "2026-11-19T17:12:05.244Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/cf/1a/cfbca3a52f17c3803475260f4e5819a7d76385dc31c9f537a449c01dba6e/mainsequence_metatable-0.1.67-py3-none-any.whl", hash = "sha256:e59f33eef7dbb9675d0f078a5212794ed2a6260bb143186764b05efdc86e8867", size = 2653197, upload-time = "2026-11-17T08:03:12.242Z" },
+    { url = "https://files.pythonhosted.org/packages/96/87/31f7e7d1265e7f93739f5bf868e03184afbb9a939b825ce38719c0abeee3/mainsequence_metatable-0.1.70-py3-none-any.whl", hash = "sha256:d9a1e344e5df6bb2ddf6bce90c118c04b26e411d92fd87703188f7e0af0aedd3", size = 2725610, upload-time = "2026-11-19T17:12:03.073Z" },
 ]
 
 [[package]]
@@ -1906,8 +1906,8 @@ name = "secretstorage"
 version = "3.5.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "cryptography" },
-    { name = "jeepney" },
+    { name = "cryptography", marker = "sys_platform != 'emscripten' and sys_platform != 'win32'" },
+    { name = "jeepney", marker = "sys_platform != 'emscripten' and sys_platform != 'win32'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/1c/03/e834bcd866f2f8a49a85eaff47340affa3bfa391ee9912a952a1faa68c7b/secretstorage-3.5.0.tar.gz", hash = "sha256:f04b8e4689cbce351744d5537bf6b1329c6fc68f91fa666f60a380edddcd11be", size = 19884, upload-time = "2025-11-23T19:02:53.191Z" }
 wheels = [

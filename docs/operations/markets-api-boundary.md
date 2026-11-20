@@ -43,27 +43,19 @@ These belong to the Markets deployment's owners, not to this repository:
 
 ## 1. Roles On `alpaca-connectors`
 
-The owner of `alpaca-connectors` (a person) grants, before the push and before the move, so each
-workload can use the project tables once they leave `mainsequence.markets`:
+The workloads get their roles from the migration, not from a person
+([ADR 0030](../adrs/0030_workloads_get_their_roles_through_their_branch.md)). Both migration
+providers declare `editor` on `alpaca-connectors` and on `alpaca-connectors-markets` for every
+workload of this repository's branch: the API, the Agent, the migration Job, the bars and
+portfolio Jobs and both dispatchers. The declaration runs on every push, so a renamed or recreated
+workload keeps its role.
 
-| Workload | Role on `alpaca-connectors` | Why |
-|---|---|---|
-| `alpaca-connectors-migrate` | `editor` (holds it already) | registers and changes the project tables |
-| `alpaca` (API) | `editor` | writes project rows; publishes provided weights; runs the orders and trades updaters in-process |
-| `alpaca-portfolio` | `editor` | runs its bars configuration's update (issue #39), then the interpolation, calendar-event, rebalance, weights and values updaters |
-| `alpaca-bars-update` | `data_viewer`, plus its table `editor` on the two bars tables (table roles move with the tables) | read configurations; run the bars updater |
-| `alpaca-portfolio-dispatcher` | `data_viewer` | preflight reads |
-| `alpaca-bars-update-dispatcher` | `data_viewer` | read the enabled, scheduled bar configurations (ADR 0021) |
+The migration Job itself needs `editor` on each namespace before it can declare. It creates a
+namespace that does not exist yet and holds `editor` on it. On a namespace that already exists,
+the owner (a person) grants it `editor` once, directly or through its Team. After that, the branch
+binding covers its replacements. The person who runs step 4 needs the same role on both namespaces.
 
 No workload needs a role on `mainsequence.markets` once step 9 is done.
-
-The owner also creates the namespace `alpaca-connectors-markets`
-([ADR 0025](../adrs/0025_markets_reads_the_instances_through_a_second_namespace.md)) and grants
-`alpaca-connectors-migrate` `editor` on it, directly or through its Team (step 5 has the
-command): the migration adds every Markets contract instance
-to it, which needs `tables.create` there. The person who runs step 4 needs the same role. No
-other workload of this application needs a role on it, since each already reaches the instances
-through `alpaca-connectors`.
 
 ## 2. Hold The Scheduled Runs
 
@@ -111,18 +103,23 @@ namespaces: `alpaca-connectors` and `alpaca-connectors-markets`
 0.1.66 or later). The code declares the second one, and the next `upgrade head` adds the
 memberships with no revision.
 
-The owner of `alpaca-connectors-markets`, or an Organization admin, grants the Markets workload
-`data_viewer` on that namespace, once per Environment:
+The owner of `alpaca-connectors-markets`, or an Organization admin, grants the
+`MainSequenceMarkets` branch `data_viewer` on that namespace, once per Environment
+([ADR 0030](../adrs/0030_workloads_get_their_roles_through_their_branch.md), decision 6). Markets
+is another repository, so its access is sharing, and code never declares it (MetaTables
+ADR 0029). The grant names the branch, not a workload User, so every Markets workload keeps it
+through its renames and redeployments:
 
 ```bash
-alpaca-connectors instances grant-markets-access --markets-workload-uid <uid>             # dry run
-alpaca-connectors instances grant-markets-access --markets-workload-uid <uid> --execute
+alpaca-connectors instances grant-markets-access --markets-branch-uid <uid>             # dry run
+alpaca-connectors instances grant-markets-access --markets-branch-uid <uid> --execute
 ```
 
-The command creates the namespace when it is missing, so the person who runs it owns it. With
-`--editor-team-uid <uid>` it also grants that Team `editor` there, which the migration Job needs
-to add the instances; run it before the push. Its report lists the instances that are not in the
-namespace yet. The dataset catalog verifies and reads the instances with it
+`<uid>` is this Environment's `MainSequenceMarkets` branch, for example from
+`CodeRepositoryBranch.filter(code_repository_name="MainSequenceMarkets")`, keeping the row whose
+`organization_environment_uid` is this Environment's. Run it after the first deployment: the
+migration Job creates the namespace, and before that the command reports that there is nothing to
+grant on. Its report lists the instances that are not in the namespace yet. The dataset catalog verifies and reads the instances with it
 (ms-markets ADR 0047, decision 5), and an instance added later is covered. Never grant the
 Markets workload a role on `alpaca-connectors`, and never one on `alpaca_connectors__acct_alpaca`:
 that table holds the application-encrypted account keys and is not `include`d by Markets.

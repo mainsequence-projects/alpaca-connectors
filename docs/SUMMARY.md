@@ -48,6 +48,8 @@
   - [0027 One Portfolio Path](adrs/0027_one_portfolio_path.md)
   - [0028 Every Portfolio Belongs To One Account](adrs/0028_every_portfolio_belongs_to_one_account.md)
   - [0029 Interpolated-Price Tables Are Named Like Every Project Table](adrs/0029_interpolated_price_tables_are_named_like_every_project_table.md)
+  - [0030 Workloads Get Their Roles Through Their Branch](adrs/0030_workloads_get_their_roles_through_their_branch.md)
+  - [0031 Markets Series Are Published, Not Shared](adrs/0031_markets_series_are_published_not_shared.md)
 - Implementation Records
   - [SDK 8 And ms-markets Migration](implementation_tasks/0001_ms_markets_storage_first_migration.md)
   - [Alpaca Account Storage](implementation_tasks/0002_alpaca_account_module.md)

@@ -197,6 +197,17 @@ the whole list. Its errors:
 
 See [ADR 0026](../adr/api/0026-atomic-statement-lists.md).
 
+On PostgreSQL and SQLite, a write through either route answers with
+`index_statistics`: the UID of each time-index table the engine reports the write
+changed, and that table's stored statistics as of the response. `rebuilt` means they
+were rebuilt from the table's rows, as after a chunk insert. Otherwise they stayed as
+they were, and the value says why: `too_many_index_coordinates` (more than 10,000),
+`not_readable` (the caller cannot read the table; only a foreign key's action wrote
+it) or `reconciliation_required` (the rebuild or catalog write failed after the
+commit). The write stands in every case, and a table without stored statistics is
+not listed. On the local runtime the statistics commit with the write; on PostgreSQL
+the API rebuilds them after the commit, under the table's catalog lock.
+
 `POST /meta-tables/run-query/` accepts `{"data_source_uid": "…", "sql": "…"}` and
 optional `limits`. It uses the same restricted execution path in read mode and
 returns the `ok/results/truncated/max_rows/row_count/error` success envelope. Errors

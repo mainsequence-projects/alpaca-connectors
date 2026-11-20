@@ -23,6 +23,17 @@ PROJECT_NAMESPACE = "alpaca-connectors"
 # reads the instances and never the account keys or this application's own tables.
 MARKETS_INSTANCES_NAMESPACE = "alpaca-connectors-markets"
 
+# The roles every workload of this repository's branch holds (MetaTables ADR 0029, ADR 0030): the
+# migration providers declare them after each finalization, so the API, the Agent and every Job,
+# renamed or recreated, have their role on their first request with nobody granting it. One role
+# per namespace for the whole branch; ``editor`` is what the API and the portfolio Job need, and
+# on the Markets namespace it keeps the migration Job's own replacements able to add instances.
+# The Markets workload's ``data_viewer`` is another repository's role and stays a person's grant.
+BRANCH_ACCESS = {
+    PROJECT_NAMESPACE: "editor",
+    MARKETS_INSTANCES_NAMESPACE: "editor",
+}
+
 # Market venue suffix for Alpaca account/asset identities (``<token>__ALPACA`` convention).
 ALPACA_VENUE = "ALPACA"
 

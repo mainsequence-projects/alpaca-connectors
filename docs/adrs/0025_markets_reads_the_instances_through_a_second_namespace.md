@@ -10,6 +10,15 @@ and the owner ran `alpaca-connectors instances grant-markets-access` (see [Rollo
 Amends [ADR 0024](0024_portfolios_from_provided_weights.md), whose registration failed in
 Production for the reason below (alpaca-connectors#37).
 
+Amended on 2026-11-19 by [ADR 0030](0030_workloads_get_their_roles_through_their_branch.md):
+the migration Job creates `alpaca-connectors-markets` and its branch holds `editor` there, and the
+Markets access of decision 2 is granted to the `MainSequenceMarkets` branch, not to a Markets
+workload User. `grant-markets-access` now takes `--markets-branch-uid` and creates nothing.
+
+[ADR 0031](0031_markets_series_are_published_not_shared.md) (accepted 2026-11-19, not implemented)
+withdraws this ADR when it is implemented: the series are published to Markets, and Markets reads
+no table of this application.
+
 ## Context
 
 This application owns instances of the Markets time-series contracts (ms-markets ADR 0047):
@@ -36,7 +45,8 @@ of them applies to it.
    Nothing else is declared there.
 2. **The Markets workload holds `data_viewer` on `alpaca-connectors-markets`** and no role on
    `alpaca-connectors` or on any table of it. One grant per Environment covers every instance,
-   including those added later.
+   including those added later. Since ADR 0030 the grant names the `MainSequenceMarkets` branch,
+   so it also covers every Markets workload.
 3. **The application's own tables stay only in `alpaca-connectors`.** The account keys table is
    never declared in the second namespace.
 4. **No revision.** A namespace is not a schema change: the next `upgrade head` of each provider

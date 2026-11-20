@@ -301,7 +301,7 @@ def test_bars_dispatcher_entry_point_checks_the_schema_before_any_work(monkeypat
         lambda argv: pytest.fail("dispatched while the schema was behind"),
     )
 
-    assert _dispatcher_main()(["--scheduled"]) == 0
+    assert _dispatcher_main()(["--scheduled"]) == 1
     assert labels == ["Alpaca bars update dispatcher Job"]
 
 

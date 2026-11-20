@@ -46,22 +46,16 @@ def configure_rollback_parser(parser: argparse.ArgumentParser) -> None:
 
 def configure_grant_markets_access_parser(parser: argparse.ArgumentParser) -> None:
     parser.description = (
-        "Once per Environment, as the owner of alpaca-connectors-markets or an Organization "
-        "admin: create that namespace when it is missing and grant the Markets workload "
-        "data_viewer on it, so Markets reads every contract instance of this application and "
-        "nothing else of it (ADR 0025). Dry run by default."
+        "Once per Environment, after the first deployment, as the owner of "
+        "alpaca-connectors-markets or an Organization admin: grant the MainSequenceMarkets "
+        "branch data_viewer on that namespace, so every Markets workload reads every contract "
+        "instance of this application and nothing else of it, through any rename or redeploy "
+        "(ADR 0025, ADR 0030). Dry run by default."
     )
     parser.add_argument(
-        "--markets-workload-uid",
+        "--markets-branch-uid",
         required=True,
-        help="The workload User of the Environment's Markets API.",
-    )
-    parser.add_argument(
-        "--editor-team-uid",
-        help=(
-            "Also grant this Team editor on the namespace, so its migration Job may add the "
-            "instances to it."
-        ),
+        help="The UID of this Environment's MainSequenceMarkets code repository branch.",
     )
     parser.add_argument("--execute", action="store_true")
     parser.set_defaults(handler=run_grant_markets_access_command)
@@ -104,8 +98,7 @@ def run_grant_markets_access_command(args: argparse.Namespace) -> int:
 
     return _print(
         grant_markets_access(
-            markets_workload_uid=args.markets_workload_uid,
-            editor_team_uid=args.editor_team_uid,
+            markets_branch_uid=args.markets_branch_uid,
             execute=args.execute,
         )
     )

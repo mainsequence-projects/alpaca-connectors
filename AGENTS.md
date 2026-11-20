@@ -32,7 +32,7 @@ Repository rules:
 - Hosted schema changes come only from the workflow's migration Job (ADR 0012); never run
   `metatables migrations upgrade` or `downgrade` against a hosted environment. Revisions add first
   and drop later. Use `metatables` for MetaTables interfaces. A person owns each namespace;
-  workloads hold roles (`data_viewer`, `data_writer`, `editor`), never `owner` or a Markets one.
+  workloads get `editor` only from the providers' `settings.BRANCH_ACCESS` (ADR 0030).
 
 FastAPI surface:
 

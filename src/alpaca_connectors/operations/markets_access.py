@@ -1,9 +1,12 @@
-"""Give the Markets workload its read access on this application's contract instances (ADR 0025).
+"""Give the Markets workloads their read access on this application's contract instances.
 
-Every Markets contract instance is also in ``alpaca-connectors-markets``. A person who owns that
-namespace, or an Organization admin, runs this once per Environment: it creates the namespace
-when it does not exist yet, grants the Markets workload ``data_viewer`` on it, and can grant a
-Team ``editor`` on it so that Team's migration Job may add the instances to it.
+Every Markets contract instance is also in ``alpaca-connectors-markets`` (ADR 0025). The migration
+Job creates that namespace when it first declares the instances there, and its branch declaration
+gives this repository's workloads their role on it (ADR 0030). The Markets workloads belong to
+another repository, and giving them access is sharing, which stays with people (MetaTables
+ADR 0029): a person who owns the namespace, or an Organization admin, grants the
+``MainSequenceMarkets`` branch ``data_viewer`` on it once per Environment. Every Markets workload
+of that branch keeps the role through its renames and redeployments.
 """
 
 from __future__ import annotations
@@ -14,11 +17,7 @@ from typing import Any
 from alpaca_connectors.settings import MARKETS_INSTANCES_NAMESPACE
 
 MARKETS_ROLE = "data_viewer"
-MIGRATION_ROLE = "editor"
-NAMESPACE_DESCRIPTION = (
-    "The Markets time-series contract instances of alpaca-connectors, which the Markets "
-    "workload reads."
-)
+MARKETS_PRINCIPAL_KIND = "branch"
 
 
 def _find_namespace(name: str) -> Any | None:
@@ -72,54 +71,45 @@ def markets_instances_report() -> dict[str, Any]:
     }
 
 
-def grant_markets_access(
-    *,
-    markets_workload_uid: str,
-    editor_team_uid: str | None = None,
-    execute: bool = False,
-) -> dict[str, Any]:
-    """Report, and with ``execute`` apply, the roles on ``alpaca-connectors-markets``."""
-    from metatables.models import Namespace
+def grant_markets_access(*, markets_branch_uid: str, execute: bool = False) -> dict[str, Any]:
+    """Report, and with ``execute`` apply, the Markets branch's role on the Markets namespace.
 
-    wanted: list[tuple[str, str, str]] = [
-        ("user", str(uuid.UUID(str(markets_workload_uid))), MARKETS_ROLE)
-    ]
-    if editor_team_uid:
-        wanted.append(("team", str(uuid.UUID(str(editor_team_uid))), MIGRATION_ROLE))
-
+    The namespace is the migration Job's to create: before the first deployment in an
+    Environment there is nothing to grant on, and the report says so.
+    """
+    principal_uid = str(uuid.UUID(str(markets_branch_uid)))
     namespace = _find_namespace(MARKETS_INSTANCES_NAMESPACE)
-    created = False
-    if namespace is None and execute:
-        namespace = Namespace.create(MARKETS_INSTANCES_NAMESPACE, description=NAMESPACE_DESCRIPTION)
-        created = True
+    if namespace is None:
+        return {
+            "succeeded": False,
+            "executed": execute,
+            "namespace": MARKETS_INSTANCES_NAMESPACE,
+            "namespace_exists": False,
+            "detail": (
+                f"{MARKETS_INSTANCES_NAMESPACE} does not exist in this Environment yet; the "
+                "migration Job creates it on the first deployment."
+            ),
+        }
 
-    grants: list[dict[str, Any]] = []
-    for principal_kind, principal_uid, role in wanted:
-        current = (
-            None if namespace is None else _bound_role(namespace, principal_kind, principal_uid)
-        )
-        granted = False
-        if execute and current != role:
-            namespace.grant_role(principal_uid, role, principal_kind=principal_kind)
-            granted = True
-        grants.append(
-            {
-                "principal_kind": principal_kind,
-                "principal_uid": principal_uid,
-                "role": role,
-                "role_before": current,
-                "granted": granted,
-            }
-        )
+    current = _bound_role(namespace, MARKETS_PRINCIPAL_KIND, principal_uid)
+    granted = False
+    if execute and current != MARKETS_ROLE:
+        namespace.grant_role(principal_uid, MARKETS_ROLE, principal_kind=MARKETS_PRINCIPAL_KIND)
+        granted = True
 
     memberships = _instance_memberships()
     return {
         "succeeded": True,
         "executed": execute,
         "namespace": MARKETS_INSTANCES_NAMESPACE,
-        "namespace_exists": namespace is not None,
-        "namespace_created": created,
-        "grants": grants,
+        "namespace_exists": True,
+        "grant": {
+            "principal_kind": MARKETS_PRINCIPAL_KIND,
+            "principal_uid": principal_uid,
+            "role": MARKETS_ROLE,
+            "role_before": current,
+            "granted": granted,
+        },
         "instances_in_namespace": memberships,
         "instances_missing_from_namespace": sorted(
             name for name, present in memberships.items() if not present
@@ -127,4 +117,4 @@ def grant_markets_access(
     }
 
 
-__all__ = ["MARKETS_ROLE", "MIGRATION_ROLE", "grant_markets_access", "markets_instances_report"]
+__all__ = ["MARKETS_ROLE", "grant_markets_access", "markets_instances_report"]

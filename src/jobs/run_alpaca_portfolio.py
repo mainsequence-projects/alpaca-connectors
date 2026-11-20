@@ -16,7 +16,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     from alpaca_connectors.migrations.schema_gate import skip_if_schema_behind
 
     if skip_if_schema_behind("Alpaca portfolio Job"):
-        return 0
+        return 1
 
     from alpaca_connectors.operations.configuration_jobs import run_configuration_job
 
