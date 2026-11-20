@@ -5,7 +5,6 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
-from msm.repositories.base import MarketsRepositoryContext
 
 from alpaca_connectors.portfolios.portfolio_history import (
     PortfolioValueObservation,
@@ -49,35 +48,31 @@ def _markets_rows(*, portfolio_exists: bool = True):
     )
 
 
-def test_portfolio_history_reads_markets_metadata_and_own_values_in_one_query() -> None:
+def test_portfolio_history_reads_markets_metadata_and_its_published_values(recipes) -> None:
     older = dt.datetime(2026, 9, 3, 20, tzinfo=dt.UTC)
     newer = dt.datetime(2026, 9, 4, 20, tzinfo=dt.UTC)
+    # Markets answers the latest values newest first, with the count of all of them.
     rows = [
         {
             "time_index": newer,
             "close": 102.5,
-            "period_return": 0.025,
+            "return": 0.025,
             "calculated_close": 102.5,
             "close_time": newer,
-            "total_observation_count": 2,
         },
         {
             "time_index": older,
             "close": 100.0,
-            "period_return": 0.0,
+            "return": 0.0,
             "calculated_close": 100.0,
             "close_time": older,
-            "total_observation_count": 2,
         },
     ]
-    context = MarketsRepositoryContext()
+    recipes.answer("portfolio_history", SimpleNamespace(rows=rows, total_count=7))
     portfolio_patch, calendar_patch, metadata_patch = _markets_rows()
 
     with (
-        patch(
-            "alpaca_connectors.runtime.start_markets_engine",
-            return_value=SimpleNamespace(context=context),
-        ),
+        patch("alpaca_connectors.runtime.start_markets_engine"),
         patch(
             "alpaca_connectors.portfolios.execution.portfolio_unique_identifier",
             return_value="ALPACA_PORTFOLIO__ABC",
@@ -85,17 +80,13 @@ def test_portfolio_history_reads_markets_metadata_and_own_values_in_one_query() 
         portfolio_patch,
         calendar_patch,
         metadata_patch,
-        patch(
-            "msm.repositories.base.compile_markets_statement",
-            return_value="portfolio-history-query",
-        ) as compile_statement,
-        patch(
-            "msm.repositories.base.execute_markets_operation",
-            return_value={"rows": rows, "truncated": False},
-        ) as execute_operation,
     ):
         history = read_portfolio_history(configuration_uid="config-uid", observation_limit=100)
 
+    # One Markets read of the values, by the portfolio's identifier and the caller's limit.
+    assert recipes.calls == [
+        ("portfolio_history", {"portfolio_identifier": "ALPACA_PORTFOLIO__ABC", "limit": 100})
+    ]
     assert history.materialized is True
     assert history.description == "Daily analytical portfolio."
     assert history.calendar_name == "US equities"
@@ -103,29 +94,20 @@ def test_portfolio_history_reads_markets_metadata_and_own_values_in_one_query() 
     assert history.backtest_price_column == "close"
     assert [item.time_index for item in history.observations] == [older, newer]
     assert [item.close for item in history.observations] == [100.0, 102.5]
-    assert history.total_observation_count == 2
+    assert [item.period_return for item in history.observations] == [0.0, 0.025]
+    assert history.total_observation_count == 7
     assert history.observations[-1].cumulative_return == pytest.approx(0.025)
     assert history.observations[-1].drawdown == 0.0
     assert history.performance is not None
     assert history.performance.methodology == "empyrical-reloaded"
     assert history.performance.total_return == pytest.approx(0.025)
-    compile_statement.assert_called_once()
-    compiled_sql = str(compile_statement.call_args.args[0])
-    assert "alpaca_connectors__portfoliosts__main" in compiled_sql
-    assert "ms_markets__" not in compiled_sql
-    assert "ORDER BY" in compiled_sql
-    assert "LIMIT" in compiled_sql
-    execute_operation.assert_called_once_with("portfolio-history-query", context=context)
 
 
-def test_portfolio_history_reports_an_unmaterialized_portfolio() -> None:
-    context = MarketsRepositoryContext()
-    portfolio_patch, calendar_patch, metadata_patch = _markets_rows(portfolio_exists=False)
+def test_a_portfolio_without_values_keeps_its_metadata(recipes) -> None:
+    recipes.answer("portfolio_history", {"rows": [], "total_count": 0})
+    portfolio_patch, calendar_patch, metadata_patch = _markets_rows()
     with (
-        patch(
-            "alpaca_connectors.runtime.start_markets_engine",
-            return_value=SimpleNamespace(context=context),
-        ),
+        patch("alpaca_connectors.runtime.start_markets_engine"),
         patch(
             "alpaca_connectors.portfolios.execution.portfolio_unique_identifier",
             return_value="ALPACA_PORTFOLIO__ABC",
@@ -133,13 +115,33 @@ def test_portfolio_history_reports_an_unmaterialized_portfolio() -> None:
         portfolio_patch,
         calendar_patch,
         metadata_patch,
-        patch("msm.repositories.base.compile_markets_statement") as compile_statement,
+    ):
+        history = read_portfolio_history(configuration_uid="config-uid")
+
+    assert history.materialized is True
+    assert history.observations == ()
+    assert history.total_observation_count == 0
+    assert history.calendar_name == "US equities"
+
+
+def test_portfolio_history_reports_an_unmaterialized_portfolio(recipes) -> None:
+    portfolio_patch, calendar_patch, metadata_patch = _markets_rows(portfolio_exists=False)
+    with (
+        patch("alpaca_connectors.runtime.start_markets_engine"),
+        patch(
+            "alpaca_connectors.portfolios.execution.portfolio_unique_identifier",
+            return_value="ALPACA_PORTFOLIO__ABC",
+        ),
+        portfolio_patch,
+        calendar_patch,
+        metadata_patch,
     ):
         history = read_portfolio_history(configuration_uid="config-uid")
 
     assert history.materialized is False
     assert history.observations == ()
-    compile_statement.assert_not_called()
+    # No Portfolio, so no values are asked for.
+    assert recipes.calls == []
 
 
 @pytest.mark.parametrize("limit", [0, 5_001, True])

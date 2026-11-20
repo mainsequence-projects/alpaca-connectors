@@ -260,3 +260,57 @@ def _restore_runtime_row_backend():
     from msm.api.remote import use_runtime_backend
 
     use_runtime_backend()
+
+
+class FakeRecipes:
+    """``msm_portfolios.recipes`` (ms-markets ADR 0060) faked at the ``markets_api`` boundary.
+
+    Set an answer per recipe with ``answer(name, value_or_callable)``; every call is recorded in
+    ``calls`` as ``(name, kwargs)``. A recipe with no answer refuses to run, so a test never
+    reaches Markets by accident.
+    """
+
+    NAMES = (
+        "publish_signal_weights",
+        "signal_history",
+        "portfolio_history",
+        "weights_as_of",
+        "portfolio_preflight",
+        "run_portfolio",
+        "end_signal",
+        "delete_private_series",
+    )
+
+    def __init__(self) -> None:
+        import types
+
+        self.calls: list[tuple[str, dict]] = []
+        self._answers: dict[str, object] = {}
+        self.module = types.ModuleType("msm_portfolios.recipes")
+        for name in self.NAMES:
+            setattr(self.module, name, self._recipe(name))
+
+    def _recipe(self, name: str) -> Callable[..., object]:
+        def call(**kwargs: object) -> object:
+            self.calls.append((name, kwargs))
+            if name not in self._answers:
+                raise AssertionError(f"recipe {name} has no answer in this test")
+            answer = self._answers[name]
+            if isinstance(answer, BaseException):
+                raise answer
+            return answer(**kwargs) if callable(answer) else answer
+
+        return call
+
+    def answer(self, name: str, value: object) -> None:
+        assert name in self.NAMES, name
+        self._answers[name] = value
+
+
+@pytest.fixture
+def recipes(monkeypatch: pytest.MonkeyPatch) -> FakeRecipes:
+    import sys
+
+    fake = FakeRecipes()
+    monkeypatch.setitem(sys.modules, "msm_portfolios.recipes", fake.module)
+    return fake

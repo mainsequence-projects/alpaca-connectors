@@ -3,8 +3,8 @@
 Every portfolio of this connector is one (ADR 0027): a row of the portfolio configuration table
 that belongs to one account and follows one signal definition of that account (ADR 0028). The
 signal is ms-markets' ``ApplicationWeights`` with ``provider`` = this connector's namespace and the
-definition's ``signal_key``, bound to this application's ``AlpacaSignalWeightsStorage`` instance.
-Each call that gives weights publishes one or more observations to that signal; ms-markets
+definition's ``signal_key``. Each call that gives weights publishes one or more observations to
+that signal in Markets with the ms-markets recipe ``publish_signal_weights`` (ADR 0031); Markets
 writes a dropped asset at ``0`` and refuses an observation at or before the last one.
 
 Only a portfolio's owner gives it weights, changes, pauses or deletes it. Errors carry a code and
@@ -36,7 +36,6 @@ from alpaca_connectors.portfolios.signal_definitions import (
     SignalDefinition,
     legacy_signal_key,
     signal_uid_for_key,
-    weights_signal,
 )
 
 PROVIDED_PORTFOLIO_PREFIX = "ALPACA_PORTFOLIO__"
@@ -235,12 +234,6 @@ def require_alpaca_assets(asset_identifiers: Sequence[str]) -> list[str]:
     )
 
 
-def _last_observed_at(signal_uid: str) -> dt.datetime | None:
-    from alpaca_connectors.portfolios.signal_history import read_signal_last_observation_at
-
-    return read_signal_last_observation_at(signal_uid=signal_uid)
-
-
 def _not_after_last() -> ProvidedWeightsError:
     return ProvidedWeightsError(
         "observation_not_after_last",
@@ -248,36 +241,6 @@ def _not_after_last() -> ProvidedWeightsError:
         "published observations are never restated.",
         status_code=409,
     )
-
-
-def ensure_signal_metadata(signal_key: str, *, description: str) -> str:
-    """Register the signal in Markets before its first publication (its rows reference it)."""
-    from msm_portfolios.api.market_metadata import SignalMetadata
-
-    signal = weights_signal(signal_key)
-    SignalMetadata.upsert(signal_uid=signal.signal_uid, signal_description=description)
-    return str(signal.signal_uid)
-
-
-def _bind_signal_table(signal_uid: str) -> None:
-    """Bind the signal to this application's signal-weights instance before its rows exist.
-
-    Markets refuses a table its workload cannot see (issue #37, ADR 0025). The caller then gets
-    the connector's words, never Markets' message, which names the table, and nothing is stored.
-    Binding a bound signal again changes nothing.
-    """
-    from alpaca_connectors.portfolios.datasets import register_signal_dataset
-
-    try:
-        register_signal_dataset(signal_uid)
-    except LookupError as exc:
-        logger.warning("Markets refused to bind a signal to its table (%s).", type(exc).__name__)
-        raise ProvidedWeightsError(
-            "signal_not_registered",
-            "Markets could not register the signal's table, so no weights were stored. An "
-            "operator checks that Markets can read this application's instances.",
-            status_code=503,
-        ) from exc
 
 
 def _signal_description(definition: SignalDefinition) -> str:
@@ -349,40 +312,37 @@ def _publish_validated(
 ) -> PublishedWeights:
     """Publish observations whose shape and assets were already validated.
 
-    Refuse an observation at or before the last stored one, register the signal in Markets on its
-    first publication (its rows reference it), bind it to this application's signal-weights
-    instance, record the assets (ADR 0024 decision 5), then publish. Binding comes before any row
-    is written, so a refused binding stores nothing (issue #37). ms-markets repeats its own
-    checks. Which of its refusals is a time conflict is decided from the stored last time, not
-    from the wording of its message.
+    Record the assets (ADR 0024 decision 5), then publish with the ms-markets recipe
+    ``publish_signal_weights`` (ADR 0031, decision 4). Markets creates the signal's
+    ``SignalMetadata`` on its first publication, writes an asset dropped since the last
+    observation at 0 and refuses an observation at or before the last stored one; it writes
+    nothing when it refuses, and nothing is registered or bound. Its refusals are answered in this
+    application's words: which one is a time conflict is decided by Markets' status, not the
+    wording of its message.
 
     ``new_signal`` is the create's: its signal's key comes from the configuration UID that call
-    made, so it has no stored observation and no recorded asset, and neither is read (issue #46).
+    made, so it has no recorded asset, which is not read (issue #46).
     """
-    signal = weights_signal(signal_key)
-    signal_uid = str(signal.signal_uid)
-    first_time = next(iter(normalized))
-    last_stored = None if new_signal else _last_observed_at(signal_uid)
-    if last_stored is not None and first_time <= last_stored:
-        raise _not_after_last()
-    if last_stored is None:
-        ensure_signal_metadata(signal_key, description=metadata_description)
-    _bind_signal_table(signal_uid)
-
+    from alpaca_connectors.markets_api import SignalWeightsRefused, publish_signal_weights
     from alpaca_connectors.portfolios.signal_assets import record_signal_assets
 
+    signal_uid = signal_uid_for_key(signal_key)
+    # First, so the recorded assets stay a superset of the published ones (ADR 0024).
     record_signal_assets(signal_uid, assets, new_signal=new_signal)
     try:
-        signal.publish(dict(normalized), description=description)
-    except LookupError as exc:
-        raise ProvidedWeightsError(
-            "unknown_asset", "An asset identifier is not a registered Main Sequence asset."
-        ) from exc
-    except (TypeError, ValueError) as exc:
-        # Another call may have published since the check above; none can to a new signal.
-        last_stored = None if new_signal else _last_observed_at(signal_uid)
-        if last_stored is not None and first_time <= last_stored:
+        publish_signal_weights(
+            signal_uid,
+            normalized,
+            signal_description=metadata_description,
+            description=description,
+        )
+    except SignalWeightsRefused as exc:
+        if exc.reason == "not_after_last":
             raise _not_after_last() from exc
+        if exc.reason == "unknown_asset":
+            raise ProvidedWeightsError(
+                "unknown_asset", "An asset identifier is not a registered Main Sequence asset."
+            ) from exc
         raise _invalid(
             "The observations were refused: an empty set with nothing to close, or a value the "
             "signal cannot store."
@@ -969,7 +929,6 @@ def create_provided_weights_portfolio(
         validate_portfolio_references,
     )
     from alpaca_connectors.portfolios.signal_definitions import (
-        SignalDefinition,
         create_signal_definition,
     )
 
@@ -1126,7 +1085,6 @@ __all__ = [
     "end_portfolio_configuration",
     "end_portfolio_configurations",
     "ended_portfolio_account_uid",
-    "ensure_signal_metadata",
     "give_portfolio_weights",
     "is_owner",
     "normalize_observations",

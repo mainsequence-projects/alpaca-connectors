@@ -16,9 +16,9 @@ The market may be closed. Orders are then queued for the next session, checked a
 cancelled again, and the checks that need fills are left out. Everything else runs the same. The
 account may already hold positions from an earlier run; no check assumes it holds cash alone.
 
-It needs, all on this machine: the Markets API on ms-markets 3.7 (``MARKETS_API_URL``), the local
-MetaTables runtime with both migrations applied, this API under uvicorn with
-``ALPACA_CONNECTORS_DATA_KEY``, and a signed-in ``mainsequence`` CLI.
+It needs, all on this machine: the Markets API on the ms-markets release of its ADR 0060
+(``MARKETS_API_URL``), the local MetaTables runtime with both migrations applied, this API under
+uvicorn with ``ALPACA_CONNECTORS_DATA_KEY``, and a signed-in ``mainsequence`` CLI.
 
 Run it with ``ALPACA_E2E=1 .venv/bin/python -m pytest tests/test_live_account_lifecycle.py -x -v``.
 """
@@ -230,27 +230,26 @@ def statuses(operation: dict[str, Any]) -> dict[str, str]:
 
 
 def write_weights(weights: dict[str, dict[str, float]], *, at: dt.datetime) -> None:
-    """Publish fixed weights as a portfolio run would: rows of the weights instance at ``at``."""
-    from msm.repositories.base import compile_markets_statement, execute_markets_operation
-    from sqlalchemy import insert
+    """Publish fixed weights as a portfolio run would: Markets' portfolio-weights series at ``at``.
 
-    from alpaca_connectors.instances import AlpacaPortfolioWeightsStorage
-    from alpaca_connectors.runtime import start_markets_engine
+    Markets keeps the series (ADR 0031); this publishes it with ms-markets' series row class
+    (ms-markets ADR 0060, decision 3), one portfolio at a time.
+    """
+    from msm_portfolios.api import PortfolioWeightsSeries
 
-    runtime = start_markets_engine()
-    rows = [
-        {
-            "time_index": at,
-            "portfolio_identifier": portfolio,
-            "asset_identifier": STATE["identifiers"][symbol],
-            "weight": weight,
-        }
-        for portfolio, legs in weights.items()
-        for symbol, weight in legs.items()
-    ]
-    statement = insert(AlpacaPortfolioWeightsStorage.__table__).values(rows)
-    operation = compile_markets_statement(statement, context=runtime.context, operation="insert")
-    execute_markets_operation(operation, context=runtime.context)
+    for portfolio, legs in weights.items():
+        PortfolioWeightsSeries.publish(
+            portfolio,
+            [
+                {
+                    "time_index": at,
+                    "portfolio_identifier": portfolio,
+                    "asset_identifier": STATE["identifiers"][symbol],
+                    "weight": weight,
+                }
+                for symbol, weight in legs.items()
+            ],
+        )
 
 
 def write_target(markets: Any, exposures: list[dict[str, Any]]) -> Any:

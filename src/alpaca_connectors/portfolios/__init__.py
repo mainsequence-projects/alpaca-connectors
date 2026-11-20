@@ -27,11 +27,11 @@ from alpaca_connectors.portfolios.configurations import (
     validate_portfolio_references,
 )
 from alpaca_connectors.portfolios.execution import (
-    PortfolioExecutionGraph,
     PortfolioExecutionResult,
     PortfolioPreflight,
+    PortfolioRunPlan,
     ResolvedPortfolioConfiguration,
-    build_portfolio_graph,
+    build_portfolio_run,
     execute_portfolio_configuration,
     portfolio_unique_identifier,
     preflight_portfolio_configuration,
@@ -50,7 +50,7 @@ from alpaca_connectors.portfolios.portfolio_history import (
     calculate_portfolio_performance,
     read_portfolio_history,
 )
-from alpaca_connectors.portfolios.signal_history import (
+from alpaca_connectors.portfolios.signal_observations import (
     MAX_SIGNAL_OBSERVATIONS,
     SignalObservationAsset,
     SignalObservationMatrix,
@@ -69,7 +69,7 @@ __all__ = [
     "PortfolioRebalanceConfigurationTable",
     "PortfolioValueObservation",
     "PortfolioExecutionResult",
-    "PortfolioExecutionGraph",
+    "PortfolioRunPlan",
     "PortfolioPreflight",
     "REBALANCE_CADENCES",
     "REBALANCE_EVENTS",
@@ -79,7 +79,7 @@ __all__ = [
     "SignalObservationMatrix",
     "alpaca_interpolated_prices_storage_model",
     "build_alpaca_interpolated_prices",
-    "build_portfolio_graph",
+    "build_portfolio_run",
     "calculate_portfolio_performance",
     "create_portfolio_configuration_row",
     "create_rebalance_configuration",

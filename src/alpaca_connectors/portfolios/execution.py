@@ -3,7 +3,9 @@
 Every portfolio belongs to one account and follows the ``ApplicationWeights`` signal of one of its
 account's signal definitions, the weights the application provides (ADR 0024, ADR 0027, ADR 0028).
 A portfolio not yet adopted runs as it did before ADR 0028: on its own signal and the bars feed it
-names.
+names. A run is the ms-markets recipe ``run_portfolio``, which publishes the portfolio's weights and
+values to Markets (ADR 0031); this application supplies its prices, its private rebalance-state and
+calendar-events tables, and the configuration.
 """
 
 from __future__ import annotations
@@ -27,7 +29,7 @@ from alpaca_connectors.portfolios.interpolated_prices import (
     resolve_alpaca_bars_time_index_meta_table_uids,
 )
 from alpaca_connectors.portfolios.rebalance_schedule import first_rebalance_state
-from alpaca_connectors.portfolios.signal_history import read_signal_observation_matrix
+from alpaca_connectors.portfolios.signal_observations import read_signal_observation_matrix
 
 logger = logging.getLogger(__name__)
 
@@ -60,26 +62,28 @@ class PortfolioExecutionResult:
     resolved: ResolvedPortfolioConfiguration
     portfolio_uid: str
     portfolio_unique_identifier: str
-    interpolation_result: Any
-    calendar_events_result: Any
-    rebalance_result: Any
-    portfolio_weights_result: Any
-    portfolio_result: Any
+    # Rows the run wrote per stage, as Markets answered (``markets_api.run_portfolio``).
+    written: dict[str, int] = field(default_factory=dict)
     bars_update: dict[str, Any] = field(default_factory=dict)
     first_rebalance: dict[str, Any] = field(default_factory=dict)
 
     def summary(self) -> dict[str, Any]:
+        def stage(name: str) -> dict[str, Any] | None:
+            if name not in self.written:
+                return None
+            return {"error": False, "rows": int(self.written[name])}
+
         return {
             **self.resolved.summary(),
             "portfolio_uid": self.portfolio_uid,
             "portfolio_unique_identifier": self.portfolio_unique_identifier,
             "bars_update": dict(self.bars_update),
             "first_rebalance": dict(self.first_rebalance),
-            "interpolation": _summarize_run_result(self.interpolation_result),
-            "calendar_events": _summarize_run_result(self.calendar_events_result),
-            "rebalance": _summarize_run_result(self.rebalance_result),
-            "portfolio_weights": _summarize_run_result(self.portfolio_weights_result),
-            "portfolio": _summarize_run_result(self.portfolio_result),
+            "interpolation": stage("prices"),
+            "calendar_events": stage("calendar_events"),
+            "rebalance": stage("rebalance"),
+            "portfolio_weights": stage("weights"),
+            "portfolio": stage("values"),
         }
 
 
@@ -96,14 +100,18 @@ class PortfolioPreflight:
 
 
 @dataclass(frozen=True, slots=True)
-class PortfolioExecutionGraph:
-    valuation_source: Any
+class PortfolioRunPlan:
+    """What this application supplies to the ms-markets recipe ``run_portfolio`` (ADR 0031).
+
+    The valuation source, its interpolated prices, is in ``portfolio_configuration``.
+    """
+
     # None for immediate_signal, which trades at the signal's own times and reads no calendar.
     calendar_events: Any
-    portfolio_rebalance: Any
-    portfolio_weights: Any
-    portfolio_node: Any
-    portfolio_row: Any
+    portfolio_configuration: Any
+    portfolio_description: str
+    unique_identifier: str
+    calendar_uid: Any
 
 
 def portfolio_unique_identifier(configuration_uid: Any) -> str:
@@ -165,7 +173,7 @@ def _resolve_inputs(
         signal_definitions_by_uids,
         signal_uid_for_key,
     )
-    from alpaca_connectors.portfolios.signal_history import (
+    from alpaca_connectors.portfolios.signal_observations import (
         read_signal_observation_bounds_by_signal,
     )
 
@@ -360,9 +368,15 @@ def preflight_portfolio_configuration(
     return answer
 
 
-def build_portfolio_graph(resolved: ResolvedPortfolioConfiguration) -> PortfolioExecutionGraph:
-    """Build the released ms-markets temporal portfolio graph."""
-    from msm.api.portfolios import Portfolio
+def build_portfolio_run(resolved: ResolvedPortfolioConfiguration) -> PortfolioRunPlan:
+    """Build what this application supplies to a portfolio run (ADR 0031, decision 5).
+
+    Its interpolated prices as the valuation source, calendar events only for
+    ``calendar_event_signal`` (in its private table), the rebalance strategy, the calendar and the
+    ``ApplicationWeights`` signal of the configuration, the valuation and fee settings, and the
+    ``ALPACA_PORTFOLIO__<hex>`` identifier. ms-markets' ``run_portfolio`` builds and runs the
+    chain from it.
+    """
     from msm_portfolios.configuration import (
         BacktestingWeightsConfig,
         FrontEndDetails,
@@ -376,13 +390,9 @@ def build_portfolio_graph(resolved: ResolvedPortfolioConfiguration) -> Portfolio
     from msm_portfolios.time_index import (
         PortfolioCalendarEvents,
         PortfolioCalendarEventsConfiguration,
-        PortfoliosUpdater,
     )
 
-    from alpaca_connectors.instances import (
-        AlpacaPortfolioCalendarEventsStorage,
-        portfolio_output_tables,
-    )
+    from alpaca_connectors.instances import AlpacaPortfolioCalendarEventsStorage
     from alpaca_connectors.portfolios.provided_weights import portfolio_signal_key
     from alpaca_connectors.portfolios.signal_definitions import weights_signal
 
@@ -396,7 +406,7 @@ def build_portfolio_graph(resolved: ResolvedPortfolioConfiguration) -> Portfolio
     recorded_assets = list(resolved.asset_identifiers)
     signal.get_asset_list = lambda: list(recorded_assets)
     if signal.signal_uid != resolved.signal_uid:
-        raise RuntimeError("Resolved Signal identity changed while building the portfolio graph.")
+        raise RuntimeError("Resolved Signal identity changed while building the portfolio run.")
     valuation_source = build_alpaca_interpolated_prices(
         source_time_index_meta_table_uid=resolved.source_time_index_meta_table_uid,
         asset_identifiers=list(resolved.asset_identifiers),
@@ -477,36 +487,12 @@ def build_portfolio_graph(resolved: ResolvedPortfolioConfiguration) -> Portfolio
             ),
         ),
     )
-    unique_identifier = portfolio_unique_identifier(configuration.uid)
-    portfolio_row = Portfolio.upsert(
-        unique_identifier=unique_identifier,
-        calendar_uid=calendar_row.uid,
-    )
-    # Values, weights and rebalance state land in this application's contract instances
-    # (ms-markets ADR 0047); output tables do not enter any update hash.
-    portfolio_node = PortfoliosUpdater(
+    return PortfolioRunPlan(
+        calendar_events=calendar_events,
         portfolio_configuration=portfolio_configuration,
         portfolio_description=description,
-        **portfolio_output_tables(),
-    )
-    portfolio_node.target_portfolio = portfolio_row
-    portfolio_node._explicit_portfolio_identifier = unique_identifier
-    # An observation-time signal cannot support a portfolio before its first stored
-    # observation. Keep this runtime calculation boundary out of durable portfolio identity.
-    portfolio_node.OFFSET_START = resolved.signal_start_time
-    portfolio_weights = portfolio_node.dependencies()["portfolio_weights"]
-    portfolio_rebalance = portfolio_weights.portfolio_rebalance
-    if portfolio_rebalance is None:
-        raise RuntimeError("ms-markets did not construct the PortfolioRebalance dependency.")
-    portfolio_rebalance.OFFSET_START = resolved.signal_start_time
-    portfolio_weights.OFFSET_START = resolved.signal_start_time
-    return PortfolioExecutionGraph(
-        valuation_source=valuation_source,
-        calendar_events=calendar_events,
-        portfolio_rebalance=portfolio_rebalance,
-        portfolio_weights=portfolio_weights,
-        portfolio_node=portfolio_node,
-        portfolio_row=portfolio_row,
+        unique_identifier=portfolio_unique_identifier(configuration.uid),
+        calendar_uid=calendar_row.uid,
     )
 
 
@@ -540,11 +526,16 @@ def update_portfolio_bars(resolved: ResolvedPortfolioConfiguration) -> dict[str,
 
 
 def execute_portfolio_configuration(configuration_uid: Any) -> PortfolioExecutionResult:
-    """Run stored inputs through the released temporal execution stages.
+    """Run a portfolio configuration with the ms-markets recipe ``run_portfolio`` (ADR 0031).
 
-    The calls that give the portfolio weights remain the signal producer; this execution updates
-    every other dependency explicitly and publishes no signal observation.
+    Its bars first (issue #39), then the run: Markets runs prices, calendar events, rebalance,
+    weights and values in order, from the signal's first observation and scoped to its one
+    signal, creates or updates the `Portfolio` and publishes the weights and values. Nothing is
+    registered or reconciled. The calls that give the portfolio weights remain the signal
+    producer; this run publishes no signal observation.
     """
+    from alpaca_connectors.instances import AlpacaPortfolioRebalanceStateStorage
+    from alpaca_connectors.markets_api import run_portfolio
     from alpaca_connectors.runtime import start_portfolio_job_engine
 
     # This service is reusable outside the repository Job entrypoint. Bootstrap the complete
@@ -552,24 +543,21 @@ def execute_portfolio_configuration(configuration_uid: Any) -> PortfolioExecutio
     start_portfolio_job_engine()
     resolved = resolve_portfolio_configuration(configuration_uid)
     bars_update = update_portfolio_bars(resolved)
-    graph = build_portfolio_graph(resolved)
-    interpolation_result = graph.valuation_source.run(update_tree=False)
-    calendar_events_result = (
-        None if graph.calendar_events is None else graph.calendar_events.run(update_tree=False)
-    )
-    signal_weights = graph.portfolio_node.signal_weights
-    signal_statistics = signal_weights.get_update_statistics()
-    signal_statistics.filter_identity_level(level=1, filters=[resolved.signal_uid])
-    signal_weights.update_statistics = signal_statistics
-    # The rebalance reads the events up to its own start, so it reaches at least this time.
+    plan = build_portfolio_run(resolved)
+    # The rebalance reads the events up to its own start, which is after this time.
     rebalanced_through = dt.datetime.now(dt.UTC)
-    rebalance_result = graph.portfolio_rebalance.run(update_tree=False)
-    portfolio_weights_result = graph.portfolio_weights.run(update_tree=False)
-    portfolio_result = graph.portfolio_node.run(update_tree=False, update_pointers=True)
-    persisted_portfolio = (
-        getattr(graph.portfolio_node, "target_portfolio", None) or graph.portfolio_row
+    answer = run_portfolio(
+        portfolio_configuration=plan.portfolio_configuration,
+        portfolio_description=plan.portfolio_description,
+        unique_identifier=plan.unique_identifier,
+        calendar_uid=plan.calendar_uid,
+        signal_uid=resolved.signal_uid,
+        # An observation-time signal cannot support a portfolio before its first observation.
+        start_at=resolved.signal_start_time,
+        calendar_events=plan.calendar_events,
+        rebalance_output_table=AlpacaPortfolioRebalanceStateStorage,
     )
-    portfolio_uid = str(persisted_portfolio.uid)
+    portfolio_uid = answer.portfolio_uid
     if (
         resolved.configuration.portfolio_uid is None
         or str(resolved.configuration.portfolio_uid) != portfolio_uid
@@ -578,10 +566,6 @@ def execute_portfolio_configuration(configuration_uid: Any) -> PortfolioExecutio
             resolved.configuration.uid,
             values={"portfolio_uid": uuid.UUID(portfolio_uid)},
         )
-    # Point the Markets dataset catalog at this application's instances and refresh its state.
-    from alpaca_connectors.portfolios.datasets import register_portfolio_datasets
-
-    register_portfolio_datasets(portfolio_uid)
     first_rebalance = first_rebalance_state(
         resolved.rebalance_configuration,
         starts_at=resolved.signal_start_time,
@@ -593,40 +577,20 @@ def execute_portfolio_configuration(configuration_uid: Any) -> PortfolioExecutio
     return PortfolioExecutionResult(
         resolved=resolved,
         portfolio_uid=portfolio_uid,
-        portfolio_unique_identifier=str(persisted_portfolio.unique_identifier),
-        interpolation_result=interpolation_result,
-        calendar_events_result=calendar_events_result,
-        rebalance_result=rebalance_result,
-        portfolio_weights_result=portfolio_weights_result,
-        portfolio_result=portfolio_result,
+        portfolio_unique_identifier=answer.portfolio_unique_identifier,
+        written=dict(answer.written),
         bars_update=bars_update,
         first_rebalance=first_rebalance,
     )
 
 
-def _summarize_run_result(value: Any) -> Any:
-    if value is None:
-        return None
-    if isinstance(value, dict):
-        return {key: _summarize_run_result(item) for key, item in value.items()}
-    if isinstance(value, tuple) and len(value) == 2:
-        error, frame = value
-        if error:
-            raise RuntimeError("Portfolio pipeline update failed; see DataNode logs.")
-        return {"error": False, "rows": int(getattr(frame, "shape", (0,))[0])}
-    uid = getattr(value, "uid", None)
-    if uid is not None:
-        return {"uid": str(uid)}
-    return str(value)
-
-
 __all__ = [
     "HeldPortfolioInputs",
     "PortfolioExecutionResult",
-    "PortfolioExecutionGraph",
+    "PortfolioRunPlan",
     "PortfolioPreflight",
     "ResolvedPortfolioConfiguration",
-    "build_portfolio_graph",
+    "build_portfolio_run",
     "execute_portfolio_configuration",
     "portfolio_unique_identifier",
     "preflight_portfolio_configuration",

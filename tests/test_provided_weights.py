@@ -45,7 +45,7 @@ from alpaca_connectors.portfolios.signal_definitions import (
     signal_uid_for_key,
     weights_signal,
 )
-from alpaca_connectors.portfolios.signal_history import SignalObservationBounds
+from alpaca_connectors.portfolios.signal_observations import SignalObservationBounds
 from alpaca_connectors.settings import PROJECT_NAMESPACE
 
 CONFIGURATION_UID = uuid.UUID("11111111-1111-4111-8111-111111111111")
@@ -163,8 +163,6 @@ def test_a_portfolio_created_before_adr_0028_keeps_its_signal() -> None:
     from msm_portfolios.contrib.signals import ApplicationWeights
     from msm_portfolios.time_index.signals.weights import compute_signal_uid
 
-    from alpaca_connectors.instances import AlpacaSignalWeightsStorage
-
     with patch.object(ApplicationWeights, "from_signal_configuration") as build:
         weights_signal(legacy_signal_key(CONFIGURATION_UID))
     configuration = build.call_args.args[0]
@@ -172,7 +170,8 @@ def test_a_portfolio_created_before_adr_0028_keeps_its_signal() -> None:
         PROJECT_NAMESPACE,
         str(CONFIGURATION_UID),
     )
-    assert build.call_args.kwargs == {"output_table": AlpacaSignalWeightsStorage}
+    # Its weights are Markets' published series: no table of this application (ADR 0031).
+    assert build.call_args.kwargs == {}
 
     # The UID the connector computes is the one ms-markets' signal publishes under, and it
     # depends only on the configuration, so new weights never change it.
@@ -201,8 +200,8 @@ def test_portfolios_have_their_own_portfolio_identifier() -> None:
 # ------------------------------------------------------------------------------------------------
 # Publishing
 # ------------------------------------------------------------------------------------------------
-def _publish_patches(*, last_stored=None, registered=None):
-    """Replace the Alpaca details read and the signal's last observation read.
+def _publish_patches(*, registered=None):
+    """Replace the Alpaca details read; Markets is reached only through the recipe fake.
 
     ``registered`` are the identifiers with Alpaca details; the default is every test asset.
     """
@@ -221,52 +220,45 @@ def _publish_patches(*, last_stored=None, registered=None):
             "alpaca_connectors.markets_api.assets_by_identifier",
             side_effect=AssertionError("Markets read"),
         ),
-        patch(
-            "alpaca_connectors.portfolios.signal_history.read_signal_last_observation_at",
-            side_effect=(
-                last_stored if isinstance(last_stored, list) else lambda signal_uid: last_stored
-            ),
-        ),
     )
 
 
-def test_publish_binds_the_signal_then_records_the_assets_then_publishes() -> None:
+def test_publish_records_the_assets_then_publishes_with_the_recipe(recipes) -> None:
     order = MagicMock()
-    signal = Mock(signal_uid="signal-a")
-    signal.publish.side_effect = lambda *args, **kwargs: order.publish()
-    details, markets, bounds = _publish_patches(last_stored=MONDAY)
+    recipes.answer("publish_signal_weights", lambda **kwargs: order.publish())
+    details, markets = _publish_patches()
     with (
         details as read_details,
         markets,
-        bounds,
-        patch.object(provided_weights, "weights_signal", return_value=signal),
-        patch.object(provided_weights, "ensure_signal_metadata") as ensure,
         patch(
             "alpaca_connectors.portfolios.signal_assets.record_signal_assets",
             side_effect=lambda *args, **kwargs: order.record(*args),
         ),
-        patch(
-            "alpaca_connectors.portfolios.datasets.register_signal_dataset",
-            side_effect=lambda signal_uid: order.register(signal_uid),
-        ) as register,
     ):
         published = publish_definition_weights(
             definition(),
             [{"observed_at": WEDNESDAY, "weights": {NVDA: 0.5, AAPL: 0.5}}],
         )
 
+    signal_uid = signal_uid_for_key(str(CONFIGURATION_UID))
     # The assets are validated with one read of this application's Alpaca details.
     read_details.assert_called_once_with([AAPL, NVDA])
-    # The signal has observations, so Markets already knows it. It is bound before any row is
-    # written, so a refused binding stores nothing (issue #37).
-    ensure.assert_not_called()
-    assert order.mock_calls == [
-        call.register("signal-a"),
-        call.record("signal-a", [AAPL, NVDA]),
-        call.publish(),
+    # Recorded first, so they stay a superset of what is published; nothing is registered or
+    # bound (ADR 0031): Markets creates the signal's metadata on its first publication.
+    assert order.mock_calls == [call.record(signal_uid, [AAPL, NVDA]), call.publish()]
+    assert recipes.calls == [
+        (
+            "publish_signal_weights",
+            {
+                "signal_uid": signal_uid,
+                "observations": {WEDNESDAY: {NVDA: 0.5, AAPL: 0.5}},
+                "signal_description": "Weights the application provides for the signal "
+                "'Thesis basket'.",
+                "description": None,
+            },
+        )
     ]
-    signal.publish.assert_called_once_with({WEDNESDAY: {NVDA: 0.5, AAPL: 0.5}}, description=None)
-    register.assert_called_once_with("signal-a")
+    assert published.signal_uid == signal_uid
     assert (published.observation_count, published.asset_count) == (1, 2)
     assert published.last_observed_at == WEDNESDAY
 
@@ -279,18 +271,13 @@ def test_publish_binds_the_signal_then_records_the_assets_then_publishes() -> No
         (AAPL, {"registered": [NVDA]}, "unknown_asset", 422),
         # One that is not an Alpaca identifier can have no bars.
         (NOT_ALPACA, {}, "asset_not_alpaca", 422),
-        (AAPL, {"last_stored": WEDNESDAY}, "observation_not_after_last", 409),
     ],
 )
-def test_publish_refuses_before_writing_anything(asset, kwargs, code, status) -> None:
-    signal = Mock(signal_uid="signal-a")
-    details, markets, bounds = _publish_patches(**kwargs)
+def test_publish_refuses_before_writing_anything(recipes, asset, kwargs, code, status) -> None:
+    details, markets = _publish_patches(**kwargs)
     with (
         details,
         markets,
-        bounds,
-        patch.object(provided_weights, "weights_signal", return_value=signal),
-        patch.object(provided_weights, "ensure_signal_metadata") as ensure,
         patch("alpaca_connectors.portfolios.signal_assets.record_signal_assets") as record,
         pytest.raises(ProvidedWeightsError) as raised,
     ):
@@ -301,73 +288,53 @@ def test_publish_refuses_before_writing_anything(asset, kwargs, code, status) ->
 
     assert (raised.value.code, raised.value.status_code) == (code, status)
     record.assert_not_called()
-    ensure.assert_not_called()
-    signal.publish.assert_not_called()
+    assert recipes.calls == []
     assert "ALPACA::" not in str(raised.value) and "FIGI" not in str(raised.value)
 
 
-def test_a_refused_binding_stores_nothing_and_names_no_table() -> None:
-    # Markets cannot see the table (issue #37). Its message names the table; the caller's never.
-    signal = Mock(signal_uid="signal-a")
-    details, markets, bounds = _publish_patches(last_stored=None)
-    refusal = LookupError(
-        "SignalWeightsTS instance '1081d765-e0eb-4a7d-9f3a-e8335cf1e85b' is not a visible "
-        "TimeIndexMetaTable"
-    )
-    with (
-        details,
-        markets,
-        bounds,
-        patch.object(provided_weights, "weights_signal", return_value=signal),
-        patch.object(provided_weights, "ensure_signal_metadata") as ensure,
-        patch("alpaca_connectors.portfolios.signal_assets.record_signal_assets") as record,
-        patch("alpaca_connectors.portfolios.datasets.register_signal_dataset", side_effect=refusal),
-        pytest.raises(ProvidedWeightsError) as raised,
-    ):
-        publish_definition_weights(
-            definition(),
-            [{"observed_at": WEDNESDAY, "weights": {NVDA: 0.5, AAPL: 0.5}}],
-        )
-
-    assert (raised.value.code, raised.value.status_code) == ("signal_not_registered", 503)
-    assert "1081d765" not in str(raised.value)
-    # Its first publication registers the signal, which binding needs; no row is written.
-    ensure.assert_called_once()
-    record.assert_not_called()
-    signal.publish.assert_not_called()
-
-
 @pytest.mark.parametrize(
-    ("error", "stored_after", "code"),
+    ("error", "code", "status"),
     [
-        (LookupError("Unknown asset unique identifiers: ['ALPACA::nvda']."), None, "unknown_asset"),
-        # Another call published first: the stored last time, not the message, decides.
-        (ValueError("any wording"), MONDAY, "observation_not_after_last"),
-        (ValueError("Observation at 2026 is at or before ..."), None, "invalid_observation"),
+        # Markets' 409: an observation at or before the last stored one. Its status decides,
+        # never its wording.
+        ("conflict", "observation_not_after_last", 409),
+        (LookupError("Unknown asset unique identifiers: ['ALPACA::nvda']."), "unknown_asset", 422),
+        (ValueError("Observation at 2026 is at or before ..."), "invalid_observation", 422),
+        (TypeError("ALPACA::nvda weight"), "invalid_observation", 422),
     ],
 )
-def test_signal_refusals_become_codes_that_quote_nothing(error, stored_after, code) -> None:
-    signal = Mock(signal_uid="signal-a")
-    signal.publish.side_effect = error
-    details, markets, bounds = _publish_patches(last_stored=[None, stored_after])
+def test_markets_refusals_become_codes_that_quote_nothing(recipes, error, code, status) -> None:
+    from msm.api.remote import MarketsConflictError
+
+    if error == "conflict":
+        error = MarketsConflictError("ALPACA::nvda at 2026-11-16 is not after 2026-11-18")
+    recipes.answer("publish_signal_weights", error)
+    details, markets = _publish_patches()
     with (
         details,
         markets,
-        bounds,
-        patch.object(provided_weights, "weights_signal", return_value=signal),
-        patch.object(provided_weights, "ensure_signal_metadata") as ensure,
         patch("alpaca_connectors.portfolios.signal_assets.record_signal_assets"),
-        patch("alpaca_connectors.portfolios.datasets.register_signal_dataset") as register,
         pytest.raises(ProvidedWeightsError) as raised,
     ):
         publish_definition_weights(definition(), [{"observed_at": MONDAY, "weights": {NVDA: 1.0}}])
 
-    # A first publication registers the signal in Markets, and binds it to its table, before its
-    # rows reference it.
-    ensure.assert_called_once_with(str(CONFIGURATION_UID), description=ANY)
-    register.assert_called_once_with("signal-a")
-    assert raised.value.code == code
+    assert (raised.value.code, raised.value.status_code) == (code, status)
     assert "ALPACA::" not in str(raised.value)
+
+
+def test_any_other_markets_failure_propagates(recipes) -> None:
+    # signal_not_registered no longer exists (ADR 0031): nothing is bound before a publication.
+    from msm.api.remote import MarketsAccessError
+
+    recipes.answer("publish_signal_weights", MarketsAccessError("not the manager"))
+    details, markets = _publish_patches()
+    with (
+        details,
+        markets,
+        patch("alpaca_connectors.portfolios.signal_assets.record_signal_assets"),
+        pytest.raises(MarketsAccessError),
+    ):
+        publish_definition_weights(definition(), [{"observed_at": MONDAY, "weights": {NVDA: 1.0}}])
 
 
 def test_a_portfolio_publishes_to_its_definition_or_before_adoption_to_its_own_signal() -> None:
@@ -1238,7 +1205,7 @@ def test_the_bars_run_resolves_a_portfolios_source_by_its_own_uid() -> None:
 
 def test_the_portfolio_run_resolves_the_provided_signal() -> None:
     from alpaca_connectors.portfolios import execution
-    from alpaca_connectors.portfolios.signal_history import (
+    from alpaca_connectors.portfolios.signal_observations import (
         SignalObservationAsset,
         SignalObservationMatrix,
     )
@@ -1276,7 +1243,7 @@ def test_the_portfolio_run_resolves_the_provided_signal() -> None:
         ),
         patch.object(execution, "read_signal_observation_matrix", return_value=matrix) as read,
         patch(
-            "alpaca_connectors.portfolios.signal_history.read_signal_observation_bounds_by_signal",
+            "alpaca_connectors.portfolios.signal_observations.read_signal_observation_bounds_by_signal",
             return_value={signal_uid: SignalObservationBounds(signal_uid, MONDAY, WEDNESDAY)},
         ),
         patch.object(
@@ -1305,7 +1272,7 @@ def test_the_portfolio_run_resolves_the_provided_signal() -> None:
 
 def test_a_portfolio_not_yet_adopted_runs_on_the_feed_it_names() -> None:
     from alpaca_connectors.portfolios import execution
-    from alpaca_connectors.portfolios.signal_history import (
+    from alpaca_connectors.portfolios.signal_observations import (
         SignalObservationAsset,
         SignalObservationMatrix,
     )
@@ -1342,7 +1309,7 @@ def test_a_portfolio_not_yet_adopted_runs_on_the_feed_it_names() -> None:
         ) as named,
         patch.object(execution, "read_signal_observation_matrix", return_value=matrix),
         patch(
-            "alpaca_connectors.portfolios.signal_history.read_signal_observation_bounds_by_signal",
+            "alpaca_connectors.portfolios.signal_observations.read_signal_observation_bounds_by_signal",
             return_value={signal_uid: SignalObservationBounds(signal_uid, MONDAY, WEDNESDAY)},
         ),
         patch.object(
@@ -1414,16 +1381,16 @@ def test_the_bars_update_comes_before_the_valuation() -> None:
     order = MagicMock()
     resolved = SimpleNamespace(bars_configuration=SimpleNamespace(uid=BARS_UID))
     order.resolve.return_value = resolved
-    order.graph.side_effect = RuntimeError("stop after the order is known")
+    order.plan.side_effect = RuntimeError("stop after the order is known")
     with (
         patch("alpaca_connectors.runtime.start_portfolio_job_engine"),
         patch.object(execution, "resolve_portfolio_configuration", order.resolve),
         patch.object(execution, "update_portfolio_bars", order.bars),
-        patch.object(execution, "build_portfolio_graph", order.graph),
+        patch.object(execution, "build_portfolio_run", order.plan),
         pytest.raises(RuntimeError, match="stop after"),
     ):
         execution.execute_portfolio_configuration(CONFIGURATION_UID)
-    assert [name for name, *_ in order.mock_calls] == ["resolve", "bars", "graph"]
+    assert [name for name, *_ in order.mock_calls] == ["resolve", "bars", "plan"]
 
 
 # ------------------------------------------------------------------------------------------------

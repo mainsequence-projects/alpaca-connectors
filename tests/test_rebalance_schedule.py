@@ -110,7 +110,7 @@ def test_a_portfolio_identifier_gives_back_its_configuration() -> None:
 
 @pytest.fixture
 def portfolio(monkeypatch) -> dict[str, Any]:
-    from alpaca_connectors.portfolios import configurations, provided_weights, signal_history
+    from alpaca_connectors.portfolios import configurations, provided_weights, signal_observations
 
     state: dict[str, Any] = {"first_observation_at": FIRST_WEIGHTS}
     configuration = SimpleNamespace(uid=CONFIGURATION_UID, rebalance_configuration_uid="rb-uid")
@@ -122,7 +122,7 @@ def portfolio(monkeypatch) -> dict[str, Any]:
     monkeypatch.setattr(configurations, "get_rebalance_configuration", lambda uid: _rebalance())
     monkeypatch.setattr(provided_weights, "portfolio_signal_uid", lambda row: "signal-uid")
     monkeypatch.setattr(
-        signal_history,
+        signal_observations,
         "read_signal_observation_bounds",
         lambda *, signal_uid: SimpleNamespace(first_observation_at=state["first_observation_at"]),
     )

@@ -232,7 +232,7 @@ def test_markets_refusing_the_account_delete_is_reported() -> None:
 # ------------------------------------------------------------------------------------------------
 # The Markets calls
 # ------------------------------------------------------------------------------------------------
-def test_the_preflight_and_the_signal_delete_call_their_ms_markets_routes() -> None:
+def test_the_preflight_and_the_signal_delete_call_their_ms_markets_routes(recipes) -> None:
     from alpaca_connectors import markets_api
 
     client = MagicMock()
@@ -241,6 +241,7 @@ def test_the_preflight_and_the_signal_delete_call_their_ms_markets_routes() -> N
         SimpleNamespace(uid="metadata-a", signal_uid="signal-a"),
         SimpleNamespace(uid="metadata-b", signal_uid="signal-b"),
     ]
+    recipes.answer("end_signal", lambda *, signal_uid: {"deleted": signal_uid})
     with (
         patch(
             "alpaca_connectors.runtime.use_markets_api", return_value=SimpleNamespace(client=client)
@@ -248,20 +249,22 @@ def test_the_preflight_and_the_signal_delete_call_their_ms_markets_routes() -> N
         patch(
             "msm_portfolios.api.market_metadata.SignalMetadata.filter", return_value=rows
         ) as read,
-        patch("msm_portfolios.api.datasets.PortfolioDatasets.unregister_signal") as unbind,
     ):
         markets_api.account_delete_preflight(ACCOUNT_UID)
-        markets_api.delete_signals_metadata(["signal-a", "signal-b", "signal-c"])
+        ended = markets_api.end_signals(["signal-a", "signal-b", "signal-c"])
 
     selection = {"selection": {"mode": "explicit", "uids": [ACCOUNT_UID]}, "options": {}}
-    # One read of the signals' metadata; unbinding and deleting are one-signal routes.
+    # One read of the signals' metadata; ending a signal is a one-signal recipe, and a signal
+    # Markets never registered costs no call.
     read.assert_called_once_with(signal_uid__in=["signal-a", "signal-b", "signal-c"], limit=3)
     assert client.request.call_args_list == [
         call("POST", "/api/v1/account/bulk-delete/preflight/", json=selection),
-        call("DELETE", "/api/v1/portfolio-signal/metadata-a/"),
-        call("DELETE", "/api/v1/portfolio-signal/metadata-b/"),
     ]
-    assert unbind.call_args_list == [call(signal_uid="signal-a"), call(signal_uid="signal-b")]
+    assert recipes.calls == [
+        ("end_signal", {"signal_uid": "signal-a"}),
+        ("end_signal", {"signal_uid": "signal-b"}),
+    ]
+    assert ended == {"signal-a": {"deleted": "signal-a"}, "signal-b": {"deleted": "signal-b"}}
 
 
 def test_several_portfolios_are_preflighted_and_deleted_in_one_request_each() -> None:

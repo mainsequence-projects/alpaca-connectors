@@ -125,7 +125,7 @@ def missing_weights_message(portfolio_identifier: str, *, at: dt.datetime) -> st
         configuration_uid_from_portfolio_identifier,
         portfolio_signal_uid,
     )
-    from alpaca_connectors.portfolios.signal_history import read_signal_observation_bounds
+    from alpaca_connectors.portfolios.signal_observations import read_signal_observation_bounds
 
     configuration_uid = configuration_uid_from_portfolio_identifier(portfolio_identifier)
     if configuration_uid is None:

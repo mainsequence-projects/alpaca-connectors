@@ -16,14 +16,14 @@ from alpaca_connectors.portfolios.configurations import (
     update_portfolio_configuration,
 )
 from alpaca_connectors.portfolios.execution import (
-    PortfolioExecutionGraph,
     PortfolioPreflight,
+    PortfolioRunPlan,
     ResolvedPortfolioConfiguration,
     execute_portfolio_configuration,
     preflight_portfolio_configuration,
     resolve_portfolio_configuration,
 )
-from alpaca_connectors.portfolios.signal_history import (
+from alpaca_connectors.portfolios.signal_observations import (
     SignalObservationAsset,
     SignalObservationBounds,
     SignalObservationMatrix,
@@ -262,7 +262,7 @@ def _input_reads(rows, *, bounds, rebalance=None, own_bars=None):
 CONFIGURATIONS = "alpaca_connectors.portfolios.configurations"
 BARS = "alpaca_connectors.market_data.configurations"
 DEFINITIONS = "alpaca_connectors.portfolios.signal_definitions"
-HISTORY = "alpaca_connectors.portfolios.signal_history"
+HISTORY = "alpaca_connectors.portfolios.signal_observations"
 OBSERVED = SignalObservationBounds(
     signal_uid="any",
     first_observation_at=dt.datetime(2026, 9, 3, 8, tzinfo=dt.UTC),
@@ -418,26 +418,29 @@ def test_portfolio_resolution_uses_published_signal_and_selected_bars_profile() 
     reads.sources.assert_called_once_with([("1d", "sip", "all")])
 
 
-def test_execution_updates_each_released_stage_without_tree_walk() -> None:
+def test_execution_runs_the_portfolio_with_the_recipe_and_registers_nothing(recipes) -> None:
+    from alpaca_connectors.instances import AlpacaPortfolioRebalanceStateStorage
+
     resolved = resolved_configuration()
-    valuation_source = Mock()
-    calendar_events = Mock()
-    portfolio_rebalance = Mock()
-    portfolio_weights = Mock()
-    portfolio_node = Mock()
-    signal_statistics = Mock()
-    portfolio_node.signal_weights.get_update_statistics.return_value = signal_statistics
-    portfolio_node.target_portfolio = SimpleNamespace(
-        uid=PORTFOLIO_UID,
+    plan = PortfolioRunPlan(
+        calendar_events=Mock(),
+        portfolio_configuration=Mock(),
+        portfolio_description="NYSE-close portfolio backtest.",
         unique_identifier="ALPACA_PORTFOLIO__11111111111141118111111111111111",
+        calendar_uid="calendar-uid",
     )
-    portfolio_row = portfolio_node.target_portfolio
-    manager = Mock()
-    manager.attach_mock(valuation_source.run, "interpolation")
-    manager.attach_mock(calendar_events.run, "calendar_events")
-    manager.attach_mock(portfolio_rebalance.run, "rebalance")
-    manager.attach_mock(portfolio_weights.run, "portfolio_weights")
-    manager.attach_mock(portfolio_node.run, "portfolio")
+    order = Mock()
+    answer = SimpleNamespace(
+        portfolio=SimpleNamespace(uid=PORTFOLIO_UID, unique_identifier=plan.unique_identifier),
+        written={"prices": 4, "calendar_events": 2, "rebalance": 1, "weights": 2, "values": 3},
+        first_rebalance=True,
+    )
+
+    def run(**kwargs):
+        order.run()
+        return answer
+
+    recipes.answer("run_portfolio", run)
 
     with (
         patch("alpaca_connectors.runtime.start_portfolio_job_engine") as start_engine,
@@ -446,25 +449,15 @@ def test_execution_updates_each_released_stage_without_tree_walk() -> None:
             return_value=resolved,
         ),
         patch(
-            "alpaca_connectors.portfolios.execution.build_portfolio_graph",
-            return_value=PortfolioExecutionGraph(
-                valuation_source=valuation_source,
-                calendar_events=calendar_events,
-                portfolio_rebalance=portfolio_rebalance,
-                portfolio_weights=portfolio_weights,
-                portfolio_node=portfolio_node,
-                portfolio_row=portfolio_row,
-            ),
+            "alpaca_connectors.portfolios.execution.build_portfolio_run",
+            side_effect=lambda resolved: (order.plan(), plan)[1],
         ),
         patch(
             "alpaca_connectors.portfolios.execution.update_portfolio_configuration_row"
         ) as update_row,
         patch(
-            "alpaca_connectors.portfolios.datasets.register_portfolio_datasets"
-        ) as register_datasets,
-        patch(
             "alpaca_connectors.portfolios.execution.update_portfolio_bars",
-            return_value={"updated": True},
+            side_effect=lambda resolved: (order.bars(), {"updated": True})[1],
         ) as bars_update,
         patch(
             "alpaca_connectors.portfolios.execution.first_rebalance_state",
@@ -477,42 +470,91 @@ def test_execution_updates_each_released_stage_without_tree_walk() -> None:
     assert first_rebalance.call_args.args == (resolved.rebalance_configuration,)
     assert first_rebalance.call_args.kwargs["starts_at"] == resolved.signal_start_time
     assert result.first_rebalance == first_rebalance.return_value
-    # Its bars first (issue #39), then the released stages.
-    bars_update.assert_called_once_with(resolved)
+    # Its bars first (issue #39), then the run, once.
     start_engine.assert_called_once_with()
-    assert manager.mock_calls[0].args == ()
-    assert manager.mock_calls[0].kwargs == {"update_tree": False}
-    assert manager.mock_calls[1].args == ()
-    assert manager.mock_calls[1].kwargs == {"update_tree": False}
-    assert manager.mock_calls[2].args == ()
-    assert manager.mock_calls[2].kwargs == {"update_tree": False}
-    assert manager.mock_calls[3].args == ()
-    assert manager.mock_calls[3].kwargs == {"update_tree": False}
-    assert manager.mock_calls[4].args == ()
-    assert manager.mock_calls[4].kwargs == {
-        "update_tree": False,
-        "update_pointers": True,
-    }
-    portfolio_node.signal_weights.get_update_statistics.assert_called_once_with()
-    signal_statistics.filter_identity_level.assert_called_once_with(
-        level=1,
-        filters=["signal-uid"],
-    )
-    assert portfolio_node.signal_weights.update_statistics is signal_statistics
+    bars_update.assert_called_once_with(resolved)
+    assert [name for name, *_ in order.mock_calls] == ["bars", "plan", "run"]
+    # Scoped to its one signal, from the signal's first observation, with this application's
+    # private rebalance-state table; Markets creates or updates the Portfolio and publishes.
+    assert recipes.calls == [
+        (
+            "run_portfolio",
+            {
+                "portfolio_configuration": plan.portfolio_configuration,
+                "portfolio_description": plan.portfolio_description,
+                "unique_identifier": plan.unique_identifier,
+                "calendar_uid": "calendar-uid",
+                "signal_uid": "signal-uid",
+                "start_at": resolved.signal_start_time,
+                "calendar_events": plan.calendar_events,
+                "rebalance_output_table": AlpacaPortfolioRebalanceStateStorage,
+            },
+        )
+    ]
+    # The configuration stores the Portfolio it runs; nothing is registered or reconciled.
     update_row.assert_called_once_with(
         CONFIGURATION_UID,
         values={"portfolio_uid": PORTFOLIO_UID},
     )
-    # The run registers and reconciles the portfolio's Markets catalog row.
-    register_datasets.assert_called_once_with(str(PORTFOLIO_UID))
     assert result.portfolio_uid == str(PORTFOLIO_UID)
+    assert result.portfolio_unique_identifier == plan.unique_identifier
+    summary = result.summary()
+    assert summary["interpolation"] == {"error": False, "rows": 4}
+    assert summary["calendar_events"] == {"error": False, "rows": 2}
+    assert summary["rebalance"] == {"error": False, "rows": 1}
+    assert summary["portfolio_weights"] == {"error": False, "rows": 2}
+    assert summary["portfolio"] == {"error": False, "rows": 3}
+
+
+def test_a_run_whose_portfolio_is_stored_does_not_store_it_again(recipes) -> None:
+    resolved = resolved_configuration()
+    resolved = ResolvedPortfolioConfiguration(
+        **{
+            **{name: getattr(resolved, name) for name in resolved.__slots__},
+            "configuration": portfolio_configuration(portfolio_uid=PORTFOLIO_UID),
+        }
+    )
+    recipes.answer(
+        "run_portfolio",
+        {"portfolio": {"uid": str(PORTFOLIO_UID)}, "written": {}, "first_rebalance": False},
+    )
+    with (
+        patch("alpaca_connectors.runtime.start_portfolio_job_engine"),
+        patch.object(execution, "resolve_portfolio_configuration", return_value=resolved),
+        patch.object(execution, "update_portfolio_bars", return_value={}),
+        patch.object(
+            execution,
+            "build_portfolio_run",
+            return_value=PortfolioRunPlan(
+                calendar_events=None,
+                portfolio_configuration=Mock(),
+                portfolio_description="d",
+                unique_identifier=execution.portfolio_unique_identifier(CONFIGURATION_UID),
+                calendar_uid="calendar-uid",
+            ),
+        ),
+        patch.object(execution, "update_portfolio_configuration_row") as update_row,
+        patch.object(
+            execution,
+            "first_rebalance_state",
+            return_value={"rebalanced": False, "message": "No rebalance yet."},
+        ),
+    ):
+        result = execute_portfolio_configuration(CONFIGURATION_UID)
+
+    update_row.assert_not_called()
+    # Its identifier is the configuration's when Markets does not repeat it.
+    assert result.portfolio_unique_identifier == execution.portfolio_unique_identifier(
+        CONFIGURATION_UID
+    )
+    assert result.first_rebalance == {"rebalanced": False, "message": "No rebalance yet."}
 
 
 def test_an_immediate_rebalance_builds_immediate_signal_and_no_calendar_events() -> None:
     """immediate_signal trades each set of weights at its own time and reads no calendar."""
     from msm_portfolios.rebalance_strategy import ImmediateSignal
 
-    from alpaca_connectors.portfolios.execution import build_portfolio_graph
+    from alpaca_connectors.portfolios.execution import build_portfolio_run
 
     def graph(strategy: str):
         rebalance = rebalance_configuration().model_copy(update={"strategy": strategy})
@@ -523,8 +565,6 @@ def test_an_immediate_rebalance_builds_immediate_signal_and_no_calendar_events()
                 "rebalance_configuration": rebalance,
             }
         )
-        updater = Mock()
-        updater.return_value.dependencies.return_value = {"portfolio_weights": Mock()}
         with (
             patch(
                 "alpaca_connectors.portfolios.signal_definitions.weights_signal",
@@ -549,11 +589,11 @@ def test_an_immediate_rebalance_builds_immediate_signal_and_no_calendar_events()
             patch("msm_portfolios.configuration.PortfolioConfiguration"),
             patch("msm_portfolios.configuration.PortfolioMarketsConfig"),
             patch("msm_portfolios.configuration.FrontEndDetails") as front_end,
-            patch("msm_portfolios.time_index.PortfoliosUpdater", updater),
-            patch("msm.api.portfolios.Portfolio.upsert", return_value=Mock()),
-            patch("alpaca_connectors.instances.portfolio_output_tables", return_value={}),
+            patch("msm.api.portfolios.Portfolio.upsert") as upsert,
         ):
-            built = build_portfolio_graph(resolved)
+            built = build_portfolio_run(resolved)
+        # The recipe creates or updates the Portfolio, not this application (ADR 0031).
+        upsert.assert_not_called()
         return SimpleNamespace(
             built=built,
             calendar_events=calendar_events,

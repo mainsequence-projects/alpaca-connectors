@@ -12,7 +12,6 @@ import empyrical as emp
 import numpy as np
 
 MAX_PORTFOLIO_OBSERVATIONS = 5_000
-PORTFOLIO_HISTORY_QUERY_TIMEOUT_MS = 30_000
 PORTFOLIO_ANNUALIZATION_FACTOR = 252
 PORTFOLIO_RISK_FREE_RATE = 0.0
 
@@ -318,50 +317,27 @@ def read_portfolio_history(
     """Read one portfolio's canonical metadata and latest value observations.
 
     The Portfolio, its metadata and its Calendar are Markets rows read through the Markets API;
-    the values are this application's ``PortfoliosTS`` instance (ms-markets ADR 0047), read with
-    one bounded query scoped by the stable configuration-derived portfolio identifier.
+    the values are Markets' published series (ADR 0031), read with the ms-markets recipe
+    ``portfolio_history`` by the stable configuration-derived portfolio identifier. The
+    performance figures are this application's, calculated here.
     """
-    from msm.api.base import operation_result_rows
     from msm.api.calendars import Calendar
     from msm.api.portfolios import Portfolio
-    from msm.repositories.base import compile_markets_statement, execute_markets_operation
     from msm_portfolios.api import PortfolioMetadata
-    from sqlalchemy import func, select
 
-    from alpaca_connectors.instances import AlpacaPortfoliosStorage
+    from alpaca_connectors.markets_api import portfolio_values
     from alpaca_connectors.portfolios.execution import portfolio_unique_identifier
     from alpaca_connectors.runtime import start_markets_engine
 
     normalized_limit = _normalize_limit(observation_limit)
     portfolio_identifier = portfolio_unique_identifier(configuration_uid)
-    runtime = start_markets_engine()
+    start_markets_engine()
     portfolio = Portfolio.get_by_unique_identifier(portfolio_identifier)
     if portfolio is None:
         return _history_from_rows(portfolio_identifier=portfolio_identifier, rows=[])
     calendar = Calendar.get_by_uid(portfolio.calendar_uid)
     metadata = PortfolioMetadata.filter(unique_identifier=portfolio_identifier, limit=1)
-    values = AlpacaPortfoliosStorage.__table__.c
-    statement = (
-        select(
-            values.time_index.label("time_index"),
-            values.close.label("close"),
-            values["return"].label("period_return"),
-            values.calculated_close.label("calculated_close"),
-            values.close_time.label("close_time"),
-            func.count(values.time_index).over().label("total_observation_count"),
-        )
-        .where(values.portfolio_identifier == portfolio_identifier)
-        .order_by(values.time_index.desc())
-        .limit(normalized_limit)
-    )
-    operation = compile_markets_statement(
-        statement,
-        context=runtime.context,
-        operation="select",
-    )
-    observations = operation_result_rows(
-        execute_markets_operation(operation, context=runtime.context)
-    )
+    values = portfolio_values(portfolio_identifier, limit=normalized_limit)
     header = {
         "portfolio_identifier": portfolio.unique_identifier,
         "backtest_price_column": portfolio.backtest_table_price_column_name,
@@ -371,9 +347,10 @@ def read_portfolio_history(
         "calendar_timezone": getattr(calendar, "timezone", None),
         "calendar_valid_from": getattr(calendar, "valid_from", None),
         "calendar_valid_to": getattr(calendar, "valid_to", None),
+        "total_observation_count": values.total_count,
     }
-    # A portfolio without observations keeps its metadata, as the outer join did.
-    rows = [{**header, **row} for row in observations] or [header]
+    # A portfolio without observations keeps its metadata.
+    rows = [{**header, **row} for row in values.rows] or [header]
     return _history_from_rows(portfolio_identifier=portfolio_identifier, rows=rows)
 
 

@@ -23,6 +23,7 @@ from alpaca_connectors.portfolios.signal_definitions import (
     normalize_key,
     signal_uid_for_key,
 )
+from alpaca_connectors.portfolios.signal_observations import SignalObservationBounds
 
 ACCOUNT_UID = uuid.UUID("55555555-5555-4555-8555-555555555555")
 DEFINITION_UID = uuid.UUID("66666666-6666-4666-8666-666666666666")
@@ -78,8 +79,10 @@ def _create(*, existing=None, last_observation=None, **values):
         patch(f"{MODULE}._start_runtime"),
         patch(f"{MODULE}.account_signal_definition", return_value=existing),
         patch(
-            "alpaca_connectors.portfolios.signal_history.read_signal_last_observation_at",
-            return_value=last_observation,
+            "alpaca_connectors.portfolios.signal_observations.read_signal_observation_bounds",
+            side_effect=lambda *, signal_uid: SignalObservationBounds(
+                signal_uid, last_observation, last_observation
+            ),
         ),
         patch("msm.bootstrap.resolve_runtime", return_value=SimpleNamespace(context="ctx")),
         patch("msm.repositories.crud.create_model", side_effect=create_model),
@@ -149,19 +152,17 @@ def test_deleting_a_definition_deletes_its_signal_in_the_order_markets_allows() 
         ),
         patch.object(SignalDefinition, "delete", calls.definition),
         patch("alpaca_connectors.portfolios.configurations.ended_signal_uids", return_value=set()),
-        patch(f"{MODULE}.delete_signals_observations", calls.observations),
         patch("alpaca_connectors.portfolios.signal_assets.forget_signals_assets", calls.assets),
-        patch("alpaca_connectors.markets_api.delete_signals_metadata", calls.metadata),
+        patch("alpaca_connectors.markets_api.end_signals", calls.end_signals),
     ):
         result = delete_signal_definition(DEFINITION_UID)
 
     signal_uid = signal_uid_for_key(definition().signal_key)
-    # The observations reference the SignalMetadata with RESTRICT, so they go first.
+    # Its assets here, then Markets deletes its weights and metadata in one call (ADR 0031).
     assert calls.mock_calls == [
         call.definition(DEFINITION_UID),
-        call.observations([signal_uid]),
         call.assets([signal_uid]),
-        call.metadata([signal_uid]),
+        call.end_signals([signal_uid]),
     ]
     assert result["signal"] == {"uid": signal_uid, "state": "deleted"}
 
@@ -172,26 +173,25 @@ def test_a_signal_a_retired_portfolio_follows_stays_with_it() -> None:
             "alpaca_connectors.portfolios.configurations.ended_signal_uids",
             return_value={"signal-a"},
         ),
-        patch(f"{MODULE}.delete_signals_observations") as observations,
-        patch("alpaca_connectors.markets_api.delete_signals_metadata") as metadata,
+        patch("alpaca_connectors.portfolios.signal_assets.forget_signals_assets") as assets,
+        patch("alpaca_connectors.markets_api.end_signals") as end_signals,
     ):
         assert delete_signal_rows("signal-a") == "kept"
-    observations.assert_not_called()
-    metadata.assert_not_called()
+    assets.assert_not_called()
+    end_signals.assert_not_called()
 
 
 def test_several_signals_rows_go_in_one_pass() -> None:
-    # One read of which signals a retired Portfolio keeps, then one delete per kind for the
-    # others (issue #46).
+    # One read of which signals a retired Portfolio keeps, then one delete of the others' assets
+    # and one Markets pass over their signals (issue #46).
     calls = MagicMock()
     with (
         patch(
             "alpaca_connectors.portfolios.configurations.ended_signal_uids",
             calls.kept,
         ),
-        patch(f"{MODULE}.delete_signals_observations", calls.observations),
         patch("alpaca_connectors.portfolios.signal_assets.forget_signals_assets", calls.assets),
-        patch("alpaca_connectors.markets_api.delete_signals_metadata", calls.metadata),
+        patch("alpaca_connectors.markets_api.end_signals", calls.end_signals),
     ):
         calls.kept.return_value = {"signal-b"}
         states = delete_signals_rows(["signal-a", "signal-b", "signal-c"])
@@ -199,9 +199,8 @@ def test_several_signals_rows_go_in_one_pass() -> None:
     assert states == {"signal-a": "deleted", "signal-b": "kept", "signal-c": "deleted"}
     assert calls.mock_calls == [
         call.kept(["signal-a", "signal-b", "signal-c"]),
-        call.observations(["signal-a", "signal-c"]),
         call.assets(["signal-a", "signal-c"]),
-        call.metadata(["signal-a", "signal-c"]),
+        call.end_signals(["signal-a", "signal-c"]),
     ]
 
 

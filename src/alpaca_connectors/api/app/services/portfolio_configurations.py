@@ -170,7 +170,7 @@ def get_configuration_detail(
     )
     from alpaca_connectors.portfolios.provided_weights import ended_portfolio_account_uid
     from alpaca_connectors.portfolios.signal_assets import assets_for_signals
-    from alpaca_connectors.portfolios.signal_history import read_signal_observation_bounds
+    from alpaca_connectors.portfolios.signal_observations import read_signal_observation_bounds
 
     row = get_portfolio_configuration(configuration_uid)
     if row is None:
@@ -437,7 +437,7 @@ def _created_response(created: Any) -> PortfolioConfigurationResponse:
 def _held_inputs(created: Any) -> Any:
     """What a create wrote, which its first run's preflight does not read again (issue #46)."""
     from alpaca_connectors.portfolios.execution import HeldPortfolioInputs
-    from alpaca_connectors.portfolios.signal_history import SignalObservationBounds
+    from alpaca_connectors.portfolios.signal_observations import SignalObservationBounds
 
     published = created.published
     return HeldPortfolioInputs(

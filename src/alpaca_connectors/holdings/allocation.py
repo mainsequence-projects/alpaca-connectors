@@ -132,51 +132,15 @@ def read_portfolio_weights(
 ) -> dict[str, dict[str, float]]:
     """Each portfolio's latest published weights at or before ``at``, by asset identifier.
 
-    One bounded statement over this application's ``AlpacaPortfolioWeightsStorage`` for all the
-    portfolios. A portfolio with no weights by then is absent from the answer.
+    Markets' published series (ADR 0031), read with the ms-markets recipe ``weights_as_of`` for
+    all the portfolios at once. A portfolio with no weights by then is absent from the answer.
     """
-    from msm.api.base import operation_result_rows
-    from msm.repositories.base import compile_markets_statement, execute_markets_operation
-    from sqlalchemy import and_, func, select
-
-    from alpaca_connectors.instances import AlpacaPortfolioWeightsStorage
-    from alpaca_connectors.runtime import start_markets_engine
+    from alpaca_connectors.markets_api import portfolio_weights_as_of
 
     identifiers = list(dict.fromkeys(identifier for identifier in portfolio_identifiers))
     if not identifiers:
         return {}
-    runtime = start_markets_engine()
-    rows = AlpacaPortfolioWeightsStorage.__table__.c
-    latest = (
-        select(
-            rows.portfolio_identifier.label("portfolio_identifier"),
-            func.max(rows.time_index).label("time_index"),
-        )
-        .where(rows.portfolio_identifier.in_(identifiers), rows.time_index <= at)
-        .group_by(rows.portfolio_identifier)
-        .subquery()
-    )
-    statement = select(
-        rows.portfolio_identifier.label("portfolio_identifier"),
-        rows.asset_identifier.label("asset_identifier"),
-        rows.weight.label("weight"),
-    ).join(
-        latest,
-        and_(
-            rows.portfolio_identifier == latest.c.portfolio_identifier,
-            rows.time_index == latest.c.time_index,
-        ),
-    )
-    operation = compile_markets_statement(statement, context=runtime.context, operation="select")
-    weights: dict[str, dict[str, float]] = {}
-    for row in operation_result_rows(execute_markets_operation(operation, context=runtime.context)):
-        weight = _number(row.get("weight"))
-        if weight is None:
-            continue
-        weights.setdefault(str(row["portfolio_identifier"]), {})[str(row["asset_identifier"])] = (
-            weight
-        )
-    return weights
+    return portfolio_weights_as_of(identifiers, at=at)
 
 
 def read_alpaca_details(asset_uids: Sequence[str]) -> dict[str, tuple[str, bool]]:

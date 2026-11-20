@@ -353,15 +353,11 @@ def test_markets_reads_every_contract_instance_through_a_second_namespace() -> N
         )
 
 
-def test_signal_and_ledger_updaters_are_bound_to_own_instances(monkeypatch) -> None:
+def test_the_signal_publishes_to_markets_and_the_ledger_to_own_instances(monkeypatch) -> None:
     from msm_portfolios.contrib.signals import ApplicationWeights
 
     from alpaca_connectors.execution.services import MarketsExecutionLedger
-    from alpaca_connectors.instances import (
-        AlpacaOrdersStorage,
-        AlpacaSignalWeightsStorage,
-        AlpacaTradesStorage,
-    )
+    from alpaca_connectors.instances import AlpacaOrdersStorage, AlpacaTradesStorage
     from alpaca_connectors.portfolios.signal_definitions import weights_signal
 
     built: dict[str, Any] = {}
@@ -371,7 +367,8 @@ def test_signal_and_ledger_updaters_are_bound_to_own_instances(monkeypatch) -> N
         classmethod(lambda cls, config, **kwargs: built.setdefault("signal", kwargs)),
     )
     weights_signal("11111111-1111-4111-8111-111111111111")
-    assert built["signal"] == {"output_table": AlpacaSignalWeightsStorage}
+    # Signal weights are Markets' published series: no table of this application (ADR 0031).
+    assert built["signal"] == {}
 
     class Node:
         tables: list[Any] = []

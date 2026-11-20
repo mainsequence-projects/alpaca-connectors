@@ -20,7 +20,8 @@ follows.
    A registration made before revision 0018 still names the Main Sequence Secrets its keys were
    in; those this application created are deleted next, as removing the keys deletes them.
 6. Each retired ``Portfolio`` of the account that no other account's history names is deleted,
-   its series in this application's instances first. One another account's history names stays
+   its rebalance state in this application's instance first (``delete_private_series``); Markets
+   deletes its weights and values with it (ADR 0031). One another account's history names stays
    retired, recorded.
 7. Each signal no ``Portfolio`` follows any more is deleted.
 
@@ -29,10 +30,10 @@ finishes steps 6 and 7.
 
 Each step reads and writes set-based (issue #46): the portfolios end together
 (``end_portfolio_configurations``), the retired ``Portfolio`` rows go through one preflight and
-one bulk delete of ms-markets, their series and records through one statement per table, and the
-signals through one pass. ms-markets has only one-portfolio routes to list the accounts whose
-current target names a portfolio and to retire one, and only one-signal routes to unbind and
-delete a signal, so those calls stay one per portfolio or signal.
+one bulk delete of ms-markets, their rebalance state through one ``delete_private_series`` call and
+their records through one statement, and the signals through one pass. ms-markets has only
+one-portfolio routes to list the accounts whose current target names a portfolio and to retire
+one, and only a one-signal ``end_signal``, so those calls stay one per portfolio or signal.
 """
 
 from __future__ import annotations
@@ -129,27 +130,20 @@ def delete_account_orders_and_trades(account_identifier: str) -> None:
 
 
 def delete_portfolio_series(portfolio_identifiers: list[str]) -> None:
-    """Delete portfolios' values, weights and rebalance state from this application's instances.
+    """Delete portfolios' private rows: their rebalance state in this application's instance.
 
-    They reference the ``Portfolio`` with ``RESTRICT``, so they go before it: one statement per
-    table for all the portfolios (issue #46).
+    Their weights and values are Markets' own rows and go with the ``Portfolio`` (ADR 0031,
+    decision 7). The rebalance state references the ``Portfolio`` with ``RESTRICT``, so it goes
+    before it, through the ms-markets recipe ``delete_private_series``: one call per
+    ``MARKETS_BATCH_SIZE`` portfolios (issue #46).
     """
-    from alpaca_connectors.instances import (
-        AlpacaPortfolioRebalanceStateStorage,
-        AlpacaPortfoliosStorage,
-        AlpacaPortfolioWeightsStorage,
-    )
-    from alpaca_connectors.markets_api import write_in_batches
+    from alpaca_connectors.instances import AlpacaPortfolioRebalanceStateStorage
+    from alpaca_connectors.markets_api import delete_private_series
 
-    for model in (
-        AlpacaPortfolioRebalanceStateStorage,
-        AlpacaPortfolioWeightsStorage,
-        AlpacaPortfoliosStorage,
-    ):
-        write_in_batches(
-            lambda batch, model=model: _delete_instance_rows(model, "portfolio_identifier", batch),
-            portfolio_identifiers,
-        )
+    delete_private_series(
+        tables=[AlpacaPortfolioRebalanceStateStorage],
+        portfolio_identifiers=portfolio_identifiers,
+    )
 
 
 def _account_definitions(account_uid: str) -> list[Any]:
@@ -249,8 +243,9 @@ def _clear_own_target(account_uid: str) -> None:
 def _finish_portfolios(account_uid: str, deletion: AccountDeletion) -> list[str]:
     """Step 6: delete the recorded ``Portfolio`` rows nothing else names; answer their signals.
 
-    One ms-markets preflight tells which are referenced; the others' series go in one statement
-    per table, then one bulk delete of the `Portfolio` rows, then one delete of their records.
+    One ms-markets preflight tells which are referenced; the others' rebalance state goes in one
+    ``delete_private_series`` call, then one bulk delete of the `Portfolio` rows, which takes
+    their weights and values, then one delete of their records.
     """
     from alpaca_connectors.markets_api import delete_portfolios, portfolios_delete_blockers
     from alpaca_connectors.portfolios.configurations import (

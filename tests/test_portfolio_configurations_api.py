@@ -446,7 +446,7 @@ def test_portfolio_detail_resolves_business_labels_and_value_history() -> None:
         ),
         patch("alpaca_connectors.account.services.get_account_registration", return_value=account),
         patch(
-            "alpaca_connectors.portfolios.signal_history.read_signal_observation_bounds",
+            "alpaca_connectors.portfolios.signal_observations.read_signal_observation_bounds",
             return_value=bounds,
         ),
         patch(
