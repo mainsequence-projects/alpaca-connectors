@@ -165,7 +165,6 @@ def _resolve_inputs(
         bar_configuration_rows_by_uids,
         portfolio_bar_configurations,
     )
-    from alpaca_connectors.markets_api import portfolios_without_rebalance_book
     from alpaca_connectors.portfolios.configurations import (
         normalize_rebalance_strategy,
         rebalance_configurations_by_uids,
@@ -246,15 +245,6 @@ def _resolve_inputs(
         resolved[uid] = (configuration, rebalance, bars, signal_uid_for_key(signal_key))
 
     pending = {uid: value for uid, value in resolved.items() if isinstance(value, tuple)}
-    # A portfolio whose published weights were computed before trades waited for the next
-    # observed price (ms-markets ADR 0058) carries no rebalance book. How such a portfolio goes
-    # on is the owner's decision (ADR 0031, Implementation Notes): until then it does not run.
-    # A create's own portfolio (its signal bounds are held) has no weights yet and is not read.
-    unbooked = portfolios_without_rebalance_book(
-        portfolio_unique_identifier(value[0].uid)
-        for value in pending.values()
-        if value[0].portfolio_uid is not None and value[3] not in held.signal_bounds
-    )
     bounds = dict(held.signal_bounds)
     bounds.update(
         read_signal_observation_bounds_by_signal(
@@ -281,13 +271,6 @@ def _resolve_inputs(
             resolved[uid] = ValueError(
                 f"Signal {signal_uid} has no published observations. "
                 "Publish weights to the portfolio's signal before running it."
-            )
-            continue
-        if portfolio_unique_identifier(configuration.uid) in unbooked:
-            resolved[uid] = ValueError(
-                f"Portfolio configuration {uid}'s published weights were computed before trades "
-                "waited for the next observed price (ms-markets ADR 0058). It does not run until "
-                "the owner decides how existing portfolios go on (ADR 0031)."
             )
             continue
         source = sources[(bars.frequency_id, bars.feed, bars.adjustment)]

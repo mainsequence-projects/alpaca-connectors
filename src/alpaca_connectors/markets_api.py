@@ -558,32 +558,6 @@ def portfolio_weights_as_of(
     return weights
 
 
-def portfolios_without_rebalance_book(portfolio_identifiers: Iterable[str]) -> set[str]:
-    """Portfolios whose latest published weights carry no rebalance book (``weights_as_of``).
-
-    Calls ``weights_as_of(batch)`` once per ``MARKETS_BATCH_SIZE`` portfolios. Since ms-markets
-    4.1.0 (its ADRs 0058 and 0059) every executed-weights row of ``ImmediateSignal`` and
-    ``CalendarEventSignal`` carries the book's ``held_shares``; a portfolio whose latest row
-    has none was computed before trades waited for the next observed price. A portfolio with
-    no published weights is not one. Refusals propagate.
-    """
-    from msm_portfolios.recipes import weights_as_of
-
-    unbooked: set[str] = set()
-    for batch in batches(str(identifier) for identifier in portfolio_identifiers):
-        frame = weights_as_of(batch)
-        if frame is None or frame.empty:
-            continue
-        flat = frame.reset_index()
-        if "held_shares" not in flat.columns:
-            unbooked.update(str(value) for value in flat["portfolio_identifier"])
-            continue
-        for identifier, rows in flat.groupby("portfolio_identifier"):
-            if rows["held_shares"].isna().all():
-                unbooked.add(str(identifier))
-    return unbooked
-
-
 @dataclass(frozen=True, slots=True)
 class PortfolioRunAnswer:
     """What a portfolio run wrote, as Markets answered it."""
@@ -722,7 +696,6 @@ __all__ = [
     "portfolio_values",
     "portfolio_weights_as_of",
     "portfolios_delete_blockers",
-    "portfolios_without_rebalance_book",
     "publish_signal_weights",
     "read_all_pages",
     "read_in_batches",

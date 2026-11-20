@@ -310,70 +310,9 @@ def test_a_signal_without_observations_blocks_its_portfolio() -> None:
     assert "has no published observations" in answer.blockers[0]
 
 
-def test_a_portfolio_whose_history_predates_the_next_observed_price_does_not_run() -> None:
-    """Owner's decision pending (ADR 0031): such a portfolio is blocked, loudly, until then."""
-    existing = portfolio_configuration(portfolio_uid=PORTFOLIO_UID)
-    other = portfolio_configuration(
-        uid=uuid.UUID(int=31),
-        signal_definition_uid=uuid.UUID(int=131),
-        portfolio_uid=uuid.UUID(int=32),
-    )
-    reads, patches = _input_reads([existing, other], bounds=OBSERVED)
-    identifier = execution.portfolio_unique_identifier(existing.uid)
-    with (
-        patches[0],
-        patches[1],
-        patches[2],
-        patches[3],
-        patches[4],
-        patches[5],
-        patch(
-            "alpaca_connectors.markets_api.portfolios_without_rebalance_book",
-            return_value={identifier},
-        ) as unbooked,
-    ):
-        answers = execution.preflight_portfolio_configurations([existing, other])
-
-    # One read for every portfolio that has a Portfolio row (issue #46).
-    assert sorted(unbooked.call_args.args[0]) == sorted(
-        [identifier, execution.portfolio_unique_identifier(other.uid)]
-    )
-    assert not answers[str(existing.uid)].allowed
-    assert "ms-markets ADR 0058" in answers[str(existing.uid)].blockers[0]
-    assert answers[str(other.uid)].allowed
-
-
-def test_the_book_check_reads_the_latest_published_weights(recipes) -> None:
-    import pandas as pd
-
-    from alpaca_connectors import markets_api
-
-    at = dt.datetime(2026, 11, 18, 21, tzinfo=dt.UTC)
-    recipes.answer(
-        "weights_as_of",
-        pd.DataFrame(
-            [
-                (at, "OLD", "ALPACA::a", 0.5, None),
-                (at, "NEW", "ALPACA::a", 0.5, 12.0),
-                (at, "NEW", "ALPACA::b", 0.0, 0.0),
-            ],
-            columns=[
-                "time_index",
-                "portfolio_identifier",
-                "asset_identifier",
-                "weight",
-                "held_shares",
-            ],
-        ).set_index(["time_index", "portfolio_identifier", "asset_identifier"]),
-    )
-    assert markets_api.portfolios_without_rebalance_book(["OLD", "NEW", "NONE"]) == {"OLD"}
-    assert recipes.calls == [("weights_as_of", {"portfolio_identifiers": ["OLD", "NEW", "NONE"]})]
-    assert markets_api.portfolios_without_rebalance_book([]) == set()
-
-
 def test_held_inputs_are_not_read_again() -> None:
-    # A create starts its first run with what it just wrote (issue #46), its Portfolio included.
-    row = portfolio_configuration(portfolio_uid=PORTFOLIO_UID)
+    # A create starts its first run with what it just wrote (issue #46).
+    row = portfolio_configuration()
     bars = SimpleNamespace(
         uid=BARS_CONFIGURATION_UID, enabled=True, frequency_id="1d", feed="sip", adjustment="all"
     )
@@ -390,22 +329,10 @@ def test_held_inputs_are_not_read_again() -> None:
     # Asked for nothing, each read answers nothing.
     for read in (reads.rebalances, reads.own_bars, reads.definitions):
         read.return_value = {}
-    with (
-        patches[0],
-        patches[1],
-        patches[2],
-        patches[3],
-        patches[4],
-        patches[5],
-        patch(
-            "alpaca_connectors.markets_api.portfolios_without_rebalance_book", return_value=set()
-        ) as unbooked,
-    ):
+    with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5]:
         answer = execution.preflight_portfolio_configurations([row], held=held)[str(row.uid)]
 
     assert answer.allowed
-    # Its new portfolio has no published weights: they are not read.
-    assert list(unbooked.call_args.args[0]) == []
     for read in (
         reads.rebalances,
         reads.own_bars,
