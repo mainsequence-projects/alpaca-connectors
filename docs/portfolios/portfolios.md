@@ -109,9 +109,10 @@ timezone:
   was wrong is deleted and created again.
 - **The signal.** The observations are an ms-markets `ApplicationWeights` signal whose
   configuration is this connector's namespace and the portfolio configuration uid, so its
-  `signal_uid` never changes. They are written to this application's signal weights instance
-  (`alpaca_connectors__signalweightsts__main`), and the assets each one names to the signal-asset
-  table (`alpaca_connectors__signal_asset`) first.
+  `signal_uid` never changes. The assets each one names are written to the signal-asset table
+  (`alpaca_connectors__signal_asset`) first, then the observations are published to Markets with
+  the ms-markets recipe `publish_signal_weights`, which creates the signal's metadata on its first
+  publication ([ADR 0031](../adrs/0031_markets_series_are_published_not_shared.md)).
 - **The assets.** Each must be a registered Alpaca asset. One read of this application's
   `AlpacaAssetDetails`, by the Alpaca asset id each `ALPACA::<id>` identifier carries, checks them
   all, with no Markets call: a details row goes with its Markets asset, so a row found is a
@@ -201,26 +202,28 @@ Rebalance Configuration ────────────> PortfolioCalendarE
 ApplicationWeights + CalendarEventSignal ─> PortfolioRebalance
                                           └> PortfolioWeights
 
-PortfolioWeights + InterpolatedPrices ──> PortfoliosUpdater ─> PortfoliosTS instance
+PortfolioWeights + InterpolatedPrices ──> PortfoliosUpdater ─> Markets portfolio values
 ```
 
-- **Where the outputs live.** Every output is in this application's `alpaca-connectors` namespace
-  (ms-markets ADR 0047): the signal weights, calendar events, rebalance state, portfolio weights
-  and values in its contract instances (`alpaca_connectors__<contract>__main`,
-  `alpaca_connectors.instances`), and the interpolated prices in
-  `alpaca_connectors__interpolated_prices__t_<suffix>`. The instances are also in
-  `alpaca-connectors-markets`, where Markets reads them
-  ([ADR 0025](../adrs/0025_markets_reads_the_instances_through_a_second_namespace.md)).
-- **The catalog.** After each run the portfolio's Markets dataset catalog row is registered and
-  reconciled (`PortfolioDatasets.register`), so Markets reads the values, weights and signal from
-  those tables. The `Portfolio` row, its calendar and the signal metadata are Markets registries,
-  written through the Markets API.
+- **Where the outputs live.** The signal weights, the portfolio weights and the values are
+  Markets' own rows: they are published to Markets and read back from it with the ms-markets
+  recipes (`publish_signal_weights`, `run_portfolio`, `signal_history`, `portfolio_history`,
+  `weights_as_of`; [ADR 0031](../adrs/0031_markets_series_are_published_not_shared.md)). The
+  calendar events and rebalance state stay private, in this application's contract instances
+  (`alpaca_connectors__<contract>__main`, `alpaca_connectors.instances`), and the interpolated
+  prices in `alpaca_connectors__interpolated_prices__t_<suffix>`, all only in `alpaca-connectors`:
+  Markets never reads them.
+- **No catalog.** Nothing is registered or reconciled after a run. The `Portfolio` row, its
+  calendar and the signal metadata are Markets registries, written through the Markets API; the
+  run creates or updates the `Portfolio`, and the first publication of weights the signal
+  metadata.
 - **The assets priced** are every asset the portfolio ever held, from the signal-asset table, so a
   history it started with is valued, including assets that history already dropped.
 - **One producer runs first.** A run requires a published observation, then runs its bars
-  configuration's update, the bars Job's own, with the account's keys (issue #39), then updates the
-  interpolated prices, the calendar events, the rebalance decisions, the executed weights and the
-  valuation with `update_tree=False`. The bars keep their own Job and schedule.
+  configuration's update, the bars Job's own, with the account's keys (issue #39), then the
+  ms-markets recipe `run_portfolio` updates, in order, the interpolated prices, the calendar
+  events, the rebalance decisions, the executed weights and the valuation. The bars keep their own
+  Job and schedule.
 
 ## Valuation
 
@@ -350,9 +353,9 @@ There is no Environment argument: the CodeRepositoryBranch runtime resolves it.
 configurations, the Job's live settings, the canonical `Portfolio` (read through the Markets API)
 and a `provided_weights` block: the signal UID, the first and last observation times and the asset
 count. With `observation_limit` (default 2,500, at most 5,000) it also returns the portfolio's most
-recent values from this application's `PortfoliosTS` instance
-(`alpaca_connectors__portfoliosts__main`), in time order. The read is constrained by the
-portfolio's unique identifier and runs only when a consumer opens that portfolio.
+recent values, read from Markets with the ms-markets recipe `portfolio_history` (ADR 0031), in time
+order. The read is constrained by the portfolio's unique identifier and runs only when a consumer
+opens that portfolio.
 
 The same answer carries window-scoped statistics computed from those daily values with
 `empyrical-reloaded`: total and annualised return, annualised volatility, Sharpe, Sortino,

@@ -2,6 +2,13 @@
 
 ## Status
 
+Withdrawn by [ADR 0031](0031_markets_series_are_published_not_shared.md) with the release that
+implements it (branch `adr-0031-publish-series`, 2026-11-20), which waits for the ms-markets
+release of its ADR 0060. From that release Markets reads no table of this application: nothing is
+declared in `alpaca-connectors-markets`, `share_with_markets`, `grant-markets-access` and the
+migration Job's `markets_access` report are removed, and the namespace is removed in each
+Environment (ADR 0031, Rollout step 7). What follows records the decision as it was.
+
 Decided by the owner and implemented on 2026-11-17, on MetaTables 0.1.67 and ms-markets 3.8.2.
 Rolled out in Production the same day: the migration Job added the seven instances to
 `alpaca-connectors-markets` and moved the thirteen project tables out of `mainsequence.markets`,

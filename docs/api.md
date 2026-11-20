@@ -295,10 +295,11 @@ GET|PATCH|DELETE /v1/portfolio-rebalance-configurations/{configuration_uid}
   details and no Markets call: `422 unknown_asset` for an `ALPACA::` identifier that is not
   registered, `422 asset_not_alpaca` for an identifier that is not an Alpaca one. Other refusals are `422 invalid_observation` and `422 empty_observations`. No error
   names an asset, a weight or an owner.
-- **Markets must read the signal's table.** Each call binds the signal to this application's
-  signal-weights instance before it writes a row. Where Markets cannot read that instance, the call
-  answers `503 signal_not_registered` and stores nothing; the operator's grant fixes it
-  ([Markets API boundary, step 5](operations/markets-api-boundary.md)). A create that fails stores
+- **Markets keeps the weights.** Each call publishes to Markets with the ms-markets recipe
+  `publish_signal_weights`, after the checks above; Markets creates the signal's metadata on its
+  first publication, and a refused publication stores nothing
+  ([ADR 0031](adrs/0031_markets_series_are_published_not_shared.md)). Nothing is bound or
+  registered first, so `503 signal_not_registered` no longer exists. A create that fails stores
   nothing either: it deletes its configuration, its own bars configuration, its `Portfolio` row,
   its signal's rows and its definition (issue #37).
 - **The owner.** The acting owner at creation owns the portfolio: the account's owner on
@@ -331,17 +332,18 @@ GET|PATCH|DELETE /v1/portfolio-rebalance-configurations/{configuration_uid}
 
 There is no Environment request field. A run selects its configuration with
 `--configuration-uid <uid>`, first runs its bars configuration's update (issue #39; a failed update
-leaves it to value with the prices already stored), then updates persistent interpolation, calendar
-events, rebalance state, executed weights, and valuation. Rebalance rows use actual configured
+leaves it to value with the prices already stored), then runs the ms-markets recipe `run_portfolio`:
+persistent interpolation, calendar events, rebalance state, executed weights, and valuation, with
+the weights and values published to Markets (ADR 0031). Rebalance rows use actual configured
 market-event timestamps and select the latest observation at or before each event.
 
 The configuration detail `GET` accepts `observation_limit` from 1 through 5,000 (default 2,500). It
 returns the resolved Bars, Rebalance, Job, and canonical portfolio/calendar summaries (read through
 the Markets API), a `provided_weights` block (the signal UID, its first and last observation times
-and its asset count), plus the requested latest values from this application's `PortfoliosTS`
-instance (`alpaca_connectors__portfoliosts__main`). The history query is scoped by the canonical
-Portfolio unique identifier and runs only when a consumer opens that configuration; API consumers
-do not need to interpret or display related resource UIDs.
+and its asset count), plus the requested latest values, read from Markets with the ms-markets recipe
+`portfolio_history` (ADR 0031). The history read is scoped by the canonical Portfolio unique
+identifier and runs only when a consumer opens that configuration; API consumers do not need to
+interpret or display related resource UIDs.
 
 The same response includes window-scoped performance statistics calculated from those canonical
 daily values with `empyrical-reloaded`: total and annualized return, annualized volatility, Sharpe,

@@ -20,6 +20,7 @@ agent session; every command below is run by the person the step names.
 | Signal weights, portfolio values, weights, rebalance state, calendar events, orders, trades in `ms_markets__*` | `alpaca_connectors__<contract>__main` instances (revision 0020) |
 | Interpolated prices in `ms_markets__interpolated_prices__t_*` (Markets namespace) | `alpaca_connectors__interpolated_prices__t_*` (revision 0021) |
 | Portfolio reads of Markets tables only | each portfolio's Markets dataset catalog row points at the instances (`PortfolioDatasets.register` after every run; `register_signal` after every publication of weights) |
+| Signal weights, portfolio weights and values in this application's instances, which Markets read through its catalog | published to Markets' own tables and read back with the ms-markets recipes; no catalog row, no second namespace ([ADR 0031](../adrs/0031_markets_series_are_published_not_shared.md)) |
 | Job schema gate read the ms-markets Alembic version table | waits until the Markets API's `/health` reports at least the ms-markets release of the image |
 | 13 project tables in `mainsequence.markets` | in `alpaca-connectors` (step 7) |
 
@@ -56,14 +57,6 @@ workload can use the project tables once they leave `mainsequence.markets`:
 | `alpaca-bars-update-dispatcher` | `data_viewer` | read the enabled, scheduled bar configurations (ADR 0021) |
 
 No workload needs a role on `mainsequence.markets` once step 9 is done.
-
-The owner also creates the namespace `alpaca-connectors-markets`
-([ADR 0025](../adrs/0025_markets_reads_the_instances_through_a_second_namespace.md)) and grants
-`alpaca-connectors-migrate` `editor` on it, directly or through its Team (step 5 has the
-command): the migration adds every Markets contract instance
-to it, which needs `tables.create` there. The person who runs step 4 needs the same role. No
-other workload of this application needs a role on it, since each already reaches the instances
-through `alpaca-connectors`.
 
 ## 2. Hold The Scheduled Runs
 
@@ -102,50 +95,32 @@ alpaca-connectors portfolio prepare-interpolated-prices --check-only
 
 Revision 0021 already creates the tables of the two bars profiles, so no revision is generated.
 
-## 5. Let Markets Read The Instances
+## 5. Markets Reads No Table Of This Application
 
-Every Markets contract instance of this application (signal weights, portfolios, portfolio
-weights, rebalance state, calendar events, orders, trades and the interpolated prices) is in two
-namespaces: `alpaca-connectors` and `alpaca-connectors-markets`
-([ADR 0025](../adrs/0025_markets_reads_the_instances_through_a_second_namespace.md), MetaTables
-0.1.66 or later). The code declares the second one, and the next `upgrade head` adds the
-memberships with no revision.
+Since [ADR 0031](../adrs/0031_markets_series_are_published_not_shared.md) this application
+publishes signal weights, portfolio weights and portfolio values to Markets with the ms-markets
+recipes, and reads them back from Markets; Markets reads no table of it. No table is in a second
+namespace, nothing is registered in the Markets dataset catalog, and no person grants Markets
+anything: a new Environment needs only the `reader` on the `MainSequenceMarkets` branch that the
+workflow declares (step 3). Never grant Markets a role on a table or namespace of this application.
 
-The owner of `alpaca-connectors-markets`, or an Organization admin, grants the Markets workload
-`data_viewer` on that namespace, once per Environment:
-
-```bash
-alpaca-connectors instances grant-markets-access --markets-workload-uid <uid>             # dry run
-alpaca-connectors instances grant-markets-access --markets-workload-uid <uid> --execute
-```
-
-The command creates the namespace when it is missing, so the person who runs it owns it. With
-`--editor-team-uid <uid>` it also grants that Team `editor` there, which the migration Job needs
-to add the instances; run it before the push. Its report lists the instances that are not in the
-namespace yet. The dataset catalog verifies and reads the instances with it
-(ms-markets ADR 0047, decision 5), and an instance added later is covered. Never grant the
-Markets workload a role on `alpaca-connectors`, and never one on `alpaca_connectors__acct_alpaca`:
-that table holds the application-encrypted account keys and is not `include`d by Markets.
-
-Check it as the owner, after the migration Job has run:
-
-```python
-from metatables import TimeIndexMetaTable
-
-from alpaca_connectors.instances import project_instance_models
-
-names = sorted(model.__table__.name for model in project_instance_models())
-for table in TimeIndexMetaTable.filter_by_body(physical_table_name__in=names, limit=100):
-    print(table.physical_table_name, sorted(item.name for item in table.namespaces))
-```
-
-The migration Job checks it on every deploy (issue #37). Its last log line,
-`{"markets_access": {...}}`, lists under `instances_missing_from_namespace` each instance that is not
-in `alpaca-connectors-markets` yet, so the gap shows at deploy and not at the first call that needs
-it. The report never fails the deploy. A call that meets the gap answers
-`503 signal_not_registered` and stores nothing.
+An Environment where Markets read the instances through `alpaca-connectors-markets`
+([ADR 0025](../adrs/0025_markets_reads_the_instances_through_a_second_namespace.md), withdrawn)
+moves with ADR 0031's [Rollout](../adrs/0031_markets_series_are_published_not_shared.md#rollout):
+the Markets API serves the ms-markets release of its ADR 0060, the scheduled runs are held (step
+2), a person assigns this application as the manager of its `Portfolio` and `SignalMetadata` rows
+and publishes the three instances' history to Markets with the ms-markets commands, and then this
+release is pushed. Its migration removes the instances' memberships of `alpaca-connectors-markets`,
+because the code no longer declares them; the three instances keep their rows and are no longer
+written. Step 9 then removes the namespace.
 
 ## 6. Move The History
+
+This step moved the history into this application's instances before
+[ADR 0031](../adrs/0031_markets_series_are_published_not_shared.md). Since that ADR, signal
+weights, portfolio weights and values are published to Markets instead (step 5), and the catalog
+registration below has no catalog to register in; `instances backfill` and `instances rollback` go
+with the three retired instances in a later release.
 
 As a person who holds `data_viewer` on the source tables in `mainsequence.markets` and
 `data_writer` on `alpaca-connectors`, with the scheduled runs held (step 2):
@@ -299,10 +274,10 @@ patching its old identifier undoes the move.
 Put the configurations held in step 2 back on the schedule, then check:
 
 - the API's portfolio configuration detail (`observation_limit`) and weights routes show the
-  copied history;
-- `PortfolioDatasets.get(portfolio_uids=[...])` (Markets API) reports `populated` for every
-  portfolio, and the Markets portfolio values route returns the same rows as before;
-- the next scheduled portfolio JobRuns succeed and append to the instances;
+  history, read from Markets (ADR 0031);
+- one publication of weights to a portfolio succeeds, and the next scheduled portfolio JobRuns
+  succeed and publish their weights and values to Markets;
+- the Markets portfolio values route returns the same rows as the API's detail;
 - `alpaca-connectors account list` pages, searches and filters as before.
 
 ## Rolling Back
@@ -329,7 +304,12 @@ The owner of `mainsequence.markets` revokes every role this application's worklo
 hold there: the namespace roles (`data_writer`, `data_viewer`, the migration Job's `editor`) and the
 table `editor` grants on `AssetSnapshotsTS`, `AccountHoldingsTS`, `SignalWeightsTS`,
 `InterpolatedPrices`, `PortfolioCalendarEventsTS`, `PortfolioRebalanceStateTS`,
-`PortfolioWeightsTS` and `PortfoliosTS`.
+`PortfolioWeightsTS` and `PortfoliosTS`. This application publishes to Markets' signal weights,
+portfolio weights and values through the Markets API (ADR 0031), which needs none of them.
+
+Once the release of ADR 0031 runs (step 5), the owner of `alpaca-connectors-markets` revokes the
+Markets `data_viewer` on that namespace, and every other role on it, and removes the namespace
+(ADR 0031, Rollout step 7). Nothing of this application reads or declares it any more.
 
 ## 10. Later
 

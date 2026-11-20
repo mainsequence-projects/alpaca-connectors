@@ -2,9 +2,12 @@
 
 ## Status
 
-Accepted on 2026-11-19 by the owner. Not implemented. It waits for the ms-markets release that
-implements ms-markets ADR 0060 ("Producers Publish, Markets Reads Only Its Own Tables"), which
-this ADR applies to this application.
+Accepted on 2026-11-19 by the owner. Implemented on the branch `adr-0031-publish-series`
+(2026-11-20) as the release of Rollout step 5; it waits for the ms-markets release that implements
+ms-markets ADR 0060 ("Producers Publish, Markets Reads Only Its Own Tables"), which this ADR
+applies to this application. Every call to an ms-markets recipe is a composite of
+`alpaca_connectors.markets_api` whose docstring states the signature and answer it assumes; they
+are reconciled with that release before this one ships. Rollout step 8 is not implemented.
 
 When implemented it withdraws
 [ADR 0025](0025_markets_reads_the_instances_through_a_second_namespace.md), removes

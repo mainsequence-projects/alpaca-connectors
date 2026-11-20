@@ -357,7 +357,8 @@ table access. The Harness Agent receives no table role.
 The connector reaches Markets through the Markets API (ms-markets ADR 0047): every entrypoint
 selects ms-markets' remote row backend (`alpaca_connectors.runtime.use_markets_api`), attaches only
 its own `alpaca-connectors` tables, and reads and writes Markets registries with `msm.api` row
-calls, `AccountHoldingsSnapshots`, `AssetSnapshots` and `PortfolioDatasets`. In each Environment
+calls, `AccountHoldingsSnapshots`, `AssetSnapshots` and the ms-markets recipes that publish and
+read signal weights, portfolio weights and portfolio values (ADR 0031). In each Environment
 the workflows grant every resource that calls Markets (the API, the portfolio Job and its
 dispatcher, and the bars Job and its dispatcher) `reader` on the
 `MainSequenceMarkets` branch, which lets them find the Markets API and write through it; the
@@ -382,7 +383,7 @@ Success requires a terminal successful JobRun, clean logs, and current output-ta
 newly persisted rows. A queued run alone is not proof. Runtime attachment only binds already
 migrated MetaTables; it never creates schema.
 
-After a push, the migration Job's last log line, `{"markets_access": {...}}`, lists the contract
-instances Markets cannot read yet (issue #37). An empty `instances_missing_from_namespace` is the
-healthy state; otherwise grant Markets its access
-([Markets API boundary, step 5](markets-api-boundary.md)).
+After a push, the migration Job logs one line per provider it applied. It no longer reports a
+`markets_access` line: Markets reads no table of this application
+([ADR 0031](../adrs/0031_markets_series_are_published_not_shared.md)), so there is no access of
+Markets to check.
