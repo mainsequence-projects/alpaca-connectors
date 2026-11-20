@@ -104,69 +104,77 @@ namespace, nothing is registered in the Markets dataset catalog, and no person g
 anything: a new Environment needs only the `reader` on the `MainSequenceMarkets` branch that the
 workflow declares (step 3). Never grant Markets a role on a table or namespace of this application.
 
-An Environment where Markets read the instances through `alpaca-connectors-markets`
-([ADR 0025](../adrs/0025_markets_reads_the_instances_through_a_second_namespace.md), withdrawn)
-moves with ADR 0031's [Rollout](../adrs/0031_markets_series_are_published_not_shared.md#rollout):
-the Markets API serves the ms-markets release of its ADR 0060, the scheduled runs are held (step
-2), a person assigns this application as the manager of its `Portfolio` and `SignalMetadata` rows
-and publishes the three instances' history to Markets with the ms-markets commands, and then this
-release is pushed. Its migration removes the instances' memberships of `alpaca-connectors-markets`,
-because the code no longer declares them; the three instances keep their rows and are no longer
-written. Step 9 then removes the namespace.
+An Environment where the three instances hold history moves with ADR 0031's
+[Rollout](../adrs/0031_markets_series_are_published_not_shared.md#rollout), in one release, while
+the portfolio runs are held (step 2) and the applications that give weights pause:
+
+1. The Markets API runs ms-markets 4.2.0.
+2. An Organization admin makes the person who publishes the history the manager of this
+   application's rows. Rows created before ms-markets ADR 0060 have no manager, and through the
+   Markets API only a row's manager publishes to it. The portfolios are the
+   `ALPACA_PORTFOLIO__<hex>` identifiers and the signals the `signal_uid`s found in the instances:
+
+   ```bash
+   msm registry assign-manager --manager user:<uid> \
+     --portfolio ALPACA_PORTFOLIO__<hex> --signal <signal_uid>   # repeat each flag; dry run
+   msm registry assign-manager --manager user:<uid> ... --execute
+   ```
+
+3. That person publishes the history. `msm series publish` reads each instance with the person's
+   own MetaTables access, by its physical name, publishes its rows key by key, oldest first, and
+   compares each key's first and last time and row count in Markets with the instance; it changes
+   nothing in the instance. Save, outside the repository, a module such as
+   `alpaca_history.py`:
+
+   ```python
+   from types import SimpleNamespace
+
+   from msm_portfolios.series_history import SeriesHistoryPublish
+
+   def _table(name):
+       # The instance by physical name; ms-markets 4.2.0 no longer builds its class.
+       return SimpleNamespace(__table__=SimpleNamespace(name=name))
+
+   def publishes():
+       return [
+           SeriesHistoryPublish(_table("alpaca_connectors__signalweightsts__main"), "signal-weights"),
+           SeriesHistoryPublish(_table("alpaca_connectors__portfolioweightsts__main"), "portfolio-weights"),
+           SeriesHistoryPublish(_table("alpaca_connectors__portfoliosts__main"), "portfolio-values"),
+       ]
+   ```
+
+   ```bash
+   PYTHONPATH=. msm series publish alpaca_history:publishes             # dry run: read, compare
+   PYTHONPATH=. msm series publish alpaca_history:publishes --execute
+   PYTHONPATH=. msm series publish alpaca_history:publishes             # every key verified
+   ```
+
+   Publishing again writes nothing. A key whose rows differ from rows Markets already holds (for
+   example rows left in the shared tables before ms-markets ADR 0047, step 10) is reported with its
+   error and is not verified: resolve it before the push, which drops the instances.
+4. The admin makes this application's branch in the Environment the manager of the same rows
+   (`msm registry assign-manager --manager branch:<uid> ... --execute`), so its workloads publish
+   to them.
+5. Push this release. The migration Job applies revision 0033, which drops the three instances
+   with their rows, and removes the instances' memberships of `alpaca-connectors-markets`, which
+   the code no longer declares. Release the runs and the applications (step 8). Step 9 then
+   removes the namespace.
 
 ## 6. Move The History
 
-This step moved the history into this application's instances before
-[ADR 0031](../adrs/0031_markets_series_are_published_not_shared.md). Since that ADR, signal
-weights, portfolio weights and values are published to Markets instead (step 5), and the catalog
-registration below has no catalog to register in; `instances backfill` and `instances rollback` go
-with the three retired instances in a later release.
+Before [ADR 0031](../adrs/0031_markets_series_are_published_not_shared.md) this step moved the
+history from the shared `ms_markets__*` time series into this application's instances, with the
+`instances backfill` command and ms-markets' series moves. Since that ADR the signal weights,
+portfolio weights and values are published to Markets (step 5) and revision 0033 drops their
+instances; the command, its rollback and the series moves are gone. The rebalance state, calendar
+events, interpolated prices, orders and trades it moved stay in this application's instances.
 
-As a person who holds `data_viewer` on the source tables in `mainsequence.markets` and
-`data_writer` on `alpaca-connectors`, with the scheduled runs held (step 2):
+As a person who holds `data_writer` on `alpaca-connectors`, copy each registration's account name
+and active flag (read through the Markets API) onto its details row:
 
 ```bash
 alpaca-connectors account backfill-listing-fields             # dry run
 alpaca-connectors account backfill-listing-fields --execute
-alpaca-connectors instances backfill                          # dry run: rows per key
-alpaca-connectors instances backfill --execute --register-catalog
-alpaca-connectors instances backfill                          # every key: missing_rows == 0
-```
-
-`backfill-listing-fields` copies each registration's account name and active flag (read through
-the Markets API) onto its details row.
-
-`instances backfill` runs ms-markets' shared series moves (`msm.storage_copies`,
-`msm_portfolios.services.series_moves`) over this application's history:
-
-| Move | Rows | Key |
-|---|---|---|
-| `PortfolioSeriesMove`, one per portfolio configuration's `Portfolio` | its current signal's weights, rebalance state, weights and values | `signal_uid`, `portfolio_identifier` |
-| `TableSeriesMove` | calendar events of the rebalance calendars | `calendar_identifier` |
-| `TableSeriesMove` | orders and trades of the registered accounts | `account_identifier` |
-| `TableSeriesMove`, one per bars profile | the revision-0011 interpolated prices | `asset_identifier` |
-
-Since [ADR 0027](../adrs/0027_one_portfolio_path.md) the command no longer moves the signals
-of the signal configurations that ADR removed. An Environment that has not run the backfill runs it
-before that ADR's first release, whose
-[inventory](../adrs/0027_one_portfolio_path.md#before-r1-what-each-environment-holds) checks it.
-
-Signal observations are published, never restated, so they are copied, never recomputed. Each copy
-writes only the rows the instance lacks (by the full index) through the ms-markets
-`TimeIndexRowsCopy` updater, then counts both sides per key. A move whose keys are all complete is
-`moved`; with `--register-catalog` it then binds its signals (`register_signal`) and writes its
-portfolio's catalog row last (`register`), which needs step 5; before any catalog call it
-refuses a move whose signals have no `SignalMetadata` row. A key still missing rows leaves the move
-`incomplete` and changes nothing in Markets; rerunning copies only the gaps. `--batch-size N` sets
-how many keys one copy request reads (ms-markets `keys_per_read`). Calendar events
-are copied although the engine could rebuild them from the persisted calendar. The selection of
-what moves comes from this application's own tables; the command reads no Markets table itself.
-
-The same moves run from the ms-markets CLI, which registers the catalog:
-
-```bash
-msm series move alpaca_connectors.operations.instance_backfill:series_moves            # dry run
-msm series move alpaca_connectors.operations.instance_backfill:series_moves --execute
 ```
 
 ## 7. Move The Project Tables To `alpaca-connectors`
@@ -282,21 +290,9 @@ Put the configurations held in step 2 back on the schedule, then check:
 
 ## Rolling Back
 
-Until step 9 revokes the roles on `mainsequence.markets`, the move can be undone. With the
-scheduled runs held, as a person with write access on the shared Markets tables:
-
-```bash
-alpaca-connectors instances rollback                  # dry run
-alpaca-connectors instances rollback --execute        # or: msm series rollback <same callable> --execute
-```
-
-The rollback runs the same moves backwards (portfolios first): it copies the rows the instances
-gained since the move into the shared tables, verifies every key, then removes each portfolio's
-catalog row (`unregister`, keeping signal bindings) and unbinds only the signals each move moved
-(`unregister_signal`: each portfolio its current signal);
-`--keep-catalog` leaves them. `msm series rollback` passes `rollback=True` to the callable, which
-returns the same moves. The instances keep their rows. This release always writes the instances and
-registers the catalog after every run, so deploy the previous release before resuming the runs.
+The move of step 6 can no longer be rolled back from this application: the `instances rollback`
+command is gone with ADR 0031, and after revision 0033 the history of the three published series
+is only in Markets. The previous release does not run on ms-markets 4.2.0.
 
 ## 9. Revoke The Markets Roles
 
@@ -315,6 +311,6 @@ Markets `data_viewer` on that namespace, and every other role on it, and removes
 
 - A later revision drops the revision-0011 tables `ms_markets__interpolated_prices__t_*` once
   every Environment has copied them (revisions add first and drop later).
-- This application's earlier rows stay in the shared Markets time series; Markets has no route
-  to delete a provider's portfolio values short of deleting the portfolio. Their removal is the
-  Markets owners' decision.
+- This application's rows written before ms-markets ADR 0047 stayed in the shared Markets time
+  series, which since ADR 0031 are where this application publishes. The publish of step 5 skips
+  the rows equal to them and reports a key whose rows differ.
