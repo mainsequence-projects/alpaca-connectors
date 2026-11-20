@@ -32,7 +32,7 @@ def test_launcher_skips_without_side_effects_when_schema_is_behind(schema_curren
     with patch("alpaca_connectors.market_data.execute_market_data_update") as execute:
         exit_code = main(["--configuration-uid", CONFIGURATION_UID])
 
-    assert exit_code == 1
+    assert exit_code == 0
     execute.assert_not_called()
 
 

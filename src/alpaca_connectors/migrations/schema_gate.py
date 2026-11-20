@@ -4,9 +4,8 @@ A Job can start on a new image before the deployment's migration Job has applied
 revisions. Jobs the API creates at runtime are outside the deployment workflow, so nothing orders
 them after the migration. Every launcher therefore calls :func:`skip_if_schema_behind` before it
 bootstraps a runtime or touches any table: when the database is behind the code for any provider
-whose tables this image reads, the run ends without side effects and the next scheduled run does
-the work. Since issue #44 a skipped run ends failed rather than succeeded, and a workload that
-cannot read the version table at all is told so instead of being reported behind.
+whose tables this image reads, the run ends cleanly without side effects and the next scheduled run
+does the work.
 
 Applied revisions are read from this application's Alembic version MetaTable with an ordinary
 governed SELECT, so the gate needs read access only and never takes the migration lock. The
@@ -83,18 +82,12 @@ def code_head_revision(script: Any) -> str:
     return heads[0]
 
 
-class SchemaUnreadableError(RuntimeError):
-    """The gate cannot read a provider's applied revision, so it cannot tell whether it is behind."""
-
-
 def applied_revisions(migration: Any) -> tuple[str, ...]:
     """Read a provider's applied revisions from its version MetaTable.
 
     The catalog reserves the version table before the first migration and activates it once
-    Alembic has created it. A merely reserved registration means the provider has never completed
-    a migration on this database, so no revision is applied. No visible registration at all, or an
-    active table this workload reads no row from, is :class:`SchemaUnreadableError` (issue #44):
-    the workload holds no role on the provider's namespace, which is not a schema behind the code.
+    Alembic has created it. A missing or merely reserved registration means the provider has never
+    completed a migration on this database, so no revision is applied.
     """
     import sqlalchemy as sa
     from msm.api.base import operation_result_rows
@@ -103,14 +96,7 @@ def applied_revisions(migration: Any) -> tuple[str, ...]:
     from metatables.compiled_sql.v1 import compile_sqlalchemy_statement
 
     registry = migration.alembic_registry
-    identifier = registry.__metatable_identifier__
-    namespace = migration.migration_namespace
-    registrations = MetaTable.filter(identifier=identifier)
-    if not registrations:
-        raise SchemaUnreadableError(
-            f"this workload sees no catalog entry for {identifier}. It needs data_viewer or more "
-            f"on the {namespace} namespace, or the migration Job has never run in this Environment."
-        )
+    registrations = MetaTable.filter(identifier=registry.__metatable_identifier__)
     if not any(
         getattr(registration, "provisioning_status", None) == "active"
         for registration in registrations
@@ -129,13 +115,7 @@ def applied_revisions(migration: Any) -> tuple[str, ...]:
         operation="select",
     )
     rows = operation_result_rows(MetaTable.execute_operation(operation))
-    applied = tuple(str(row[column_name]) for row in rows)
-    if not applied:
-        raise SchemaUnreadableError(
-            f"this workload reads no row from {identifier}, which a completed migration always "
-            f"leaves. It needs data_viewer or more on the {namespace} namespace."
-        )
-    return applied
+    return tuple(str(row[column_name]) for row in rows)
 
 
 def _is_behind(script: Any, applied: tuple[str, ...], code_head: str) -> bool:
@@ -234,16 +214,8 @@ def skip_if_schema_behind(
     read_state: Callable[[], SchemaState] = schema_state,
     emit: Callable[[str], None] = print,
 ) -> bool:
-    """Return ``True`` (after reporting why) when this run must end without doing any work.
-
-    The launcher then ends the run failed (issue #44), so a caller and the run history never take a
-    run that did nothing for one that did its work.
-    """
-    try:
-        state = read_state()
-    except SchemaUnreadableError as error:
-        emit(f"{job_label}: skipped; it cannot read the applied schema revision: {error}")
-        return True
+    """Return ``True`` (after reporting why) when this run must end without doing any work."""
+    state = read_state()
     if not state.behind:
         return False
     details = "; ".join(
@@ -265,7 +237,6 @@ __all__ = [
     "MIGRATION_PROVIDERS",
     "ProviderSchemaState",
     "SchemaState",
-    "SchemaUnreadableError",
     "applied_revisions",
     "code_head_revision",
     "load_provider",

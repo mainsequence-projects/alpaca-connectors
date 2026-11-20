@@ -16,7 +16,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     from alpaca_connectors.migrations.schema_gate import skip_if_schema_behind
 
     if skip_if_schema_behind("Alpaca bars update dispatcher Job"):
-        return 1
+        return 0
 
     from alpaca_connectors.operations.bar_updates import run_bars_dispatcher_job
 

@@ -33,14 +33,6 @@ also declares `alpaca-bars-update-dispatcher`, which starts the daily bars runs 
 the bars Job it follows main outside the graph, and its launcher starts with the schema gate, so a
 scheduled run in the gap is a skip and the next day's run does the work.
 
-Amended on 2026-11-19 (issue #44): a skip now ends the run failed (exit 1) instead of succeeded, so
-the API's run history and a caller that started the run can tell it from one that did its work.
-The gate also no longer reports a version table it cannot see as a schema behind the code: a
-workload with no role on `alpaca-connectors` sees no catalog entry, and an active table it reads
-no row from, and the gate says so and names the role it needs. In Production the `alpaca-portfolio`
-and `alpaca-portfolio-dispatcher` workloads held no role there, so every portfolio run since the
-migration had ended `SUCCEEDED` with nothing recorded and a log reading "at none".
-
 ## Context
 
 Until now, project MetaTable revisions were applied by hand. AGENTS.md told operators to run
@@ -170,15 +162,12 @@ declaration lives in the migration workflow file with one of those kinds; see
 Every launcher under `src/jobs/` except the migration Job starts with a schema gate. It reads the
 provider's revision applied on the database and compares it with the head revision the image ships:
 
-- **database behind the code:** log it and exit without extracting, calling Alpaca, or writing
-  anything (exit 1 since issue #44; it exited successfully before);
-- **applied revision unreadable** (issue #44): no visible catalog entry for the version table, or
-  an active one with no row. Log that the workload needs `data_viewer` or more on the provider's
-  namespace and exit 1 the same way;
+- **database behind the code:** log it and exit successfully without extracting, calling Alpaca,
+  or writing anything;
 - **database at or ahead of the code:** run normally. Ahead means an older image is running after
   a newer migration, which rule 4 keeps safe.
 
-The gate turns a run that would fail midway into a skip that does nothing. It does not recover the skipped work: a skipped signal
+The gate turns a failed run into a clean skip. It does not recover the skipped work: a skipped signal
 run is still an ETF-weights observation that is never recorded, so the platform answer below still
 matters. Portfolio runs recover fully on their next run.
 

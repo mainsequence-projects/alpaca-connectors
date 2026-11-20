@@ -18,7 +18,7 @@ The dispatcher runs after the US equity close and after the 00:00 UTC
 [bars dispatcher](#daily-bars-dispatcher). Both Jobs use 0.25 CPU, 0.5 GiB and 3600 seconds, and
 every push promotes their image. No `execution.steps` entry references them, so a push may promote
 their image before the migration Job finishes; the schema gate in each entry point turns a run in
-that window into a skip, which ends the run failed (issue #44)
+that window into a clean skip
 ([ADR 0012](../adrs/0012_deployment_workflow_migrations_and_schema_gated_jobs.md)). The gate is
 also a run's first call to the Markets and MetaTables APIs, which are usually asleep at these hours.
 It waits up to 300 s for each to wake. ms-markets' own 30 s failed every dispatcher run from
@@ -191,7 +191,7 @@ The workflow uses workflow API `3.0.0`. The Job has no schedule and no configura
 variable; the dispatcher holds the schedule. Automatic redeployment is enabled (PRs #7 and #8,
 2026-11-04), so every push promotes this Job to the new image, as it does the API's Jobs. The file
 has no `execution.steps`, so a push may promote it before the migration Job finishes; its
-launcher's schema gate turns a run in that window into a skip, which ends the run failed (issue #44)
+launcher's schema gate turns a run in that window into a clean skip
 ([ADR 0012](../adrs/0012_deployment_workflow_migrations_and_schema_gated_jobs.md)).
 
 The API starts this Job through its branch `editor` policy. A workflow file's `access.resources`

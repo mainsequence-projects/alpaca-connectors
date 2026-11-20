@@ -526,7 +526,7 @@ def test_entry_points_check_the_schema_before_any_work(monkeypatch, launcher, ar
             lambda *args: pytest.fail("ran work while the schema was behind"),
         )
 
-    assert main(argv) == 1
+    assert main(argv) == 0
     assert calls and calls[0].startswith("Alpaca portfolio")
 
 

@@ -96,6 +96,11 @@ def need(*names: str) -> None:
         pytest.skip(f"An earlier stage did not complete (missing: {', '.join(missing)}).")
 
 
+def delete_account(api, account_uid: str):
+    """Delete an account with the exact confirmation the route takes (ADR 0028, decision 8)."""
+    return api.delete(f"/v1/accounts/{account_uid}", params={"confirm": f"DELETE {account_uid}"})
+
+
 def now() -> dt.datetime:
     return dt.datetime.now(dt.UTC).replace(microsecond=0)
 
@@ -384,7 +389,7 @@ def test_01_the_account_is_registered_with_the_paper_keys(api, markets) -> None:
     # An earlier run that stopped half way leaves its account; this run starts from none.
     for leftover in ok(api.get("/v1/accounts", params={"limit": 100}))["items"]:
         if leftover.get("account_name") == ACCOUNT_NAME:
-            ok(api.delete(f"/v1/accounts/{leftover['uid']}"))
+            ok(delete_account(api, leftover["uid"]))
     preflight = ok(api.post("/v1/accounts/registration/preflight", json=request))
     assert not preflight.get("blockers"), f"Registration is blocked: {preflight.get('blockers')}"
     created = api.post("/v1/accounts", json=request)
@@ -678,5 +683,5 @@ def test_09_the_target_is_cleared_and_the_account_deleted(api, markets) -> None:
         assert statuses(operation)["size_targets"] == "skipped"
 
     account_uid = STATE.pop("account_uid")
-    ok(api.delete(f"/v1/accounts/{account_uid}"))
+    ok(delete_account(api, account_uid))
     assert api.get(f"/v1/accounts/{account_uid}").status_code == 404

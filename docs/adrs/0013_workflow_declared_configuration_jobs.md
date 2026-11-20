@@ -238,8 +238,8 @@ the same file:
   runs could not start configuration runs (decision 8).
 - **A run can start before the schema is migrated.** The Jobs are outside the graph, so a push may
   promote their image before the migration Job finishes. The schema gate turns a run in that window
-  into a skip. The next scheduled run does the work. A manual run in that window used to end as
-  succeeded without having done anything; since issue #44 it ends failed.
+  into a clean skip. The next scheduled run does the work, but a manual run in that window ends as
+  succeeded without having done anything.
 - **Runs of the old per-configuration Jobs no longer appear** in run history or in
   `/v1/operations/job-runs/{uid}`.
 - **Old per-configuration Jobs are not removed by any push.** Configurations created with SDK 8,
