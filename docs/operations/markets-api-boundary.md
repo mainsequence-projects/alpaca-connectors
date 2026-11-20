@@ -109,39 +109,67 @@ An Environment where the three instances hold history moves with ADR 0031's
 the portfolio runs are held (step 2) and the applications that give weights pause:
 
 1. The Markets API runs ms-markets 4.2.0.
-2. An Organization admin makes the person who publishes the history the manager of this
-   application's rows. Rows created before ms-markets ADR 0060 have no manager, and through the
-   Markets API only a row's manager publishes to it. The portfolios are the
-   `ALPACA_PORTFOLIO__<hex>` identifiers and the signals the `signal_uid`s found in the instances:
-
-   ```bash
-   msm registry assign-manager --manager user:<uid> \
-     --portfolio ALPACA_PORTFOLIO__<hex> --signal <signal_uid>   # repeat each flag; dry run
-   msm registry assign-manager --manager user:<uid> ... --execute
-   ```
-
-3. That person publishes the history. `msm series publish` reads each instance with the person's
-   own MetaTables access, by its physical name, publishes its rows key by key, oldest first, and
-   compares each key's first and last time and row count in Markets with the instance; it changes
-   nothing in the instance. Save, outside the repository, a module such as
-   `alpaca_history.py`:
+2. Save, outside the repository, a module such as `alpaca_history.py`, and run it from a
+   checkout of this release with your own `mainsequence` session. It attaches this application's
+   runtime (which reaches Markets through the Markets API) and names the three instances by their
+   physical names: ms-markets 4.2.0 no longer builds their classes, and `msm series publish`
+   needs only the name.
 
    ```python
    from types import SimpleNamespace
 
-   from msm_portfolios.series_history import SeriesHistoryPublish
+   INSTANCES = {
+       "alpaca_connectors__signalweightsts__main": ("signal-weights", "signal_uid"),
+       "alpaca_connectors__portfolioweightsts__main": ("portfolio-weights", "portfolio_identifier"),
+       "alpaca_connectors__portfoliosts__main": ("portfolio-values", "portfolio_identifier"),
+   }
 
-   def _table(name):
-       # The instance by physical name; ms-markets 4.2.0 no longer builds its class.
-       return SimpleNamespace(__table__=SimpleNamespace(name=name))
+   def attach():
+       """This application's runtime, and the package that serves signals to assign-manager."""
+       from alpaca_connectors.runtime import start_markets_engine
+
+       start_markets_engine()
+       import msm_portfolios.api  # noqa: F401
 
    def publishes():
+       attach()
+       from msm_portfolios.series_history import SeriesHistoryPublish
+
        return [
-           SeriesHistoryPublish(_table("alpaca_connectors__signalweightsts__main"), "signal-weights"),
-           SeriesHistoryPublish(_table("alpaca_connectors__portfolioweightsts__main"), "portfolio-weights"),
-           SeriesHistoryPublish(_table("alpaca_connectors__portfoliosts__main"), "portfolio-values"),
+           SeriesHistoryPublish(SimpleNamespace(__table__=SimpleNamespace(name=name)), series)
+           for name, (series, _key) in INSTANCES.items()
        ]
+
+   def keys():
+       """The --signal and --portfolio flags of every key the instances hold."""
+       attach()
+       from metatables import TimeIndexMetaTable, TimeIndexTableRef
+
+       flags = set()
+       for name, (series, key) in INSTANCES.items():
+           (table,) = TimeIndexMetaTable.filter(physical_table_name__in=[name])
+           frame = TimeIndexTableRef.from_meta_table(table).get_df_between_dates(columns=[key])
+           values = frame.index.get_level_values(key) if key in frame.index.names else frame[key]
+           flag = "--signal" if series == "signal-weights" else "--portfolio"
+           flags.update(f"{flag} {value}" for value in values)
+       print(" ".join(sorted(flags)))
    ```
+
+   An Organization admin makes the person who publishes the history the manager of this
+   application's rows. Rows created before ms-markets ADR 0060 have no manager, and through the
+   Markets API only a row's manager publishes to it. `--attach` loads the package that serves
+   signals; without it only portfolios are assigned:
+
+   ```bash
+   FLAGS=$(PYTHONPATH=. python -c "import alpaca_history; alpaca_history.keys()")
+   PYTHONPATH=. msm registry assign-manager --manager user:<uid> --attach alpaca_history:attach $FLAGS
+   PYTHONPATH=. msm registry assign-manager --manager user:<uid> --attach alpaca_history:attach $FLAGS --execute
+   ```
+
+3. That person publishes the history. `msm series publish` runs each `SeriesHistoryPublish`,
+   which reads its instance with the person's own MetaTables access, by its physical name,
+   publishes its rows key by key, oldest first, and compares each key's first and last time and
+   row count in Markets with the instance; it changes nothing in the instance:
 
    ```bash
    PYTHONPATH=. msm series publish alpaca_history:publishes             # dry run: read, compare
@@ -153,12 +181,18 @@ the portfolio runs are held (step 2) and the applications that give weights paus
    example rows left in the shared tables before ms-markets ADR 0047, step 10) is reported with its
    error and is not verified: resolve it before the push, which drops the instances.
 4. The admin makes this application's branch in the Environment the manager of the same rows
-   (`msm registry assign-manager --manager branch:<uid> ... --execute`), so its workloads publish
-   to them.
+   (`msm registry assign-manager --manager branch:<uid> --attach alpaca_history:attach $FLAGS
+   --execute`), so its workloads publish to them.
 5. Push this release. The migration Job applies revision 0033, which drops the three instances
    with their rows, and removes the instances' memberships of `alpaca-connectors-markets`, which
    the code no longer declares. Release the runs and the applications (step 8). Step 9 then
    removes the namespace.
+
+A run of this release publishes the calendar's `market_open` and `market_close` into the private
+calendar-events table by itself, both strategies now read them (ADR 0031, decision 5), and the
+rows already there are written again with equal values; nobody runs a step for them. Until the
+owner decides how existing portfolios go on, a portfolio whose published weights predate the next
+observed-price rule does not run, and its preflight says why (ADR 0031, Implementation Notes).
 
 ## 6. Move The History
 

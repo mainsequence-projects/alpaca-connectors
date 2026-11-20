@@ -162,10 +162,9 @@ A rebalance configuration is a reusable rebalance policy, shared by any number o
 ([ADR 0009](../adrs/0009_calendar_event_portfolio_timing.md)). Its `strategy` is one of two
 ms-markets strategies:
 
-- `immediate_signal` (`ImmediateSignal`): the portfolio rebalances to each set of weights at the
-  time it was observed, so a portfolio has weights from the run after its first weights. It reads
-  no calendar event; the calendar identifier only gives the `Portfolio` row its calendar. Use it
-  for weights an application provides and expects to hold at once.
+- `immediate_signal` (`ImmediateSignal`): the portfolio rebalances to each set of weights from
+  the time it was observed when the calendar's market is open then, otherwise from the next open.
+  Use it for weights an application provides and expects to hold as soon as the market allows.
 - `calendar_event_signal` (`CalendarEventSignal`, the default): it stores the persisted calendar
   identifier (`NYSE` by default), the session label, the event (`market_open` or `market_close`),
   an offset in seconds, and the cadence (`every_session`, or `weekly` on one weekday). At each
@@ -173,6 +172,17 @@ ms-markets strategies:
   event, so weights given after a close are first used at the next configured event, and a new
   portfolio has no weights before its first event. Early closes use their actual persisted close
   times; they are not normalised to midnight or a nominal close.
+
+Both strategies trade at the next observed price (ms-markets ADR 0058,
+[ADR 0031](../adrs/0031_markets_series_are_published_not_shared.md)): from the strategy's moment,
+or the next open when the market is closed then, each asset trades at its first price observed at
+or after it, strictly after the weights, inside a session. This application's prices are daily
+Alpaca bars stamped at the session's close, so a trade happens at a session's close: weights given
+during a session trade at that close, weights given at a weekend at Monday's close. Both read the
+calendar's `market_open` and `market_close` events, which a run publishes to this application's
+private calendar-events table. The execution choices are ms-markets' defaults (shares sized at the
+decision, no negative cash, sells before buys), the portfolio's currency is US dollars, and between
+rebalances its weights drift with prices (ms-markets ADR 0059).
 
 The strategy is part of the portfolio's identity in ms-markets: pointing a portfolio at a
 rebalance configuration of the other strategy, or changing that configuration's strategy, gives it
