@@ -18,7 +18,7 @@ The dispatcher runs after the US equity close and after the 00:00 UTC
 [bars dispatcher](#daily-bars-dispatcher). Both Jobs use 0.25 CPU, 0.5 GiB and 3600 seconds, and
 every push promotes their image. No `execution.steps` entry references them, so a push may promote
 their image before the migration Job finishes; the schema gate in each entry point turns a run in
-that window into a clean skip
+that window into a skip, which ends the run failed (issue #44)
 ([ADR 0012](../adrs/0012_deployment_workflow_migrations_and_schema_gated_jobs.md)). The gate is
 also a run's first call to the Markets and MetaTables APIs, which are usually asleep at these hours.
 It waits up to 300 s for each to wake. ms-markets' own 30 s failed every dispatcher run from
@@ -61,10 +61,12 @@ How they run:
 
 A dispatcher starts runs of another Job from inside a Job runtime, with its own workload's
 `runner` policy. Confirm it on the first scheduled runs after a push that creates a dispatcher
-(00:00 UTC for bars, 02:00 UTC for portfolios). Each new Job's workload User needs its MetaTables
-roles before then ([Table Access And MetaTables Roles](#table-access-and-metatables-roles)): the
-rename of [ADR 0027](../adrs/0027_one_portfolio_path.md) created both Jobs anew, with new
-workload Users.
+(00:00 UTC for bars, 02:00 UTC for portfolios). A new Job's workload User gets its MetaTables
+role through the branch on its first request
+([Table Access And MetaTables Roles](#table-access-and-metatables-roles)). Before
+[ADR 0030](../adrs/0030_workloads_get_their_roles_through_their_branch.md), the rename of
+[ADR 0027](../adrs/0027_one_portfolio_path.md) created both Jobs anew with no role, and their runs
+skipped (issue #44).
 
 ### Cleanup Of Per-Configuration Jobs
 
@@ -189,7 +191,7 @@ The workflow uses workflow API `3.0.0`. The Job has no schedule and no configura
 variable; the dispatcher holds the schedule. Automatic redeployment is enabled (PRs #7 and #8,
 2026-11-04), so every push promotes this Job to the new image, as it does the API's Jobs. The file
 has no `execution.steps`, so a push may promote it before the migration Job finishes; its
-launcher's schema gate turns a run in that window into a clean skip
+launcher's schema gate turns a run in that window into a skip, which ends the run failed (issue #44)
 ([ADR 0012](../adrs/0012_deployment_workflow_migrations_and_schema_gated_jobs.md)).
 
 The API starts this Job through its branch `editor` policy. A workflow file's `access.resources`
@@ -234,7 +236,7 @@ dispatcher:
 - **`GET /v1/operations/job-runs/{uid}` does not return the dispatcher's runs,** only the
   `Alpaca Bars Update` runs it starts.
 
-Its workload User needs `data_viewer` on `alpaca-connectors` before the first scheduled run
+Its workload User holds `editor` on `alpaca-connectors` through the branch
 ([Table Access And MetaTables Roles](#table-access-and-metatables-roles)).
 
 ### Run arguments
@@ -312,8 +314,8 @@ provider name.
 Since MetaTables 0.1.46 (its ADR 0024) access is a role on a namespace or a table. `data_viewer`
 reads rows, `data_writer` also writes rows, `editor` also registers and changes tables and runs
 updaters, and `owner` also decides who has access. A namespace role covers the namespace's tables.
-A person, or a Team of people, owns each namespace; a workload never owns one, never grants, and
-never creates a table outside a namespace.
+A person, or a Team of people, owns each namespace; a workload never owns one, never grants
+through the access routes, and never creates a table outside a namespace.
 
 In each Environment where the project runs:
 
@@ -321,36 +323,31 @@ In each Environment where the project runs:
    `mainsequence.markets` schema, and its Markets API must serve the release this image runs
    (the Jobs' schema gate checks its `/health`). The project's revisions reference its tables by
    physical name.
-2. Each workload holds these roles on `alpaca-connectors`. A workload User exists once its
-   declaration is applied, and a recreated resource, such as a renamed key, has a new workload
-   User that needs its roles again.
+2. The migration Job gives every workload of this repository's branch `editor` on
+   `alpaca-connectors`
+   ([ADR 0030](../adrs/0030_workloads_get_their_roles_through_their_branch.md), MetaTables
+   ADR 0029). Both providers declare `settings.BRANCH_ACCESS` after each finalization, on every
+   push. The API, the Agent, the migration Job, the bars and portfolio Jobs and both dispatchers
+   have the role on their first request. A renamed or recreated workload keeps it, and nobody
+   grants a workload User by hand. In a new Environment the migration Job creates the namespace
+   and holds `editor` on it. A refused declaration fails the Job with `BranchAccessRefused`.
 
-   | Workload | `alpaca-connectors` |
-   |---|---|
-   | `alpaca-connectors-migrate` | `editor`: it registers the project tables |
-   | `alpaca` API | `editor`: it writes project rows, publishes provided weights, and runs the orders and trades updaters in-process |
-   | `alpaca-portfolio` | `editor` |
-   | `alpaca-bars-update` | `data_viewer`, plus table `editor` on `alpaca_connectors__bars_1d_sip_all` and `alpaca_connectors__bars_1d_iex_raw` |
-   | `alpaca-portfolio-dispatcher`, `alpaca-bars-update-dispatcher` | `data_viewer` |
-   | `alpaca-connectors-agent` | none: its tools run in the API |
+   Markets holds no role on `alpaca-connectors` or any of its tables: this application publishes
+   to Markets and reads it back through the Markets API
+   ([ADR 0031](../adrs/0031_markets_series_are_published_not_shared.md)), and never a role on
+   `alpaca_connectors__acct_alpaca`, whose columns hold the application-encrypted keys.
 
-   The Markets contract instances are also in `alpaca-connectors-markets`
-   ([ADR 0025](../adrs/0025_markets_reads_the_instances_through_a_second_namespace.md)). The
-   migration Job holds `editor` on it, and the Markets workload holds `data_viewer` on it and
-   nothing on `alpaca-connectors`: never a role on `alpaca_connectors__acct_alpaca`, whose
-   columns hold the application-encrypted keys.
-
-   Shared roles can stay on the Team, with its person owner as a member, so a recreated workload
-   needs only membership. Grant the `editor` roles directly.
+   A person still grants each namespace an owner, once per Environment.
 3. Every one of those resources except the Agent declares
    `access.branches: [{repository: MetaTables, policy: reader}]` in its workflow file. A migration
    that fails with `namespace_access_required`, `namespace_not_writable` or `table_not_editable`
-   (403) names the `caller_user_uid` that lacks a role: the owner grants it. A manual run of the
+   (403) names the `caller_user_uid` that lacks a role: the owner grants it `editor`, after which
+   its branch declaration covers its replacements. A manual run of the
    migration Job then applies the revisions, but only another push deploys the API that waited for
    them. Do not run the Job as an Organization admin to get around a refusal.
 
 An Organization admin's ability to administer the platform does not by itself give a workload
-table access. The Harness Agent receives no table role.
+table access.
 
 ## Markets API Access
 

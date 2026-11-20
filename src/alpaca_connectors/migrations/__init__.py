@@ -17,7 +17,7 @@ from alpaca_connectors.instances import project_instance_models
 from alpaca_connectors.market_data import project_configuration_models, project_storage_models
 from alpaca_connectors.operations import project_operation_models
 from alpaca_connectors.portfolios import project_portfolio_configuration_models
-from alpaca_connectors.settings import PROJECT_NAMESPACE
+from alpaca_connectors.settings import BRANCH_ACCESS, PROJECT_NAMESPACE
 from metatables.migrations import (
     build_alembic_version_metatable,
     build_metatable_migration_provider,
@@ -88,6 +88,9 @@ SHARED_PROVIDER_KWARGS = {
     "script_location": "alpaca_connectors.migrations:",
     "version_location_prefix": "alpaca_connectors.migrations:versions",
     "alembic_registry": ProjectAlembicVersion,
+    # The branch's whole declaration (MetaTables ADR 0029): each provider that finalizes sends
+    # the same set, so neither removes what the other declared (ADR 0030).
+    "branch_access": BRANCH_ACCESS,
 }
 
 migration = build_metatable_migration_provider(

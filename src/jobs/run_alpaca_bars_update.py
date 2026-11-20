@@ -47,7 +47,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     from alpaca_connectors.migrations.schema_gate import skip_if_schema_behind
 
     if skip_if_schema_behind("Alpaca bars update Job"):
-        return 0
+        return 1
 
     from alpaca_connectors.market_data import execute_market_data_update
 

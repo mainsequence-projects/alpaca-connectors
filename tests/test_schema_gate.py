@@ -15,6 +15,7 @@ from alpaca_connectors.migrations.schema_gate import (
     MIGRATION_PROVIDERS,
     ProviderSchemaState,
     SchemaState,
+    SchemaUnreadableError,
     applied_revisions,
     code_head_revision,
     load_provider,
@@ -126,18 +127,68 @@ def test_current_schema_runs_silently() -> None:
     assert messages == []
 
 
-@pytest.mark.parametrize("registrations", [[], [SimpleNamespace(provisioning_status="reserved")]])
-def test_unfinalized_version_table_means_no_applied_revision(registrations) -> None:
+def test_reserved_version_table_means_no_applied_revision() -> None:
     import metatables
 
     with (
-        patch.object(metatables.MetaTable, "filter", return_value=registrations),
+        patch.object(
+            metatables.MetaTable,
+            "filter",
+            return_value=[SimpleNamespace(provisioning_status="reserved")],
+        ),
         patch.object(metatables.MetaTable, "execute_operation") as execute,
     ):
         assert applied_revisions(load_provider(APP)) == ()
 
     # A reserved table may not physically exist yet, so it is never queried.
     execute.assert_not_called()
+
+
+def test_an_invisible_version_table_is_unreadable_not_behind() -> None:
+    """Issue #44: a workload with no role on the namespace sees no catalog entry."""
+    import metatables
+
+    with (
+        patch.object(metatables.MetaTable, "filter", return_value=[]),
+        patch.object(metatables.MetaTable, "execute_operation") as execute,
+        pytest.raises(SchemaUnreadableError, match="data_viewer or more on the alpaca-connectors"),
+    ):
+        applied_revisions(load_provider(APP))
+
+    execute.assert_not_called()
+
+
+def test_an_active_version_table_without_a_row_is_unreadable() -> None:
+    import metatables
+
+    with (
+        patch.object(
+            metatables.MetaTable,
+            "filter",
+            return_value=[SimpleNamespace(provisioning_status="active")],
+        ),
+        patch(
+            "metatables.compiled_sql.v1.compile_sqlalchemy_statement",
+            return_value="compiled",
+        ),
+        patch.object(metatables.MetaTable, "execute_operation", return_value={}),
+        patch("msm.api.base.operation_result_rows", return_value=[]),
+        pytest.raises(SchemaUnreadableError, match="reads no row"),
+    ):
+        applied_revisions(load_provider(APP))
+
+
+def test_an_unreadable_schema_skips_and_says_why() -> None:
+    messages: list[str] = []
+
+    def unreadable() -> SchemaState:
+        raise SchemaUnreadableError("this workload sees no catalog entry")
+
+    assert skip_if_schema_behind("Portfolio Job", read_state=unreadable, emit=messages.append)
+    assert messages == [
+        "Portfolio Job: skipped; it cannot read the applied schema revision: this workload sees "
+        "no catalog entry"
+    ]
 
 
 @pytest.mark.parametrize(("reference", "table"), [(APP, "alpaca_connectors__alembic_version")])
@@ -215,7 +266,7 @@ def test_launchers_do_no_work_while_the_schema_is_behind(launcher, work) -> None
         ),
         patch(work, MagicMock()) as work_call,
     ):
-        assert main() == 0
+        assert main() == 1
 
     work_call.assert_not_called()
 

@@ -44,17 +44,17 @@ These belong to the Markets deployment's owners, not to this repository:
 
 ## 1. Roles On `alpaca-connectors`
 
-The owner of `alpaca-connectors` (a person) grants, before the push and before the move, so each
-workload can use the project tables once they leave `mainsequence.markets`:
+The workloads get their roles from the migration, not from a person
+([ADR 0030](../adrs/0030_workloads_get_their_roles_through_their_branch.md)). Both migration
+providers declare `editor` on `alpaca-connectors` for every workload of this repository's branch:
+the API, the Agent, the migration Job, the bars and portfolio Jobs and both dispatchers. The
+declaration runs on every push, so a renamed or recreated workload keeps its role. Markets holds
+no role on this application ([ADR 0031](../adrs/0031_markets_series_are_published_not_shared.md)).
 
-| Workload | Role on `alpaca-connectors` | Why |
-|---|---|---|
-| `alpaca-connectors-migrate` | `editor` (holds it already) | registers and changes the project tables |
-| `alpaca` (API) | `editor` | writes project rows; publishes provided weights; runs the orders and trades updaters in-process |
-| `alpaca-portfolio` | `editor` | runs its bars configuration's update (issue #39), then the interpolation, calendar-event, rebalance, weights and values updaters |
-| `alpaca-bars-update` | `data_viewer`, plus its table `editor` on the two bars tables (table roles move with the tables) | read configurations; run the bars updater |
-| `alpaca-portfolio-dispatcher` | `data_viewer` | preflight reads |
-| `alpaca-bars-update-dispatcher` | `data_viewer` | read the enabled, scheduled bar configurations (ADR 0021) |
+The migration Job itself needs `editor` on the namespace before it can declare. It creates the
+namespace when it does not exist yet and holds `editor` on it. On a namespace that already exists,
+the owner (a person) grants it `editor` once, directly or through its Team. After that, the branch
+binding covers its replacements. The person who runs step 4 needs the same role.
 
 No workload needs a role on `mainsequence.markets` once step 9 is done.
 
@@ -279,7 +279,7 @@ portfolio weights and values through the Markets API (ADR 0031), which needs non
 
 Once the release of ADR 0031 runs (step 5), the owner of `alpaca-connectors-markets` revokes the
 Markets `data_viewer` on that namespace, and every other role on it, and removes the namespace
-(ADR 0031, Rollout step 7). Nothing of this application reads or declares it any more.
+(ADR 0031, Rollout step 6). Nothing of this application reads or declares it any more.
 
 ## 10. Later
 

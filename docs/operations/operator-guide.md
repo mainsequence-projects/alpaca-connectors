@@ -146,10 +146,14 @@ instructions are `.tau/SYSTEM.md`; its tools and skills are described in
   run `metatables migrations upgrade` or `downgrade` against a hosted environment from a developer
   or agent session
 - every table this project owns, including its instances of the Markets time series, is in its
-  own `alpaca-connectors` namespace (ms-markets ADR 0047); a person owns it and grants each
-  workload its MetaTables role (`data_viewer`, `data_writer` or `editor`, never `owner`), directly
-  or through the Environment's Team (for example `alpaca-connectors-production`) for the roles
-  its members share ([Table Access And MetaTables Roles](jobs.md#table-access-and-metatables-roles));
+  own `alpaca-connectors` namespace (ms-markets ADR 0047); a person owns it, and the migration
+  Job gives every workload of this repository's branch `editor` on it on every push
+  (`settings.BRANCH_ACCESS`,
+  [ADR 0030](../adrs/0030_workloads_get_their_roles_through_their_branch.md)), so nobody grants a
+  workload User and a renamed workload keeps its role
+  ([Table Access And MetaTables Roles](jobs.md#table-access-and-metatables-roles)); Markets holds
+  no role on any of its tables
+  ([ADR 0031](../adrs/0031_markets_series_are_published_not_shared.md));
   no workload holds a role on `mainsequence.markets`: Markets registries go through the Markets
   API, which a workload's workflow grant on the `MainSequenceMarkets` branch lets it reach and
   write through ([Markets API Access](jobs.md#markets-api-access); moving an existing

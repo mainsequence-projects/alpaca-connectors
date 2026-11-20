@@ -17,6 +17,13 @@ PROJECT_NAMESPACE_SLUG = "alpaca_connectors"
 # (ms-markets ``markets_configured_namespace``), so hosted resources never set that variable.
 PROJECT_NAMESPACE = "alpaca-connectors"
 
+# The roles every workload of this repository's branch holds (MetaTables ADR 0029, ADR 0030): the
+# migration providers declare them after each finalization, so the API, the Agent and every Job,
+# renamed or recreated, have their role on their first request with nobody granting it. One role
+# for the whole branch; ``editor`` is what the API and the portfolio Job need. Markets holds no role
+# on any table of this application (ADR 0031).
+BRANCH_ACCESS = {PROJECT_NAMESPACE: "editor"}
+
 # Market venue suffix for Alpaca account/asset identities (``<token>__ALPACA`` convention).
 ALPACA_VENUE = "ALPACA"
 

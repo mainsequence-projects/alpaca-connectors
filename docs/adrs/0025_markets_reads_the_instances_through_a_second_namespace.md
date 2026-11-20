@@ -3,11 +3,11 @@
 ## Status
 
 Withdrawn by [ADR 0031](0031_markets_series_are_published_not_shared.md) with the release that
-implements it (branch `adr-0031-publish-series`, 2026-11-20), which waits for the ms-markets
-release of its ADR 0060. From that release Markets reads no table of this application: nothing is
-declared in `alpaca-connectors-markets`, `share_with_markets`, `grant-markets-access` and the
-migration Job's `markets_access` report are removed, and the namespace is removed in each
-Environment (ADR 0031, Rollout step 7). What follows records the decision as it was.
+implements it (2026-11-20, on ms-markets 4.2.0). From that release Markets reads no table of this
+application: nothing is declared in `alpaca-connectors-markets`, `share_with_markets`,
+`grant-markets-access` and the migration Job's `markets_access` report are removed, and the
+namespace is removed in each Environment (ADR 0031, Rollout step 6). What follows records the
+decision as it was.
 
 Decided by the owner and implemented on 2026-11-17, on MetaTables 0.1.67 and ms-markets 3.8.2.
 Rolled out in Production the same day: the migration Job added the seven instances to
@@ -16,6 +16,11 @@ and the owner ran `alpaca-connectors instances grant-markets-access` (see [Rollo
 
 Amends [ADR 0024](0024_portfolios_from_provided_weights.md), whose registration failed in
 Production for the reason below (alpaca-connectors#37).
+
+Amended on 2026-11-19 by [ADR 0030](0030_workloads_get_their_roles_through_their_branch.md):
+the migration Job creates `alpaca-connectors-markets` and its branch holds `editor` there, and the
+Markets access of decision 2 is granted to the `MainSequenceMarkets` branch, not to a Markets
+workload User. `grant-markets-access` now takes `--markets-branch-uid` and creates nothing.
 
 ## Context
 
@@ -43,7 +48,8 @@ of them applies to it.
    Nothing else is declared there.
 2. **The Markets workload holds `data_viewer` on `alpaca-connectors-markets`** and no role on
    `alpaca-connectors` or on any table of it. One grant per Environment covers every instance,
-   including those added later.
+   including those added later. Since ADR 0030 the grant names the `MainSequenceMarkets` branch,
+   so it also covers every Markets workload.
 3. **The application's own tables stay only in `alpaca-connectors`.** The account keys table is
    never declared in the second namespace.
 4. **No revision.** A namespace is not a schema change: the next `upgrade head` of each provider
