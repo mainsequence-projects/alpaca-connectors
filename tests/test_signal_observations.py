@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import datetime as dt
-from types import SimpleNamespace
 from unittest.mock import patch
 
 import pandas as pd
 import pytest
+from msm_portfolios.recipes import SignalHistory
+from msm_portfolios.services.series import SeriesBounds
 
 from alpaca_connectors.portfolios.signal_observations import (
     read_signal_observation_bounds,
@@ -32,13 +33,13 @@ def _details(identifiers):
 def test_signal_history_reads_all_assets_for_the_latest_distinct_observations_once(
     recipes,
 ) -> None:
-    # The latest two observations, newest first as Markets may answer them; ALPACA::b left the
-    # signal at SECOND (0) and ALPACA::c entered it then (NaN before its first observation).
+    # The latest two observations, a time by asset matrix; ALPACA::b left the signal at SECOND
+    # (0) and ALPACA::c entered it then (NaN before its first observation).
     frame = pd.DataFrame(
         {"ALPACA::c": [0.3, float("nan")], "ALPACA::a": [0.7, 0.6], "ALPACA::b": [0.0, 0.4]},
-        index=pd.DatetimeIndex([SECOND, FIRST]),
+        index=pd.DatetimeIndex([SECOND, FIRST], name="time_index"),
     )
-    recipes.answer("signal_history", {"signal-123": SimpleNamespace(matrix=frame)})
+    recipes.answer("signal_history", SignalHistory(bounds={}, latest={"signal-123": frame}))
     with patch(DETAILS, side_effect=_details) as details:
         matrix = read_signal_observation_matrix(signal_uid="signal-123", observation_limit=2)
 
@@ -57,7 +58,7 @@ def test_signal_history_reads_all_assets_for_the_latest_distinct_observations_on
 
 def test_an_asset_without_details_is_ordered_by_its_identifier(recipes) -> None:
     frame = pd.DataFrame({"ALPACA::z": [0.5], "ALPACA::a": [0.5]}, index=pd.DatetimeIndex([FIRST]))
-    recipes.answer("signal_history", {"signal-123": {"matrix": frame}})
+    recipes.answer("signal_history", SignalHistory(bounds={}, latest={"signal-123": frame}))
     with patch(DETAILS, side_effect=_details):
         matrix = read_signal_observation_matrix(signal_uid="signal-123")
 
@@ -69,7 +70,10 @@ def test_an_asset_without_details_is_ordered_by_its_identifier(recipes) -> None:
 
 
 def test_a_signal_with_nothing_published_has_an_empty_matrix(recipes) -> None:
-    recipes.answer("signal_history", {})
+    # The recipe answers an empty matrix for a signal with no observation.
+    recipes.answer(
+        "signal_history", SignalHistory(bounds={}, latest={"signal-123": pd.DataFrame()})
+    )
     with patch(DETAILS) as details:
         matrix = read_signal_observation_matrix(signal_uid="signal-123")
     assert (matrix.time_indexes, matrix.assets) == ((), ())
@@ -80,10 +84,14 @@ def test_signal_observation_bounds_of_many_signals_are_one_markets_call(recipes)
     last = dt.datetime(2026, 9, 7, 8, tzinfo=dt.UTC)
     recipes.answer(
         "signal_history",
-        {
-            "signal-a": SimpleNamespace(first_observation_at=FIRST, last_observation_at=last),
-            "signal-b": {"first_observation_at": None, "last_observation_at": None},
-        },
+        SignalHistory(
+            bounds={
+                "signal-a": SeriesBounds(
+                    key="signal-a", first_time=FIRST, last_time=last, row_count=4
+                ),
+                "signal-b": SeriesBounds(key="signal-b"),
+            }
+        ),
     )
 
     bounds = read_signal_observation_bounds_by_signal(["signal-a", "signal-b", "signal-c"])
@@ -103,23 +111,16 @@ def test_signal_observation_bounds_of_many_signals_are_one_markets_call(recipes)
 def test_one_signals_bounds(recipes) -> None:
     recipes.answer(
         "signal_history",
-        {"signal-123": SimpleNamespace(first_observation_at=FIRST, last_observation_at=SECOND)},
+        SignalHistory(
+            bounds={
+                "signal-123": SeriesBounds(
+                    key="signal-123", first_time=FIRST, last_time=SECOND, row_count=2
+                )
+            }
+        ),
     )
     bounds = read_signal_observation_bounds(signal_uid="signal-123")
     assert (bounds.first_observation_at, bounds.last_observation_at) == (FIRST, SECOND)
-
-
-def test_a_time_without_a_timezone_is_refused(recipes) -> None:
-    recipes.answer(
-        "signal_history",
-        {
-            "signal-123": SimpleNamespace(
-                first_observation_at=dt.datetime(2026, 9, 3), last_observation_at=None
-            )
-        },
-    )
-    with pytest.raises(RuntimeError, match="without a timezone"):
-        read_signal_observation_bounds(signal_uid="signal-123")
 
 
 @pytest.mark.parametrize("limit", [0, 101, True])

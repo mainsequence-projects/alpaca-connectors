@@ -263,11 +263,13 @@ def _restore_runtime_row_backend():
 
 
 class FakeRecipes:
-    """``msm_portfolios.recipes`` (ms-markets ADR 0060) faked at the ``markets_api`` boundary.
+    """``msm_portfolios.recipes`` (ms-markets 4.2.0, ADR 0060) faked at the ``markets_api`` boundary.
 
-    Set an answer per recipe with ``answer(name, value_or_callable)``; every call is recorded in
-    ``calls`` as ``(name, kwargs)``. A recipe with no answer refuses to run, so a test never
-    reaches Markets by accident.
+    Each recipe of the real module is replaced by a fake with the real signature: a call the real
+    recipe would refuse for its arguments fails here too. Set an answer per recipe with
+    ``answer(name, value_or_callable)``, built with the real answer classes; every call is recorded
+    in ``calls`` as ``(name, arguments)``, its arguments bound by name. A recipe with no answer
+    refuses to run, so a test never reaches Markets by accident.
     """
 
     NAMES = (
@@ -281,24 +283,28 @@ class FakeRecipes:
         "delete_private_series",
     )
 
-    def __init__(self) -> None:
-        import types
+    def __init__(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        import msm_portfolios.recipes as module
 
         self.calls: list[tuple[str, dict]] = []
         self._answers: dict[str, object] = {}
-        self.module = types.ModuleType("msm_portfolios.recipes")
         for name in self.NAMES:
-            setattr(self.module, name, self._recipe(name))
+            monkeypatch.setattr(module, name, self._recipe(name, getattr(module, name)))
 
-    def _recipe(self, name: str) -> Callable[..., object]:
-        def call(**kwargs: object) -> object:
-            self.calls.append((name, kwargs))
+    def _recipe(self, name: str, real: Callable[..., object]) -> Callable[..., object]:
+        import inspect
+
+        signature = inspect.signature(real)
+
+        def call(*args: object, **kwargs: object) -> object:
+            bound = signature.bind(*args, **kwargs)
+            self.calls.append((name, dict(bound.arguments)))
             if name not in self._answers:
                 raise AssertionError(f"recipe {name} has no answer in this test")
             answer = self._answers[name]
             if isinstance(answer, BaseException):
                 raise answer
-            return answer(**kwargs) if callable(answer) else answer
+            return answer(*args, **kwargs) if callable(answer) else answer
 
         return call
 
@@ -309,8 +315,4 @@ class FakeRecipes:
 
 @pytest.fixture
 def recipes(monkeypatch: pytest.MonkeyPatch) -> FakeRecipes:
-    import sys
-
-    fake = FakeRecipes()
-    monkeypatch.setitem(sys.modules, "msm_portfolios.recipes", fake.module)
-    return fake
+    return FakeRecipes(monkeypatch)

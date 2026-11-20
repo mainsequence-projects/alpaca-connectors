@@ -241,7 +241,7 @@ def test_the_preflight_and_the_signal_delete_call_their_ms_markets_routes(recipe
         SimpleNamespace(uid="metadata-a", signal_uid="signal-a"),
         SimpleNamespace(uid="metadata-b", signal_uid="signal-b"),
     ]
-    recipes.answer("end_signal", lambda *, signal_uid: {"deleted": signal_uid})
+    recipes.answer("end_signal", lambda signal_uid: {"deleted": signal_uid})
     with (
         patch(
             "alpaca_connectors.runtime.use_markets_api", return_value=SimpleNamespace(client=client)

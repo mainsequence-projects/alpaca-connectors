@@ -62,7 +62,8 @@ class PortfolioExecutionResult:
     resolved: ResolvedPortfolioConfiguration
     portfolio_uid: str
     portfolio_unique_identifier: str
-    # Rows the run wrote per stage, as Markets answered (``markets_api.run_portfolio``).
+    # Rows the run published per series, ``weights`` and ``values``, as Markets answered
+    # (``markets_api.run_portfolio``). The recipe does not count the rows of the private stages.
     written: dict[str, int] = field(default_factory=dict)
     bars_update: dict[str, Any] = field(default_factory=dict)
     first_rebalance: dict[str, Any] = field(default_factory=dict)
@@ -79,9 +80,9 @@ class PortfolioExecutionResult:
             "portfolio_unique_identifier": self.portfolio_unique_identifier,
             "bars_update": dict(self.bars_update),
             "first_rebalance": dict(self.first_rebalance),
-            "interpolation": stage("prices"),
-            "calendar_events": stage("calendar_events"),
-            "rebalance": stage("rebalance"),
+            "interpolation": None,
+            "calendar_events": None,
+            "rebalance": None,
             "portfolio_weights": stage("weights"),
             "portfolio": stage("values"),
         }
@@ -528,9 +529,11 @@ def update_portfolio_bars(resolved: ResolvedPortfolioConfiguration) -> dict[str,
 def execute_portfolio_configuration(configuration_uid: Any) -> PortfolioExecutionResult:
     """Run a portfolio configuration with the ms-markets recipe ``run_portfolio`` (ADR 0031).
 
-    Its bars first (issue #39), then the run: Markets runs prices, calendar events, rebalance,
-    weights and values in order, from the signal's first observation and scoped to its one
-    signal, creates or updates the `Portfolio` and publishes the weights and values. Nothing is
+    Its bars first (issue #39), then the run: ms-markets runs the calendar events (for
+    ``calendar_event_signal``), the rebalance state into this application's private table, the
+    executed weights and the interpolated prices, then the values, from the signal's first
+    observation and reading only its one signal; the `Portfolio` row is the configuration's
+    ``ALPACA_PORTFOLIO__<hex>``, and the weights and values are published to Markets. Nothing is
     registered or reconciled. The calls that give the portfolio weights remain the signal
     producer; this run publishes no signal observation.
     """
@@ -546,15 +549,13 @@ def execute_portfolio_configuration(configuration_uid: Any) -> PortfolioExecutio
     plan = build_portfolio_run(resolved)
     # The rebalance reads the events up to its own start, which is after this time.
     rebalanced_through = dt.datetime.now(dt.UTC)
+    # ms-markets starts a first run at the signal's first observation (its portfolio_preflight),
+    # the same time as ``resolved.signal_start_time``, which the calendar events start at too.
     answer = run_portfolio(
-        portfolio_configuration=plan.portfolio_configuration,
-        portfolio_description=plan.portfolio_description,
+        plan.portfolio_configuration,
         unique_identifier=plan.unique_identifier,
         calendar_uid=plan.calendar_uid,
-        signal_uid=resolved.signal_uid,
-        # An observation-time signal cannot support a portfolio before its first observation.
-        start_at=resolved.signal_start_time,
-        calendar_events=plan.calendar_events,
+        portfolio_description=plan.portfolio_description,
         rebalance_output_table=AlpacaPortfolioRebalanceStateStorage,
     )
     portfolio_uid = answer.portfolio_uid

@@ -4,7 +4,9 @@ import datetime as dt
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import pandas as pd
 import pytest
+from msm_portfolios.recipes import PortfolioHistory
 
 from alpaca_connectors.portfolios.portfolio_history import (
     PortfolioValueObservation,
@@ -52,23 +54,22 @@ def test_portfolio_history_reads_markets_metadata_and_its_published_values(recip
     older = dt.datetime(2026, 9, 3, 20, tzinfo=dt.UTC)
     newer = dt.datetime(2026, 9, 4, 20, tzinfo=dt.UTC)
     # Markets answers the latest values newest first, with the count of all of them.
-    rows = [
+    values = pd.DataFrame(
         {
-            "time_index": newer,
-            "close": 102.5,
-            "return": 0.025,
-            "calculated_close": 102.5,
-            "close_time": newer,
-        },
-        {
-            "time_index": older,
-            "close": 100.0,
-            "return": 0.0,
-            "calculated_close": 100.0,
-            "close_time": older,
-        },
-    ]
-    recipes.answer("portfolio_history", SimpleNamespace(rows=rows, total_count=7))
+            "time_index": [newer, older],
+            "portfolio_identifier": ["ALPACA_PORTFOLIO__ABC"] * 2,
+            "close": [102.5, 100.0],
+            "return": [0.025, 0.0],
+            "calculated_close": [102.5, 100.0],
+            "close_time": [newer, older],
+        }
+    ).set_index(["time_index", "portfolio_identifier"])
+    recipes.answer(
+        "portfolio_history",
+        PortfolioHistory(
+            portfolio_identifier="ALPACA_PORTFOLIO__ABC", count=7, values=values, next_offset=2
+        ),
+    )
     portfolio_patch, calendar_patch, metadata_patch = _markets_rows()
 
     with (
@@ -104,7 +105,15 @@ def test_portfolio_history_reads_markets_metadata_and_its_published_values(recip
 
 
 def test_a_portfolio_without_values_keeps_its_metadata(recipes) -> None:
-    recipes.answer("portfolio_history", {"rows": [], "total_count": 0})
+    recipes.answer(
+        "portfolio_history",
+        PortfolioHistory(
+            portfolio_identifier="ALPACA_PORTFOLIO__ABC",
+            count=0,
+            values=pd.DataFrame(),
+            next_offset=None,
+        ),
+    )
     portfolio_patch, calendar_patch, metadata_patch = _markets_rows()
     with (
         patch("alpaca_connectors.runtime.start_markets_engine"),

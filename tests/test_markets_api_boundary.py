@@ -386,9 +386,8 @@ def test_the_signal_publishes_to_markets_and_the_ledger_to_own_instances(monkeyp
 
 
 # Markets table classes may appear only where this application declares a foreign key to a
-# Markets registry (`X.__table__.fullname` inside ForeignKey(...)), in migration metadata, as a
-# contract handed to an ms-markets instance factory, or as the core table of an ms-markets
-# `TableSeriesMove` (the history move, which reads and writes through MetaTables).
+# Markets registry (`X.__table__.fullname` inside ForeignKey(...)), in migration metadata, or as a
+# contract handed to an ms-markets instance factory.
 _MARKETS_TABLE_MODULES = re.compile(
     r"^(msm\.models(\..*)?|msm\.time_index\..*storage|msm_portfolios\.models(\..*)?"
     r"|msm_portfolios\.time_index\..*storage)$"
@@ -411,7 +410,6 @@ _EXEMPT = {
     "instances.py",
     "portfolios/interpolated_prices_schema.py",
 }
-_SERIES_MOVE_ONLY = {"operations/instance_backfill.py"}
 
 
 def test_no_module_builds_a_statement_on_a_markets_table() -> None:
@@ -433,24 +431,12 @@ def test_no_module_builds_a_statement_on_a_markets_table() -> None:
         }
         if not imported or relative in _EXEMPT:
             continue
-        if relative not in _FOREIGN_KEY_ONLY | _SERIES_MOVE_ONLY:
+        if relative not in _FOREIGN_KEY_ONLY:
             violations.append(f"{relative} imports {sorted(imported)}")
             continue
         parents = {child: node for node in ast.walk(tree) for child in ast.iter_child_nodes(node)}
-
-        def inside_series_move(node: ast.AST) -> bool:
-            while node in parents:
-                node = parents[node]
-                if isinstance(node, ast.Call) and getattr(node.func, "id", "") == "TableSeriesMove":
-                    return True
-            return False
-
         for node in ast.walk(tree):
             if not (isinstance(node, ast.Name) and node.id in imported):
-                continue
-            if relative in _SERIES_MOVE_ONLY:
-                if not inside_series_move(node):
-                    violations.append(f"{relative}:{node.lineno} uses {node.id}")
                 continue
             parent = parents.get(node)
             grandparent = parents.get(parent)
@@ -480,10 +466,6 @@ def test_markets_registries_are_reached_only_through_row_calls() -> None:
         "delete_model",
         "update_model",
         "upsert_model",
-        # The shared history moves, which copy through MetaTables and catalog through the API.
-        "PortfolioSeriesMove",
-        "PortfolioSeriesTables",
-        "SignalSeriesMove",
     }
     violations = []
     for path in sorted(root.rglob("*.py")):

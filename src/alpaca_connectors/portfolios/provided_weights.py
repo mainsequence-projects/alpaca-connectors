@@ -301,6 +301,13 @@ def publish_provided_weights(
     return publish_definition_weights(definition, observations)
 
 
+def _last_observed_at(signal_uid: str) -> dt.datetime | None:
+    """The signal's last published observation time, read from Markets (``signal_history``)."""
+    from alpaca_connectors.portfolios.signal_observations import read_signal_observation_bounds
+
+    return read_signal_observation_bounds(signal_uid=signal_uid).last_observation_at
+
+
 def _publish_validated(
     signal_key: str,
     normalized: Mapping[dt.datetime, Mapping[str, float]],
@@ -312,37 +319,46 @@ def _publish_validated(
 ) -> PublishedWeights:
     """Publish observations whose shape and assets were already validated.
 
-    Record the assets (ADR 0024 decision 5), then publish with the ms-markets recipe
-    ``publish_signal_weights`` (ADR 0031, decision 4). Markets creates the signal's
-    ``SignalMetadata`` on its first publication, writes an asset dropped since the last
-    observation at 0 and refuses an observation at or before the last stored one; it writes
-    nothing when it refuses, and nothing is registered or bound. Its refusals are answered in this
-    application's words: which one is a time conflict is decided by Markets' status, not the
-    wording of its message.
+    Refuse an observation at or before the signal's last published one, record the assets
+    (ADR 0024 decision 5), then publish with the ms-markets recipe ``publish_signal_weights``
+    (ADR 0031, decision 4), which creates the signal's ``SignalMetadata`` on its first
+    publication and writes an asset dropped since the last observation at 0. Nothing is
+    registered or bound.
+
+    The not-after-last rule is checked here first, with one Markets read: the recipe refuses an
+    earlier observation only when it differs from what is stored, and silently skips one equal
+    to it, while this application refuses both (``409 observation_not_after_last``). The recipe
+    refuses every other bad observation with the same exception type, so which refusal is a
+    time conflict (another call published first) is decided from the stored last time, never
+    from the wording of Markets' message.
 
     ``new_signal`` is the create's: its signal's key comes from the configuration UID that call
-    made, so it has no recorded asset, which is not read (issue #46).
+    made, so it has no observation and no recorded asset, and neither is read (issue #46).
     """
     from alpaca_connectors.markets_api import SignalWeightsRefused, publish_signal_weights
     from alpaca_connectors.portfolios.signal_assets import record_signal_assets
 
     signal_uid = signal_uid_for_key(signal_key)
+    first_time = next(iter(normalized))
+    last_stored = None if new_signal else _last_observed_at(signal_uid)
+    if last_stored is not None and first_time <= last_stored:
+        raise _not_after_last()
     # First, so the recorded assets stay a superset of the published ones (ADR 0024).
     record_signal_assets(signal_uid, assets, new_signal=new_signal)
     try:
+        # The signal's own description, or on its first publication the connector's words for
+        # it, as the signal's metadata described it before (ADR 0024).
         publish_signal_weights(
-            signal_uid,
-            normalized,
-            signal_description=metadata_description,
-            description=description,
+            signal_uid, normalized, description=description or metadata_description
         )
     except SignalWeightsRefused as exc:
-        if exc.reason == "not_after_last":
-            raise _not_after_last() from exc
         if exc.reason == "unknown_asset":
             raise ProvidedWeightsError(
                 "unknown_asset", "An asset identifier is not a registered Main Sequence asset."
             ) from exc
+        last_stored = None if new_signal else _last_observed_at(signal_uid)
+        if last_stored is not None and first_time <= last_stored:
+            raise _not_after_last() from exc
         raise _invalid(
             "The observations were refused: an empty set with nothing to close, or a value the "
             "signal cannot store."

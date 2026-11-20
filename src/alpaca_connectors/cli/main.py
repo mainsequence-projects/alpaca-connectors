@@ -48,8 +48,6 @@ from .holdings import (
 from .holdings import (
     configure_list_parser as configure_holdings_list_parser,
 )
-from .instances import configure_backfill_parser as configure_instances_backfill_parser
-from .instances import configure_rollback_parser as configure_instances_rollback_parser
 from .portfolios import (
     configure_action_parser as configure_portfolio_action_parser,
 )
@@ -156,24 +154,6 @@ def build_parser() -> argparse.ArgumentParser:
         account_commands.add_parser(
             "backfill-listing-fields",
             help="One-time: copy account names and active flags onto the account details rows.",
-        )
-    )
-
-    instances_parser = top_level.add_parser(
-        "instances",
-        help="This application's instances of the Markets time series (ms-markets ADR 0047).",
-    )
-    instances_commands = instances_parser.add_subparsers(dest="instances_command")
-    configure_instances_backfill_parser(
-        instances_commands.add_parser(
-            "backfill",
-            help="One-time: move this application's history from the shared Markets time series.",
-        )
-    )
-    configure_instances_rollback_parser(
-        instances_commands.add_parser(
-            "rollback",
-            help="Undo the backfill: copy the instances' rows back and unregister them.",
         )
     )
 

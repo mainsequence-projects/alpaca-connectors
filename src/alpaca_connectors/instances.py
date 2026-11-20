@@ -1,20 +1,15 @@
-"""This application's instances of the Markets time-series contracts (ms-markets ADR 0047).
+"""This application's private instances of Markets time-series contracts (ms-markets ADR 0047).
 
 Each class below is a contract-identical instance built by an ms-markets factory, named
 ``alpaca_connectors__<contract>__main``, identified as ``alpaca-connectors.<Contract>.main`` and
 migrated by this application's own Alembic provider in its ``alpaca-connectors`` namespace.
 
-Private, and never read by Markets (ADR 0031, decision 2): rebalance state and calendar events,
-which a portfolio run writes (``private_portfolio_models``), and orders and trades, which the
-execution ledger writes. Interpolated prices are dynamic (one table per bars source);
-``configured_alpaca_interpolated_prices_storage`` places them in this namespace the same way.
-
-Retired (ADR 0031, decision 1): signal weights, portfolio weights and portfolio values are
-Markets' own published series, and nothing here writes or reads ``AlpacaSignalWeightsStorage``,
-``AlpacaPortfolioWeightsStorage`` or ``AlpacaPortfoliosStorage`` any more. They stay in the
-migration metadata, with their rows, until a later revision drops them once their history is
-published to Markets (revisions add first and drop later; ADR 0031, Rollout step 8), and
-``instances backfill|rollback`` goes with them.
+They are private, and Markets never reads them (ADR 0031, decision 2): rebalance state and
+calendar events, which a portfolio run writes (``private_portfolio_models``), and orders and
+trades, which the execution ledger writes. Interpolated prices are dynamic (one table per bars
+source); ``configured_alpaca_interpolated_prices_storage`` places them in this namespace the same
+way. Signal weights, portfolio weights and portfolio values are Markets' own published series
+(ADR 0031, decision 1); revision 0033 dropped this application's tables of them.
 """
 
 from __future__ import annotations
@@ -50,15 +45,9 @@ def _build() -> dict[str, type[Any]]:
     from msm_portfolios.time_index.contract_instances import (
         configured_portfolio_calendar_events_storage,
         configured_portfolio_rebalance_state_storage,
-        configured_portfolio_weights_storage,
-        configured_portfolios_storage,
-        configured_signal_weights_storage,
     )
 
     return {
-        "signal_weights": configured_signal_weights_storage(**_instance_kwargs()),
-        "portfolios": configured_portfolios_storage(**_instance_kwargs()),
-        "portfolio_weights": configured_portfolio_weights_storage(**_instance_kwargs()),
         "portfolio_rebalance_state": configured_portfolio_rebalance_state_storage(
             **_instance_kwargs()
         ),
@@ -72,9 +61,6 @@ def _build() -> dict[str, type[Any]]:
 
 _INSTANCES = _build()
 
-AlpacaSignalWeightsStorage = _INSTANCES["signal_weights"]
-AlpacaPortfoliosStorage = _INSTANCES["portfolios"]
-AlpacaPortfolioWeightsStorage = _INSTANCES["portfolio_weights"]
 AlpacaPortfolioRebalanceStateStorage = _INSTANCES["portfolio_rebalance_state"]
 AlpacaPortfolioCalendarEventsStorage = _INSTANCES["portfolio_calendar_events"]
 AlpacaOrdersStorage = _INSTANCES["orders"]
@@ -90,7 +76,7 @@ def interpolated_prices_storage_kwargs() -> dict[str, Any]:
 
 
 def project_instance_models() -> list[type[Any]]:
-    """Every contract instance this application migrates, the three retired ones included."""
+    """Every contract instance this application migrates, registers and attaches."""
     return list(_INSTANCES.values())
 
 
@@ -110,9 +96,6 @@ __all__ = [
     "AlpacaOrdersStorage",
     "AlpacaPortfolioCalendarEventsStorage",
     "AlpacaPortfolioRebalanceStateStorage",
-    "AlpacaPortfolioWeightsStorage",
-    "AlpacaPortfoliosStorage",
-    "AlpacaSignalWeightsStorage",
     "AlpacaTradesStorage",
     "execution_instance_models",
     "interpolated_prices_storage_kwargs",

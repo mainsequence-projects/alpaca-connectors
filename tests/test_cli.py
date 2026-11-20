@@ -168,7 +168,7 @@ class CliTests(unittest.TestCase):
         )
         self.assertEqual(
             set(top_level),
-            {"asset", "market-data", "account", "instances", "holdings", "portfolio"},
+            {"asset", "market-data", "account", "holdings", "portfolio"},
         )
         portfolio_commands = next(
             action.choices

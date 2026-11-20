@@ -319,27 +319,25 @@ def delete_portfolio(portfolio_uid: Any) -> dict[str, Any]:
 
 
 # ------------------------------------------------------------------------------------------------
-# Published series (ADR 0031, ms-markets ADR 0060)
+# Published series (ADR 0031, ms-markets ADR 0060, ms-markets 4.2.0)
 #
 # Signal weights, portfolio weights and portfolio values are Markets' own rows: this application
-# publishes them and reads them back through the ms-markets recipes (``msm_portfolios.recipes``),
-# never through a table of its own. Every recipe is imported here, inside the function that calls
-# it, and every answer is translated here into this module's shapes, so a signature or an answer
-# that differs from what a docstring assumes changes this module only. Each docstring states what
-# this application needs from its recipe: the arguments, the answer and the refusals.
+# publishes them and reads them back through the recipes of ``msm_portfolios.recipes``, never
+# through a table of its own. Each recipe is imported here, inside the function that calls it,
+# and each answer is translated here into this module's shapes, so a change of a recipe's
+# signature or answer changes this module only. Each docstring names the call, its answer and its
+# refusals, and how they become this application's answers.
 # ------------------------------------------------------------------------------------------------
 
 
-def _get(row: Any, name: str, default: Any = None) -> Any:
-    if isinstance(row, Mapping):
-        return row.get(name, default)
-    return getattr(row, name, default)
-
-
 def _utc(value: Any) -> dt.datetime | None:
-    """A timezone-aware time in UTC, or None. A naive time is refused: Markets sends UTC."""
-    if value is None:
+    """A timezone-aware time in UTC, or None for a missing one (``None``, ``NaT``)."""
+    import pandas as pd
+
+    if value is None or value is pd.NaT:
         return None
+    if isinstance(value, pd.Timestamp):
+        value = value.to_pydatetime()
     if not isinstance(value, dt.datetime):
         text = str(value).strip()
         if not text:
@@ -350,13 +348,25 @@ def _utc(value: Any) -> dt.datetime | None:
     return value.astimezone(dt.UTC)
 
 
+def _number(value: Any) -> float | None:
+    """A float, or None for a missing one (``None``, ``NaN``)."""
+    import math
+
+    if value is None:
+        return None
+    number = float(value)
+    return None if math.isnan(number) else number
+
+
 class SignalWeightsRefused(Exception):
     """Markets refused a publication of signal weights; nothing was written.
 
-    ``reason`` is ``not_after_last`` (an observation at or before the signal's last stored one,
-    or a different row for a stored time), ``unknown_asset`` (an asset Markets has not
-    registered) or ``invalid`` (any other value the series cannot store). The caller answers it
-    in its own words; Markets' message, which can quote values, is kept only as the cause.
+    ``reason`` is ``unknown_asset`` (an asset Markets has not registered) or ``refused`` (any
+    other refusal of the observations: a time at or before the signal's last stored one, a
+    different row at a stored time, a value the series cannot store). ms-markets refuses all of
+    those with ``ValueError`` (or ``TypeError``), so the caller tells a time conflict apart by
+    the signal's stored last time, never by the wording. Markets' message, which can quote
+    values, is kept only as the cause.
     """
 
     def __init__(self, reason: str) -> None:
@@ -368,50 +378,38 @@ def publish_signal_weights(
     signal_uid: str,
     observations: Mapping[dt.datetime, Mapping[str, float]],
     *,
-    signal_description: str,
     description: str | None,
 ) -> None:
-    """Publish one or more observations of one signal (recipe ``publish_signal_weights``).
+    """Publish one or more observations of one signal (``recipes.publish_signal_weights``).
 
-    Assumed call: ``publish_signal_weights(signal_uid=str, observations={UTC datetime:
-    {asset_identifier: weight}}, signal_description=str, description=str | None)``. The
-    observations are validated here first: timezone-aware UTC times, oldest first, finite
-    weights, registered Alpaca assets. Markets creates the signal's ``SignalMetadata`` with
-    ``signal_description`` on its first publication (recording this application as its manager,
-    ms-markets ADR 0060 decision 4), writes an asset dropped since the last observation at 0,
-    refuses an observation at or before the last stored one, and writes nothing when it refuses.
-    Repeating a publication writes nothing.
+    Calls ``publish_signal_weights(signal_uid, {UTC datetime: {asset_identifier: weight}},
+    description=description)``. Markets creates the signal's ``SignalMetadata`` with
+    ``description`` on its first publication (its manager is the caller, ms-markets ADR 0060
+    decision 4) and updates the description when it differs, writes an asset dropped since the
+    last observation at 0, and refuses the whole call, writing nothing, for an observation at or
+    before the last stored one that differs from it. Its ``SignalPublication`` answer is not
+    read: the caller answers what it validated and sent.
 
-    Its answer (the count, the assets and the first and last time) is not read: the caller
-    answers what it validated and sent, which is what Markets wrote.
-
-    Refusals, raised as ``SignalWeightsRefused`` with Markets' error as the cause:
-
-    - ``MarketsConflictError`` (409): ``not_after_last``, answered ``409
-      observation_not_after_last``. The status decides, never the wording.
-    - ``LookupError`` (404): ``unknown_asset``, answered ``422 unknown_asset``.
-    - ``ValueError`` or ``TypeError`` (400, 422): ``invalid``, answered ``422
-      invalid_observation``.
-
-    Any other error (``MarketsAccessError`` when Markets does not record this application as the
-    signal's manager, an unavailable Markets API) propagates unchanged.
+    Refusals: ``LookupError`` (an unknown asset, ``services/series.py``
+    ``_require_registered_assets``) is ``SignalWeightsRefused("unknown_asset")``; ``ValueError``
+    and ``TypeError`` (``MarketsConflictError`` included) are ``SignalWeightsRefused("refused")``.
+    ``PermissionError`` (``MarketsAccessError``: this application is not the signal's manager)
+    and any other error propagate unchanged.
     """
-    from msm.api.remote import MarketsConflictError
     from msm_portfolios.recipes import publish_signal_weights as recipe
 
     try:
         recipe(
-            signal_uid=str(signal_uid),
-            observations={time: dict(weights) for time, weights in observations.items()},
-            signal_description=signal_description,
+            str(signal_uid),
+            {time: dict(weights) for time, weights in observations.items()},
             description=description,
         )
-    except MarketsConflictError as exc:
-        raise SignalWeightsRefused("not_after_last") from exc
+    except PermissionError:
+        raise
     except LookupError as exc:
         raise SignalWeightsRefused("unknown_asset") from exc
     except (TypeError, ValueError) as exc:
-        raise SignalWeightsRefused("invalid") from exc
+        raise SignalWeightsRefused("refused") from exc
 
 
 @dataclass(frozen=True, slots=True)
@@ -424,13 +422,12 @@ class SignalObservationBounds:
 
 
 def signal_bounds(signal_uids: Iterable[str]) -> dict[str, SignalObservationBounds]:
-    """First and last observation of several signals (recipe ``signal_history``).
+    """First and last observation of several signals (``recipes.signal_history``).
 
-    Assumed call: ``signal_history(signal_uids=[str, ...])``, once per ``MARKETS_BATCH_SIZE``
-    signals. Assumed answer: a mapping of ``signal_uid`` to an item with
-    ``first_observation_at`` and ``last_observation_at``; a signal with no observation is absent
-    or has both None. Every signal asked for is answered here, with no bounds when Markets has
-    none. Refusals propagate.
+    Calls ``signal_history(batch)`` once per ``MARKETS_BATCH_SIZE`` signals; its answer's
+    ``bounds`` maps each signal to a ``SeriesBounds`` (``first_time``, ``last_time``,
+    ``row_count``). Every signal asked for is answered, with no bounds when Markets has none.
+    Refusals propagate.
     """
     from msm_portfolios.recipes import signal_history
 
@@ -440,16 +437,13 @@ def signal_bounds(signal_uids: Iterable[str]) -> dict[str, SignalObservationBoun
         for uid in values
     }
     for batch in batches(values):
-        answer = signal_history(signal_uids=batch) or {}
-        for uid in batch:
-            item = answer.get(uid)
-            if item is None:
-                continue
-            bounds[uid] = SignalObservationBounds(
-                signal_uid=uid,
-                first_observation_at=_utc(_get(item, "first_observation_at")),
-                last_observation_at=_utc(_get(item, "last_observation_at")),
-            )
+        for uid, item in signal_history(batch).bounds.items():
+            if str(uid) in bounds:
+                bounds[str(uid)] = SignalObservationBounds(
+                    signal_uid=str(uid),
+                    first_observation_at=_utc(item.first_time),
+                    last_observation_at=_utc(item.last_time),
+                )
     return bounds
 
 
@@ -465,33 +459,27 @@ class LatestSignalObservations:
 def latest_signal_observations(signal_uid: str, *, limit: int) -> LatestSignalObservations:
     """The latest ``limit`` observations of one signal, every asset of each (``signal_history``).
 
-    Assumed call: ``signal_history(signal_uids=[signal_uid], latest=limit)``. An observation is
-    one distinct time and is never cut short by its number of assets. Assumed answer:
-    ``answer[signal_uid].matrix``, a pandas ``DataFrame`` with one row per observation time
-    (timezone-aware, any order) and one column per asset identifier. A weight missing at a time
-    (an asset before its first observation) is NaN and is answered here as 0, as an asset the
-    signal leaves out is held at zero. No matrix, or an absent signal, is no observation.
-    Refusals propagate.
+    Calls ``signal_history([signal_uid], latest=limit)``; its answer's ``latest[signal_uid]`` is a
+    time (rows, UTC) by asset (columns) ``DataFrame``, oldest first, empty when the signal has
+    no observation. An observation is one distinct time and is never cut short by its number of
+    assets. A weight missing at a time (an asset before its first observation) is NaN and is
+    answered here as 0, as an asset the signal leaves out is held at zero. Refusals propagate.
     """
-    import math
-
     from msm_portfolios.recipes import signal_history
 
     uid = str(signal_uid)
-    item = (signal_history(signal_uids=[uid], latest=int(limit)) or {}).get(uid)
-    matrix = _get(item, "matrix") if item is not None else None
-    if matrix is None or len(matrix.index) == 0:
+    frame = signal_history([uid], latest=int(limit)).latest.get(uid)
+    if frame is None or frame.empty:
         return LatestSignalObservations(signal_uid=uid, time_indexes=(), weights={})
-    frame = matrix.sort_index()
-    time_indexes = tuple(_utc(value.to_pydatetime()) for value in frame.index)
-    weights: dict[str, tuple[float, ...]] = {}
-    for column in frame.columns:
-        values = []
-        for value in frame[column].tolist():
-            number = math.nan if value is None else float(value)
-            values.append(0.0 if math.isnan(number) else number)
-        weights[str(column)] = tuple(values)
-    return LatestSignalObservations(signal_uid=uid, time_indexes=time_indexes, weights=weights)
+    frame = frame.sort_index()
+    return LatestSignalObservations(
+        signal_uid=uid,
+        time_indexes=tuple(_utc(value) for value in frame.index),
+        weights={
+            str(asset): tuple(_number(value) or 0.0 for value in frame[asset].tolist())
+            for asset in frame.columns
+        },
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -503,54 +491,55 @@ class PortfolioValuesPage:
 
 
 def portfolio_values(portfolio_identifier: str, *, limit: int) -> PortfolioValuesPage:
-    """A portfolio's latest ``limit`` values, newest first (recipe ``portfolio_history``).
+    """A portfolio's latest ``limit`` values, newest first (``recipes.portfolio_history``).
 
-    Assumed call: ``portfolio_history(portfolio_identifier=str, limit=int)``, by the
-    portfolio's ``unique_identifier``. Assumed answer: ``rows``, newest first, each with
-    ``time_index``, ``close``, ``return``, ``calculated_close`` and ``close_time``; and
-    ``total_count``, every value the portfolio has. Answered here as rows with ``period_return``
-    for ``return``. A portfolio with no value answers no row. Refusals propagate.
+    Calls ``portfolio_history(portfolio_identifier, limit=limit)``, by the portfolio's
+    ``unique_identifier``. Its answer's ``values`` is a ``DataFrame`` newest first, indexed by
+    ``time_index`` and ``portfolio_identifier``, with ``close``, ``return``,
+    ``calculated_close`` and ``close_time``; ``count`` is every value the portfolio has. Answered
+    here as rows with ``period_return`` for ``return`` and None for a missing value. Refusals
+    propagate.
     """
     from msm_portfolios.recipes import portfolio_history
 
-    answer = portfolio_history(portfolio_identifier=str(portfolio_identifier), limit=int(limit))
+    answer = portfolio_history(str(portfolio_identifier), limit=int(limit))
+    frame = answer.values.reset_index() if not answer.values.empty else None
     rows = [
         {
-            "time_index": _get(row, "time_index"),
-            "close": _get(row, "close"),
-            "period_return": _get(row, "return"),
-            "calculated_close": _get(row, "calculated_close"),
-            "close_time": _get(row, "close_time"),
+            "time_index": _utc(row.get("time_index")),
+            "close": _number(row.get("close")),
+            "period_return": _number(row.get("return")),
+            "calculated_close": _number(row.get("calculated_close")),
+            "close_time": _utc(row.get("close_time")),
         }
-        for row in (_get(answer, "rows") or [])
+        for row in ([] if frame is None else frame.to_dict(orient="records"))
     ]
-    return PortfolioValuesPage(rows=rows, total_count=int(_get(answer, "total_count") or 0))
+    return PortfolioValuesPage(rows=rows, total_count=int(answer.count or 0))
 
 
 def portfolio_weights_as_of(
     portfolio_identifiers: Iterable[str], *, at: dt.datetime
 ) -> dict[str, dict[str, float]]:
-    """Each portfolio's latest weights at or before ``at`` (recipe ``weights_as_of``).
+    """Each portfolio's latest weights at or before ``at`` (``recipes.weights_as_of``).
 
-    Assumed call: ``weights_as_of(portfolio_identifiers=[str, ...], at=datetime)``, once per
-    ``MARKETS_BATCH_SIZE`` portfolios, by ``unique_identifier``. Assumed answer: a mapping of
-    portfolio identifier to a mapping of asset identifier to weight; a portfolio with no weights
-    by then is absent or empty, and is absent here. A null weight is left out. Refusals
+    Calls ``weights_as_of(batch, at=at)`` once per ``MARKETS_BATCH_SIZE`` portfolios, by
+    ``unique_identifier``. Its answer is a ``DataFrame`` indexed by ``time_index``,
+    ``portfolio_identifier`` and ``asset_identifier`` with a ``weight`` column; a portfolio with
+    no weights by then has no rows and is absent here. A missing weight is left out. Refusals
     propagate.
     """
     from msm_portfolios.recipes import weights_as_of
 
     weights: dict[str, dict[str, float]] = {}
     for batch in batches(str(identifier) for identifier in portfolio_identifiers):
-        answer = weights_as_of(portfolio_identifiers=batch, at=at) or {}
-        for identifier, legs in answer.items():
-            values = {
-                str(asset): float(weight)
-                for asset, weight in (legs or {}).items()
-                if weight is not None
-            }
-            if values:
-                weights[str(identifier)] = values
+        frame = weights_as_of(batch, at=at)
+        if frame is None or frame.empty:
+            continue
+        for row in frame.reset_index().to_dict(orient="records"):
+            weight = _number(row.get("weight"))
+            if weight is not None:
+                legs = weights.setdefault(str(row["portfolio_identifier"]), {})
+                legs[str(row["asset_identifier"])] = weight
     return weights
 
 
@@ -560,101 +549,108 @@ class PortfolioRunAnswer:
 
     portfolio_uid: str
     portfolio_unique_identifier: str
-    # Rows written per stage: prices, calendar_events, rebalance, weights, values.
+    # Rows published per series: ``weights`` and ``values``.
     written: dict[str, int]
-    first_rebalance: bool | None
+    first_rebalance: bool
+
+
+class _ConfigurationPortfolio:
+    """The ``portfolio_resolver`` ``run_portfolio`` asks for the run's ``Portfolio`` row.
+
+    ms-markets calls ``get_or_create_from_configuration_hash`` with the configuration's hash
+    (``time_index/portfolio_identity.py``); this application's portfolio is identified by its
+    configuration UID, not by that hash, so the row is ``Portfolio.upsert`` of the given
+    ``unique_identifier`` on the given calendar, created when it does not exist.
+    """
+
+    def __init__(self, unique_identifier: str, calendar_uid: Any) -> None:
+        self.unique_identifier = unique_identifier
+        self.calendar_uid = calendar_uid
+
+    def get_or_create_from_configuration_hash(self, **_: Any) -> Any:
+        from msm.api.portfolios import Portfolio
+
+        return Portfolio.upsert(
+            unique_identifier=self.unique_identifier, calendar_uid=self.calendar_uid
+        )
 
 
 def run_portfolio(
-    *,
     portfolio_configuration: Any,
-    portfolio_description: str,
+    *,
     unique_identifier: str,
     calendar_uid: Any,
-    signal_uid: str,
-    start_at: dt.datetime,
-    calendar_events: Any,
+    portfolio_description: str,
     rebalance_output_table: Any,
 ) -> PortfolioRunAnswer:
-    """Run one portfolio's chain in order and publish it (recipe ``run_portfolio``).
+    """Run one portfolio's chain and publish it (``recipes.run_portfolio``).
 
-    Assumed call: ``run_portfolio(portfolio_configuration=PortfolioConfiguration,
-    portfolio_description=str, unique_identifier=str, calendar_uid=..., signal_uid=str,
-    start_at=datetime, calendar_events=PortfolioCalendarEvents | None,
-    rebalance_output_table=<private rebalance-state table>)``.
+    Calls ``run_portfolio(portfolio_configuration, rebalance_output_table=...,
+    portfolio_resolver=..., portfolio_description=...)``. ms-markets refuses, with
+    ``ValueError``, a portfolio its ``portfolio_preflight`` finds not ready; runs, in order, the
+    rebalance strategy's declared inputs (calendar events), the rebalance state (into this
+    application's private table), the executed weights and the valuation source (this
+    application's interpolated prices); publishes the weights and the values; starts a first run
+    at the signal's first observation; reads the signal's weights by its ``signal_uid`` only; and
+    records the signal on the ``Portfolio`` row. The row itself is this application's
+    ``unique_identifier`` on ``calendar_uid`` (``_ConfigurationPortfolio``).
 
-    This application supplies what is its own: the ms-markets ``PortfolioConfiguration`` it
-    built (its interpolated prices as the valuation source, the rebalance strategy, the
-    ``ApplicationWeights`` signal, valuation and fees), the calendar-events node bound to its
-    private table (``None`` for ``immediate_signal``), its private rebalance-state table, the
-    ``ALPACA_PORTFOLIO__<hex>`` identifier and the calendar. Markets runs, in order, prices,
-    calendar events, rebalance, weights and values, scoped to ``signal_uid`` and starting at
-    ``start_at`` (the signal's first observation); creates or updates the ``Portfolio`` row of
-    ``unique_identifier`` on ``calendar_uid``; publishes the weights and values to its own
-    series; and continues a stopped run from what it holds. Nothing is registered or reconciled.
-
-    Assumed answer: ``portfolio`` (the row, with ``uid`` and ``unique_identifier``), ``written``
-    (rows per stage: ``prices``, ``calendar_events``, ``rebalance``, ``weights``, ``values``) and
-    ``first_rebalance`` (whether a first rebalance has happened). A stage that fails raises, and
-    the error propagates.
+    Its ``PortfolioRun`` answer gives the ``portfolio`` row, the ``SeriesPublication`` of the
+    weights and of the values (None when nothing was new) and ``first_rebalance`` (this run made
+    the first). Refusals propagate.
     """
     from msm_portfolios.recipes import run_portfolio as recipe
 
     answer = recipe(
-        portfolio_configuration=portfolio_configuration,
-        portfolio_description=portfolio_description,
-        unique_identifier=unique_identifier,
-        calendar_uid=calendar_uid,
-        signal_uid=str(signal_uid),
-        start_at=start_at,
-        calendar_events=calendar_events,
+        portfolio_configuration,
         rebalance_output_table=rebalance_output_table,
+        portfolio_resolver=_ConfigurationPortfolio(unique_identifier, calendar_uid),
+        portfolio_description=portfolio_description,
     )
-    portfolio = _get(answer, "portfolio")
-    first_rebalance = _get(answer, "first_rebalance")
-    written = _get(answer, "written") or {}
     return PortfolioRunAnswer(
-        portfolio_uid=str(_get(portfolio, "uid")),
-        portfolio_unique_identifier=str(_get(portfolio, "unique_identifier") or unique_identifier),
-        written={str(stage): int(rows or 0) for stage, rows in written.items()},
-        first_rebalance=None if first_rebalance is None else bool(first_rebalance),
+        portfolio_uid=str(answer.portfolio.uid),
+        portfolio_unique_identifier=str(answer.portfolio.unique_identifier or unique_identifier),
+        written={
+            "weights": 0 if answer.weights is None else int(answer.weights.written),
+            "values": 0 if answer.values is None else int(answer.values.written),
+        },
+        first_rebalance=bool(answer.first_rebalance),
     )
 
 
 def end_signals(signal_uids: Iterable[str]) -> dict[str, Any]:
-    """Delete signals' weights and metadata in Markets (recipe ``end_signal``).
+    """Delete signals' weights and metadata in Markets (``recipes.end_signal``).
 
     Their ``SignalMetadata`` rows are read in one ``filter`` per batch (issue #46), so a signal
-    Markets never registered (nothing was ever published to it) costs no call. Assumed call, once
-    per registered signal: ``end_signal(signal_uid=str)``, which deletes the signal's weights and
-    its ``SignalMetadata`` in one Markets call. Markets refuses with ``MarketsConflictError``
-    while a ``Portfolio`` follows the signal; the refusal propagates. Answers each registered
-    signal's result.
+    Markets never registered (nothing was ever published to it) costs no call. Then
+    ``end_signal(signal_uid)`` once per registered signal, which deletes its weights and its
+    ``SignalMetadata`` in one Markets call. Markets refuses while a ``Portfolio`` names the
+    signal, and only the signal's manager may end it; refusals propagate. Answers each
+    registered signal's result.
     """
-    from msm_portfolios.api.market_metadata import SignalMetadata
+    from msm_portfolios.api import SignalMetadata
     from msm_portfolios.recipes import end_signal
 
     values = list(dict.fromkeys(str(uid) for uid in signal_uids))
     rows = read_in_batches(
         lambda batch: SignalMetadata.filter(signal_uid__in=batch, limit=len(batch)), values
     )
-    return {str(row.signal_uid): end_signal(signal_uid=str(row.signal_uid)) for row in rows}
+    return {str(row.signal_uid): end_signal(str(row.signal_uid)) for row in rows}
 
 
 def delete_private_series(*, tables: Sequence[Any], portfolio_identifiers: Iterable[str]) -> None:
-    """Delete this application's private rows of portfolios (recipe ``delete_private_series``).
+    """Delete this application's private rows of portfolios (``recipes.delete_private_series``).
 
-    Assumed call: ``delete_private_series(tables=[<private table>, ...],
-    portfolio_identifiers=[str, ...])``, once per ``MARKETS_BATCH_SIZE`` portfolios. ms-markets
-    deletes the rows of each given table whose ``portfolio_identifier`` is one of them, in the
-    order their keys demand, with this process's own access: the tables are this application's,
-    and Markets never reads them. It runs before the ``Portfolio`` rows are deleted, which those
-    rows' ``RESTRICT`` keys would refuse. Refusals propagate.
+    Calls ``delete_private_series(tables, portfolios=batch)`` once per ``MARKETS_BATCH_SIZE``
+    portfolios. ms-markets deletes, in one transaction per call and on this process's own runtime
+    (never the Markets API), the rows of each table whose ``portfolio_identifier`` is one of
+    them, a table before the tables it references. It runs before the ``Portfolio`` rows are
+    deleted, which those rows' ``RESTRICT`` keys would refuse. Refusals propagate.
     """
     from msm_portfolios.recipes import delete_private_series as recipe
 
     for batch in batches(str(identifier) for identifier in portfolio_identifiers):
-        recipe(tables=list(tables), portfolio_identifiers=batch)
+        recipe(list(tables), portfolios=batch)
 
 
 __all__ = [

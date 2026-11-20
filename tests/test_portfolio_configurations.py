@@ -6,6 +6,8 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 import pytest
+from msm_portfolios.recipes import PortfolioRun
+from msm_portfolios.services.series import SeriesPublication
 
 from alpaca_connectors.portfolios import configurations, execution
 from alpaca_connectors.portfolios.configurations import (
@@ -430,14 +432,25 @@ def test_execution_runs_the_portfolio_with_the_recipe_and_registers_nothing(reci
         calendar_uid="calendar-uid",
     )
     order = Mock()
-    answer = SimpleNamespace(
-        portfolio=SimpleNamespace(uid=PORTFOLIO_UID, unique_identifier=plan.unique_identifier),
-        written={"prices": 4, "calendar_events": 2, "rebalance": 1, "weights": 2, "values": 3},
+    portfolio_row = SimpleNamespace(uid=PORTFOLIO_UID, unique_identifier=plan.unique_identifier)
+    answer = PortfolioRun(
+        portfolio=portfolio_row,
+        weights=SeriesPublication(key=plan.unique_identifier, written=2, skipped=0),
+        values=SeriesPublication(key=plan.unique_identifier, written=3, skipped=0),
         first_rebalance=True,
     )
+    resolved_rows = []
 
-    def run(**kwargs):
+    def run(portfolio_configuration, *, portfolio_resolver=None, **kwargs):
         order.run()
+        # The run asks this application for its Portfolio row.
+        resolved_rows.append(
+            portfolio_resolver.get_or_create_from_configuration_hash(
+                portfolio_configuration_hash="hash",
+                portfolio_configuration=portfolio_configuration,
+                timeout=None,
+            )
+        )
         return answer
 
     recipes.answer("run_portfolio", run)
@@ -463,6 +476,7 @@ def test_execution_runs_the_portfolio_with_the_recipe_and_registers_nothing(reci
             "alpaca_connectors.portfolios.execution.first_rebalance_state",
             return_value={"rebalanced": True, "first_rebalance_at": "2026-11-18T21:00:00+00:00"},
         ) as first_rebalance,
+        patch("msm.api.portfolios.Portfolio.upsert", return_value=portfolio_row) as upsert,
     ):
         result = execute_portfolio_configuration(CONFIGURATION_UID)
 
@@ -474,23 +488,18 @@ def test_execution_runs_the_portfolio_with_the_recipe_and_registers_nothing(reci
     start_engine.assert_called_once_with()
     bars_update.assert_called_once_with(resolved)
     assert [name for name, *_ in order.mock_calls] == ["bars", "plan", "run"]
-    # Scoped to its one signal, from the signal's first observation, with this application's
-    # private rebalance-state table; Markets creates or updates the Portfolio and publishes.
-    assert recipes.calls == [
-        (
-            "run_portfolio",
-            {
-                "portfolio_configuration": plan.portfolio_configuration,
-                "portfolio_description": plan.portfolio_description,
-                "unique_identifier": plan.unique_identifier,
-                "calendar_uid": "calendar-uid",
-                "signal_uid": "signal-uid",
-                "start_at": resolved.signal_start_time,
-                "calendar_events": plan.calendar_events,
-                "rebalance_output_table": AlpacaPortfolioRebalanceStateStorage,
-            },
-        )
-    ]
+    # The configuration this application built (its prices, calendar events and signal), its
+    # private rebalance-state table; ms-markets starts it at the signal's first observation.
+    [(name, arguments)] = recipes.calls
+    assert name == "run_portfolio"
+    assert arguments["portfolio_configuration"] is plan.portfolio_configuration
+    assert arguments["portfolio_description"] == plan.portfolio_description
+    assert arguments["rebalance_output_table"] is AlpacaPortfolioRebalanceStateStorage
+    # The Portfolio is the configuration's ALPACA_PORTFOLIO__<hex>, on its calendar.
+    upsert.assert_called_once_with(
+        unique_identifier=plan.unique_identifier, calendar_uid="calendar-uid"
+    )
+    assert resolved_rows == [portfolio_row]
     # The configuration stores the Portfolio it runs; nothing is registered or reconciled.
     update_row.assert_called_once_with(
         CONFIGURATION_UID,
@@ -499,11 +508,14 @@ def test_execution_runs_the_portfolio_with_the_recipe_and_registers_nothing(reci
     assert result.portfolio_uid == str(PORTFOLIO_UID)
     assert result.portfolio_unique_identifier == plan.unique_identifier
     summary = result.summary()
-    assert summary["interpolation"] == {"error": False, "rows": 4}
-    assert summary["calendar_events"] == {"error": False, "rows": 2}
-    assert summary["rebalance"] == {"error": False, "rows": 1}
+    # The recipe counts only the published rows.
     assert summary["portfolio_weights"] == {"error": False, "rows": 2}
     assert summary["portfolio"] == {"error": False, "rows": 3}
+    assert (summary["interpolation"], summary["calendar_events"], summary["rebalance"]) == (
+        None,
+        None,
+        None,
+    )
 
 
 def test_a_run_whose_portfolio_is_stored_does_not_store_it_again(recipes) -> None:
@@ -516,7 +528,12 @@ def test_a_run_whose_portfolio_is_stored_does_not_store_it_again(recipes) -> Non
     )
     recipes.answer(
         "run_portfolio",
-        {"portfolio": {"uid": str(PORTFOLIO_UID)}, "written": {}, "first_rebalance": False},
+        PortfolioRun(
+            portfolio=SimpleNamespace(uid=PORTFOLIO_UID, unique_identifier=None),
+            weights=None,
+            values=None,
+            first_rebalance=False,
+        ),
     )
     with (
         patch("alpaca_connectors.runtime.start_portfolio_job_engine"),
@@ -550,6 +567,14 @@ def test_a_run_whose_portfolio_is_stored_does_not_store_it_again(recipes) -> Non
     assert result.first_rebalance == {"rebalanced": False, "message": "No rebalance yet."}
 
 
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "Gap (ADR 0031 decision 5): since ms-markets 4.1.0 (its ADR 0058) ImmediateSignal requires "
+        "calendar_events_instance and calendar_identifier, so immediate_signal cannot run without "
+        "calendar events; the owner decides."
+    ),
+)
 def test_an_immediate_rebalance_builds_immediate_signal_and_no_calendar_events() -> None:
     """immediate_signal trades each set of weights at its own time and reads no calendar."""
     from msm_portfolios.rebalance_strategy import ImmediateSignal

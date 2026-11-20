@@ -223,9 +223,52 @@ def _publish_patches(*, registered=None):
     )
 
 
-def test_publish_records_the_assets_then_publishes_with_the_recipe(recipes) -> None:
+def _stored_last(*times):
+    """``signal_history`` answers, one per read: the signal's last stored time (None: none)."""
+    from msm_portfolios.recipes import SignalHistory
+    from msm_portfolios.services.series import SeriesBounds
+
+    pending = list(times)
+
+    def answer(signal_uids, *, latest=0):
+        last = pending.pop(0)
+        return SignalHistory(
+            bounds={
+                uid: SeriesBounds(
+                    key=uid, first_time=last, last_time=last, row_count=int(bool(last))
+                )
+                for uid in signal_uids
+            }
+        )
+
+    return answer
+
+
+def _publication(signal_uid):
+    from msm_portfolios.recipes import SignalPublication
+
+    return SignalPublication(
+        signal_uid=signal_uid,
+        written=2,
+        skipped=0,
+        assets=(AAPL, NVDA),
+        first_time=MONDAY,
+        last_time=WEDNESDAY,
+        row_count=4,
+        created_metadata=False,
+    )
+
+
+def test_publish_checks_the_last_time_records_the_assets_then_publishes(recipes) -> None:
+    signal_uid = signal_uid_for_key(str(CONFIGURATION_UID))
     order = MagicMock()
-    recipes.answer("publish_signal_weights", lambda **kwargs: order.publish())
+    recipes.answer("signal_history", _stored_last(MONDAY))
+
+    def publish(signal_uid, observations, *, description=None):
+        order.publish()
+        return _publication(signal_uid)
+
+    recipes.answer("publish_signal_weights", publish)
     details, markets = _publish_patches()
     with (
         details as read_details,
@@ -240,23 +283,21 @@ def test_publish_records_the_assets_then_publishes_with_the_recipe(recipes) -> N
             [{"observed_at": WEDNESDAY, "weights": {NVDA: 0.5, AAPL: 0.5}}],
         )
 
-    signal_uid = signal_uid_for_key(str(CONFIGURATION_UID))
     # The assets are validated with one read of this application's Alpaca details.
     read_details.assert_called_once_with([AAPL, NVDA])
     # Recorded first, so they stay a superset of what is published; nothing is registered or
     # bound (ADR 0031): Markets creates the signal's metadata on its first publication.
     assert order.mock_calls == [call.record(signal_uid, [AAPL, NVDA]), call.publish()]
     assert recipes.calls == [
+        ("signal_history", {"signal_uids": [signal_uid]}),
         (
             "publish_signal_weights",
             {
                 "signal_uid": signal_uid,
                 "observations": {WEDNESDAY: {NVDA: 0.5, AAPL: 0.5}},
-                "signal_description": "Weights the application provides for the signal "
-                "'Thesis basket'.",
-                "description": None,
+                "description": "Weights the application provides for the signal 'Thesis basket'.",
             },
-        )
+        ),
     ]
     assert published.signal_uid == signal_uid
     assert (published.observation_count, published.asset_count) == (1, 2)
@@ -271,9 +312,13 @@ def test_publish_records_the_assets_then_publishes_with_the_recipe(recipes) -> N
         (AAPL, {"registered": [NVDA]}, "unknown_asset", 422),
         # One that is not an Alpaca identifier can have no bars.
         (NOT_ALPACA, {}, "asset_not_alpaca", 422),
+        # At or before the last published observation, even one equal to it, which Markets
+        # would skip: published observations are never restated.
+        (AAPL, {"last_stored": WEDNESDAY}, "observation_not_after_last", 409),
     ],
 )
 def test_publish_refuses_before_writing_anything(recipes, asset, kwargs, code, status) -> None:
+    recipes.answer("signal_history", _stored_last(kwargs.pop("last_stored", None)))
     details, markets = _publish_patches(**kwargs)
     with (
         details,
@@ -288,26 +333,34 @@ def test_publish_refuses_before_writing_anything(recipes, asset, kwargs, code, s
 
     assert (raised.value.code, raised.value.status_code) == (code, status)
     record.assert_not_called()
-    assert recipes.calls == []
+    assert "publish_signal_weights" not in [name for name, _ in recipes.calls]
     assert "ALPACA::" not in str(raised.value) and "FIGI" not in str(raised.value)
 
 
 @pytest.mark.parametrize(
-    ("error", "code", "status"),
+    ("error", "stored_after", "code", "status"),
     [
-        # Markets' 409: an observation at or before the last stored one. Its status decides,
-        # never its wording.
-        ("conflict", "observation_not_after_last", 409),
-        (LookupError("Unknown asset unique identifiers: ['ALPACA::nvda']."), "unknown_asset", 422),
-        (ValueError("Observation at 2026 is at or before ..."), "invalid_observation", 422),
-        (TypeError("ALPACA::nvda weight"), "invalid_observation", 422),
+        (
+            LookupError("Unknown asset unique identifiers: ['ALPACA::nvda']."),
+            None,
+            "unknown_asset",
+            422,
+        ),
+        # Another call published first: the stored last time, not the message, decides.
+        (ValueError("any wording"), MONDAY, "observation_not_after_last", 409),
+        ("conflict", MONDAY, "observation_not_after_last", 409),
+        (ValueError("Observation at 2026 is at or before ..."), None, "invalid_observation", 422),
+        (TypeError("ALPACA::nvda weight"), None, "invalid_observation", 422),
     ],
 )
-def test_markets_refusals_become_codes_that_quote_nothing(recipes, error, code, status) -> None:
+def test_markets_refusals_become_codes_that_quote_nothing(
+    recipes, error, stored_after, code, status
+) -> None:
     from msm.api.remote import MarketsConflictError
 
     if error == "conflict":
         error = MarketsConflictError("ALPACA::nvda at 2026-11-16 is not after 2026-11-18")
+    recipes.answer("signal_history", _stored_last(None, stored_after))
     recipes.answer("publish_signal_weights", error)
     details, markets = _publish_patches()
     with (
@@ -324,8 +377,10 @@ def test_markets_refusals_become_codes_that_quote_nothing(recipes, error, code, 
 
 def test_any_other_markets_failure_propagates(recipes) -> None:
     # signal_not_registered no longer exists (ADR 0031): nothing is bound before a publication.
+    # Markets refuses a signal this application does not manage (ms-markets ADR 0060).
     from msm.api.remote import MarketsAccessError
 
+    recipes.answer("signal_history", _stored_last(None))
     recipes.answer("publish_signal_weights", MarketsAccessError("not the manager"))
     details, markets = _publish_patches()
     with (

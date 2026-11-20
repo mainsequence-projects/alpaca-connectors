@@ -62,10 +62,8 @@ def test_migration_metadata_includes_fk_dependencies_but_manages_only_project_ta
         "alpaca_connectors__portfolio_rebalance_configuration",
         "alpaca_connectors__signal_definition",
         "alpaca_connectors__ended_portfolio",
-        # Contract instances of the Markets time series (ms-markets ADR 0047).
-        "alpaca_connectors__signalweightsts__main",
-        "alpaca_connectors__portfoliosts__main",
-        "alpaca_connectors__portfolioweightsts__main",
+        # Private contract instances of the Markets time series (ms-markets ADR 0047); signal
+        # weights, portfolio weights and values are Markets' published series (ADR 0031).
         "alpaca_connectors__portfoliorebalancestatets__main",
         "alpaca_connectors__portfoliocalendareventsts__main",
         "alpaca_connectors__ordersts__main",
