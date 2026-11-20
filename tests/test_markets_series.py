@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import ast
 import datetime as dt
+import functools
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -138,6 +139,7 @@ _RETIRED_INSTANCES = {
 _KEEPS_THE_RETIRED_INSTANCES = {"instances.py", "operations/instance_backfill.py"}
 
 
+@functools.cache
 def _python_files() -> list[tuple[str, ast.Module]]:
     return [
         (path.relative_to(SRC).as_posix(), ast.parse(path.read_text()))
@@ -161,6 +163,17 @@ def _names(tree: ast.Module) -> list[tuple[int, str]]:
     return found
 
 
+def test_no_module_reads_or_writes_the_three_retired_instances() -> None:
+    violations = [
+        f"{relative}:{line} {name}"
+        for relative, tree in _python_files()
+        if relative not in _KEEPS_THE_RETIRED_INSTANCES
+        for line, name in _names(tree)
+        if name in _RETIRED_INSTANCES
+    ]
+    assert violations == [], violations
+
+
 def test_only_the_markets_api_composites_call_the_recipes() -> None:
     series = {"SignalWeightsSeries", "PortfolioWeightsSeries", "PortfolioValuesSeries"}
     violations = [
@@ -171,3 +184,33 @@ def test_only_the_markets_api_composites_call_the_recipes() -> None:
         if name.startswith("msm_portfolios.recipes") or name in series
     ]
     assert violations == [], violations
+
+
+def test_nothing_registers_with_or_shares_to_markets() -> None:
+    """Decision 3: no catalog registration, no second namespace, no access tooling."""
+    forbidden = {
+        "PortfolioDatasets",
+        "msm_portfolios.api.datasets",
+        "register_portfolio_datasets",
+        "register_signal_dataset",
+        "share_with_markets",
+        "MARKETS_INSTANCES_NAMESPACE",
+        "__metatable_namespaces__",
+        "grant_markets_access",
+        "markets_instances_report",
+    }
+    violations = [
+        f"{relative}:{line} {name}"
+        for relative, tree in _python_files()
+        # The history move ends with ms-markets' catalog calls until Rollout step 8 removes it.
+        if relative != "operations/instance_backfill.py"
+        for line, name in _names(tree)
+        if name in forbidden
+    ]
+    assert violations == [], violations
+    for removed in (
+        "operations/markets_access.py",
+        "portfolios/datasets.py",
+        "portfolios/signal_history.py",
+    ):
+        assert not (SRC / removed).exists(), removed

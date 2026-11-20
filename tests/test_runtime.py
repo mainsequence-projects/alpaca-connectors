@@ -59,9 +59,18 @@ def test_application_runtime_attaches_the_own_execution_ledger_and_portfolio_ins
     assert {
         "alpaca_connectors__ordersts__main",
         "alpaca_connectors__tradests__main",
-        "alpaca_connectors__signalweightsts__main",
-        "alpaca_connectors__portfoliosts__main",
+        "alpaca_connectors__portfoliorebalancestatets__main",
+        "alpaca_connectors__portfoliocalendareventsts__main",
     } <= table_names
+    # Signal weights, portfolio weights and values are Markets' series (ADR 0031).
+    assert (
+        not {
+            "alpaca_connectors__signalweightsts__main",
+            "alpaca_connectors__portfolioweightsts__main",
+            "alpaca_connectors__portfoliosts__main",
+        }
+        & table_names
+    )
 
 
 def test_account_and_application_runtimes_are_the_same_model_set() -> None:

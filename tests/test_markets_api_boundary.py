@@ -311,11 +311,11 @@ def test_producers_write_to_own_namespace_instances() -> None:
         assert model.__table__.info["namespace"] == "alpaca-connectors"
         assert model.__table__.name.startswith("alpaca_connectors__")
         assert model.__table__.name.endswith("__main")
-    assert instances.portfolio_output_tables() == {
-        "output_table": instances.AlpacaPortfoliosStorage,
-        "weights_output_table": instances.AlpacaPortfolioWeightsStorage,
-        "rebalance_output_table": instances.AlpacaPortfolioRebalanceStateStorage,
-    }
+    # A run writes only its private rebalance state and calendar events (ADR 0031).
+    assert instances.private_portfolio_models() == [
+        instances.AlpacaPortfolioRebalanceStateStorage,
+        instances.AlpacaPortfolioCalendarEventsStorage,
+    ]
     interpolated = configured_alpaca_interpolated_prices_storage(
         source_time_index_meta_table_uid="11111111-1111-4111-8111-111111111111",
         source_cadence="1d",
@@ -324,30 +324,21 @@ def test_producers_write_to_own_namespace_instances() -> None:
     assert interpolated.__table__.info["namespace"] == "alpaca-connectors"
 
 
-def test_markets_reads_every_contract_instance_through_a_second_namespace() -> None:
-    """ADR 0025: the instances, and nothing else, are also in `alpaca-connectors-markets`."""
-    from alpaca_connectors import instances
+def test_no_table_of_this_application_is_shared_with_markets() -> None:
+    """ADR 0031, decision 3: every table, instances included, is only in `alpaca-connectors`."""
     from alpaca_connectors.migrations import all_project_metatable_models
     from alpaca_connectors.portfolios.interpolated_prices_schema import (
         configured_alpaca_interpolated_prices_storage,
     )
     from metatables.sqlalchemy_contracts import _resolve_namespaces
 
-    both = ["alpaca-connectors", "alpaca-connectors-markets"]
-    shared = instances.project_instance_models()
-    assert len(shared) == 7
-    for model in shared:
-        assert _resolve_namespaces(model, namespace=None) == both, model.__table__.name
     interpolated = configured_alpaca_interpolated_prices_storage(
         source_time_index_meta_table_uid="11111111-1111-4111-8111-111111111111",
         source_cadence="1d",
     )
-    assert _resolve_namespaces(interpolated, namespace=None) == both
-
-    shared_names = {model.__table__.name for model in shared}
-    own = [m for m in all_project_metatable_models() if m.__table__.name not in shared_names]
-    assert "alpaca_connectors__acct_alpaca" in {model.__table__.name for model in own}
-    for model in own:
+    models = [*all_project_metatable_models(), interpolated]
+    assert "alpaca_connectors__acct_alpaca" in {model.__table__.name for model in models}
+    for model in models:
         assert _resolve_namespaces(model, namespace=None) == ["alpaca-connectors"], (
             model.__table__.name
         )
@@ -392,52 +383,6 @@ def test_the_signal_publishes_to_markets_and_the_ledger_to_own_instances(monkeyp
     ledger.write_orders([{"order_identifier": "o"}])
     ledger.write_trades([{"trade_identifier": "t"}])
     assert Node.tables == [AlpacaOrdersStorage, AlpacaTradesStorage]
-
-
-def test_portfolio_catalog_registration_names_the_own_instances(monkeypatch) -> None:
-    from msm_portfolios.api.datasets import PortfolioDatasets
-
-    from alpaca_connectors import instances
-    from alpaca_connectors.portfolios import datasets
-
-    for index, model in enumerate(
-        (
-            instances.AlpacaPortfoliosStorage,
-            instances.AlpacaPortfolioWeightsStorage,
-            instances.AlpacaSignalWeightsStorage,
-        )
-    ):
-        monkeypatch.setattr(
-            model, "get_meta_table_uid", classmethod(lambda cls, index=index: f"table-{index}")
-        )
-    calls: list[tuple[str, Any]] = []
-    monkeypatch.setattr(
-        PortfolioDatasets,
-        "register",
-        classmethod(lambda cls, registration, **kw: calls.append(("register", registration, kw))),
-    )
-    monkeypatch.setattr(
-        PortfolioDatasets,
-        "register_signal",
-        classmethod(lambda cls, registration: calls.append(("register_signal", registration))),
-    )
-
-    datasets.register_portfolio_datasets("portfolio-uid")
-    datasets.register_signal_dataset("signal-uid")
-
-    assert calls == [
-        (
-            "register",
-            {
-                "portfolio_uid": "portfolio-uid",
-                "values_meta_table_uid": "table-0",
-                "weights_meta_table_uid": "table-1",
-                "signal_meta_table_uid": "table-2",
-            },
-            {"reconcile": True},
-        ),
-        ("register_signal", {"signal_uid": "signal-uid", "signal_meta_table_uid": "table-2"}),
-    ]
 
 
 # Markets table classes may appear only where this application declares a foreign key to a

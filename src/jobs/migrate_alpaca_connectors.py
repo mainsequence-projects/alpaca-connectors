@@ -4,9 +4,8 @@ The deployment workflow runs this Job from the candidate image on every push (AD
 schema revisions only; one-off data repairs belong to the release that needs them. It applies only
 this application's providers: the ms-markets schema is migrated by the ms-markets deployment's own
 `migrate-markets` Job (ms-markets 2.1.1). An exception fails the Job, which blocks the rollout while
-the previous release keeps serving. Last, it reports the contract instances Markets cannot read yet
-(issue #37), so a missing grant shows at deploy, not at the first call that needs it; the report
-never fails the Job.
+the previous release keeps serving. Markets reads no table of this application (ADR 0031), so there
+is no access of Markets to report.
 """
 
 from __future__ import annotations
@@ -32,9 +31,6 @@ def main() -> int:
             ),
             flush=True,
         )
-    from alpaca_connectors.operations.markets_access import markets_instances_report
-
-    print(json.dumps({"markets_access": markets_instances_report()}, sort_keys=True), flush=True)
     return 0
 
 

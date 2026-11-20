@@ -59,23 +59,24 @@ def project_runtime_models() -> list[type[Any]]:
 
 
 def account_runtime_models() -> list[type[Any]]:
-    """Every table of this project: the project tables, account details, key requests, and the
-    execution, signal and portfolio contract instances.
+    """Every table this project reads or writes: the project tables, account details, key
+    requests, and the private execution and portfolio contract instances.
 
     It equals ``application_runtime_models()``: ``start_engine`` rejects a second *differing*
     model set in one process, and services started with either set call each other.
     """
     from alpaca_connectors.account.provider_account_details import project_account_models
     from alpaca_connectors.execution import execution_runtime_models
-    from alpaca_connectors.instances import portfolio_instance_models
+    from alpaca_connectors.instances import private_portfolio_models
 
     return [
         *project_runtime_models(),
         *project_account_models(),
         # Order execution (ADR 0016) writes this application's orders and trades instances.
         *execution_runtime_models(),
-        # Signal and portfolio history are read from this application's instances.
-        *portfolio_instance_models(),
+        # A portfolio run writes its rebalance state and calendar events in this application's
+        # private instances; its signal and portfolio series are Markets' (ADR 0031).
+        *private_portfolio_models(),
     ]
 
 
@@ -87,7 +88,7 @@ def application_runtime_models() -> list[type[Any]]:
 def portfolio_runtime_models(extra_models: list[type[Any]] | None = None) -> list[type[Any]]:
     """Runtime models for portfolio construction.
 
-    The application tables plus the signal and portfolio contract instances. Configured
+    The application tables plus the private portfolio contract instances. Configured
     interpolated-price storage classes are dynamic and must be migrated before normal
     portfolio execution; pass them as ``extra_models``. Calendars, portfolios and signal metadata
     are Markets registries read and written through the Markets API, so they are not attached.

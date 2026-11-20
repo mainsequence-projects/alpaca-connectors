@@ -168,26 +168,14 @@ def test_active_version_table_is_read_with_a_governed_select(reference, table) -
 def test_migration_job_applies_only_this_application(capsys) -> None:
     main = runpy.run_path(str(JOBS / "migrate_alpaca_connectors.py"))["main"]
     result = {"revision": "0015", "migrated": True, "data_source_uid": "ds-uid"}
-    report = {
-        "checked": True,
-        "namespace": "alpaca-connectors-markets",
-        "instances_missing_from_namespace": [],
-    }
 
-    with (
-        patch("metatables.upgrade_application", return_value=result) as upgrade,
-        patch(
-            "alpaca_connectors.operations.markets_access.markets_instances_report",
-            return_value=report,
-        ),
-    ):
+    with patch("metatables.upgrade_application", return_value=result) as upgrade:
         assert main() == 0
 
     assert [call.args[0] for call in upgrade.call_args_list] == [APP]
-    # Then what Markets cannot read yet (issue #37), reported, never raised.
+    # Markets reads no table of this application (ADR 0031): there is no access to report.
     assert [json.loads(line) for line in capsys.readouterr().out.splitlines()] == [
         {"data_source_uid": "ds-uid", "provider": APP, "revision": "0015", "state": "migrated"},
-        {"markets_access": report},
     ]
 
 

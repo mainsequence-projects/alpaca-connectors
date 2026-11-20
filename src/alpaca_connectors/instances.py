@@ -1,20 +1,20 @@
 """This application's instances of the Markets time-series contracts (ms-markets ADR 0047).
 
-The time series this application produces live in its own ``alpaca-connectors`` namespace,
-migrated by its own Alembic provider, instead of in the shared Markets tables: each class below is
-a contract-identical instance built by an ms-markets factory, named
-``alpaca_connectors__<contract>__main`` and identified as
-``alpaca-connectors.<Contract>.main``. The producers are bound to them with ``output_table=``
-(an output table never enters ``update_hash``, so producer identities and signal uids do not
-change), and the portfolio and signal instances are recorded in the Markets dataset catalog with
-``PortfolioDatasets`` so Markets reads them by table uid.
+Each class below is a contract-identical instance built by an ms-markets factory, named
+``alpaca_connectors__<contract>__main``, identified as ``alpaca-connectors.<Contract>.main`` and
+migrated by this application's own Alembic provider in its ``alpaca-connectors`` namespace.
 
-Interpolated prices are dynamic (one table per bars source); ``configured_alpaca_interpolated_prices
-_storage`` places them in this namespace the same way.
+Private, and never read by Markets (ADR 0031, decision 2): rebalance state and calendar events,
+which a portfolio run writes (``private_portfolio_models``), and orders and trades, which the
+execution ledger writes. Interpolated prices are dynamic (one table per bars source);
+``configured_alpaca_interpolated_prices_storage`` places them in this namespace the same way.
 
-Every instance is also in ``alpaca-connectors-markets`` (MetaTables ADR 0028), the namespace the
-Markets workload reads: ``share_with_markets`` declares it, and the next ``upgrade head`` adds the
-membership at finalization, with no revision.
+Retired (ADR 0031, decision 1): signal weights, portfolio weights and portfolio values are
+Markets' own published series, and nothing here writes or reads ``AlpacaSignalWeightsStorage``,
+``AlpacaPortfolioWeightsStorage`` or ``AlpacaPortfoliosStorage`` any more. They stay in the
+migration metadata, with their rows, until a later revision drops them once their history is
+published to Markets (revisions add first and drop later; ADR 0031, Rollout step 8), and
+``instances backfill|rollback`` goes with them.
 """
 
 from __future__ import annotations
@@ -23,11 +23,7 @@ from typing import Any
 
 from msm.settings import markets_configured_namespace
 
-from alpaca_connectors.settings import (
-    MARKETS_INSTANCES_NAMESPACE,
-    PROJECT_NAMESPACE,
-    PROJECT_NAMESPACE_SLUG,
-)
+from alpaca_connectors.settings import PROJECT_NAMESPACE, PROJECT_NAMESPACE_SLUG
 
 INSTANCE_KEY = "main"
 INSTANCE_NAMESPACE = markets_configured_namespace(PROJECT_NAMESPACE)
@@ -48,16 +44,6 @@ def _instance_kwargs() -> dict[str, Any]:
     }
 
 
-def share_with_markets(model: type[Any]) -> type[Any]:
-    """Declare ``model`` in the namespace the Markets workload reads, besides its own.
-
-    ``__metatable_namespaces__`` only adds (MetaTables ADR 0028); the ms-markets factories set
-    the one ``__metatable_namespace__``, so the second name is declared on the built class.
-    """
-    model.__metatable_namespaces__ = (MARKETS_INSTANCES_NAMESPACE,)
-    return model
-
-
 def _build() -> dict[str, type[Any]]:
     from msm.storage_instances import configured_time_index_instance
     from msm.time_index.execution.storage import OrdersStorage, TradesStorage
@@ -69,7 +55,7 @@ def _build() -> dict[str, type[Any]]:
         configured_signal_weights_storage,
     )
 
-    instances = {
+    return {
         "signal_weights": configured_signal_weights_storage(**_instance_kwargs()),
         "portfolios": configured_portfolios_storage(**_instance_kwargs()),
         "portfolio_weights": configured_portfolio_weights_storage(**_instance_kwargs()),
@@ -82,7 +68,6 @@ def _build() -> dict[str, type[Any]]:
         "orders": configured_time_index_instance(OrdersStorage, **_instance_kwargs()),
         "trades": configured_time_index_instance(TradesStorage, **_instance_kwargs()),
     }
-    return {name: share_with_markets(model) for name, model in instances.items()}
 
 
 _INSTANCES = _build()
@@ -96,15 +81,6 @@ AlpacaOrdersStorage = _INSTANCES["orders"]
 AlpacaTradesStorage = _INSTANCES["trades"]
 
 
-def portfolio_output_tables() -> dict[str, type[Any]]:
-    """``PortfoliosUpdater`` keyword arguments binding its three outputs to these instances."""
-    return {
-        "output_table": AlpacaPortfoliosStorage,
-        "weights_output_table": AlpacaPortfolioWeightsStorage,
-        "rebalance_output_table": AlpacaPortfolioRebalanceStateStorage,
-    }
-
-
 def interpolated_prices_storage_kwargs() -> dict[str, Any]:
     """``InterpolatedPrices`` keyword arguments placing its table in this namespace.
 
@@ -114,19 +90,13 @@ def interpolated_prices_storage_kwargs() -> dict[str, Any]:
 
 
 def project_instance_models() -> list[type[Any]]:
-    """Every contract instance this application migrates, registers and attaches."""
+    """Every contract instance this application migrates, the three retired ones included."""
     return list(_INSTANCES.values())
 
 
-def portfolio_instance_models() -> list[type[Any]]:
-    """The instances the signal and portfolio producers write."""
-    return [
-        AlpacaSignalWeightsStorage,
-        AlpacaPortfoliosStorage,
-        AlpacaPortfolioWeightsStorage,
-        AlpacaPortfolioRebalanceStateStorage,
-        AlpacaPortfolioCalendarEventsStorage,
-    ]
+def private_portfolio_models() -> list[type[Any]]:
+    """The private instances a portfolio run writes: rebalance state and calendar events."""
+    return [AlpacaPortfolioRebalanceStateStorage, AlpacaPortfolioCalendarEventsStorage]
 
 
 def execution_instance_models() -> list[type[Any]]:
@@ -146,8 +116,6 @@ __all__ = [
     "AlpacaTradesStorage",
     "execution_instance_models",
     "interpolated_prices_storage_kwargs",
-    "portfolio_instance_models",
-    "portfolio_output_tables",
+    "private_portfolio_models",
     "project_instance_models",
-    "share_with_markets",
 ]
