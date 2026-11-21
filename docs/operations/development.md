@@ -70,33 +70,46 @@ The project requires MetaTables 0.1.66 or later: tables in several namespaces
 0.1.65 JSON parameters typed as `json` (MetaTables#111). On an earlier client these tests fail with the hosted error,
 `cannot adapt type 'dict' using placeholder '%s'`: a list was bound as a PostgreSQL array.
 
-## Live End-To-End Test
+## Live Life-Cycle Check
 
-`tests/test_live_account_lifecycle.py` runs the whole account life cycle on a real Alpaca paper
-account and a local stack ([ADR 0023](../adrs/0023_account_sync_sizes_and_allocates_funds.md)).
-It is skipped unless `ALPACA_E2E=1`:
+`scripts/lifecycle_check.py` runs the whole account and portfolio life cycle on a real Alpaca paper
+account and a local stack ([ADR 0023](../adrs/0023_account_sync_sizes_and_allocates_funds.md),
+[ADR 0031](../adrs/0031_markets_series_are_published_not_shared.md)). It times every step, cleans
+up after itself and exits 0 only when every stage passed and the cleanup completed:
 
 ```bash
-ALPACA_E2E=1 .venv/bin/python -m pytest tests/test_live_account_lifecycle.py -x -v
+MARKETS_API_URL=http://127.0.0.1:8322 .venv/bin/python scripts/lifecycle_check.py
+MARKETS_API_URL=http://127.0.0.1:8322 .venv/bin/python scripts/lifecycle_check.py --json lifecycle.json
 ```
+
+`--keep` skips the cleanup, to look at what a run left. `tests/test_live_account_lifecycle.py` runs
+the same script once and fails with its report; it is skipped unless `ALPACA_E2E=1`.
 
 | Stage | What it checks |
 | --- | --- |
-| Register | The account is created with the paper keys of `.env`; no key value comes back |
-| Sync, no target | Only the capture runs; the two other steps are skipped |
-| Two fixed-weight portfolios | AAPL and NVDA, and JPM and NVDA, published as weights rows |
-| Exposure | A share of NAV in the first portfolio and an amount in the second |
-| Sync | Each exposure is sized into units; an account holding only cash has full deltas |
-| Rebalance | The deltas are traded; the fills are allocated and NVDA is split between the funds. With the market closed the orders are queued, checked as accepted and cancelled |
-| Change and repeat | A portfolio with no weights fails the sizing; new weights and a lower exposure are sized again and traded |
-| Tear down | The target is cleared and the account is deleted; positions the test bought are left |
+| Cleanup before | An earlier run's account (by name) and its three Markets portfolios are removed |
+| 1 Register | The account is created with the paper keys of `.env`; no key value comes back |
+| 2 Sync, no target | Only the capture runs; the two other steps are skipped |
+| 3 Two fixed-weight portfolios | AAPL and NVDA, and JPM and NVDA, published in Markets' portfolio-weights series |
+| 4 Exposure | A share of NAV in the first portfolio and an amount in the second; the write creates the funds |
+| 5 Sync | Each exposure is sized into units and the snapshot is allocated |
+| 6 Assignment | Per asset, the lines add up to what the account holds |
+| 7 Rebalance | The deltas are traded; the fills are allocated and NVDA is split between the funds. With the market closed the orders are queued, checked as accepted and cancelled |
+| 8 No weights | A portfolio with no weights fails the sizing and the snapshot stays |
+| 9 Reweight | New weights and a lower exposure are sized again and traded |
+| Cleanup after | This run's open orders are cancelled; the three symbols are traded back to the positions the run started with (only while the market is open); the target is cleared; the account is deleted with its confirmation; the three portfolios are deleted |
+
+The report lists each stage with the calls it made: each call to this API, each Markets call and
+each Alpaca read, timed on the caller's side, then the slowest calls and the total. The sync's
+three steps run inside one request, so that request's time is theirs.
 
 It needs, on this machine:
 
 - the local MetaTables runtime (`metatables serve --local`) with both migrations applied;
-- the Markets API on ms-markets 3.7 or later, started from an ms-markets checkout against that
-  runtime, with `MARKETS_API_URL` set for this API and for the test;
-- this API at `http://127.0.0.1:8321` (`ALPACA_E2E_API_URL` names another address);
+- the Markets API on ms-markets 4.2.3 or later, started from an ms-markets checkout against that
+  runtime, with `MARKETS_API_URL` set for this API and for the script;
+- this API at `http://127.0.0.1:8321` (`ALPACA_LIFECYCLE_API_URL` or `--api-url` names another
+  address);
 - a signed-in `mainsequence` CLI, for the Bearer token;
 - `ALPACA_PAPER_API_KEY` and `ALPACA_PAPER_SECRET_KEY` in `.env`, which Git ignores.
 
