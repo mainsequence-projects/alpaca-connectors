@@ -32,6 +32,13 @@ For the calendar a portfolio references (getting one, reading its sessions,
 correcting it), read
 `.agents/skills/ms_markets/calendars/calendar_workflow/SKILL.md`.
 
+For an application that computes or receives signals or runs portfolios, read
+`.agents/skills/ms_markets/platform/producer_boundary/SKILL.md` first (ADR 0060):
+signal weights, portfolio weights and values are published to Markets through
+`SignalWeightsSeries`, `PortfolioWeightsSeries` and `PortfolioValuesSeries` and the
+recipes of `msm_portfolios.recipes`; a producer keeps no table for them, registers no
+table with Markets and grants Markets no role.
+
 For position-aware accounting, lifecycle cash flows, or portfolio valuation,
 also read:
 
@@ -106,6 +113,18 @@ referenced. Retire it instead:
   target search hide it unless `include_retired=true`, and the portfolio
   updaters write nothing dated at or after `retired_at`.
 - Delete a portfolio only when nothing references it.
+  `DELETE /api/v1/portfolio/{uid}/` and `POST /api/v1/portfolio/bulk-delete/`
+  delete it with its rows in its seven datasets (weights, values, rebalance
+  state, analytics, event ledger, state, cash flows), in one transaction.
+  `MarketsClient.delete_portfolio(uid)` and `bulk_delete_portfolios(uids)` call
+  them. They refuse with `409`, deleting nothing, while virtual funds or
+  account target rows name it, or while another application's table with a
+  `RESTRICT` key to it holds rows of it; that application deletes its rows
+  first.
+  `POST /api/v1/portfolio/bulk-delete/preflight/` reports the rows per dataset
+  and every blocker. These routes are the only portfolio delete:
+  `Portfolio.delete` raises `MarketsOperationUnsupported` under both backends
+  and deletes nothing; a test double for it should refuse the same way.
 
 ## Portfolio Group Boundary
 
@@ -185,9 +204,9 @@ One call links them all in one transaction. Do not loop over
   error.
 - The `asset_list` of `InterpolatedPricesConfig` holds identifiers only. A
   `calendar` key in a scope mapping is refused.
-- A `CalendarEventSignal` must use the calendar of `Portfolio.calendar_uid`.
-  `PortfoliosUpdater` refuses to run when its `calendar_identifier` names another
-  calendar.
+- An `ImmediateSignal` or `CalendarEventSignal` must use the calendar of
+  `Portfolio.calendar_uid`. `PortfoliosUpdater` refuses to run when its
+  `calendar_identifier` names another calendar.
 - Attach `AssetCalendar` in the runtime models where price updates run.
 
 Example workflows should stay chainable. The reusable portfolio example exposes
@@ -280,8 +299,48 @@ Rules:
 - `PortfoliosUpdater.dependencies()` exposes canonical `portfolio_weights` and
   `valuation_source`. Signal weights are a transitive execution dependency, not
   a direct valuation dependency.
-- `ImmediateSignal` executes only at original signal observation timestamps.
-  Use `CalendarEventSignal` when the latest eligible signal should execute at a
+- Prices are stamped at the moment they were observed, and a trade happens only
+  at an observed price (ADR 0058). Every strategy follows it: the earliest moment
+  is the strategy's moment while the portfolio calendar is in session, otherwise
+  the next session start; each asset then trades at the first valuation-source row
+  at or after it, strictly after the signal and inside a session
+  (`market_open < time_index <= market_close`). Interpolated rows never count, the
+  fill column must be a close or a mark (`open`, `high`, `low`, `vwap` are refused),
+  assets fill independently, only a fill writes a rebalance-state row, and a
+  missing price makes the trade wait. Strategies with their own bars trade at them
+  under the same conditions.
+- `ImmediateSignal` rebalances at every new signal. It requires
+  `calendar_events_instance` (a `PortfolioCalendarEvents` publishing both
+  `market_open` and `market_close`) and `calendar_identifier`, the portfolio's
+  calendar (`CRYPTO_24_7` for 24/7 assets).
+- `PortfolioEngine` books exactly the fills `PortfolioRebalance` recorded
+  (`portfolio_rebalance_instance`); it builds no schedule and looks up no mark for
+  a fill. Share counts are fixed once at the decision (weight x NAV / price, with
+  the last prices before the earliest moment) and each asset fills them at its own
+  price. The decision reads the last prices and FX rates before the earliest moment,
+  however old.
+- A held asset is always valued at its last observed price (and FX at its last
+  rate), however old. Past `maximum_staleness` it is marked stale; only a held asset
+  with no observed price at all raises. `fail_on_missing_values=True` on
+  `ValuationAlignmentPolicy` or `MarketPriceValuationModel` refuses a stale price
+  instead (default `False`).
+- `ImmediateSignal.execution_policy` (`ExecutionPolicy`) holds the execution choices;
+  its defaults are the owner's decisions: shares sized at the decision, no negative
+  cash (`negative_cash`: `fraction_of_nav`, or `fixed_amount` only with a ledger),
+  sells before buys, pro-rata allocation of too little cash, cut-and-cancel of an
+  uncovered buy once the
+  rebalance's sells have filled (reason `insufficient_cash`), and the portfolio
+  calendar gating trades. The facts (observed price strictly after the signal, at or
+  after the earliest moment, in session) are not settings.
+- `PortfolioBuildConfiguration.valuation_asset_identifier` (required) is the
+  portfolio's currency; the accounting configuration has none. Declare
+  `fx_source_instance` when an asset is quoted in another currency: the valuation
+  source then needs `price_asset_identifier`, and prices convert at the last
+  observed rate. Without it, a foreign quote is refused.
+- Without a ledger, the portfolio is valued from the rebalance book's shares and
+  cash (`PortfolioWeights.held_shares`, `book_cash`): weights drift with prices
+  between rebalances.
+- Use `CalendarEventSignal` when the latest eligible signal should execute at a
   persisted market open or close. Its calendar identifier, session label,
   event, offset, cadence, signal selection, and execution valuation convention
   are hash-bearing configuration. The calendar identifier is required and must
@@ -300,23 +359,26 @@ Rules:
   value override asset.
 - Valuation sources may contain extra assets; portfolio calculation filters to
   the required signal universe.
-- Existing portfolio output progress must be scoped by `portfolio_identifier`;
-  `PortfoliosStorage` is shared and keyed by `(time_index, portfolio_identifier)`.
-  A later row for another portfolio must not move this portfolio's start date.
-  The authoritative portfolio update start is this portfolio's latest
-  `PortfoliosStorage` timestamp for the resolved `PortfolioTable.unique_identifier`.
+- `SignalWeights`, `PortfolioWeights` and `PortfoliosUpdater` are not
+  `TimeIndexTableUpdater`s (ADR 0060): they take no `output_table=` and publish
+  through the series row classes. Their progress is the published series itself
+  (`bounds`, `last`), scoped by key: a portfolio's start is its latest published
+  value for the resolved `PortfolioTable.unique_identifier`; a later row for another
+  portfolio never moves it. Running the same window twice publishes nothing.
 - Portfolio valuation timestamps come from actual valuation-source observations.
   Executed weights are selected as-of each valuation timestamp, so sparse weekly
   rebalances can drive daily valuation without daily weight rows.
 - Seed valuation reads must fetch the latest eligible observation for every
-  required asset in one set-based request. Enforce
-  `ValuationAlignmentPolicy.maximum_staleness` per asset.
-- Contributed signal progress must be scoped by `signal_uid`; `SignalWeightsStorage`
-  is shared and keyed by `(time_index, signal_uid, asset_identifier)`.
-  `signal_uid` is a required reference to `SignalMetadataTable.signal_uid`, so
-  signal metadata must be registered before signal weights are published.
-  `asset_identifier` must reference `AssetTable.unique_identifier`. A later row
-  for another signal must not move this signal's start date.
+  required asset in one set-based request. Past
+  `ValuationAlignmentPolicy.maximum_staleness` an observation is marked stale,
+  not refused.
+- Contributed signal progress is scoped by `signal_uid`: the signal's published
+  `SignalWeightsSeries` (`bounds`, and `last(by="asset")` per asset). `signal_uid`
+  references `SignalMetadataTable.signal_uid`, so a signal's metadata exists before
+  its weights are published (`SignalWeights.run()` and `publish_signal_weights`
+  create it). `asset_identifier` must reference `AssetTable.unique_identifier`.
+  Markets refuses an observation at or before the signal's last stored time, and
+  closes at `0` an asset the signal held that a new observation leaves out.
 - `SignalMetadataTable.signal_description` and signal `get_explanation()` text
   must be plain text or Markdown. Do not return or document HTML tags for signal
   descriptions; rendering belongs to the consuming UI.
@@ -337,10 +399,11 @@ Rules:
   inspection reaches the latest stored row, and apply one portfolio at a time.
   Never update indexed coordinates in place or use raw SQL.
 - `PortfoliosUpdater.run(..., update_pointers=True)` is the default portfolio
-  workflow behavior. After the graph publishes, it must upsert the resolved
-  `PortfolioTable` row with `signal_uid`, `signal_weights_table_update_uid`,
-  `portfolio_weights_table_update_uid`, and `portfolio_table_update_uid`. Examples
-  should not perform this final pointer upsert manually.
+  workflow behavior: after it publishes, it upserts the resolved `PortfolioTable`
+  row with its `signal_uid`. The three `*_table_update_uid` pointers name update
+  records of bound tables, which a publishing node does not have; they are left as
+  they are (ADR 0060 leaves their replacement undecided). Prefer
+  `msm_portfolios.recipes.run_portfolio`, which runs the chain in order.
 - Rerunning before a new execution event or valuation observation must return an
   empty incremental update. Job run time is never an economic timestamp.
 - API reads for a portfolio's signal weights must filter by
@@ -353,10 +416,11 @@ Contributed signal rules:
 
 - `FixedWeightsConfig` must not require asset/price configuration for portfolio
   core behavior.
-- Weights a provider receives (not computes) use `ApplicationWeights` bound to the
-  provider's `SignalWeightsTS` instance; do not write a provider signal class for
-  them. Its identity is `ApplicationWeightsConfig(provider, key)`, never the weights;
-  `publish` refuses unknown assets and observations at or before the last stored time.
+- Weights an application receives (not computes) use `ApplicationWeights`, or
+  `msm_portfolios.recipes.publish_signal_weights` directly; do not write a signal
+  class for them. Its identity is `ApplicationWeightsConfig(provider, key)`, never the
+  weights; Markets refuses unknown assets and observations at or before the last
+  stored time.
 - External weights and market-cap signals must receive their asset universe or
   market-data dependencies explicitly.
 - ETF replication must expose both basket and ETF price sources explicitly.

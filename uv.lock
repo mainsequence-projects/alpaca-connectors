@@ -1,5 +1,5 @@
 version = 1
-revision = 5
+revision = 3
 requires-python = "==3.13.*"
 resolution-markers = [
     "sys_platform == 'win32'",
@@ -504,8 +504,8 @@ name = "httpcore2"
 version = "2.13.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "h11" },
-    { name = "truststore" },
+    { name = "h11", marker = "sys_platform != 'emscripten'" },
+    { name = "truststore", marker = "sys_platform != 'emscripten'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/cb/f3/1db7aa2bc2524062192bb0e0323969492d1883152a232fe36eea65f4e35c/httpcore2-2.13.1.tar.gz", hash = "sha256:e0aa977abe17e69a3b820a24542a6fa88702676d83880b8d194dcd18408e5103", size = 68071, upload-time = "2026-09-23T07:47:22.372Z" }
 wheels = [
@@ -1061,7 +1061,7 @@ wheels = [
 
 [[package]]
 name = "ms-markets"
-version = "4.2.0"
+version = "4.2.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "alembic" },
@@ -1082,9 +1082,9 @@ dependencies = [
     { name = "sqlalchemy" },
     { name = "uvicorn" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/83/24/a39579d3d0f4a921abfedc416477af8a590df528dd65e1057361a12af8dd/ms_markets-4.2.0.tar.gz", hash = "sha256:d3b44afac882bf02a2a8d09835ce4c938f7769dac587255562791d8e570e481b", size = 3052102, upload-time = "2026-11-20T14:41:34.633Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/2e/55/3d8ded32d262d1d61f19cb539dd9bf91d67bfcfa28b5d3e7504f711f102e/ms_markets-4.2.3.tar.gz", hash = "sha256:812ee49e0498535086d772a7574b92bcde6c4c1f47282057bf94771397eda78f", size = 3063262, upload-time = "2026-11-21T08:09:30.966Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/2d/22/65ee86e9dbdd9ece25154929132a704fce4061338a4cc28b1b6287744e49/ms_markets-4.2.0-py3-none-any.whl", hash = "sha256:3fdb70504fb696c8a8298d9c5fc2c8b6e669e159bd0badb0ec2fb15afb0e5203", size = 993579, upload-time = "2026-11-20T14:41:32.874Z" },
+    { url = "https://files.pythonhosted.org/packages/67/16/ea423ba9e2e47286aaae1d67eff5fbed144398bbf03c768ad433a23500fd/ms_markets-4.2.3-py3-none-any.whl", hash = "sha256:c634cf73ad049cef2b175c8f6191a862d3da3c4f77331f47d0ee64ec4d107bb5", size = 994862, upload-time = "2026-11-21T08:09:28.891Z" },
 ]
 
 [[package]]
@@ -1906,8 +1906,8 @@ name = "secretstorage"
 version = "3.5.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "cryptography" },
-    { name = "jeepney" },
+    { name = "cryptography", marker = "sys_platform != 'emscripten' and sys_platform != 'win32'" },
+    { name = "jeepney", marker = "sys_platform != 'emscripten' and sys_platform != 'win32'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/1c/03/e834bcd866f2f8a49a85eaff47340affa3bfa391ee9912a952a1faa68c7b/secretstorage-3.5.0.tar.gz", hash = "sha256:f04b8e4689cbce351744d5537bf6b1329c6fc68f91fa666f60a380edddcd11be", size = 19884, upload-time = "2025-11-23T19:02:53.191Z" }
 wheels = [
