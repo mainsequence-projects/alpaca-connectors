@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import sys
 from pathlib import Path
 
 import pytest
@@ -27,6 +28,8 @@ SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "lifecycle_check.py"
 def _lifecycle_check():
     spec = importlib.util.spec_from_file_location("lifecycle_check", SCRIPT)
     module = importlib.util.module_from_spec(spec)
+    # Registered before it runs: its dataclasses look their module up by name.
+    sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
 

@@ -18,7 +18,7 @@ It drives a real Alpaca paper account through the local stack, the way an applic
 Cleanup always runs, also after a failure, unless ``--keep``: it cancels this run's open orders,
 trades the three symbols back to the positions the account held when the run started (only while
 the market is open: a closed market fills nothing), clears the target, deletes the account with its
-exact confirmation, and deletes the three Markets portfolios. Before it starts, it removes what an
+exact confirmation, and deletes the three Markets portfolios and their calendar. Before it starts, it removes what an
 earlier run left: the account by name and the three portfolios.
 
 With the market closed the orders are queued, checked as accepted and cancelled, and the checks
@@ -30,6 +30,11 @@ with ``ALPACA_CONNECTORS_DATA_KEY`` (``ALPACA_LIFECYCLE_API_URL``, default
 ``http://127.0.0.1:8321``), a signed-in ``mainsequence`` CLI, and ``ALPACA_PAPER_API_KEY`` and
 ``ALPACA_PAPER_SECRET_KEY`` in the environment or ``.env``. The keys go only to the account create
 route and are never printed.
+
+``--release-uid <uid>`` runs it against that deployed FastAPI release instead, as the signed-in
+person: the platform hands over the release's endpoint and token, and Markets calls go to the
+Environment's Markets API. It writes in that Environment (an account, a target, three Markets
+portfolios and paper orders) and its cleanup removes them.
 
 Every step is timed on this side of the wire: each stage, each call to this API and each Markets
 call. The sync's own steps run inside one request, so the request's time is theirs. The report
@@ -206,31 +211,57 @@ def next_second() -> dt.datetime:
 
 
 class Api:
-    """This API over HTTP as the signed-in person; every call is timed under the current stage."""
+    """This API over HTTP; every call is timed under the current stage.
 
-    def __init__(self, base_url: str, clock: Clock) -> None:
+    Local: ``base_url`` with the signed-in person's token from the ``mainsequence`` CLI. Deployed:
+    the release's endpoint and token, as the platform hands them to the signed-in person
+    (``ResourceRelease.resolve_runtime_access``), asked again before the token goes stale.
+    """
+
+    def __init__(self, base_url: str | None, clock: Clock, release_uid: str | None = None) -> None:
         import httpx
+
+        self.clock = clock
+
+        def cli_token() -> str:
+            return subprocess.run(
+                [str(ROOT / ".venv/bin/mainsequence"), "auth", "token"],
+                capture_output=True,
+                text=True,
+                check=True,
+            ).stdout.strip()
+
+        def release_access() -> tuple[str, dict[str, str]]:
+            from mainsequence.client import ResourceRelease
+            from mainsequence.client.utils import SessionJWTAuthProvider
+
+            with clock.call("platform: resolve the API's runtime access"):
+                access = ResourceRelease(uid=release_uid, release_kind="fastapi")
+                access = access.wait_for_runtime_access(wait_timeout_seconds=300).access or {}
+            check(access.get("rpc_url") and access.get("token"), "The release gave no endpoint.")
+            headers = SessionJWTAuthProvider(access_token=access["token"], refresh_token="")
+            return str(access["rpc_url"]).rstrip("/"), dict(headers.get_headers())
+
+        if release_uid:
+            base_url, first_headers = release_access()
 
         class SignedIn(httpx.Auth):
             def __init__(self) -> None:
-                self.token, self.read_at = "", 0.0
+                self.headers: dict[str, str] = first_headers if release_uid else {}
+                self.read_at = time.monotonic() if release_uid else 0.0
 
             def auth_flow(self, request):
-                fixed = os.environ.get("ALPACA_E2E_TOKEN")
-                if fixed:
-                    self.token = fixed
-                elif not self.token or time.monotonic() - self.read_at > 20:
-                    self.token = subprocess.run(
-                        [str(ROOT / ".venv/bin/mainsequence"), "auth", "token"],
-                        capture_output=True,
-                        text=True,
-                        check=True,
-                    ).stdout.strip()
+                if not self.headers or time.monotonic() - self.read_at > 20:
+                    if release_uid:
+                        self.headers = release_access()[1]
+                    else:
+                        token = os.environ.get("ALPACA_E2E_TOKEN") or cli_token()
+                        self.headers = {"Authorization": f"Bearer {token}"}
                     self.read_at = time.monotonic()
-                request.headers["Authorization"] = f"Bearer {self.token}"
+                request.headers.update(self.headers)
                 yield request
 
-        self.clock = clock
+        self.base_url = base_url
         self.client = httpx.Client(base_url=base_url, auth=SignedIn(), timeout=180.0)
 
     def request(self, method: str, path: str, label: str | None = None, **kwargs: Any) -> Any:
@@ -523,13 +554,15 @@ class Lifecycle:
 
     # -- before ----------------------------------------------------------------------------------
     def remove_leftovers(self) -> None:
-        """An earlier run that stopped half way leaves its account and portfolios."""
+        """An earlier run that stopped half way leaves its account, portfolios and calendar."""
         for leftover in ok(self.api.get("/v1/accounts", params={"limit": 100}))["items"]:
             if leftover.get("account_name") == ACCOUNT_NAME:
                 self.delete_account(str(leftover["uid"]))
-        self.delete_portfolios()
+        self.delete_markets_rows()
 
-    def delete_portfolios(self) -> None:
+    def delete_markets_rows(self) -> None:
+        """Delete the three portfolios, then the calendar only they use."""
+        from msm.api.calendars import Calendar
         from msm.api.portfolios import Portfolio
 
         for name in PORTFOLIOS:
@@ -542,6 +575,11 @@ class Lifecycle:
                     self.markets.delete_portfolio,
                     portfolio.uid,
                 )
+        calendar = self.clock.timed(
+            "markets: find calendar", Calendar.get_by_unique_identifier, CALENDAR
+        )
+        if calendar is not None:
+            self.clock.timed("markets: delete calendar", Calendar.delete, calendar.uid)
 
     # -- stages ----------------------------------------------------------------------------------
     def register(self) -> None:
@@ -620,7 +658,7 @@ class Lifecycle:
         self.state["identifiers"] = {
             symbol: str(assets[str(uid)].unique_identifier) for symbol, uid in uids.items()
         }
-        today = dt.date.today()
+        # ms-markets 4.2 stores a calendar's rules up to the library's horizon: no end date.
         calendar = self.clock.timed(
             "markets: find calendar", Calendar.get_by_unique_identifier, CALENDAR
         ) or self.clock.timed(
@@ -629,8 +667,7 @@ class Lifecycle:
             source_identifier="NYSE",
             unique_identifier=CALENDAR,
             display_name="Alpaca end-to-end NYSE",
-            valid_from=today - dt.timedelta(days=30),
-            valid_to=today + dt.timedelta(days=30),
+            valid_from=dt.date.today() - dt.timedelta(days=30),
             timezone="America/New_York",
         )
         self.state["portfolios"] = {
@@ -870,7 +907,7 @@ class Lifecycle:
                     "The account still reads back after the delete.",
                 ),
             )
-        attempt("delete portfolios", self.delete_portfolios)
+        attempt("delete portfolios and calendar", self.delete_markets_rows)
         check(not failures, "; ".join(failures))
 
     def restore_positions(self) -> None:
@@ -887,23 +924,38 @@ class Lifecycle:
         self.trade(back)
 
 
-def run(*, api_url: str, keep: bool = False, clock: Clock | None = None) -> tuple[Clock, list]:
-    """Run every stage and the cleanup; the timings and the warnings."""
+def run(
+    *,
+    api_url: str | None = None,
+    release_uid: str | None = None,
+    keep: bool = False,
+    clock: Clock | None = None,
+) -> tuple[Clock, list]:
+    """Run every stage and the cleanup; the timings and the warnings.
+
+    With ``release_uid`` it runs against that deployed API and the Environment's Markets API, as
+    the signed-in person; otherwise against the local stack at ``api_url``.
+    """
     for name, value in _env_file().items():
         os.environ.setdefault(name, value)
-    if not os.environ.get("MARKETS_API_URL"):
+    if release_uid:
+        # The Markets API is found in the person's Environment, as a deployed workload finds it.
+        os.environ.pop("MARKETS_API_URL", None)
+    elif not os.environ.get("MARKETS_API_URL"):
         raise SystemExit("MARKETS_API_URL is not set: point it at the local Markets API.")
     clock = clock or Clock()
 
     with clock.stage("setup: connect to the API, Markets and Alpaca"):
-        api = Api(api_url, clock)
+        api = Api(api_url, clock, release_uid=release_uid)
         health = api.get("/health")
         check(health.status_code == 200, f"GET /health answered {health.status_code}.")
         from alpaca_connectors.runtime import start_markets_engine, use_markets_api
-        from metatables import configure_local_client
 
-        configure_local_client()
-        clock.timed("markets: start engine", start_markets_engine)
+        if not release_uid:
+            from metatables import configure_local_client
+
+            configure_local_client()
+            clock.timed("markets: start engine", start_markets_engine)
         markets = use_markets_api().client
         lifecycle = Lifecycle(api, markets, Alpaca(clock), clock)
     if clock.stages[-1].status != "passed":
@@ -941,12 +993,22 @@ def main(argv: list[str] | None = None) -> int:
         help="This API (default: ALPACA_LIFECYCLE_API_URL or http://127.0.0.1:8321).",
     )
     parser.add_argument(
+        "--release-uid",
+        default=os.environ.get("ALPACA_LIFECYCLE_RELEASE_UID"),
+        help=(
+            "Run against this deployed FastAPI release instead of the local stack, with the "
+            "Environment's Markets API (default: ALPACA_LIFECYCLE_RELEASE_UID)."
+        ),
+    )
+    parser.add_argument(
         "--keep", action="store_true", help="Skip the cleanup and leave the account."
     )
     parser.add_argument("--json", type=Path, help="Also write the timings to this file.")
     args = parser.parse_args(argv)
 
-    clock, warnings = run(api_url=args.api_url.rstrip("/"), keep=args.keep)
+    clock, warnings = run(
+        api_url=args.api_url.rstrip("/"), release_uid=args.release_uid, keep=args.keep
+    )
     print(render(clock))
     for warning in warnings:
         print(f"warning: {warning}")
