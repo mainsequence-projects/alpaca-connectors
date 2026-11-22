@@ -8,6 +8,8 @@ transaction. The PostgreSQL path has not been run: its end-to-end test is writte
 skips without the disposable cluster of `scripts/test_postgresql.py`. MySQL and SQL
 Server refuse statement lists. The amendment on time-index statistics (2026-11-19) is
 implemented for 0.1.69 and tested the same way: SQLite in process, PostgreSQL not run.
+The amendment on SQLite parameters (2026-11-19) is implemented for 0.1.71 and tested in
+process and through the local API.
 
 Owner: MetaTables API, with the Python client.
 
@@ -180,6 +182,33 @@ each rebuilt table's UID with `rebuilt`, or with why its statistics stayed as th
 
 A table left unchanged is corrected by its next rebuild: a chunk insert, a
 `delete-after-date`, or a later compiled write.
+
+### SQLite statements bind by position (amended 2026-11-19)
+
+Issue: [MetaTables#121](https://github.com/mainsequence-projects/MetaTables/issues/121).
+
+A statement list near SQLite's 32,766-value limit ran past its deadline before it read a
+row. SQLite numbers each named parameter by searching the names before it, so preparing a
+statement takes time quadratic in its values, and CPython's `sqlite3` searches again to
+bind a dict. A 26,212-value statement took 6.4 s of CPU to prepare; with `?` it took
+milliseconds.
+
+SQLite uses the `qmark` paramstyle, as SQL Server does. The client compiles plain `?`
+placeholders and sends the values as a list in order, repeating a value wherever the
+statement uses its parameter again, and the API binds them by position. The runtime
+context reports `qmark` for SQLite, and the API refuses a SQLite statement in any other
+paramstyle with `compiled_sql_dialect_mismatch`.
+
+- Numbered placeholders (`?NNN`, `:1`) are not enough: on CPython 3.12 and later,
+  binding by position still looks up each parameter's name, and a numbered parameter has
+  one.
+- Rewriting named placeholders to `?` in the API was rejected. The API submits caller
+  SQL unchanged (ADR 0007), and a rewrite needs a scanner that skips string literals,
+  quoted identifiers and comments.
+- A client and an API of different versions disagree on SQLite's paramstyle. A SQLite
+  runtime is always local and normally runs from the client's own installation, so they
+  differ only when a local API runs from another one. The client then says to install
+  the API's version; an older client gets `compiled_sql_dialect_mismatch`.
 
 ## Alternatives
 
