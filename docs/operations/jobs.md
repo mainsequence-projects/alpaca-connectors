@@ -150,20 +150,15 @@ Execution first runs its bars configuration's update, so an asset the signal jus
 (issue #39); a failed update leaves the run to value with the prices already stored. It then reads
 the portfolio's published observations, updates the configuration-derived persistent
 `InterpolatedPrices`, and calculates `PortfoliosUpdater` with dependency traversal disabled.
-Revision `0010` and the configuration-derived interpolation storage must be migrated before the
-first live run. See
+The interpolated prices are written to the table of the portfolio's bars profile, which revision
+`0034` creates and the migration Job registers
+([ADR 0029](../adrs/0029_interpolated_price_tables_are_named_like_every_project_table.md)); the
+Job needs nothing prepared. See
 [ADR 0008](../adrs/0008_portfolio_configuration_and_job_ownership.md).
 
-Prepare that dynamic storage through the supported migration wrapper:
-
-```bash
-alpaca-connectors portfolio prepare-interpolated-prices
-alpaca-connectors portfolio prepare-interpolated-prices --check-only
-```
-
-The first command generates a provider-scoped Alembic revision only when one is missing, upgrades
-the shared project history, and verifies the registered output tables. The second is read-only and
-fails if either the local revision or platform table is missing.
+A run's summary carries `first_rebalance`: `rebalanced` is true only when Markets holds the
+portfolio's weights. A run whose first rebalance was due and recorded no weights says so in its
+`message` and log, instead of reporting the schedule.
 
 ## Alpaca Bars Update Job
 
@@ -326,7 +321,7 @@ In each Environment where the project runs:
 2. The migration Job gives every workload of this repository's branch `editor` on
    `alpaca-connectors`
    ([ADR 0030](../adrs/0030_workloads_get_their_roles_through_their_branch.md), MetaTables
-   ADR 0029). Both providers declare `settings.BRANCH_ACCESS` after each finalization, on every
+   ADR 0029). The provider declares `settings.BRANCH_ACCESS` after each finalization, on every
    push. The API, the Agent, the migration Job, the bars and portfolio Jobs and both dispatchers
    have the role on their first request. A renamed or recreated workload keeps it, and nobody
    grants a workload User by hand. In a new Environment the migration Job creates the namespace

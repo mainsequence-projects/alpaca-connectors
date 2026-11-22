@@ -33,9 +33,13 @@ Frequency, feed, and adjustment are stored on the configuration. Their triple re
 output storage class. A request cannot create a new combination dynamically; adding one requires a
 storage class and an Alembic migration.
 
-For daily bars, `time_index` is normalized to 16:00 America/New_York on the session date. The
-updater excludes the current incomplete period and uses the ms-markets per-asset incremental update
-range.
+For daily bars, `time_index` is the close of the bar's NYSE session, the calendar a US equity is
+linked to (ADR 0026): 16:00 America/New_York, or 13:00 on an early-close day, and `open_time` is
+the session's open. ms-markets puts daily bars on the session closes of the asset's calendar, so a
+bar stamped at 16:00 on an early-close day fell between two sessions and interpolation valued that
+day at the previous close. Revision `0035` moved the bars stored before this rule on the 2018 to
+2026 early closes. The updater excludes the current incomplete period and uses the ms-markets
+per-asset incremental update range.
 
 ## Prerequisites
 

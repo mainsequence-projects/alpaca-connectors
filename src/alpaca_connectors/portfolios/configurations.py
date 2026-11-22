@@ -16,7 +16,7 @@ from collections.abc import Sequence
 from typing import Any, ClassVar, Literal
 
 from msm.api.base import MarketsMetaTableRow, operation_result_rows
-from msm.base import MarketsBase, markets_table_args, new_markets_uid
+from msm.base import markets_table_args, new_markets_uid
 from msm.models import AccountTable
 from msm.models.portfolios import PortfolioTable
 from pydantic import ConfigDict
@@ -36,6 +36,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.types import Uuid
 
+from alpaca_connectors.base import ProjectBase
 from alpaca_connectors.metatables import AlpacaMarketsMetaTableMixin, ProjectStorageNameMixin
 from alpaca_connectors.portfolios.signal_definitions import SignalDefinitionTable
 
@@ -60,7 +61,7 @@ def utc_now() -> dt.datetime:
 class PortfolioRebalanceConfigurationTable(
     ProjectStorageNameMixin,
     AlpacaMarketsMetaTableMixin,
-    MarketsBase,
+    ProjectBase,
 ):
     """Reusable configuration for converting signal weights into executed weights."""
 
@@ -238,7 +239,7 @@ class PortfolioRebalanceConfigurationTable(
 class AlpacaPortfolioConfigurationTable(
     ProjectStorageNameMixin,
     AlpacaMarketsMetaTableMixin,
-    MarketsBase,
+    ProjectBase,
 ):
     """One analytical portfolio of one account, following one of its account's signals.
 
@@ -330,7 +331,7 @@ class AlpacaPortfolioConfigurationTable(
     )
     account_uid: Mapped[uuid.UUID | None] = mapped_column(
         Uuid(as_uuid=True),
-        ForeignKey(f"{AccountTable.__table__.fullname}.uid", ondelete="RESTRICT"),
+        ForeignKey(AccountTable.__table__.c.uid, ondelete="RESTRICT"),
         nullable=True,
         info={
             "label": "Account UID",
@@ -379,7 +380,7 @@ class AlpacaPortfolioConfigurationTable(
     )
     portfolio_uid: Mapped[uuid.UUID | None] = mapped_column(
         Uuid(as_uuid=True),
-        ForeignKey(f"{PortfolioTable.__table__.fullname}.uid", ondelete="SET NULL"),
+        ForeignKey(PortfolioTable.__table__.c.uid, ondelete="SET NULL"),
         nullable=True,
         info={
             "label": "Portfolio UID",
@@ -506,7 +507,7 @@ class AlpacaPortfolioConfigurationTable(
     )
 
 
-class EndedPortfolioTable(ProjectStorageNameMixin, AlpacaMarketsMetaTableMixin, MarketsBase):
+class EndedPortfolioTable(ProjectStorageNameMixin, AlpacaMarketsMetaTableMixin, ProjectBase):
     """A deleted portfolio whose retired ``Portfolio`` or signal ms-markets still keeps.
 
     No key names the account, so the record never blocks ms-markets' account delete; the
@@ -585,7 +586,7 @@ class PortfolioRebalanceConfiguration(MarketsMetaTableRow):
     __table__: ClassVar[type[PortfolioRebalanceConfigurationTable]] = (
         PortfolioRebalanceConfigurationTable
     )
-    __required_tables__: ClassVar[list[type[MarketsBase]]] = [PortfolioRebalanceConfigurationTable]
+    __required_tables__: ClassVar[list[type[ProjectBase]]] = [PortfolioRebalanceConfigurationTable]
 
     name: str
     description: str | None
@@ -606,7 +607,7 @@ class AlpacaPortfolioConfiguration(MarketsMetaTableRow):
 
     __table__: ClassVar[type[AlpacaPortfolioConfigurationTable]] = AlpacaPortfolioConfigurationTable
     # Own tables only; the Account and Portfolio keys are references (ms-markets ADR 0047).
-    __required_tables__: ClassVar[list[type[MarketsBase]]] = [
+    __required_tables__: ClassVar[list[type[ProjectBase]]] = [
         SignalDefinitionTable,
         PortfolioRebalanceConfigurationTable,
         AlpacaPortfolioConfigurationTable,
@@ -641,7 +642,7 @@ class EndedPortfolio(MarketsMetaTableRow):
     model_config = ConfigDict(extra="ignore", frozen=True)
 
     __table__: ClassVar[type[EndedPortfolioTable]] = EndedPortfolioTable
-    __required_tables__: ClassVar[list[type[MarketsBase]]] = [EndedPortfolioTable]
+    __required_tables__: ClassVar[list[type[ProjectBase]]] = [EndedPortfolioTable]
 
     account_uid: uuid.UUID
     portfolio_uid: uuid.UUID
@@ -1287,7 +1288,7 @@ def _uuid_list(values: Sequence[Any]) -> list[uuid.UUID]:
     return list(dict.fromkeys(uuid.UUID(str(value)) for value in values if value is not None))
 
 
-def _select_rows(table: type[MarketsBase], statement: Any) -> list[dict[str, Any]]:
+def _select_rows(table: type[ProjectBase], statement: Any) -> list[dict[str, Any]]:
     """Run one select of this application's own tables and answer its rows."""
     from msm.bootstrap import resolve_runtime
     from msm.repositories.base import compile_markets_statement, execute_markets_operation
@@ -1298,7 +1299,7 @@ def _select_rows(table: type[MarketsBase], statement: Any) -> list[dict[str, Any
     return operation_result_rows(execute_markets_operation(operation, context=runtime.context))
 
 
-def delete_rows_in(table: type[MarketsBase], column: str, values: Sequence[Any]) -> None:
+def delete_rows_in(table: type[ProjectBase], column: str, values: Sequence[Any]) -> None:
     """Delete the rows whose ``column`` is one of ``values``: one statement per batch (#46)."""
     from msm.bootstrap import resolve_runtime
     from msm.repositories.base import compile_markets_statement, execute_markets_operation
@@ -1597,7 +1598,7 @@ def ended_signal_uids(signal_uids: Sequence[str]) -> set[str]:
     return {str(row["signal_uid"]) for row in rows}
 
 
-def project_portfolio_configuration_models() -> list[type[MarketsBase]]:
+def project_portfolio_configuration_models() -> list[type[ProjectBase]]:
     from alpaca_connectors.portfolios.signal_assets import SignalAssetTable
 
     return [

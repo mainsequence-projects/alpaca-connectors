@@ -43,10 +43,7 @@ RETIRED_LAUNCHERS = (
 )
 REMOVED_ROUTE_PREFIXES = ("/v1/universe-sources", "/v1/universes", "/v1/signal-jobs")
 REMOVED_DISTRIBUTIONS = ("etfhextractor", "playwright")
-MIGRATION_ONLY_MODULES = (
-    "alpaca_connectors.migrations.env",
-    "alpaca_connectors.portfolios.interpolated_prices_migration",
-)
+MIGRATION_ONLY_MODULES = ("alpaca_connectors.migrations.env",)
 
 
 def _scanned_files() -> list[Path]:

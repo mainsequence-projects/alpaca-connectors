@@ -81,19 +81,13 @@ interpolated-price tables); the API and the Agent deploy after it; the Jobs take
 their schema gate waits until the Markets API reports the installed ms-markets release (3.0.2) or later. The workflow
 grants every resource that calls Markets `reader` on the `MainSequenceMarkets` branch.
 
-## 4. Register The Namespaced Interpolated-Price Tables
+## 4. Interpolated-Price Tables
 
+Nothing to do. Since
 [ADR 0029](../adrs/0029_interpolated_price_tables_are_named_like_every_project_table.md)
-(proposed, waiting for MainSequenceMarkets#95) removes this step: the tables are named after their
-bars profile and the migration Job creates them. Until then, as before for revision 0011, a person
-registers the dynamic interpolated-price tables with the documented wrapper and checks them:
-
-```bash
-alpaca-connectors portfolio prepare-interpolated-prices
-alpaca-connectors portfolio prepare-interpolated-prices --check-only
-```
-
-Revision 0021 already creates the tables of the two bars profiles, so no revision is generated.
+(ms-markets 5.0.0) revision `0034` creates the interpolated-price table of each bars profile and
+the migration Job registers it, in every Environment. The tables of revisions 0011 and 0021 are
+named from bars-table UIDs, no code reads them, and a later revision drops them.
 
 ## 5. Markets Reads No Table Of This Application
 
@@ -195,10 +189,6 @@ this release finds the bars and interpolated-price tables by physical name only.
 The only places the identifier is shown are the market-data dataset reads (`identifier`), which
 read it from the catalog. The dataset `key` (`1d/sip/all`) and every uid are unchanged.
 
-`MSM_AUTO_REGISTER_NAMESPACE`, when it is set, silently replaces the declared namespace (and
-suffixes physical names). No hosted resource sets it; never set it outside tests and local
-examples.
-
 Who runs it: a person who holds `editor` or `owner` on `mainsequence.markets` (or on each of the
 thirteen tables) and `editor` or `owner` on `alpaca-connectors`, or an Organization admin.
 Adding needs `tables.update` on the table and `tables.create` on `alpaca-connectors`; removing
@@ -246,7 +236,7 @@ assert {table.physical_table_name: table.uid for table in after} == {
 }
 ```
 
-Run it with `MSM_AUTO_REGISTER_NAMESPACE` unset, from a checkout of this release, against the
+Run it from a checkout of this release against the
 Environment's MetaTables (`mainsequence` session of the person above). Keep the printed `before`
 mapping: adding each table back to its old namespace, removing it from `alpaca-connectors` and
 patching its old identifier undoes the move.
@@ -283,8 +273,11 @@ Markets `data_viewer` on that namespace, and every other role on it, and removes
 
 ## 10. Later
 
-- A later revision drops the revision-0011 tables `ms_markets__interpolated_prices__t_*` once
-  every Environment has copied them (revisions add first and drop later).
+- A later revision drops the interpolated-price tables of revisions 0011
+  (`ms_markets__interpolated_prices__t_*`) and 0021 (`alpaca_connectors__interpolated_prices__t_*`)
+  once every Environment runs the release of
+  [ADR 0029](../adrs/0029_interpolated_price_tables_are_named_like_every_project_table.md), whose
+  revision 0034 replaced them (revisions add first and drop later).
 - This application's rows written before ms-markets ADR 0047 stayed in the shared Markets time
   series. They belong to portfolios step 5 deletes, which keep them as their history; their
   removal is the Markets owners' decision.

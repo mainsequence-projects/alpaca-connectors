@@ -6,6 +6,8 @@ from unittest.mock import patch
 
 from packaging.specifiers import SpecifierSet
 
+from alpaca_connectors.base import ProjectBase
+from alpaca_connectors.instances import INTERPOLATED_PRICES_BY_PROFILE
 from alpaca_connectors.market_data.alpaca_bars import AlpacaStockBarsNode
 from alpaca_connectors.market_data.storage import AlpacaStockBars1dSipAllStorage
 from alpaca_connectors.migrations import METADATA, PROJECT_TABLE_NAMES, migration
@@ -16,9 +18,9 @@ from alpaca_connectors.portfolios.interpolated_prices import (
 
 
 def test_runtime_dependency_versions_match_the_sdk9_metatables_stack() -> None:
-    assert version("mainsequence") in SpecifierSet(">=9.0.2,<10")
-    assert version("mainsequence-metatable") in SpecifierSet(">=0.1.6,<0.2")
-    assert version("ms-markets") in SpecifierSet(">=4.0.1,<5")
+    assert version("mainsequence") in SpecifierSet(">=9.0.38,<10")
+    assert version("mainsequence-metatable") in SpecifierSet(">=0.1.74,<0.2")
+    assert version("ms-markets") in SpecifierSet(">=5.0.0,<6")
 
 
 def test_alpaca_bars_node_declares_sdk8_output_table() -> None:
@@ -26,28 +28,18 @@ def test_alpaca_bars_node_declares_sdk8_output_table() -> None:
     assert not hasattr(AlpacaStockBarsNode, "_required_storage_table")
 
 
-def test_migration_metadata_includes_fk_dependencies_but_manages_only_project_tables() -> None:
-    assert {
-        "ms_markets__accountgroup",
-        "ms_markets__account",
-        "ms_markets__asset",
-        "ms_markets__calendar",
-        "ms_markets__index",
-        "ms_markets__portfolio",
-        "ms_markets__signalmetadata",
-        "ms_markets__ordermanager",
-        *PROJECT_TABLE_NAMES,
-    } == set(METADATA.tables)
+def test_migration_metadata_holds_only_this_applications_tables() -> None:
+    # ms-markets 5.0.0 (ADR 0029, decision 5): every table is on ProjectBase and keys to Markets by
+    # Markets' own column objects, so the provider's metadata holds no Markets table and the
+    # provider needs no include hook.
+    assert METADATA is ProjectBase.metadata
+    assert set(METADATA.tables) == PROJECT_TABLE_NAMES
+    assert migration.include_name_hook is None
+    assert migration.include_object_hook is None
+    for model in migration.metatable_models:
+        assert model.metadata is ProjectBase.metadata, model.__table__.name
     assert {model.__table__.name for model in migration.metatable_models} == PROJECT_TABLE_NAMES
-    assert {
-        table.name
-        for table in METADATA.sorted_tables
-        if migration.include_name(
-            table.name,
-            "table",
-            {"schema_name": table.schema},
-        )
-    } == {
+    assert PROJECT_TABLE_NAMES == {
         "alpaca_connectors__bars_1d_iex_raw",
         "alpaca_connectors__bars_1d_sip_all",
         "alpaca_connectors__bars_configuration",
@@ -68,6 +60,22 @@ def test_migration_metadata_includes_fk_dependencies_but_manages_only_project_ta
         "alpaca_connectors__portfoliocalendareventsts__main",
         "alpaca_connectors__ordersts__main",
         "alpaca_connectors__tradests__main",
+        # One interpolated-price table per bars profile, revision 0034 (ADR 0029).
+        "alpaca_connectors__interpolatedpricests__t_1330c8b4c5fd5124",
+        "alpaca_connectors__interpolatedpricests__ff97574884b78031",
+    }
+    # The foreign keys reach Markets' registries through their own tables, outside this metadata.
+    assert {
+        key.column.table.name
+        for table in METADATA.tables.values()
+        for key in table.foreign_keys
+        if key.column.table.name not in PROJECT_TABLE_NAMES
+    } == {
+        "ms_markets__account",
+        "ms_markets__asset",
+        "ms_markets__calendar",
+        "ms_markets__ordermanager",
+        "ms_markets__portfolio",
     }
 
 
@@ -102,6 +110,7 @@ def test_interpolated_prices_scope_is_identifiers_and_bars_follow_each_asset_cal
         result = build_alpaca_interpolated_prices(
             source_time_index_meta_table_uid="source-table-uid",
             asset_identifiers=["ALPACA::asset-b", "ALPACA::asset-a", "ALPACA::asset-a"],
+            profile=("1d", "iex", "raw"),
         )
 
     assert result is node
@@ -109,3 +118,8 @@ def test_interpolated_prices_scope_is_identifiers_and_bars_follow_each_asset_cal
     # registration linked it to (ADR 0026).
     interpolation_config = interpolated_prices.call_args.kwargs["interpolation_config"]
     assert interpolation_config.asset_list == ["ALPACA::asset-a", "ALPACA::asset-b"]
+    # ms-markets 5.0.0 requires the table; the run writes its bars profile's (ADR 0029).
+    assert (
+        interpolated_prices.call_args.kwargs["output_table"]
+        is INTERPOLATED_PRICES_BY_PROFILE[("1d", "iex", "raw")]
+    )

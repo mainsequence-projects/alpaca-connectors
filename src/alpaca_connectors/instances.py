@@ -1,41 +1,43 @@
 """This application's private instances of Markets time-series contracts (ms-markets ADR 0047).
 
-Each class below is a contract-identical instance built by an ms-markets factory, named
-``alpaca_connectors__<contract>__main``, identified as ``alpaca-connectors.<Contract>.main`` and
-migrated by this application's own Alembic provider in its ``alpaca-connectors`` namespace.
+Each class below is a contract-identical instance built by an ms-markets factory on
+``ProjectBase``, in the ``alpaca-connectors`` namespace, and migrated by this application's own
+Alembic provider. The four of key ``main`` are named ``alpaca_connectors__<contract>__main`` and
+identified as ``alpaca-connectors.<Contract>.main``; the interpolated-price tables are keyed by
+their configuration (ADR 0029).
 
 They are private, and Markets never reads them (ADR 0031, decision 2): rebalance state and
-calendar events, which a portfolio run writes (``private_portfolio_models``), and orders and
-trades, which the execution ledger writes. Interpolated prices are dynamic (one table per bars
-source); ``configured_alpaca_interpolated_prices_storage`` places them in this namespace the same
-way. Signal weights, portfolio weights and portfolio values are Markets' own published series
-(ADR 0031, decision 1); revision 0033 dropped this application's tables of them.
+calendar events, which a portfolio run writes (``private_portfolio_models``); orders and trades,
+which the execution ledger writes; and one interpolated-price table per bars profile, which values
+the portfolios (``INTERPOLATED_PRICES_BY_PROFILE``). Signal weights, portfolio weights and
+portfolio values are Markets' own published series (ADR 0031, decision 1); revision 0033 dropped
+this application's tables of them.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-from msm.settings import markets_configured_namespace
-
+from alpaca_connectors.base import ProjectBase
 from alpaca_connectors.settings import PROJECT_NAMESPACE, PROJECT_NAMESPACE_SLUG
 
 INSTANCE_KEY = "main"
-INSTANCE_NAMESPACE = markets_configured_namespace(PROJECT_NAMESPACE)
+INSTANCE_NAMESPACE = PROJECT_NAMESPACE
 
 
 def _instance_kwargs() -> dict[str, Any]:
-    """Factory arguments of every instance: this namespace and app segment, the Markets base.
+    """Factory arguments of every instance: this namespace, app segment and declarative base.
 
-    The instances are built on the Markets declarative base (no ``base=``), where their
-    references to Markets registries resolve; this provider's migration copies the instance tables
-    into its own metadata like any model (revisions 0020 and 0021 were written from it). A
-    provider ``base`` would change that migration metadata, so it stays out.
+    ms-markets 5.0.0 requires all three (issue 95). The instances key to Markets' registries by
+    Markets' own columns, so the provider's metadata, ``ProjectBase.metadata``, holds only this
+    application's tables. Their names, identifiers and DDL are the ones revisions 0020 and 0026
+    created.
     """
     return {
         "instance_key": INSTANCE_KEY,
         "namespace": INSTANCE_NAMESPACE,
         "storage_app": PROJECT_NAMESPACE_SLUG,
+        "base": ProjectBase,
     }
 
 
@@ -67,22 +69,63 @@ AlpacaOrdersStorage = _INSTANCES["orders"]
 AlpacaTradesStorage = _INSTANCES["trades"]
 
 
-def interpolated_prices_storage_kwargs() -> dict[str, Any]:
-    """``InterpolatedPrices`` keyword arguments placing its table in this namespace.
+# A portfolio configuration stores these two values and refuses any other (ADR 0024).
+INTERPOLATION_UPSAMPLE_FREQUENCY = "1d"
+INTERPOLATION_RULE = "ffill"
 
-    No ``storage_base``, like the other instances (see ``_instance_kwargs``).
+
+def _build_interpolated_prices() -> dict[tuple[str, str, str], type[Any]]:
+    """One ``InterpolatedPricesTS`` instance per bars profile (ADR 0029, ms-markets issue 95).
+
+    ms-markets keys the table by its configuration: the bars table's physical name and cadence,
+    the upsample frequency and the rule (``interpolated_prices_instance_key``). The physical name
+    is the same in every Environment, so one committed revision (0034) creates these tables
+    everywhere, and ``InterpolatedPrices`` refuses any other class as its ``output_table``. A
+    new bars profile gets its interpolated-price table in the revision that adds its bars table.
     """
-    return {"storage_namespace": INSTANCE_NAMESPACE, "storage_app": PROJECT_NAMESPACE_SLUG}
+    from msm.storage_instances import configured_time_index_instance
+    from msm_portfolios.time_index.prices.storage import (
+        InterpolatedPricesStorage,
+        interpolated_prices_instance_key,
+    )
+
+    from alpaca_connectors.market_data.storage import ALPACA_STOCK_BARS_STORAGE_BY_TRIPLE
+
+    return {
+        profile: configured_time_index_instance(
+            InterpolatedPricesStorage,
+            instance_key=interpolated_prices_instance_key(
+                source_table_name=bars.__table__.name,
+                source_cadence=bars.__cadence__,
+                upsample_frequency_id=INTERPOLATION_UPSAMPLE_FREQUENCY,
+                intraday_bar_interpolation_rule=INTERPOLATION_RULE,
+            ),
+            cadence=INTERPOLATION_UPSAMPLE_FREQUENCY,
+            namespace=INSTANCE_NAMESPACE,
+            storage_app=PROJECT_NAMESPACE_SLUG,
+            base=ProjectBase,
+        )
+        for profile, bars in sorted(ALPACA_STOCK_BARS_STORAGE_BY_TRIPLE.items())
+    }
+
+
+INTERPOLATED_PRICES_BY_PROFILE = _build_interpolated_prices()
+"""The interpolated-price table of each ``(frequency_id, feed, adjustment)`` bars profile."""
 
 
 def project_instance_models() -> list[type[Any]]:
     """Every contract instance this application migrates, registers and attaches."""
-    return list(_INSTANCES.values())
+    return [*_INSTANCES.values(), *INTERPOLATED_PRICES_BY_PROFILE.values()]
 
 
 def private_portfolio_models() -> list[type[Any]]:
-    """The private instances a portfolio run writes: rebalance state and calendar events."""
-    return [AlpacaPortfolioRebalanceStateStorage, AlpacaPortfolioCalendarEventsStorage]
+    """The private instances a portfolio run writes: rebalance state, calendar events and the
+    interpolated prices it values with."""
+    return [
+        AlpacaPortfolioRebalanceStateStorage,
+        AlpacaPortfolioCalendarEventsStorage,
+        *INTERPOLATED_PRICES_BY_PROFILE.values(),
+    ]
 
 
 def execution_instance_models() -> list[type[Any]]:
@@ -97,8 +140,10 @@ __all__ = [
     "AlpacaPortfolioCalendarEventsStorage",
     "AlpacaPortfolioRebalanceStateStorage",
     "AlpacaTradesStorage",
+    "INTERPOLATED_PRICES_BY_PROFILE",
+    "INTERPOLATION_RULE",
+    "INTERPOLATION_UPSAMPLE_FREQUENCY",
     "execution_instance_models",
-    "interpolated_prices_storage_kwargs",
     "private_portfolio_models",
     "project_instance_models",
 ]

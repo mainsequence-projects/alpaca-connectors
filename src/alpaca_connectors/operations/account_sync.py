@@ -16,13 +16,14 @@ from typing import Any, ClassVar
 
 from msm.api.base import MarketsMetaTableRow
 from msm.api.http import OperationError, OperationStatus, OperationStep
-from msm.base import MarketsBase, markets_table_args, new_markets_uid
+from msm.base import markets_table_args, new_markets_uid
 from pydantic import ConfigDict
 from sqlalchemy import JSON, DateTime, Index, String
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.types import Uuid
 
 from alpaca_connectors.account.ownership import AccountOwner
+from alpaca_connectors.base import ProjectBase
 from alpaca_connectors.metatables import AlpacaMarketsMetaTableMixin, ProjectStorageNameMixin
 
 ACCOUNT_SYNC_ACTION = "account_sync"
@@ -46,7 +47,7 @@ def utc_now() -> dt.datetime:
 class AccountSyncOperationTable(
     ProjectStorageNameMixin,
     AlpacaMarketsMetaTableMixin,
-    MarketsBase,
+    ProjectBase,
 ):
     """One durable record of one account sync."""
 

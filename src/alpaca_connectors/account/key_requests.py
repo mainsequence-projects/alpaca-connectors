@@ -17,13 +17,14 @@ import uuid
 from typing import Any, ClassVar, Literal
 
 from msm.api.base import MarketsMetaTableRow
-from msm.base import MarketsBase, markets_table_args, new_markets_uid
+from msm.base import markets_table_args, new_markets_uid
 from pydantic import ConfigDict
 from sqlalchemy import DateTime, Index, String
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.types import Uuid
 
 from alpaca_connectors.account import ALPACA_ENVIRONMENTS
+from alpaca_connectors.base import ProjectBase
 from alpaca_connectors.metatables import AlpacaMarketsMetaTableMixin, ProjectStorageNameMixin
 
 KeyRequestAction = Literal["register", "rotate"]
@@ -39,7 +40,7 @@ def utc_now() -> dt.datetime:
     return dt.datetime.now(UTC).replace(microsecond=0)
 
 
-class AccountKeyRequestTable(ProjectStorageNameMixin, AlpacaMarketsMetaTableMixin, MarketsBase):
+class AccountKeyRequestTable(ProjectStorageNameMixin, AlpacaMarketsMetaTableMixin, ProjectBase):
     """One request for one person to enter Alpaca keys for a new or an existing account."""
 
     __project_storage_concept__ = "account_key_request"

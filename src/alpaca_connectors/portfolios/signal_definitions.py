@@ -23,13 +23,14 @@ import uuid
 from typing import Any, ClassVar
 
 from msm.api.base import MarketsMetaTableRow
-from msm.base import MarketsBase, markets_table_args, new_markets_uid
+from msm.base import markets_table_args, new_markets_uid
 from msm.models import AccountTable
 from pydantic import ConfigDict
 from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.types import Uuid
 
+from alpaca_connectors.base import ProjectBase
 from alpaca_connectors.metatables import AlpacaMarketsMetaTableMixin, ProjectStorageNameMixin
 
 UTC = dt.timezone.utc
@@ -41,7 +42,7 @@ def utc_now() -> dt.datetime:
     return dt.datetime.now(UTC).replace(microsecond=0)
 
 
-class SignalDefinitionTable(ProjectStorageNameMixin, AlpacaMarketsMetaTableMixin, MarketsBase):
+class SignalDefinitionTable(ProjectStorageNameMixin, AlpacaMarketsMetaTableMixin, ProjectBase):
     """One signal an account's application provides weights for (ADR 0028, decision 5)."""
 
     __project_storage_concept__ = "signal_definition"
@@ -74,7 +75,7 @@ class SignalDefinitionTable(ProjectStorageNameMixin, AlpacaMarketsMetaTableMixin
     )
     account_uid: Mapped[uuid.UUID] = mapped_column(
         Uuid(as_uuid=True),
-        ForeignKey(f"{AccountTable.__table__.fullname}.uid", ondelete="CASCADE"),
+        ForeignKey(AccountTable.__table__.c.uid, ondelete="CASCADE"),
         nullable=False,
         info={
             "label": "Account UID",
@@ -139,7 +140,7 @@ class SignalDefinition(MarketsMetaTableRow):
     model_config = ConfigDict(extra="ignore", frozen=True)
 
     __table__: ClassVar[type[SignalDefinitionTable]] = SignalDefinitionTable
-    __required_tables__: ClassVar[list[type[MarketsBase]]] = [SignalDefinitionTable]
+    __required_tables__: ClassVar[list[type[ProjectBase]]] = [SignalDefinitionTable]
 
     account_uid: uuid.UUID
     key: str
@@ -508,7 +509,7 @@ def delete_signal_definition(definition_uid: Any) -> dict[str, Any]:
     }
 
 
-def project_signal_definition_models() -> list[type[MarketsBase]]:
+def project_signal_definition_models() -> list[type[ProjectBase]]:
     return [SignalDefinitionTable]
 
 

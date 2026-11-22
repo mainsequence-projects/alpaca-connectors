@@ -13,12 +13,19 @@ It drives a real Alpaca paper account through the local stack, the way an applic
  6. assignment   every unit the account holds is assigned to exactly one line;
  7. trade        the deltas are traded and the fills allocated to the funds;
  8. no weights   a portfolio with no weights fails the sizing and keeps the snapshot;
- 9. reweight     new weights and a lower exposure are sized and traded again.
+ 9. reweight     new weights and a lower exposure are sized and traded again;
+10. portfolio Job three portfolios of the account, two first observed at one time and one earlier,
+                 each run by the portfolio Job: every one must record weights and values from its
+                 own first rebalance, though they share the price and rebalance-state tables.
+
+Locally the portfolio Job runs as its launcher in a subprocess, with this machine's MetaTables and
+Markets; with ``--release-uid`` the API starts the deployed Job and the run is polled until it ends.
 
 Cleanup always runs, also after a failure, unless ``--keep``: it cancels this run's open orders,
 trades the three symbols back to the positions the account held when the run started (only while
 the market is open: a closed market fills nothing), clears the target, deletes the account with its
-exact confirmation, and deletes the three Markets portfolios and their calendar. Before it starts, it removes what an
+exact confirmation (its portfolios go with it), deletes stage 10's rebalance configuration, and
+deletes the three Markets portfolios and their calendar. Before it starts, it removes what an
 earlier run left: the account by name and the three portfolios.
 
 With the market closed the orders are queued, checked as accepted and cancelled, and the checks
@@ -80,6 +87,19 @@ AMOUNT = 20_000.0
 # apart from the sync's, so the comparison allows for that drift.
 SIZING_TOLERANCE = 0.03
 FILL_TIMEOUT_SECONDS = 120.0
+JOB_TIMEOUT_SECONDS = 1800.0
+JOB_DONE = {"SUCCEEDED", "FAILED", "ABORTED"}
+# Runs the portfolio Job's launcher as the deployed Job does, with the local API's keyring.
+LOCAL_JOB = """
+import os, runpy, sys
+ring = os.environ.get("ALPACA_E2E_LOCAL_KEYRING")
+if ring:
+    from metatables.encryption import set_keyring_source
+    set_keyring_source(lambda name: ring)
+launcher = sys.argv[1]
+sys.argv = [launcher, "--configuration-uid", sys.argv[2]]
+runpy.run_path(launcher, run_name="__main__")
+"""
 UNITS = 1e-6
 
 
@@ -368,8 +388,11 @@ class Alpaca:
 # The run
 # ------------------------------------------------------------------------------------------------
 class Lifecycle:
-    def __init__(self, api: Api, markets: Any, alpaca: Alpaca, clock: Clock) -> None:
+    def __init__(
+        self, api: Api, markets: Any, alpaca: Alpaca, clock: Clock, *, deployed: bool = False
+    ) -> None:
         self.api, self.markets, self.alpaca, self.clock = api, markets, alpaca, clock
+        self.deployed = deployed
         self.run = uuid.uuid4().hex[:8]
         self.state: dict[str, Any] = {}
         self.order_ids: set[str] = set()
@@ -880,6 +903,127 @@ class Lifecycle:
                 f"{symbol}: still a delta of {line['delta']} after the trade.",
             )
 
+    def portfolio_jobs(self) -> None:
+        """Three portfolios share the price and rebalance-state tables; each records its own run.
+
+        Two are first observed at one time and one earlier, so a portfolio that took another's
+        progress as its own (ms-markets issue 118) records nothing, or starts late.
+        """
+        self.need("account_uid", "identifiers")
+        from msm_portfolios.api import PortfolioValuesSeries, PortfolioWeightsSeries
+
+        from alpaca_connectors.market_data.alpaca_bars_support import stock_sessions
+
+        account = self.state["account_uid"]
+        today = now().date()
+        sessions = sorted(stock_sessions(today - dt.timedelta(days=21), today).values())
+        closed = [session for session in sessions if session[1] < now()]
+        check(len(closed) >= 6, "Fewer than six past NYSE sessions in the last three weeks.")
+        # An hour into a session: an immediate signal trades at that session's close.
+        later, earlier = closed[-2], closed[-5]
+        plan = {"shared_1": later, "shared_2": later, "earlier": earlier}
+        rebalance = ok(
+            self.api.post(
+                "/v1/portfolio-rebalance-configurations",
+                json={"name": f"ALPACA_E2E {self.run}", "strategy": "immediate_signal"},
+            ),
+            201,
+        )
+        self.state["rebalance_configuration_uid"] = str(rebalance["uid"])
+        weights = {self.state["identifiers"]["AAPL"]: 0.5, self.state["identifiers"]["NVDA"]: 0.5}
+        portfolios: dict[str, tuple[str, str, dt.datetime]] = {}
+        for key, (session_open, session_close) in plan.items():
+            definition = ok(
+                self.api.post(
+                    "/v1/signal-definitions",
+                    json={"account_uid": account, "key": f"e2e-{self.run}-{key}", "name": key},
+                ),
+                201,
+            )
+            observed = session_open + dt.timedelta(hours=1)
+            ok(
+                self.api.post(
+                    f"/v1/signal-definitions/{definition['uid']}/weights",
+                    json={
+                        "observations": [{"observed_at": observed.isoformat(), "weights": weights}]
+                    },
+                ),
+                201,
+            )
+            created = ok(
+                self.api.post(
+                    "/v1/portfolio-configurations",
+                    json={
+                        "name": f"ALPACA_E2E {self.run} {key}",
+                        "account_uid": account,
+                        "signal_definition_uid": str(definition["uid"]),
+                        "rebalance_configuration_uid": str(rebalance["uid"]),
+                        "scheduled": False,
+                        "bars": {"scheduled": False},
+                    },
+                ),
+                201,
+            )
+            portfolios[key] = (
+                str(created["configuration"]["uid"]),
+                str(created["portfolio_unique_identifier"]),
+                session_close,
+            )
+        for key, (configuration_uid, _, _) in portfolios.items():
+            self.run_portfolio_job(key, configuration_uid)
+
+        identifiers = [identifier for _, identifier, _ in portfolios.values()]
+        recorded = {
+            str(bounds.key): bounds
+            for bounds in self.clock.timed(
+                "markets: weights bounds", PortfolioWeightsSeries.bounds, identifiers
+            )
+        }
+        valued = {
+            str(bounds.key): bounds
+            for bounds in self.clock.timed(
+                "markets: values bounds", PortfolioValuesSeries.bounds, identifiers
+            )
+        }
+        for key, (_, identifier, first_close) in portfolios.items():
+            check(
+                recorded[identifier].row_count and valued[identifier].row_count,
+                f"Portfolio {key} recorded no weights or values: another portfolio's progress "
+                "in the shared rebalance-state table was taken as its own (ms-markets issue 118).",
+            )
+            check(
+                recorded[identifier].first_time == first_close,
+                f"Portfolio {key}'s first weights are at {recorded[identifier].first_time}, not at "
+                f"the close of its first observation's session, {first_close}.",
+            )
+
+    def run_portfolio_job(self, key: str, configuration_uid: str) -> None:
+        """Run the portfolio Job once for the configuration and wait for it to end."""
+        if self.deployed:
+            accepted = ok(
+                self.api.post(f"/v1/portfolio-configurations/{configuration_uid}/actions/run"),
+                202,
+            )
+            deadline = time.monotonic() + JOB_TIMEOUT_SECONDS
+            with self.clock.call(f"portfolio Job {key}: queued to ended"):
+                while True:
+                    state = ok(self.api.get(f"/v1/operations/job-runs/{accepted['job_run_uid']}"))
+                    if state["status"] in JOB_DONE or time.monotonic() > deadline:
+                        break
+                    time.sleep(10)
+            check(state["status"] == "SUCCEEDED", f"The {key} Job run ended {state['status']}.")
+            return
+        launcher = str(ROOT / "src/jobs/run_alpaca_portfolio.py")
+        with self.clock.call(f"portfolio Job {key}: local launcher"):
+            finished = subprocess.run(
+                [sys.executable, "-c", LOCAL_JOB, launcher, configuration_uid],
+                capture_output=True,
+                text=True,
+                timeout=JOB_TIMEOUT_SECONDS,
+                check=False,
+            )
+        check(finished.returncode == 0, f"The {key} Job run exited {finished.returncode}.")
+
     # -- after -----------------------------------------------------------------------------------
     def cleanup(self) -> None:
         """Leave the paper account and the local stack as the run found them."""
@@ -906,6 +1050,12 @@ class Lifecycle:
                     self.api.get(f"/v1/accounts/{account_uid}").status_code == 404,
                     "The account still reads back after the delete.",
                 ),
+            )
+        if "rebalance_configuration_uid" in self.state:
+            rule = self.state["rebalance_configuration_uid"]
+            attempt(
+                "delete rebalance configuration",
+                lambda: ok(self.api.delete(f"/v1/portfolio-rebalance-configurations/{rule}")),
             )
         attempt("delete portfolios and calendar", self.delete_markets_rows)
         check(not failures, "; ".join(failures))
@@ -957,7 +1107,7 @@ def run(
             configure_local_client()
             clock.timed("markets: start engine", start_markets_engine)
         markets = use_markets_api().client
-        lifecycle = Lifecycle(api, markets, Alpaca(clock), clock)
+        lifecycle = Lifecycle(api, markets, Alpaca(clock), clock, deployed=bool(release_uid))
     if clock.stages[-1].status != "passed":
         return clock, []
 
@@ -973,6 +1123,7 @@ def run(
         ("7 trade the deltas, fills go to the funds", lifecycle.rebalance),
         ("8 a portfolio with no weights fails the sizing", lifecycle.no_weights),
         ("9 new weights and lower exposure: size and trade", lifecycle.reweight),
+        ("10 portfolio Job: three portfolios share the tables", lifecycle.portfolio_jobs),
     ]
     try:
         for name, stage in stages:

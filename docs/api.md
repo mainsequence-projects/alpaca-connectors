@@ -371,7 +371,9 @@ A portfolio rebalances at the events of its rebalance configuration (NYSE `marke
 default) and has weights only from its first rebalance: the first configured event at or after
 its first provided weights. A run before that event succeeds with no weights. Its summary's
 `first_rebalance` says so, with the time (`rebalanced: false`, `first_rebalance_at`, `message`),
-and its log carries the message (issue #41).
+and its log carries the message (issue #41). `rebalanced` is true only when Markets holds the
+portfolio's weights: a run after the event that recorded none reports `rebalanced: false` and says
+that no run has recorded that rebalance.
 
 ## Account Sync
 

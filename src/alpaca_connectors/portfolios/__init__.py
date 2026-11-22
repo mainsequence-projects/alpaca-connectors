@@ -38,7 +38,6 @@ from alpaca_connectors.portfolios.execution import (
     resolve_portfolio_configuration,
 )
 from alpaca_connectors.portfolios.interpolated_prices import (
-    alpaca_interpolated_prices_storage_model,
     build_alpaca_interpolated_prices,
     resolve_alpaca_bars_time_index_meta_table_uid,
 )
@@ -77,7 +76,6 @@ __all__ = [
     "ResolvedPortfolioConfiguration",
     "SignalObservationAsset",
     "SignalObservationMatrix",
-    "alpaca_interpolated_prices_storage_model",
     "build_alpaca_interpolated_prices",
     "build_portfolio_run",
     "calculate_portfolio_performance",

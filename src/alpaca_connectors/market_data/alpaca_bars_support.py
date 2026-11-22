@@ -296,6 +296,33 @@ def fetch_stock_bars_frame(
     return bar_set.df.copy()
 
 
+# The stored ms-markets calendar a US equity is linked to (ADR 0026), built from this
+# pandas-market-calendars calendar. Daily stock bars are stamped with its sessions.
+STOCK_SESSION_CALENDAR = "NYSE"
+
+
+def stock_sessions(first: dt.date, last: dt.date) -> dict[dt.date, tuple[dt.datetime, dt.datetime]]:
+    """The ``(open, close)`` in UTC of each NYSE session from ``first`` to ``last``.
+
+    A daily bar is stamped at its session's close, its time of observation, as ms-markets puts
+    daily bars on the session closes of the asset's stored calendar: 16:00 New York, or 13:00 on
+    an early-close day. A bar stamped 16:00 on an early-close day falls between two sessions, and
+    interpolation replaces it with the previous close.
+    """
+    import pandas_market_calendars as market_calendars
+
+    schedule = market_calendars.get_calendar(STOCK_SESSION_CALENDAR).schedule(
+        start_date=first, end_date=last
+    )
+    return {
+        session.date(): (
+            row["market_open"].to_pydatetime().astimezone(UTC),
+            row["market_close"].to_pydatetime().astimezone(UTC),
+        )
+        for session, row in schedule.iterrows()
+    }
+
+
 def normalize_stock_bars_frame(
     *,
     frame: pd.DataFrame,
@@ -314,8 +341,11 @@ def normalize_stock_bars_frame(
     )
     if normalize_frequency_id(frequency_id) == "1d":
         session_date = normalized["bar_start_time"].dt.tz_convert(NEW_YORK).dt.date
+        sessions = stock_sessions(min(session_date), max(session_date))
         session_open = [
-            dt.datetime.combine(
+            sessions[current_date][0]
+            if current_date in sessions
+            else dt.datetime.combine(
                 current_date,
                 dt.time(hour=9, minute=30),
                 tzinfo=NEW_YORK,
@@ -323,7 +353,9 @@ def normalize_stock_bars_frame(
             for current_date in session_date
         ]
         session_close = [
-            dt.datetime.combine(
+            sessions[current_date][1]
+            if current_date in sessions
+            else dt.datetime.combine(
                 current_date,
                 dt.time(hour=16, minute=0),
                 tzinfo=NEW_YORK,

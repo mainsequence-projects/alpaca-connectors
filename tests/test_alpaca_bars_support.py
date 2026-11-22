@@ -93,6 +93,53 @@ class AlpacaBarsSupportTests(unittest.TestCase):
         )
         self.assertEqual(float(normalized.iloc[0]["close"]), 101.6)
 
+    def test_daily_bars_are_stamped_at_their_nyse_session_close(self) -> None:
+        # ms-markets puts daily bars on the session closes of the asset's calendar: a bar stamped
+        # 16:00 on an early-close day would fall between two sessions.
+        # Alpaca stamps a daily bar at midnight New York: 04:00Z in summer, 05:00Z in winter.
+        starts = ("2025-07-03T04:00:00Z", "2025-11-26T05:00:00Z", "2025-11-28T05:00:00Z")
+        frame = pd.DataFrame(
+            [
+                {
+                    "symbol": "AAPL",
+                    "timestamp": pd.Timestamp(start),
+                    "open": 100.0,
+                    "high": 101.0,
+                    "low": 99.0,
+                    "close": 100.5,
+                    "volume": 1_000.0,
+                    "trade_count": 10.0,
+                    "vwap": 100.2,
+                }
+                for start in starts
+            ]
+        ).set_index(["symbol", "timestamp"])
+
+        normalized = normalize_stock_bars_frame(
+            frame=frame,
+            frequency_id="1d",
+            asset_identifier_by_symbol={"AAPL": "FIGI_AAPL"},
+            last_update_by_asset_identifier={"FIGI_AAPL": dt.datetime(2025, 1, 1, tzinfo=UTC)},
+            period_cutoff=dt.datetime(2025, 12, 1, tzinfo=UTC),
+        )
+
+        self.assertEqual(
+            list(normalized.index.get_level_values("time_index")),
+            [
+                pd.Timestamp("2025-07-03T17:00:00Z"),  # 13:00 New York, early close (EDT)
+                pd.Timestamp("2025-11-26T21:00:00Z"),  # 16:00 New York
+                pd.Timestamp("2025-11-28T18:00:00Z"),  # 13:00 New York, early close (EST)
+            ],
+        )
+        self.assertEqual(
+            list(normalized["open_time"]),
+            [
+                pd.Timestamp("2025-07-03T13:30:00Z"),
+                pd.Timestamp("2025-11-26T14:30:00Z"),
+                pd.Timestamp("2025-11-28T14:30:00Z"),
+            ],
+        )
+
     def test_resolve_asset_bindings_reuses_stored_symbol_for_canonical_alpaca_asset(
         self,
     ) -> None:

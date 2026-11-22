@@ -5,7 +5,7 @@ These register every project-owned table in this project's MetaTables namespace,
 so tables are named ``alpaca_connectors__<table>`` instead of the library default
 ``ms_markets__<table>``. ms-markets prefixes each authored identifier with the namespace
 (``alpaca-connectors.<identifier>``); physical names, schema and constraint naming are unchanged.
-``MSM_AUTO_REGISTER_NAMESPACE``, when set, replaces the declared namespace (tests and examples).
+The namespace is final: since ms-markets 5.0.0 nothing in the environment overrides it.
 
 Inheriting ``mainsequence.markets`` from the ms-markets mixins was the extension defect ADR 0047
 withdraws: it made these tables Markets tables, so the remote row backend would have sent their
@@ -15,6 +15,8 @@ Use:
 - ``AlpacaMarketsMetaTableMixin`` for regular (non-time-indexed) MetaTables (e.g. account detail
   sidecars).
 - ``AlpacaMarketsTimeIndexMetaTableMixin`` for storage-first time-indexed DataNode storage classes.
+The models themselves are declared on ``alpaca_connectors.base.ProjectBase``.
+
 - ``ProjectStorageNameMixin`` (optional, placed *before* the Markets mixin in the base list) to give
   a short explicit physical ``__tablename__`` from ``__project_storage_concept__`` instead of the
   SDK's namespaced-identifier-derived name.
@@ -25,7 +27,6 @@ from __future__ import annotations
 from typing import ClassVar
 
 from msm.base import MarketsMetaTableMixin, MarketsTimeIndexMetaTableMixin
-from msm.settings import markets_auto_register_namespace, markets_configured_namespace
 from sqlalchemy.orm import declared_attr
 
 from alpaca_connectors.settings import PROJECT_NAMESPACE, PROJECT_NAMESPACE_SLUG
@@ -39,7 +40,7 @@ class AlpacaMarketsMetaTableMixin(MarketsMetaTableMixin):
     """Regular markets MetaTable mixin in this project's namespace and table-name app segment."""
 
     __abstract__ = True
-    __metatable_namespace__: ClassVar[str] = markets_configured_namespace(PROJECT_NAMESPACE)
+    __metatable_namespace__: ClassVar[str] = PROJECT_NAMESPACE
     __markets_storage_app__: ClassVar[str] = PROJECT_TABLE_APP
 
 
@@ -47,7 +48,7 @@ class AlpacaMarketsTimeIndexMetaTableMixin(MarketsTimeIndexMetaTableMixin):
     """Time-indexed (storage-first) markets MetaTable mixin in this project's namespace."""
 
     __abstract__ = True
-    __metatable_namespace__: ClassVar[str] = markets_configured_namespace(PROJECT_NAMESPACE)
+    __metatable_namespace__: ClassVar[str] = PROJECT_NAMESPACE
     __markets_storage_app__: ClassVar[str] = PROJECT_TABLE_APP
 
 
@@ -66,11 +67,7 @@ class ProjectStorageNameMixin:
         cadence = getattr(cls, "__cadence__", None)
         if cadence:
             concept = f"{concept}_{cadence}"
-        return schema_table_name(
-            PROJECT_TABLE_APP,
-            concept,
-            suffix=markets_auto_register_namespace(),
-        )
+        return schema_table_name(PROJECT_TABLE_APP, concept)
 
 
 __all__ = [

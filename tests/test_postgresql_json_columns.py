@@ -61,6 +61,7 @@ def postgresql(monkeypatch):
     import metatables.runtime_context
     from alpaca_connectors.account.provider_account_details import ProviderAccountDetails
     from alpaca_connectors.assets.alpaca_asset_details import AlpacaAssetDetailsTable
+    from alpaca_connectors.base import ProjectBase
     from alpaca_connectors.operations import account_sync
     from alpaca_connectors.operations.account_sync import AccountSyncOperationTable
     from alpaca_connectors.operations.asset_registration import AssetRegistrationOperationTable
@@ -78,7 +79,13 @@ def postgresql(monkeypatch):
     with engine.begin() as connection:
         connection.exec_driver_sql("DROP SCHEMA public CASCADE")
         connection.exec_driver_sql("CREATE SCHEMA public")
-        MarketsBase.metadata.create_all(connection, tables=_with_references(project_tables))
+        # ms-markets 5.0.0: the project tables are on ProjectBase and reference Markets' tables.
+        tables = _with_references(project_tables)
+        markets = [table for table in tables if table.metadata is MarketsBase.metadata]
+        MarketsBase.metadata.create_all(connection, tables=markets)
+        ProjectBase.metadata.create_all(
+            connection, tables=[table for table in tables if table not in markets]
+        )
 
     runtime = RuntimeContext(
         git_source=None,

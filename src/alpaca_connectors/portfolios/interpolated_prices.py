@@ -74,32 +74,11 @@ def resolve_alpaca_bars_time_index_meta_table_uids(
     return answers
 
 
-def alpaca_interpolated_prices_storage_model(
-    *,
-    source_time_index_meta_table_uid: str,
-    frequency_id: str = "1d",
-    feed: str = "sip",
-    adjustment: str = "all",
-    upsample_frequency_id: str = "1d",
-    intraday_bar_interpolation_rule: str = "ffill",
-) -> type[Any]:
-    """Return the dynamic msm-portfolios storage model for Alpaca-derived prices."""
-    from alpaca_connectors.portfolios.interpolated_prices_schema import (
-        configured_alpaca_interpolated_prices_storage,
-    )
-
-    return configured_alpaca_interpolated_prices_storage(
-        source_time_index_meta_table_uid=source_time_index_meta_table_uid,
-        source_cadence=storage_for(frequency_id, feed, adjustment).__cadence__,
-        upsample_frequency_id=upsample_frequency_id,
-        intraday_bar_interpolation_rule=intraday_bar_interpolation_rule,
-    )
-
-
 def build_alpaca_interpolated_prices(
     *,
     source_time_index_meta_table_uid: str,
     asset_identifiers: list[str],
+    profile: tuple[str, str, str],
     upsample_frequency_id: str = "1d",
     intraday_bar_interpolation_rule: str = "ffill",
 ) -> Any:
@@ -107,14 +86,16 @@ def build_alpaca_interpolated_prices(
 
     Each asset's bars follow the stored trading calendar it is linked to (ms-markets ADR 0056),
     which registration sets from its Alpaca class (ADR 0026); the scope carries identifiers only,
-    and ms-markets refuses the run when an asset in it has no calendar.
+    and ms-markets refuses the run when an asset in it has no calendar. It writes the
+    interpolated-price table of the bars profile (``INTERPOLATED_PRICES_BY_PROFILE``, ADR 0029),
+    and ms-markets refuses a table keyed by another configuration.
     """
     from msm_portfolios.contrib.prices.updaters import (
         InterpolatedPrices,
         InterpolatedPricesConfig,
     )
 
-    from alpaca_connectors.instances import interpolated_prices_storage_kwargs
+    from alpaca_connectors.instances import INTERPOLATED_PRICES_BY_PROFILE
 
     asset_scope = sorted(set(asset_identifiers))
 
@@ -125,12 +106,11 @@ def build_alpaca_interpolated_prices(
             upsample_frequency_id=upsample_frequency_id,
             intraday_bar_interpolation_rule=intraday_bar_interpolation_rule,
         ),
-        **interpolated_prices_storage_kwargs(),
+        output_table=INTERPOLATED_PRICES_BY_PROFILE[profile],
     )
 
 
 __all__ = [
-    "alpaca_interpolated_prices_storage_model",
     "build_alpaca_interpolated_prices",
     "resolve_alpaca_bars_time_index_meta_table_uid",
     "resolve_alpaca_bars_time_index_meta_table_uids",

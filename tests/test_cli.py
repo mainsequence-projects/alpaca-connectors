@@ -176,18 +176,10 @@ class CliTests(unittest.TestCase):
             if getattr(action, "choices", None)
         )
         # ADR 0028 adds the `adopt` rollout; still no command creates a portfolio or gives weights.
+        # ADR 0029 removes `prepare-interpolated-prices`: the migration Job creates those tables.
         self.assertEqual(
             set(portfolio_commands),
-            {
-                "list",
-                "get",
-                "delete",
-                "run",
-                "runs",
-                "prepare-interpolated-prices",
-                "rebalance",
-                "adopt",
-            },
+            {"list", "get", "delete", "run", "runs", "rebalance", "adopt"},
         )
         for command in (
             ["universe-source", "list"],
@@ -341,21 +333,6 @@ class CliTests(unittest.TestCase):
         error = json.loads(stderr.getvalue())["error"]
         self.assertEqual(error["code"], "action_blocked")
         self.assertIn("current target", error["message"])
-
-    def test_portfolio_prepare_interpolated_prices_uses_migration_preflight(self) -> None:
-        result = {
-            "created_revision": False,
-            "dynamic_provider": "alpaca_connectors.portfolios.interpolated_prices_migration:migration",
-            "storages": [],
-        }
-        with patch(
-            "alpaca_connectors.portfolios.interpolated_prices_schema.prepare_interpolated_prices_schema",
-            return_value=result,
-        ) as prepare:
-            exit_code = main(["portfolio", "prepare-interpolated-prices", "--check-only"])
-
-        self.assertEqual(exit_code, 0)
-        prepare.assert_called_once_with(check_only=True, revision_message=None)
 
     def test_unexpected_provider_error_is_sanitized(self) -> None:
         stderr = io.StringIO()

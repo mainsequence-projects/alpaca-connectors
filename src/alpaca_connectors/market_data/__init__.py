@@ -37,7 +37,6 @@ _LAZY_IMPORTS = {
         "project_storage_models",
     ),
     "storage_for": ("alpaca_connectors.market_data.storage", "storage_for"),
-    "storage_metadata": ("alpaca_connectors.market_data.storage", "storage_metadata"),
     "MarketDataDataset": ("alpaca_connectors.market_data.services", "MarketDataDataset"),
     "build_market_data_update": (
         "alpaca_connectors.market_data.services",

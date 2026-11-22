@@ -420,7 +420,10 @@ def test_portfolio_resolution_uses_published_signal_and_selected_bars_profile() 
     reads.sources.assert_called_once_with([("1d", "sip", "all")])
 
 
-def test_execution_runs_the_portfolio_with_the_recipe_and_registers_nothing(recipes) -> None:
+@pytest.mark.parametrize("recorded", [True, False])
+def test_execution_runs_the_portfolio_with_the_recipe_and_registers_nothing(
+    recipes, recorded
+) -> None:
     from alpaca_connectors.instances import AlpacaPortfolioRebalanceStateStorage
 
     resolved = resolved_configuration()
@@ -477,13 +480,28 @@ def test_execution_runs_the_portfolio_with_the_recipe_and_registers_nothing(reci
             return_value={"rebalanced": True, "first_rebalance_at": "2026-11-18T21:00:00+00:00"},
         ) as first_rebalance,
         patch("msm.api.portfolios.Portfolio.upsert", return_value=portfolio_row) as upsert,
+        patch(
+            "alpaca_connectors.markets_api.portfolio_weights_recorded", return_value=recorded
+        ) as weights_recorded,
     ):
         result = execute_portfolio_configuration(CONFIGURATION_UID)
 
     # The summary says whether the run reached the first rebalance (issue #41).
     assert first_rebalance.call_args.args == (resolved.rebalance_configuration,)
     assert first_rebalance.call_args.kwargs["starts_at"] == resolved.signal_start_time
-    assert result.first_rebalance == first_rebalance.return_value
+    # A due rebalance counts only when Markets holds the portfolio's weights (ms-markets #118).
+    weights_recorded.assert_called_once_with(plan.unique_identifier)
+    if recorded:
+        assert result.first_rebalance == first_rebalance.return_value
+    else:
+        assert result.first_rebalance == {
+            "rebalanced": False,
+            "first_rebalance_at": "2026-11-18T21:00:00+00:00",
+            "message": (
+                "The portfolio's first rebalance was due at 2026-11-18T21:00:00+00:00, and "
+                "Markets holds no weights of it: no run has recorded that rebalance."
+            ),
+        }
     # Its bars first (issue #39), then the run, once.
     start_engine.assert_called_once_with()
     bars_update.assert_called_once_with(resolved)

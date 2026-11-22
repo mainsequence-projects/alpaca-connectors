@@ -85,20 +85,19 @@ def application_runtime_models() -> list[type[Any]]:
     return account_runtime_models()
 
 
-def portfolio_runtime_models(extra_models: list[type[Any]] | None = None) -> list[type[Any]]:
+def portfolio_runtime_models() -> list[type[Any]]:
     """Runtime models for portfolio construction.
 
-    The application tables plus the private portfolio contract instances. Configured
-    interpolated-price storage classes are dynamic and must be migrated before normal
-    portfolio execution; pass them as ``extra_models``. Calendars, portfolios and signal metadata
-    are Markets registries read and written through the Markets API, so they are not attached.
+    The application tables with the private portfolio instances, the interpolated prices among
+    them: every one is migrated by this application's provider (ADR 0029). Calendars, portfolios
+    and signal metadata are Markets registries read and written through the Markets API, so they
+    are not attached.
     """
-    return [*application_runtime_models(), *(extra_models or [])]
+    return application_runtime_models()
 
 
 def start_portfolio_markets_engine(
     *,
-    extra_models: list[type[Any]] | None = None,
     timeout: int | float | tuple[float, float] | None = None,
 ) -> Any:
     """Attach the portfolio-capable runtime once for this process."""
@@ -106,47 +105,22 @@ def start_portfolio_markets_engine(
     from msm.bootstrap import resolve_runtime
 
     use_markets_api()
-    models = portfolio_runtime_models(extra_models=extra_models)
+    models = portfolio_runtime_models()
     try:
         return resolve_runtime(models=models, row_model_name="alpaca_connectors.runtime")
     except RuntimeError:
         return msm_portfolios.start_engine(models=models, timeout=timeout)
 
 
-def portfolio_job_runtime_models() -> list[type[Any]]:
-    """Resolve every phase-one persistent interpolation table before process bootstrap.
-
-    The interpolation table identity includes the registered source TimeIndexMetaTable UID.
-    Jobs therefore discover each deliberately migrated Alpaca bars profile before the one allowed
-    ``msm.start_engine`` call and attach all phase-one interpolation outputs in the same runtime.
-    """
-    from alpaca_connectors.portfolios.interpolated_prices_schema import (
-        assert_interpolated_prices_registered,
-        configured_alpaca_interpolated_prices_storage,
-        resolve_interpolated_prices_storage_specs,
-    )
-
-    specs = resolve_interpolated_prices_storage_specs()
-    assert_interpolated_prices_registered(specs)
-    dynamic_models = [
-        configured_alpaca_interpolated_prices_storage(
-            source_time_index_meta_table_uid=spec.source_time_index_meta_table_uid,
-            source_cadence=spec.source_cadence,
-        )
-        for spec in specs
-    ]
-    return portfolio_runtime_models(extra_models=dynamic_models)
-
-
 def start_portfolio_job_engine(
     *,
     timeout: int | float | tuple[float, float] | None = None,
 ) -> Any:
-    """Attach the complete phase-one portfolio runtime in one process bootstrap."""
+    """Attach the complete portfolio runtime in one process bootstrap."""
     import msm_portfolios
 
     use_markets_api()
-    return msm_portfolios.start_engine(models=portfolio_job_runtime_models(), timeout=timeout)
+    return msm_portfolios.start_engine(models=portfolio_runtime_models(), timeout=timeout)
 
 
 def start_markets_engine(
@@ -177,7 +151,6 @@ __all__ = [
     "account_runtime_models",
     "application_runtime_models",
     "portfolio_runtime_models",
-    "portfolio_job_runtime_models",
     "project_runtime_models",
     "start_markets_engine",
     "start_portfolio_markets_engine",

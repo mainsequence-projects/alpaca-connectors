@@ -223,8 +223,9 @@ PortfolioWeights + InterpolatedPrices ──> PortfoliosUpdater ─> Markets por
   `weights_as_of`; [ADR 0031](../adrs/0031_markets_series_are_published_not_shared.md)). The
   calendar events and rebalance state stay private, in this application's contract instances
   (`alpaca_connectors__<contract>__main`, `alpaca_connectors.instances`), and the interpolated
-  prices in `alpaca_connectors__interpolated_prices__t_<suffix>`, all only in `alpaca-connectors`:
-  Markets never reads them.
+  prices in one table per bars profile (`INTERPOLATED_PRICES_BY_PROFILE`,
+  [ADR 0029](../adrs/0029_interpolated_price_tables_are_named_like_every_project_table.md)), all
+  only in `alpaca-connectors`: Markets never reads them.
 - **No catalog.** Nothing is registered or reconciled after a run. The `Portfolio` row, its
   calendar and the signal metadata are Markets registries, written through the Markets API; the
   run creates or updates the `Portfolio`, and the first publication of weights the signal
@@ -345,17 +346,9 @@ alpaca-connectors portfolio delete <PORTFOLIO_CONFIGURATION_UID>             # d
 alpaca-connectors portfolio delete <PORTFOLIO_CONFIGURATION_UID> --execute   # retires its Portfolio first
 ```
 
-Prepare and verify the persistent interpolation tables for every migrated Alpaca bars profile:
-
-```bash
-alpaca-connectors portfolio prepare-interpolated-prices
-alpaca-connectors portfolio prepare-interpolated-prices --check-only
-```
-
-The preparation command resolves every registered Alpaca bars table in one catalog request,
-derives the ms-markets dynamic storage identities, generates one Alembic revision when needed,
-applies the project's migration history and verifies every resulting `TimeIndexMetaTable`. A
-portfolio run only checks and attaches those tables; it never creates schema.
+The interpolated-price tables are ordinary project tables: revision `0034` creates the one of
+each bars profile and the migration Job registers it, in every Environment (ADR 0029). A portfolio
+run binds its profile's table as `InterpolatedPrices(output_table=...)`; it never creates schema.
 
 There is no Environment argument: the CodeRepositoryBranch runtime resolves it.
 
@@ -380,14 +373,13 @@ since-inception. Alpha and beta are absent: a portfolio has no benchmark.
 
 Before a portfolio's first run in an Environment:
 
-- the installed ms-markets release, 4.0.1 or later, is the one the Environment's Markets API runs
+- the installed ms-markets release, 5.0.0 or later, is the one the Environment's Markets API runs
   (the Job's schema gate checks it); this application holds no role on `mainsequence.markets` and
   reaches the `Portfolio`, calendar and signal metadata through the Markets API;
-- this project's revisions are applied by the migration Job, including the instances of revisions
-  `0020` and `0021` and the portfolio configuration table of revision `0027`;
+- this project's revisions are applied by the migration Job, including the private instances, the
+  portfolio configuration table of revision `0027` and the interpolated-price tables of revision
+  `0034`;
 - the bars configuration is enabled, and its bars table holds the portfolio's assets;
-- the configuration-derived `InterpolatedPrices` storage is migrated and registered
-  (`prepare-interpolated-prices`);
 - the declared `Alpaca Portfolio` Job exists on the branch, its image is ready, and its workload
   holds `editor` on `alpaca-connectors`
   ([table access](../operations/jobs.md#table-access-and-metatables-roles)).

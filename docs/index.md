@@ -58,7 +58,7 @@ See [Capability Model](capabilities/index.md) before the workflow-specific pages
   `.mainsequence/workflows/alpaca-connectors-api.yaml` runs every configuration and owns schedule
   and compute; a configuration only chooses whether the daily scheduled run includes it
   (ADR 0013). Every delete retires the portfolio's `Portfolio` first.
-- Daily bar `time_index` is normalized to `16:00 America/New_York` on the session date as a project convention.
+- A daily bar's `time_index` is the close of its NYSE session: 16:00 America/New_York, or 13:00 on an early-close day.
 - The FastAPI application authenticates every caller through the SDK request identity that
   `create_app()` installs; routes read the verified caller with `User.get_logged_user()`, and no
   route is public (ADR 0014).

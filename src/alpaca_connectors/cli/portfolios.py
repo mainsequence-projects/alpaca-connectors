@@ -63,12 +63,6 @@ def configure_runs_parser(parser: argparse.ArgumentParser) -> None:
     parser.set_defaults(handler=run_runs_command)
 
 
-def configure_prepare_interpolated_prices_parser(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--check-only", action="store_true")
-    parser.add_argument("--revision-message")
-    parser.set_defaults(handler=run_prepare_interpolated_prices_command)
-
-
 def configure_rebalance_list_parser(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--limit", type=int, default=25)
     parser.add_argument("--offset", type=int, default=0)
@@ -209,20 +203,6 @@ def run_runs_command(args: argparse.Namespace) -> int:
     return 0
 
 
-def run_prepare_interpolated_prices_command(args: argparse.Namespace) -> int:
-    from alpaca_connectors.portfolios.interpolated_prices_schema import (
-        prepare_interpolated_prices_schema,
-    )
-
-    _print(
-        prepare_interpolated_prices_schema(
-            check_only=args.check_only,
-            revision_message=args.revision_message,
-        )
-    )
-    return 0
-
-
 def run_rebalance_list_command(args: argparse.Namespace) -> int:
     from alpaca_connectors.portfolios import list_rebalance_configurations
 
@@ -316,7 +296,6 @@ __all__ = [
     "configure_delete_parser",
     "configure_get_parser",
     "configure_list_parser",
-    "configure_prepare_interpolated_prices_parser",
     "configure_rebalance_create_parser",
     "configure_rebalance_delete_parser",
     "configure_rebalance_get_parser",

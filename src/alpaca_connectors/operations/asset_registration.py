@@ -14,12 +14,13 @@ from typing import Any, ClassVar, Literal
 from msm.api.base import MarketsMetaTableRow, operation_result_rows
 from msm.api.http import OperationError, OperationStatus, OperationStep
 from msm.api.http import OperationStepStatus as StepStatus
-from msm.base import MarketsBase, markets_table_args, new_markets_uid
+from msm.base import markets_table_args, new_markets_uid
 from pydantic import ConfigDict
 from sqlalchemy import JSON, DateTime, Index, String
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.types import Uuid
 
+from alpaca_connectors.base import ProjectBase
 from alpaca_connectors.metatables import AlpacaMarketsMetaTableMixin, ProjectStorageNameMixin
 
 OperationAction = Literal["plan", "execute"]
@@ -57,7 +58,7 @@ def registration_steps(action: OperationAction) -> list[dict[str, Any]]:
 class AssetRegistrationOperationTable(
     ProjectStorageNameMixin,
     AlpacaMarketsMetaTableMixin,
-    MarketsBase,
+    ProjectBase,
 ):
     """One durable status record for one asset-registration plan or execution request."""
 

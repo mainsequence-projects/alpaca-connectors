@@ -13,7 +13,7 @@ import uuid
 from typing import Any, ClassVar, Literal
 
 from msm.api.base import MarketsMetaTableRow, operation_result_rows
-from msm.base import MarketsBase, markets_table_args, new_markets_uid
+from msm.base import markets_table_args, new_markets_uid
 from msm.models import AccountTable
 from msm.models.assets.core import AssetTable
 from pydantic import ConfigDict, Field
@@ -31,6 +31,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.types import Uuid
 
+from alpaca_connectors.base import ProjectBase
 from alpaca_connectors.metatables import (
     PROJECT_TABLE_APP,
     AlpacaMarketsMetaTableMixin,
@@ -57,7 +58,7 @@ def utc_now() -> dt.datetime:
 class AlpacaBarsConfigurationTable(
     ProjectStorageNameMixin,
     AlpacaMarketsMetaTableMixin,
-    MarketsBase,
+    ProjectBase,
 ):
     """One stock-bar update configuration with exactly one parent (ADR 0028, decision 4).
 
@@ -133,7 +134,7 @@ class AlpacaBarsConfigurationTable(
     )
     account_uid: Mapped[uuid.UUID | None] = mapped_column(
         Uuid(as_uuid=True),
-        ForeignKey(f"{AccountTable.__table__.fullname}.uid", ondelete="CASCADE"),
+        ForeignKey(AccountTable.__table__.c.uid, ondelete="CASCADE"),
         nullable=True,
         info={
             "label": "Account UID",
@@ -240,7 +241,7 @@ class AlpacaBarsConfigurationTable(
 class AlpacaBarsConfigurationAssetTable(
     ProjectStorageNameMixin,
     AlpacaMarketsMetaTableMixin,
-    MarketsBase,
+    ProjectBase,
 ):
     """Explicit Asset membership for configurations whose source is ``assets``."""
 
@@ -270,7 +271,7 @@ class AlpacaBarsConfigurationAssetTable(
     )
     asset_uid: Mapped[uuid.UUID] = mapped_column(
         Uuid(as_uuid=True),
-        ForeignKey(f"{AssetTable.__table__.fullname}.uid", ondelete="RESTRICT"),
+        ForeignKey(AssetTable.__table__.c.uid, ondelete="RESTRICT"),
         primary_key=True,
         nullable=False,
         info={
@@ -289,7 +290,7 @@ class AlpacaBarsConfiguration(MarketsMetaTableRow):
     model_config = ConfigDict(extra="ignore", frozen=True)
 
     __table__: ClassVar[type[AlpacaBarsConfigurationTable]] = AlpacaBarsConfigurationTable
-    __required_tables__: ClassVar[list[type[MarketsBase]]] = [
+    __required_tables__: ClassVar[list[type[ProjectBase]]] = [
         AlpacaBarsConfigurationTable,
         AlpacaBarsConfigurationAssetTable,
     ]
@@ -960,7 +961,7 @@ def delete_bar_configuration(configuration_uid: uuid.UUID | str) -> dict[str, An
     return AlpacaBarsConfiguration.delete(configuration_uid)
 
 
-def project_configuration_models() -> list[type[MarketsBase]]:
+def project_configuration_models() -> list[type[ProjectBase]]:
     return [AlpacaBarsConfigurationTable, AlpacaBarsConfigurationAssetTable]
 
 

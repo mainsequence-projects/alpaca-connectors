@@ -1,18 +1,8 @@
 from __future__ import annotations
 
-from msm.models import (
-    AccountGroupTable,
-    AccountTable,
-    CalendarTable,
-    IndexTable,
-    OrderManagerTable,
-    PortfolioTable,
-)
-from msm.models.assets.core import AssetTable
-from msm_portfolios.models import SignalMetadataTable
-
 from alpaca_connectors.account.provider_account_details import project_account_models
 from alpaca_connectors.assets.alpaca_asset_details import project_asset_models
+from alpaca_connectors.base import ProjectBase
 from alpaca_connectors.instances import project_instance_models
 from alpaca_connectors.market_data import project_configuration_models, project_storage_models
 from alpaca_connectors.operations import project_operation_models
@@ -21,7 +11,6 @@ from alpaca_connectors.settings import BRANCH_ACCESS, PROJECT_NAMESPACE
 from metatables.migrations import (
     build_alembic_version_metatable,
     build_metatable_migration_provider,
-    metadata_for_models,
 )
 
 
@@ -42,34 +31,11 @@ def all_project_metatable_models() -> list[type]:
 PROJECT_TABLE_NAMES = frozenset(model.__table__.name for model in all_project_metatable_models())
 
 
-def _include_project_tables(
-    name: str | None,
-    type_: str,
-    parent_names: dict[str, object],
-) -> bool:
-    """Limit Alembic operations to this provider's project-owned tables."""
-    del parent_names
-    return type_ != "table" or name in PROJECT_TABLE_NAMES
-
-
-# SQLAlchemy must see the full foreign-key metadata closure to sort the project tables.
-# The ms-markets tables below are metadata-only dependencies: the include-name hook excludes them
-# from this provider's DDL and the provider model list excludes them from catalog registration.
-# Their schemas remain owned by the ms-markets provider; the project tables reference them by
-# physical name and key column only.
-METADATA = metadata_for_models(
-    [
-        AssetTable,
-        AccountGroupTable,
-        AccountTable,
-        CalendarTable,
-        IndexTable,
-        SignalMetadataTable,
-        PortfolioTable,
-        OrderManagerTable,
-        *all_project_metatable_models(),
-    ]
-)
+# Every table this provider owns and no Markets table (ms-markets 5.0.0): the models are declared on
+# ProjectBase and key to Markets by column object, so autogenerate compares only this application's
+# tables and needs no include hook. MetaTables 0.1.73 and later never autogenerate a table drop;
+# drops are written by hand.
+METADATA = ProjectBase.metadata
 
 ProjectAlembicVersion = build_alembic_version_metatable(
     class_name="ProjectAlembicVersion",
@@ -88,8 +54,8 @@ SHARED_PROVIDER_KWARGS = {
     "script_location": "alpaca_connectors.migrations:",
     "version_location_prefix": "alpaca_connectors.migrations:versions",
     "alembic_registry": ProjectAlembicVersion,
-    # The branch's whole declaration (MetaTables ADR 0029): each provider that finalizes sends
-    # the same set, so neither removes what the other declared (ADR 0030).
+    # The branch's whole declaration (MetaTables ADR 0029, ADR 0030): this provider is the only one,
+    # so what it declares is everything the branch holds.
     "branch_access": BRANCH_ACCESS,
 }
 
@@ -97,7 +63,6 @@ migration = build_metatable_migration_provider(
     **SHARED_PROVIDER_KWARGS,
     target_metadata=METADATA,
     metatable_models=all_project_metatable_models(),
-    include_name_hook=_include_project_tables,
 )
 
 

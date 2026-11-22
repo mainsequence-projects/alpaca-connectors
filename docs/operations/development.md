@@ -97,7 +97,14 @@ the same script once and fails with its report; it is skipped unless `ALPACA_E2E
 | 7 Rebalance | The deltas are traded; the fills are allocated and NVDA is split between the funds. With the market closed the orders are queued, checked as accepted and cancelled |
 | 8 No weights | A portfolio with no weights fails the sizing and the snapshot stays |
 | 9 Reweight | New weights and a lower exposure are sized again and traded |
-| Cleanup after | This run's open orders are cancelled; the three symbols are traded back to the positions the run started with (only while the market is open); the target is cleared; the account is deleted with its confirmation; the three portfolios are deleted |
+| 10 Portfolio Job | Three portfolios of the account on the immediate-signal rebalance, two first observed at one time and one three sessions earlier, are each run by the portfolio Job; each records weights and values from the close of its own first observation's session. Locally the Job runs as its launcher; against a release, the API starts the deployed Job and the stage polls the run |
+| Cleanup after | This run's open orders are cancelled; the three symbols are traded back to the positions the run started with (only while the market is open); the target is cleared; the account is deleted with its confirmation, and its portfolios with it; the rebalance configuration and the three portfolios are deleted |
+
+Stage 10 fails on ms-markets 5.0.0: in the rebalance-state table the portfolios share, a
+portfolio's first run starts after the newest row of any portfolio
+([MainSequenceMarkets#118](https://github.com/mainsequence-projects/MainSequenceMarkets/issues/118)),
+so the second and third record nothing. It passes once ms-markets releases the fix
+([ADR 0029](../adrs/0029_interpolated_price_tables_are_named_like_every_project_table.md#rollout)).
 
 The report lists each stage with the calls it made: each call to this API, each Markets call and
 each Alpaca read, timed on the caller's side, then the slowest calls and the total. The sync's
@@ -106,7 +113,7 @@ three steps run inside one request, so that request's time is theirs.
 It needs, on this machine:
 
 - the local MetaTables runtime (`metatables serve --local`) with both migrations applied;
-- the Markets API on ms-markets 4.2.3 or later, started from an ms-markets checkout against that
+- the Markets API on ms-markets 5.0.0 or later, started from an ms-markets checkout against that
   runtime, with `MARKETS_API_URL` set for this API and for the script;
 - this API at `http://127.0.0.1:8321` (`ALPACA_LIFECYCLE_API_URL` or `--api-url` names another
   address);

@@ -303,41 +303,64 @@ def test_start_markets_engine_selects_the_api_and_attaches_only_own_tables(monke
 
 def test_producers_write_to_own_namespace_instances() -> None:
     from alpaca_connectors import instances
-    from alpaca_connectors.portfolios.interpolated_prices_schema import (
-        configured_alpaca_interpolated_prices_storage,
-    )
 
+    interpolated = list(instances.INTERPOLATED_PRICES_BY_PROFILE.values())
     for model in instances.project_instance_models():
         assert model.__table__.info["namespace"] == "alpaca-connectors"
         assert model.__table__.name.startswith("alpaca_connectors__")
-        assert model.__table__.name.endswith("__main")
-    # A run writes only its private rebalance state and calendar events (ADR 0031).
+        assert model in interpolated or model.__table__.name.endswith("__main")
+    # A run writes its private rebalance state and calendar events (ADR 0031) and the
+    # interpolated prices it values with (ADR 0029).
     assert instances.private_portfolio_models() == [
         instances.AlpacaPortfolioRebalanceStateStorage,
         instances.AlpacaPortfolioCalendarEventsStorage,
+        *interpolated,
     ]
-    interpolated = configured_alpaca_interpolated_prices_storage(
-        source_time_index_meta_table_uid="11111111-1111-4111-8111-111111111111",
-        source_cadence="1d",
+
+
+def test_each_bars_profile_has_its_interpolated_price_table_named_from_its_configuration() -> None:
+    """ADR 0029: ms-markets derives the name from the configuration, the same in every Environment.
+
+    Revision 0034 created these two tables by name, so the names must not change.
+    """
+    from msm_portfolios.time_index.prices.storage import interpolated_prices_instance_key
+
+    from alpaca_connectors.instances import (
+        INTERPOLATED_PRICES_BY_PROFILE,
+        INTERPOLATION_RULE,
+        INTERPOLATION_UPSAMPLE_FREQUENCY,
     )
-    assert interpolated.__table__.name.startswith("alpaca_connectors__interpolated_prices__t_")
-    assert interpolated.__table__.info["namespace"] == "alpaca-connectors"
+    from alpaca_connectors.market_data.storage import ALPACA_STOCK_BARS_STORAGE_BY_TRIPLE
+
+    assert {
+        profile: model.__table__.name for profile, model in INTERPOLATED_PRICES_BY_PROFILE.items()
+    } == {
+        ("1d", "sip", "all"): "alpaca_connectors__interpolatedpricests__t_1330c8b4c5fd5124",
+        ("1d", "iex", "raw"): "alpaca_connectors__interpolatedpricests__ff97574884b78031",
+    }
+    assert set(INTERPOLATED_PRICES_BY_PROFILE) == set(ALPACA_STOCK_BARS_STORAGE_BY_TRIPLE)
+    for profile, model in INTERPOLATED_PRICES_BY_PROFILE.items():
+        bars = ALPACA_STOCK_BARS_STORAGE_BY_TRIPLE[profile]
+        key = interpolated_prices_instance_key(
+            source_table_name=bars.__table__.name,
+            source_cadence=bars.__cadence__,
+            upsample_frequency_id=INTERPOLATION_UPSAMPLE_FREQUENCY,
+            intraday_bar_interpolation_rule=INTERPOLATION_RULE,
+        )
+        assert model.__metatable_identifier__ == f"alpaca-connectors.InterpolatedPricesTS.{key}"
+        assert model.__table__.info["namespace"] == "alpaca-connectors"
 
 
 def test_no_table_of_this_application_is_shared_with_markets() -> None:
     """ADR 0031, decision 3: every table, instances included, is only in `alpaca-connectors`."""
+    from alpaca_connectors.instances import INTERPOLATED_PRICES_BY_PROFILE
     from alpaca_connectors.migrations import all_project_metatable_models
-    from alpaca_connectors.portfolios.interpolated_prices_schema import (
-        configured_alpaca_interpolated_prices_storage,
-    )
     from metatables.sqlalchemy_contracts import _resolve_namespaces
 
-    interpolated = configured_alpaca_interpolated_prices_storage(
-        source_time_index_meta_table_uid="11111111-1111-4111-8111-111111111111",
-        source_cadence="1d",
-    )
-    models = [*all_project_metatable_models(), interpolated]
-    assert "alpaca_connectors__acct_alpaca" in {model.__table__.name for model in models}
+    models = all_project_metatable_models()
+    names = {model.__table__.name for model in models}
+    assert "alpaca_connectors__acct_alpaca" in names
+    assert {model.__table__.name for model in INTERPOLATED_PRICES_BY_PROFILE.values()} <= names
     for model in models:
         assert _resolve_namespaces(model, namespace=None) == ["alpaca-connectors"], (
             model.__table__.name
@@ -386,7 +409,7 @@ def test_the_signal_publishes_to_markets_and_the_ledger_to_own_instances(monkeyp
 
 
 # Markets table classes may appear only where this application declares a foreign key to a
-# Markets registry (`X.__table__.fullname` inside ForeignKey(...)), in migration metadata, or as a
+# Markets registry (`X.__table__.c.<column>` inside ForeignKey(...), ms-markets 5.0.0), or as a
 # contract handed to an ms-markets instance factory.
 _MARKETS_TABLE_MODULES = re.compile(
     r"^(msm\.models(\..*)?|msm\.time_index\..*storage|msm_portfolios\.models(\..*)?"
@@ -403,12 +426,8 @@ _FOREIGN_KEY_ONLY = {
     "universes/registry.py",
 }
 _EXEMPT = {
-    # Metadata closure for this provider's foreign keys; never queried.
-    "migrations/__init__.py",
-    "portfolios/interpolated_prices_migration.py",
     # Contracts handed to ms-markets instance factories.
     "instances.py",
-    "portfolios/interpolated_prices_schema.py",
 }
 
 
@@ -440,11 +459,13 @@ def test_no_module_builds_a_statement_on_a_markets_table() -> None:
                 continue
             parent = parents.get(node)
             grandparent = parents.get(parent)
+            column = parents.get(grandparent)
             if not (
                 isinstance(parent, ast.Attribute)
                 and parent.attr == "__table__"
                 and isinstance(grandparent, ast.Attribute)
-                and grandparent.attr == "fullname"
+                and grandparent.attr == "c"
+                and isinstance(column, ast.Attribute)
             ):
                 violations.append(f"{relative}:{node.lineno} uses {node.id}")
     assert violations == [], violations

@@ -16,10 +16,11 @@ import datetime as dt
 from collections.abc import Iterable, Sequence
 from typing import Any
 
-from msm.base import MarketsBase, markets_table_args
+from msm.base import markets_table_args
 from sqlalchemy import DateTime, String
 from sqlalchemy.orm import Mapped, mapped_column
 
+from alpaca_connectors.base import ProjectBase
 from alpaca_connectors.metatables import AlpacaMarketsMetaTableMixin, ProjectStorageNameMixin
 
 UTC = dt.timezone.utc
@@ -29,7 +30,7 @@ def utc_now() -> dt.datetime:
     return dt.datetime.now(UTC).replace(microsecond=0)
 
 
-class SignalAssetTable(ProjectStorageNameMixin, AlpacaMarketsMetaTableMixin, MarketsBase):
+class SignalAssetTable(ProjectStorageNameMixin, AlpacaMarketsMetaTableMixin, ProjectBase):
     """One row per signal and asset the signal has ever published."""
 
     __project_storage_concept__ = "signal_asset"
@@ -203,7 +204,7 @@ def forget_signals_assets(signal_uids: Iterable[str]) -> None:
     write_in_batches(write, normalized)
 
 
-def project_signal_asset_models() -> list[type[MarketsBase]]:
+def project_signal_asset_models() -> list[type[ProjectBase]]:
     return [SignalAssetTable]
 
 

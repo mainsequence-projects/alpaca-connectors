@@ -558,6 +558,14 @@ def portfolio_weights_as_of(
     return weights
 
 
+def portfolio_weights_recorded(portfolio_identifier: str) -> bool:
+    """Whether Markets holds any weights of the portfolio (``PortfolioWeightsSeries.bounds``)."""
+    from msm_portfolios.api import PortfolioWeightsSeries
+
+    (bounds,) = PortfolioWeightsSeries.bounds([str(portfolio_identifier)])
+    return int(bounds.row_count or 0) > 0
+
+
 @dataclass(frozen=True, slots=True)
 class PortfolioRunAnswer:
     """What a portfolio run wrote, as Markets answered it."""
@@ -701,6 +709,7 @@ __all__ = [
     "read_in_batches",
     "register_account",
     "retire_portfolio",
+    "portfolio_weights_recorded",
     "run_portfolio",
     "signal_bounds",
     "write_in_batches",

@@ -23,7 +23,7 @@ import datetime as dt
 import uuid
 from typing import ClassVar
 
-from msm.base import MarketsBase, markets_table_args
+from msm.base import markets_table_args
 from msm.models import AccountTable
 from sqlalchemy import (
     JSON,
@@ -39,6 +39,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.types import Uuid
 
+from alpaca_connectors.base import ProjectBase
 from alpaca_connectors.metatables import AlpacaMarketsMetaTableMixin, ProjectStorageNameMixin
 from alpaca_connectors.settings import CREDENTIAL_SECRET_NAME, PROJECT_NAMESPACE_SLUG
 from metatables import EncryptedString
@@ -138,7 +139,7 @@ def _account_uid_pk_fk() -> Mapped[uuid.UUID]:
     """One-to-one detail link: primary key + foreign key to ``AccountTable.uid``."""
     return mapped_column(
         Uuid(as_uuid=True),
-        ForeignKey(f"{AccountTable.__table__.fullname}.uid", ondelete="CASCADE"),
+        ForeignKey(AccountTable.__table__.c.uid, ondelete="CASCADE"),
         primary_key=True,
         nullable=False,
         info={
@@ -150,7 +151,7 @@ def _account_uid_pk_fk() -> Mapped[uuid.UUID]:
     )
 
 
-class ProviderAccountDetails(ProjectStorageNameMixin, AlpacaMarketsMetaTableMixin, MarketsBase):
+class ProviderAccountDetails(ProjectStorageNameMixin, AlpacaMarketsMetaTableMixin, ProjectBase):
     """This connector's provider account sidecar (ms-markets ADR 0047; ADR 0028, decision 7).
 
     Alpaca account metadata, current financials, the owner and the encrypted keys, one row per

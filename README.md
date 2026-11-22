@@ -84,12 +84,10 @@ uv sync
 mainsequence refresh-token
 metatables --local migrations upgrade --provider msm_migrations:migration head
 metatables --local migrations upgrade --provider alpaca_connectors.migrations:migration head   # local runtime; hosted: migration Job
-alpaca-connectors portfolio prepare-interpolated-prices
 ```
 
-The portfolio preparation command derives and migrates the persistent `InterpolatedPrices` tables
-from the registered Alpaca bars profiles. Application startup never creates schema and never seeds
-rows.
+The project's migrations create every table it owns, the interpolated-price table of each bars
+profile included (ADR 0029). Application startup never creates schema and never seeds rows.
 
 ## Core CLI
 

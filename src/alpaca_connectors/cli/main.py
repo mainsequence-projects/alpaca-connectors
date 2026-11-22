@@ -64,7 +64,6 @@ from .portfolios import (
     configure_list_parser as configure_portfolio_list_parser,
 )
 from .portfolios import (
-    configure_prepare_interpolated_prices_parser,
     configure_rebalance_create_parser,
     configure_rebalance_delete_parser,
     configure_rebalance_get_parser,
@@ -177,12 +176,6 @@ def build_parser() -> argparse.ArgumentParser:
     )
     configure_portfolio_action_parser(portfolio_commands.add_parser("run"))
     configure_portfolio_runs_parser(portfolio_commands.add_parser("runs"))
-    configure_prepare_interpolated_prices_parser(
-        portfolio_commands.add_parser(
-            "prepare-interpolated-prices",
-            help="Generate, apply, and verify persistent InterpolatedPrices storage.",
-        )
-    )
     rebalance_parser = portfolio_commands.add_parser(
         "rebalance",
         help="Manage reusable portfolio rebalance configurations.",

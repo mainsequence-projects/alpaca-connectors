@@ -12,13 +12,14 @@ import uuid
 from typing import Any, ClassVar
 
 from msm.api.base import MarketsMetaTableRow, operation_result_rows
-from msm.base import MarketsBase, markets_table_args
+from msm.base import markets_table_args
 from msm.models import AssetTable
 from pydantic import AliasChoices, ConfigDict, Field
 from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Index, String
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.types import Uuid
 
+from alpaca_connectors.base import ProjectBase
 from alpaca_connectors.metatables import AlpacaMarketsMetaTableMixin, ProjectStorageNameMixin
 
 ALPACA_IDENTIFIER_PREFIX = "ALPACA::"
@@ -85,7 +86,7 @@ def trading_calendar_from_alpaca_class(asset_class: str) -> str:
 class AlpacaAssetDetailsTable(
     ProjectStorageNameMixin,
     AlpacaMarketsMetaTableMixin,
-    MarketsBase,
+    ProjectBase,
 ):
     """Required Alpaca provider details, one row per connector-owned Asset."""
 
@@ -108,7 +109,7 @@ class AlpacaAssetDetailsTable(
 
     asset_uid: Mapped[uuid.UUID] = mapped_column(
         Uuid(as_uuid=True),
-        ForeignKey(f"{AssetTable.__table__.fullname}.uid", ondelete="CASCADE"),
+        ForeignKey(AssetTable.__table__.c.uid, ondelete="CASCADE"),
         primary_key=True,
         nullable=False,
         info={

@@ -18,22 +18,22 @@ from __future__ import annotations
 import datetime
 from typing import ClassVar
 
-from msm.base import MarketsBase, MarketsTimeIndexMetaTableMixin
+from msm.base import MarketsTimeIndexMetaTableMixin
 from msm.models.assets.core import AssetTable
 from msm.settings import ASSET_IDENTIFIER_DIMENSION
-from sqlalchemy import DateTime, Float, ForeignKey, MetaData, String
+from sqlalchemy import DateTime, Float, ForeignKey, String
 from sqlalchemy.orm import Mapped, mapped_column
 
+from alpaca_connectors.base import ProjectBase
 from alpaca_connectors.metatables import AlpacaMarketsTimeIndexMetaTableMixin
 from metatables import schema_table_name
-from metatables.migrations import metadata_for_models
 
 # Project-owned SQLAlchemy table-name segment so physical tables are namespaced to this project
 # instead of the library default ``ms_markets``. This only affects physical table names; the
 # logical ``__metatable_identifier__`` remains the globally unique runtime identity.
 ALPACA_CONNECTORS_STORAGE_APP = "alpaca_connectors"
 
-_ASSET_IDENTIFIER_FK = f"{AssetTable.__table__.fullname}.unique_identifier"
+_ASSET_IDENTIFIER_FK = AssetTable.__table__.c.unique_identifier
 _BARS_1D_SIP_ALL_TABLE_NAME = schema_table_name(
     ALPACA_CONNECTORS_STORAGE_APP,
     "bars_1d_sip_all",
@@ -59,15 +59,14 @@ def _daily_bar_column_info(*, price_basis: str, volume_basis: str) -> dict[str, 
         "time_index": {
             "label": "Bar close time",
             "description": (
-                "Scheduled 16:00 America/New_York close of the trading day the bar covers, "
-                "stored in UTC, also on early-close days."
+                "Close of the NYSE session the bar covers, stored in UTC: 16:00 "
+                "America/New_York, or 13:00 on an early-close day."
             ),
         },
         "open_time": {
             "label": "Bar open time",
             "description": (
-                "Scheduled 09:30 America/New_York open of the trading day the bar covers, "
-                "stored in UTC."
+                "Open of the NYSE session the bar covers, 09:30 America/New_York, stored in UTC."
             ),
         },
         "asset_identifier": {
@@ -108,7 +107,7 @@ _IEX_RAW_COLUMN_INFO = _daily_bar_column_info(
 )
 
 
-class AlpacaStockBars1dSipAllStorage(AlpacaMarketsTimeIndexMetaTableMixin, MarketsBase):
+class AlpacaStockBars1dSipAllStorage(AlpacaMarketsTimeIndexMetaTableMixin, ProjectBase):
     """Daily (1d) SIP-feed, all-adjustment Alpaca US equity OHLCV bars."""
 
     __markets_storage_app__ = ALPACA_CONNECTORS_STORAGE_APP
@@ -165,7 +164,7 @@ class AlpacaStockBars1dSipAllStorage(AlpacaMarketsTimeIndexMetaTableMixin, Marke
     )
 
 
-class AlpacaStockBars1dIexRawStorage(AlpacaMarketsTimeIndexMetaTableMixin, MarketsBase):
+class AlpacaStockBars1dIexRawStorage(AlpacaMarketsTimeIndexMetaTableMixin, ProjectBase):
     """Daily (1d) IEX-feed, raw-adjustment Alpaca US equity OHLCV bars."""
 
     __markets_storage_app__ = ALPACA_CONNECTORS_STORAGE_APP
@@ -259,16 +258,6 @@ def project_storage_models() -> list[type[MarketsTimeIndexMetaTableMixin]]:
     return list(dict.fromkeys(ALPACA_STOCK_BARS_STORAGE_BY_TRIPLE.values()))
 
 
-def storage_metadata() -> MetaData:
-    """SQLAlchemy metadata containing only the project storage tables (migration target)."""
-    return metadata_for_models(project_storage_models())
-
-
-# Stable migration target metadata (only the project-owned storage tables). Referenced by the
-# migration provider as ``alpaca_connectors.market_data.storage:METADATA``.
-METADATA: MetaData = storage_metadata()
-
-
 __all__ = [
     "ALPACA_CONNECTORS_STORAGE_APP",
     "ALPACA_STOCK_BARS_STORAGE_BY_TRIPLE",
@@ -276,5 +265,4 @@ __all__ = [
     "AlpacaStockBars1dSipAllStorage",
     "project_storage_models",
     "storage_for",
-    "storage_metadata",
 ]

@@ -13,8 +13,7 @@ OPENFIGI_DEFAULT_EXCHANGE_CODE = "US"
 PROJECT_NAMESPACE_SLUG = "alpaca_connectors"
 
 # MetaTables catalog namespace of every table this project owns (ms-markets ADR 0047, decision 4).
-# The project mixins declare it; ``MSM_AUTO_REGISTER_NAMESPACE``, when set, overrides it silently
-# (ms-markets ``markets_configured_namespace``), so hosted resources never set that variable.
+# The project mixins and the instance factories declare it; nothing in the environment overrides it.
 PROJECT_NAMESPACE = "alpaca-connectors"
 
 # The roles every workload of this repository's branch holds (MetaTables ADR 0029, ADR 0030): the

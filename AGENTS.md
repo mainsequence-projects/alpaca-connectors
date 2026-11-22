@@ -29,9 +29,9 @@ Repository rules:
   Job, holding `runner` on it, starts the scheduled runs (ADR 0013). `src/jobs/` launchers run by
   path and are bound to live Jobs, so never move them. Every launcher except the migration Job
   starts with `skip_if_schema_behind`.
-- Hosted schema changes come only from the workflow's migration Job (ADR 0012); never run
-  `metatables migrations upgrade` or `downgrade` against a hosted environment. Revisions add first
-  and drop later. Use `metatables` for MetaTables interfaces. A person owns each namespace;
+- Hosted schema changes come only from the migration Job (ADR 0012); never run `metatables
+  migrations upgrade` or `downgrade` on a hosted Environment. Revisions add first, drop later. Use
+  `metatables` interfaces; every table is on `ProjectBase` (ADR 0029). A person owns each namespace;
   workloads get `editor` only from `settings.BRANCH_ACCESS` (ADR 0030); Markets none (ADR 0031).
 
 FastAPI surface:

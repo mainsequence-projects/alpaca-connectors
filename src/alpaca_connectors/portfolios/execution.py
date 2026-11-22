@@ -413,6 +413,11 @@ def build_portfolio_run(resolved: ResolvedPortfolioConfiguration) -> PortfolioRu
     valuation_source = build_alpaca_interpolated_prices(
         source_time_index_meta_table_uid=resolved.source_time_index_meta_table_uid,
         asset_identifiers=list(resolved.asset_identifiers),
+        profile=(
+            resolved.bars_configuration.frequency_id,
+            resolved.bars_configuration.feed,
+            resolved.bars_configuration.adjustment,
+        ),
         upsample_frequency_id=configuration.upsample_frequency_id,
         intraday_bar_interpolation_rule=configuration.intraday_bar_interpolation_rule,
     )
@@ -550,7 +555,7 @@ def execute_portfolio_configuration(configuration_uid: Any) -> PortfolioExecutio
     producer; this run publishes no signal observation.
     """
     from alpaca_connectors.instances import AlpacaPortfolioRebalanceStateStorage
-    from alpaca_connectors.markets_api import run_portfolio
+    from alpaca_connectors.markets_api import portfolio_weights_recorded, run_portfolio
     from alpaca_connectors.runtime import start_portfolio_job_engine
 
     # This service is reusable outside the repository Job entrypoint. Bootstrap the complete
@@ -584,6 +589,20 @@ def execute_portfolio_configuration(configuration_uid: Any) -> PortfolioExecutio
         starts_at=resolved.signal_start_time,
         at=rebalanced_through,
     )
+    if first_rebalance["rebalanced"] and not portfolio_weights_recorded(
+        answer.portfolio_unique_identifier
+    ):
+        # The first rebalance was due, and no run has recorded it: the run reports what Markets
+        # holds, not what the schedule expected (ms-markets issue 118).
+        first_rebalance = {
+            **first_rebalance,
+            "rebalanced": False,
+            "message": (
+                "The portfolio's first rebalance was due at "
+                f"{first_rebalance['first_rebalance_at']}, and Markets holds no weights of it: "
+                "no run has recorded that rebalance."
+            ),
+        }
     if not first_rebalance["rebalanced"]:
         # Issue #41: a run before the first configured event writes no weights.
         logger.warning("%s", first_rebalance["message"])

@@ -78,8 +78,8 @@ instructions are `.tau/SYSTEM.md`; its tools and skills are described in
   referenced it stay, recorded under the account, whose delete deletes them
 - a portfolio's bars come from its own bars configuration, which follows what its signal ever
   published, so new weights need no bars edit
-- after a new bars profile is migrated, run `alpaca-connectors portfolio prepare-interpolated-prices`,
-  then the same command with `--check-only`
+- a new bars profile adds its interpolated-price table in the revision that adds its bars table
+  (`INTERPOLATED_PRICES_BY_PROFILE`, ADR 0029); nothing is run by hand
 
 ## Price Updates From Alpaca
 
