@@ -20,7 +20,7 @@ from alpaca_connectors.portfolios.interpolated_prices import (
 def test_runtime_dependency_versions_match_the_sdk9_metatables_stack() -> None:
     assert version("mainsequence") in SpecifierSet(">=9.0.38,<10")
     assert version("mainsequence-metatable") in SpecifierSet(">=0.1.74,<0.2")
-    assert version("ms-markets") in SpecifierSet(">=5.0.0,<6")
+    assert version("ms-markets") in SpecifierSet(">=5.2.0,<6")
 
 
 def test_alpaca_bars_node_declares_sdk8_output_table() -> None:

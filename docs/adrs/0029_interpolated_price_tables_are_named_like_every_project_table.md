@@ -7,9 +7,10 @@ Accepted and implemented on 2026-11-22, on ms-markets 5.0.0, the release that re
 Proposed on 2026-11-19. ms-markets decided how a producer names the table differently from what
 this ADR first proposed; decision 2 records what it decided (see [History](#history)).
 
-The release waits for
+It was released on 2026-11-23 on ms-markets 5.2.0, which fixes
 [MainSequenceMarkets#118](https://github.com/mainsequence-projects/MainSequenceMarkets/issues/118)
-before it is pushed (see [Rollout](#rollout)).
+and [#119](https://github.com/mainsequence-projects/MainSequenceMarkets/issues/119) (see
+[Rollout](#rollout)).
 
 It amends the interpolated-price parts of
 [ADR 0025](0025_markets_reads_the_instances_through_a_second_namespace.md) and of the
@@ -79,18 +80,20 @@ InterpolatedPrices storage is not migrated", and the command that would have cre
 
 ## Rollout
 
-1. **One release.** It requires ms-markets 5.0.0 and MetaTables 0.1.74. Revision `0034` creates
+1. **One release.** It requires ms-markets 5.2.0 and MetaTables 0.1.74. Revision `0034` creates
    the two tables, and the portfolio Job writes them from its first run. Nothing is copied:
    Production never registered an interpolated-price table, so there is no history to keep, and
    the first run interpolates from the updater's start, 2017-07-20, which is before the first
    bar this application stores (2018-01-02).
-2. **Push only after ms-markets fixes
-   [#118](https://github.com/mainsequence-projects/MainSequenceMarkets/issues/118).** In a
-   shared rebalance-state table, a new portfolio takes another portfolio's progress as its own and
-   records nothing, or a cut history. Fixing this table without it would turn a failing Job into
-   silently wrong portfolios. The lifecycle check's portfolio Job stage fails until that release
-   ([Development Workflow](../operations/development.md)). [#119](https://github.com/mainsequence-projects/MainSequenceMarkets/issues/119)
-   is the same defect for the calendar events of a second calendar.
+2. **Pushed only on ms-markets 5.2.0, which fixes
+   [#118](https://github.com/mainsequence-projects/MainSequenceMarkets/issues/118).** Before it, in
+   a shared rebalance-state table, a new portfolio took another portfolio's progress as its own and
+   recorded nothing, or a cut history. Fixing this table without it would have turned a failing
+   Job into silently wrong portfolios. The lifecycle check's portfolio Job stage runs three
+   portfolios on the shared tables to catch it
+   ([Development Workflow](../operations/development.md)). 5.2.0 also fixes
+   [#119](https://github.com/mainsequence-projects/MainSequenceMarkets/issues/119), the same
+   defect for the calendar events of a second calendar.
 3. **Drop later.** A later revision drops the four orphaned tables, `…__t_0e9255594b348d8c` and
    `…__t_43b7a7a637ae4df3` of revisions 0011 (`ms_markets__…`) and 0021 (`alpaca_connectors__…`),
    with `op.drop_table(name, if_exists=True)`, once every Environment runs this release (revisions

@@ -340,9 +340,14 @@ MetaTables (`mainsequence-metatable`) **0.1.63** and ms-markets **3.4.0**.
   `requirements.txt` are regenerated once 4.2.0 is published.
 - TAU 2.0.26 (ADR 0025) reads the deployed Agent's resources only from `.tau/`, so the six skills
   moved from `.agents/skills/mcp_tools/` to `.tau/skills/` in the same change.
+- On 2026-11-23 the range moved to `ms-markets>=5.2.0`, with MetaTables `>=0.1.74` and Main
+  Sequence `>=9.0.38`. ms-markets 5.0.0 has producers own their interpolated-price tables
+  ([ADR 0029](adrs/0029_interpolated_price_tables_are_named_like_every_project_table.md)), and
+  5.2.0 starts a new portfolio or calendar in a shared table at its own progress
+  (MainSequenceMarkets#118 and #119).
 
-`pyproject.toml` keeps non-exact compatibility ranges (`mainsequence[mcp]>=9.0.31,<10`,
-`mainsequence-metatable>=0.1.55,<0.2`, `ms-tau-sdk>=2.0.26,<3`, and `ms-markets>=4.2.0` with no
+`pyproject.toml` keeps non-exact compatibility ranges (`mainsequence[mcp]>=9.0.38,<10`,
+`mainsequence-metatable>=0.1.74,<0.2`, `ms-tau-sdk>=2.0.26,<3`, and `ms-markets>=5.2.0` with no
 upper bound since [ADR 0031](adrs/0031_markets_series_are_published_not_shared.md)), while
 `uv.lock` and the exported `requirements.txt` record the resolution. On 2026-10-14 Main Sequence
 had moved from 9.0.23 to 9.0.24, which stopped scaffolding `AGENTS.md` and ships its guidance in
