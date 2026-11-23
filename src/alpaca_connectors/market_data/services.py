@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import datetime as dt
 import uuid
+from collections.abc import Sequence
 from dataclasses import asdict, dataclass
 from typing import Any
 
@@ -242,6 +243,94 @@ def _asset_uids_from_identifiers(asset_identifiers: list[str]) -> list[str]:
     return [str(assets[identifier].uid) for identifier in asset_identifiers]
 
 
+def last_final_daily_close(now: dt.datetime | None = None) -> dt.datetime:
+    """The close of the last NYSE session whose daily bar the bars update may store.
+
+    The update requests only finished periods: a daily bar starts at its session's midnight in
+    New York and is kept when that start is before today's 00:00 UTC (``current_period_start``).
+    It is stamped at the session's close (``stock_sessions``).
+    """
+    from alpaca_connectors.market_data.alpaca_bars_support import (
+        NEW_YORK,
+        current_period_start,
+        stock_sessions,
+    )
+
+    cutoff = current_period_start(now or dt.datetime.now(dt.UTC), "1d")
+    sessions = stock_sessions(cutoff.date() - dt.timedelta(days=14), cutoff.date())
+    final = [
+        day
+        for day in sessions
+        if dt.datetime.combine(day, dt.time(0), tzinfo=NEW_YORK).astimezone(dt.UTC) < cutoff
+    ]
+    return sessions[max(final)][1]
+
+
+def daily_bars_current_through(
+    profile: tuple[str, str, str],
+    asset_identifiers: Sequence[str],
+    *,
+    now: dt.datetime | None = None,
+) -> dt.datetime | None:
+    """The last final session close when every asset already holds its bar, else None.
+
+    One read of the profile's bars table: each asset's latest bar. A daily profile whose assets
+    all hold the bar of ``last_final_daily_close`` has nothing for the bars update to fetch. Any
+    other frequency, an asset without that bar, or no asset answers None: the update runs.
+    """
+    from msm.repositories.base import compile_markets_statement, execute_markets_operation
+    from sqlalchemy import func, select
+
+    from alpaca_connectors.market_data.alpaca_bars_support import normalize_frequency_id
+    from alpaca_connectors.market_data.storage import storage_for
+    from alpaca_connectors.markets_api import read_in_batches
+    from alpaca_connectors.runtime import start_markets_engine
+
+    identifiers = sorted({str(identifier) for identifier in asset_identifiers})
+    if normalize_frequency_id(profile[0]) != "1d" or not identifiers:
+        return None
+    close = last_final_daily_close(now)
+    storage = storage_for(*profile)
+    runtime = start_markets_engine()
+
+    def latest(batch: list[str]) -> list[dict[str, Any]]:
+        statement = (
+            select(
+                storage.asset_identifier.label("asset_identifier"),
+                func.max(storage.time_index).label("latest_observation"),
+            )
+            .where(storage.asset_identifier.in_(batch))
+            .group_by(storage.asset_identifier)
+        )
+        operation = compile_markets_statement(
+            statement, context=runtime.context, operation="select"
+        )
+        return operation_result_rows(execute_markets_operation(operation, context=runtime.context))
+
+    held = {
+        str(row["asset_identifier"]): _utc_time(row["latest_observation"])
+        for row in read_in_batches(latest, identifiers)
+    }
+    if all(
+        held.get(identifier) is not None and held[identifier] >= close for identifier in identifiers
+    ):
+        return close
+    return None
+
+
+def _utc_time(value: Any) -> dt.datetime | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        value = dt.datetime.fromisoformat(value)
+    to_pydatetime = getattr(value, "to_pydatetime", None)
+    if to_pydatetime is not None:
+        value = to_pydatetime()
+    if value.tzinfo is None:
+        return value.replace(tzinfo=dt.UTC)
+    return value.astimezone(dt.UTC)
+
+
 def build_market_data_update(
     *,
     configuration_uid: uuid.UUID | str,
@@ -403,8 +492,10 @@ def execute_market_data_update(
 __all__ = [
     "MarketDataDataset",
     "build_market_data_update",
+    "daily_bars_current_through",
     "execute_market_data_update",
     "get_market_data_dataset",
+    "last_final_daily_close",
     "list_market_data_datasets",
     "query_price_observations",
     "resolve_market_data_update",

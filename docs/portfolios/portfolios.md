@@ -156,7 +156,8 @@ in, whose rows name no account ([Alpaca Bars](../market_data/alpaca_bars.md)):
   run, the one `actions/run` starts included, first runs its bars configuration's update, so a
   run started at once after new weights has the new asset's prices (issue #39). A failed update
   (keys removed, Alpaca unavailable) does not stop the run: it values with the prices already
-  stored, and the run's summary reports `bars_update`.
+  stored, and the run's summary reports `bars_update`. When every asset already holds its last
+  final daily bar, the update has nothing to fetch and does not run (`current_through`).
 
 ## Rebalance Configurations
 

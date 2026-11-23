@@ -590,3 +590,73 @@ def test_fills_write_the_batch_the_cash_asset_and_the_snapshot_together() -> Non
     # The target read alongside the capture is the one the allocation sizes.
     assert harness.targets == [target]
     assert harness.ledger.batches["HUNCH_BATCH__1"].metadata_json["holdings_set_uid"] == "set-1"
+
+
+# ------------------------------------------------------------------------------------------------
+# A portfolio run's inputs: the reads that need only the configuration go together
+# ------------------------------------------------------------------------------------------------
+def test_a_portfolio_runs_inputs_are_read_in_two_steps() -> None:
+    import datetime as dt
+
+    from alpaca_connectors.portfolios import execution
+
+    configuration = SimpleNamespace(
+        uid=uuid.UUID(int=1),
+        rebalance_configuration_uid=uuid.UUID(int=2),
+        signal_definition_uid=uuid.UUID(int=3),
+        bars_configuration_uid=None,
+    )
+    bars = SimpleNamespace(
+        uid=uuid.UUID(int=4), enabled=True, frequency_id="1d", feed="sip", adjustment="all"
+    )
+    first = dt.datetime(2026, 11, 20, 15, tzinfo=dt.UTC)
+    signal_uid = "signal-of-key"
+    # Read one after another, either barrier times out.
+    by_configuration = threading.Barrier(3, timeout=5)
+    by_inputs = threading.Barrier(2, timeout=5)
+    with (
+        patch("alpaca_connectors.runtime.start_markets_engine"),
+        patch(
+            "alpaca_connectors.portfolios.configurations.rebalance_configurations_by_uids",
+            _waiting(
+                by_configuration,
+                lambda uids: {str(uuid.UUID(int=2)): SimpleNamespace(strategy="immediate_signal")},
+            ),
+        ),
+        patch(
+            "alpaca_connectors.market_data.configurations.portfolio_bar_configurations",
+            _waiting(by_configuration, lambda uids: {str(uuid.UUID(int=1)): bars}),
+        ),
+        patch(
+            "alpaca_connectors.portfolios.signal_definitions.signal_definitions_by_uids",
+            _waiting(
+                by_configuration,
+                lambda uids: {str(uuid.UUID(int=3)): SimpleNamespace(signal_key="key")},
+            ),
+        ),
+        patch(
+            "alpaca_connectors.portfolios.signal_definitions.signal_uid_for_key",
+            return_value=signal_uid,
+        ),
+        patch(
+            "alpaca_connectors.portfolios.signal_observations."
+            "read_signal_observation_bounds_by_signal",
+            _waiting(
+                by_inputs,
+                lambda uids: {
+                    signal_uid: SimpleNamespace(
+                        first_observation_at=first, last_observation_at=first
+                    )
+                },
+            ),
+        ),
+        patch.object(
+            execution,
+            "resolve_alpaca_bars_time_index_meta_table_uids",
+            _waiting(by_inputs, lambda profiles: {("1d", "sip", "all"): "bars-table"}),
+        ),
+    ):
+        resolved = execution._resolve_inputs([configuration])
+    inputs = resolved[str(uuid.UUID(int=1))]
+    assert inputs.signal_uid == signal_uid and inputs.signal_start_time == first
+    assert inputs.source_time_index_meta_table_uid == "bars-table"

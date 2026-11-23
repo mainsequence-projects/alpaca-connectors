@@ -358,7 +358,8 @@ GET|PATCH|DELETE /v1/portfolio-rebalance-configurations/{configuration_uid}
 
 There is no Environment request field. A run selects its configuration with
 `--configuration-uid <uid>`, first runs its bars configuration's update (issue #39; a failed update
-leaves it to value with the prices already stored), then runs the ms-markets recipe `run_portfolio`:
+leaves it to value with the prices already stored; it is skipped, in one read, when every asset
+already holds its last final daily bar), then runs the ms-markets recipe `run_portfolio`:
 persistent interpolation, calendar events, rebalance state, executed weights, and valuation, with
 the weights and values published to Markets (ADR 0031). Rebalance rows use actual configured
 market-event timestamps and select the latest observation at or before each event.

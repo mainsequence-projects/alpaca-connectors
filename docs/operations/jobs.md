@@ -147,7 +147,11 @@ alpaca-connectors portfolio runs <PORTFOLIO_CONFIGURATION_UID>
 ```
 
 Execution first runs its bars configuration's update, so an asset the signal just gained is priced
-(issue #39); a failed update leaves the run to value with the prices already stored. It then reads
+(issue #39); a failed update leaves the run to value with the prices already stored. One read of
+the bars table comes first: when every asset of the run already holds the bar of the last session
+whose daily bar is final (its New York midnight before today's 00:00 UTC), there is nothing to
+fetch and the update does not run (`bars_update.current_through` in the summary). The inputs the
+run resolves are read in three steps, each step's reads together. It then reads
 the portfolio's published observations, updates the configuration-derived persistent
 `InterpolatedPrices`, and calculates `PortfoliosUpdater` with dependency traversal disabled.
 The interpolated prices are written to the table of the portfolio's bars profile, which revision

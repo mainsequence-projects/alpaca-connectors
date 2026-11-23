@@ -157,7 +157,8 @@ def _resolve_inputs(
     The rebalance configurations, the portfolios' own bars configurations, the feeds the
     portfolios not yet adopted name, the signal definitions, the signals' observation bounds and
     the bars tables are each read once for all of them (issue #46); what ``held`` gives is not
-    read. Each configuration is answered with its inputs or with the error that blocks it: a
+    read. The reads that need only the configurations run together, then the two that need what
+    they answered (``all_together``). Each configuration is answered with its inputs or with the error that blocks it: a
     ``LookupError`` or ``ValueError`` for an input that is missing, disabled or unsupported, a
     ``RuntimeError`` for a bars table that is not registered.
     """
@@ -165,6 +166,7 @@ def _resolve_inputs(
         bar_configuration_rows_by_uids,
         portfolio_bar_configurations,
     )
+    from alpaca_connectors.markets_api import all_together
     from alpaca_connectors.portfolios.configurations import (
         normalize_rebalance_strategy,
         rebalance_configurations_by_uids,
@@ -177,22 +179,35 @@ def _resolve_inputs(
     from alpaca_connectors.portfolios.signal_observations import (
         read_signal_observation_bounds_by_signal,
     )
+    from alpaca_connectors.runtime import account_runtime_models, start_markets_engine
 
     held = held or HeldPortfolioInputs()
     uids = [str(configuration.uid) for configuration in configurations]
+    # The reads below run together; the engine they share starts first, once.
+    start_markets_engine(models=account_runtime_models())
 
     rebalances = dict(held.rebalance_configurations)
-    rebalances.update(
-        rebalance_configurations_by_uids(
+    own_bars = dict(held.bars_configurations)
+    definitions = dict(held.definitions)
+    read_rebalances, read_bars, read_definitions = all_together(
+        lambda: rebalance_configurations_by_uids(
             [
                 str(configuration.rebalance_configuration_uid)
                 for configuration in configurations
                 if str(configuration.rebalance_configuration_uid) not in rebalances
             ]
-        )
+        ),
+        lambda: portfolio_bar_configurations([uid for uid in uids if uid not in own_bars]),
+        lambda: signal_definitions_by_uids(
+            configuration.signal_definition_uid
+            for configuration in configurations
+            if configuration.signal_definition_uid is not None
+            and str(configuration.signal_definition_uid) not in definitions
+        ),
     )
-    own_bars = dict(held.bars_configurations)
-    own_bars.update(portfolio_bar_configurations([uid for uid in uids if uid not in own_bars]))
+    rebalances.update(read_rebalances)
+    own_bars.update(read_bars)
+    definitions.update(read_definitions)
     # A portfolio not yet adopted is priced by the bars feed it names, as before ADR 0028.
     named_bars = bar_configuration_rows_by_uids(
         [
@@ -201,15 +216,6 @@ def _resolve_inputs(
             if str(configuration.uid) not in own_bars
             and configuration.bars_configuration_uid is not None
         ]
-    )
-    definitions = dict(held.definitions)
-    definitions.update(
-        signal_definitions_by_uids(
-            configuration.signal_definition_uid
-            for configuration in configurations
-            if configuration.signal_definition_uid is not None
-            and str(configuration.signal_definition_uid) not in definitions
-        )
     )
 
     resolved: dict[str, Any] = {}
@@ -246,21 +252,22 @@ def _resolve_inputs(
 
     pending = {uid: value for uid, value in resolved.items() if isinstance(value, tuple)}
     bounds = dict(held.signal_bounds)
-    bounds.update(
-        read_signal_observation_bounds_by_signal(
+    read_bounds, sources = all_together(
+        lambda: read_signal_observation_bounds_by_signal(
             [value[3] for value in pending.values() if value[3] not in bounds]
-        )
+        ),
+        lambda: (
+            resolve_alpaca_bars_time_index_meta_table_uids(
+                [
+                    (value[2].frequency_id, value[2].feed, value[2].adjustment)
+                    for value in pending.values()
+                ]
+            )
+            if pending
+            else {}
+        ),
     )
-    sources = (
-        resolve_alpaca_bars_time_index_meta_table_uids(
-            [
-                (value[2].frequency_id, value[2].feed, value[2].adjustment)
-                for value in pending.values()
-            ]
-        )
-        if pending
-        else {}
-    )
+    bounds.update(read_bounds)
     for uid, (configuration, rebalance, bars, signal_uid) in pending.items():
         signal_bounds = bounds.get(signal_uid)
         if (
@@ -291,7 +298,11 @@ def _resolve_inputs(
 def resolve_portfolio_configuration(
     configuration_uid: Any,
 ) -> ResolvedPortfolioConfiguration:
-    """Resolve stored calculation inputs and require an existing signal observation."""
+    """Resolve stored calculation inputs and require an existing signal observation.
+
+    The latest observation and the signal's recorded assets are read together.
+    """
+    from alpaca_connectors.markets_api import all_together
     from alpaca_connectors.portfolios.signal_assets import assets_for_signals
 
     configuration = get_portfolio_configuration(configuration_uid)
@@ -300,7 +311,10 @@ def resolve_portfolio_configuration(
     inputs = _resolve_inputs([configuration])[str(configuration.uid)]
     if isinstance(inputs, Exception):
         raise inputs
-    latest = read_signal_observation_matrix(signal_uid=inputs.signal_uid, observation_limit=1)
+    latest, recorded = all_together(
+        lambda: read_signal_observation_matrix(signal_uid=inputs.signal_uid, observation_limit=1),
+        lambda: assets_for_signals([inputs.signal_uid]),
+    )
     if not latest.time_indexes or not latest.assets:
         raise ValueError(
             f"Signal {inputs.signal_uid} has no published observations. "
@@ -309,10 +323,7 @@ def resolve_portfolio_configuration(
     # Every asset the portfolio ever held, so a history it started with is priced too; read from
     # the signal-asset table, not the signal weights series (ADR 0024).
     asset_identifiers = tuple(
-        sorted(
-            {asset.asset_identifier for asset in latest.assets}
-            | set(assets_for_signals([inputs.signal_uid]))
-        )
+        sorted({asset.asset_identifier for asset in latest.assets} | set(recorded))
     )
     return ResolvedPortfolioConfiguration(
         configuration=configuration,
@@ -523,11 +534,29 @@ def update_portfolio_bars(resolved: ResolvedPortfolioConfiguration) -> dict[str,
     yet adopted names), which prices every asset the signal has published, incrementally. A
     failed update (keys removed, Alpaca unavailable) never stops the run: it values with the
     prices already stored, as it did before, and the summary says the update failed.
+
+    When every asset of the run already holds its last final daily bar, there is nothing to fetch
+    and the update does not run (``current_through`` in the summary): one read instead of
+    resolving the update's scope, the account and its keys and running the updater.
     """
     from alpaca_connectors.market_data import execute_market_data_update
+    from alpaca_connectors.market_data.services import daily_bars_current_through
 
     bars_uid = str(resolved.bars_configuration.uid)
+    bars = resolved.bars_configuration
     try:
+        # Nothing to fetch when every asset already holds its last final bar: the update would
+        # resolve its scope, the account and its keys, and run an updater, to write nothing.
+        current = daily_bars_current_through(
+            (bars.frequency_id, bars.feed, bars.adjustment), resolved.asset_identifiers
+        )
+        if current is not None:
+            return {
+                "bars_configuration_uid": bars_uid,
+                "updated": True,
+                "rows_persisted": 0,
+                "current_through": current.isoformat(),
+            }
         result = execute_market_data_update(configuration_uid=bars_uid)
     except Exception as exc:  # noqa: BLE001 - the run keeps what worked before (issue #39)
         # The type only: a provider message can carry request context.

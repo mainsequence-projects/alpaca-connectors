@@ -1405,22 +1405,49 @@ def test_a_run_fetches_the_bars_its_signal_needs_before_it_values() -> None:
     # Issue #39: a run started at once after new weights brings its prices itself.
     from alpaca_connectors.portfolios import execution
 
-    resolved = SimpleNamespace(bars_configuration=SimpleNamespace(uid=BARS_UID))
-    with patch(
-        "alpaca_connectors.market_data.execute_market_data_update",
-        return_value={"rows_persisted": 12},
-    ) as update:
+    resolved = SimpleNamespace(
+        bars_configuration=SimpleNamespace(
+            uid=BARS_UID, frequency_id="1d", feed="sip", adjustment="all"
+        ),
+        asset_identifiers=("ALPACA::a", "ALPACA::b"),
+    )
+    current = "alpaca_connectors.market_data.services.daily_bars_current_through"
+    with (
+        patch(current, return_value=None) as check,
+        patch(
+            "alpaca_connectors.market_data.execute_market_data_update",
+            return_value={"rows_persisted": 12},
+        ) as update,
+    ):
         assert execution.update_portfolio_bars(resolved) == {
             "bars_configuration_uid": str(BARS_UID),
             "updated": True,
             "rows_persisted": 12,
         }
+    check.assert_called_once_with(("1d", "sip", "all"), ("ALPACA::a", "ALPACA::b"))
     update.assert_called_once_with(configuration_uid=str(BARS_UID))
 
+    # Every asset already holds its last final bar: nothing to fetch, and the update does not run.
+    close = dt.datetime(2026, 11, 20, 21, tzinfo=dt.UTC)
+    with (
+        patch(current, return_value=close),
+        patch("alpaca_connectors.market_data.execute_market_data_update") as update,
+    ):
+        assert execution.update_portfolio_bars(resolved) == {
+            "bars_configuration_uid": str(BARS_UID),
+            "updated": True,
+            "rows_persisted": 0,
+            "current_through": close.isoformat(),
+        }
+    update.assert_not_called()
+
     # A failed update never stops the run: it values with the stored prices, as before.
-    with patch(
-        "alpaca_connectors.market_data.execute_market_data_update",
-        side_effect=RuntimeError("Alpaca said no with secret context"),
+    with (
+        patch(current, return_value=None),
+        patch(
+            "alpaca_connectors.market_data.execute_market_data_update",
+            side_effect=RuntimeError("Alpaca said no with secret context"),
+        ),
     ):
         answer = execution.update_portfolio_bars(resolved)
     assert answer == {
