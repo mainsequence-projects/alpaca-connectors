@@ -33,7 +33,8 @@ Each step reads and writes set-based (issue #46): the portfolios end together
 one bulk delete of ms-markets, their rebalance state through one ``delete_private_series`` call and
 their records through one statement, and the signals through one pass. ms-markets has only
 one-portfolio routes to list the accounts whose current target names a portfolio and to retire
-one, and only a one-signal ``end_signal``, so those calls stay one per portfolio or signal.
+one, and only a one-signal ``end_signal``, so those calls stay one per portfolio or signal, made
+together (``markets_api.each_together``).
 """
 
 from __future__ import annotations
@@ -189,7 +190,11 @@ class _AccountContents:
 
 def _preflight(normalized: str) -> _AccountContents:
     from alpaca_connectors.market_data.configurations import bar_configurations_for_account
-    from alpaca_connectors.markets_api import account_delete_preflight, current_target_account_uids
+    from alpaca_connectors.markets_api import (
+        account_delete_preflight,
+        current_target_account_uids,
+        each_together,
+    )
     from alpaca_connectors.portfolios.configurations import ended_portfolios_of_account
 
     markets = account_delete_preflight(normalized) or {}
@@ -198,12 +203,13 @@ def _preflight(normalized: str) -> _AccountContents:
     feeds = bar_configurations_for_account(normalized)
     portfolios = _account_portfolios(normalized, feeds)
     # ms-markets lists a portfolio's account targets one portfolio at a time
-    # (``listPortfolioAccountTargets``); it has no form for several portfolios.
+    # (``listPortfolioAccountTargets``); it has no form for several portfolios, so the lists are
+    # read together.
+    targeted = [row.portfolio_uid for row in portfolios if row.portfolio_uid is not None]
     held = sum(
         1
-        for configuration in portfolios
-        if configuration.portfolio_uid is not None
-        and set(current_target_account_uids(configuration.portfolio_uid)) - {normalized}
+        for accounts in each_together(current_target_account_uids, targeted)
+        if set(accounts) - {normalized}
     )
     if held:
         # ms-markets' rule (its ADR 0049): never names the other accounts (ADR 0019).

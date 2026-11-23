@@ -309,12 +309,14 @@ Retiring deletes nothing. The `Portfolio`, its series, its catalog registration 
 account's history stay. A retired portfolio cannot be named by a new target, gets no virtual-fund
 holdings, leaves discovery, and its updaters write nothing after `retired_at`.
 
-An account's delete ends all its portfolios in one pass (issue #46): each `Portfolio` is retired
-in turn, since ms-markets retires one portfolio per call, and then one read of the definitions
-they followed, one read and one insert of their records, one delete of their configurations, one
-pass over their definitions and one over their inline rebalance configurations serve them all. A
-refused retirement leaves that portfolio and the ones after it unchanged, and ends the ones before
-it, as one at a time would have.
+An account's delete ends all its portfolios in one pass (issue #46). ms-markets retires one
+portfolio per call, so the `Portfolio` rows are retired together, at most eight calls at once
+(`markets_api.each_together`). Then one read of the definitions they followed, one read and one
+insert of their records, one delete of their configurations, one pass over their definitions and
+one over their inline rebalance configurations serve them all. A refused retirement leaves that
+portfolio unchanged; every other one ends, and the refusal is answered after. The account delete's
+other one-item Markets calls, the check of which accounts target each portfolio and the end of
+each signal, are made together the same way.
 
 ## CLI
 

@@ -15,7 +15,8 @@ calls of an account delete and a signal delete (ADR 0028): ``current_target_acco
 ``portfolios_delete_blockers`` and ``delete_portfolios`` (issue #46). The preflights and the bulk
 portfolio delete have no typed client method in ms-markets 4.0.1, so they call their routes
 through the same client's ``request``. Retiring a portfolio and listing the accounts whose current
-target names it have only one-item routes there.
+target names it have only one-item routes there, as ending a signal does; ``each_together`` makes
+those one-item calls together instead of one after another.
 
 Signal weights, portfolio weights and portfolio values are published to Markets and read back
 from it through the ms-markets recipes (ADR 0031, ms-markets ADR 0060), only by the composites of
@@ -26,16 +27,37 @@ the last section: ``publish_signal_weights``, ``signal_bounds``, ``latest_signal
 
 from __future__ import annotations
 
+import contextvars
 import datetime as dt
 import uuid
 from collections.abc import Callable, Iterable, Mapping, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Any, TypeVar
 
 T = TypeVar("T")
+R = TypeVar("R")
 
 # Largest key list or page one Markets row call carries (the Markets by-uids routes cap at 500).
 MARKETS_BATCH_SIZE = 500
+# Most one-item Markets calls ``each_together`` has in flight at once.
+MARKETS_CONCURRENT_CALLS = 8
+
+
+def each_together(call: Callable[[T], R], values: Iterable[T]) -> list[R]:
+    """``call`` once per value, together, for a Markets route that takes one item at a time.
+
+    At most ``MARKETS_CONCURRENT_CALLS`` are in flight at once. Each runs in a copy of the
+    caller's context, so it acts as the caller's own calls do. Answers in the order of
+    ``values``; every call runs, and the first failure in that order is raised once all have
+    ended.
+    """
+    items = list(values)
+    if len(items) < 2:
+        return [call(item) for item in items]
+    with ThreadPoolExecutor(max_workers=min(MARKETS_CONCURRENT_CALLS, len(items))) as pool:
+        futures = [pool.submit(contextvars.copy_context().run, call, item) for item in items]
+    return [future.result() for future in futures]
 
 
 def batches(values: Iterable[T], size: int = MARKETS_BATCH_SIZE) -> list[list[T]]:
@@ -674,10 +696,10 @@ def end_signals(signal_uids: Iterable[str]) -> dict[str, Any]:
 
     Their ``SignalMetadata`` rows are read in one ``filter`` per batch (issue #46), so a signal
     Markets never registered (nothing was ever published to it) costs no call. Then
-    ``end_signal(signal_uid)`` once per registered signal, which deletes its weights and its
-    ``SignalMetadata`` in one Markets call. Markets refuses while a ``Portfolio`` names the
-    signal, and only the signal's manager may end it; refusals propagate. Answers each
-    registered signal's result.
+    ``end_signal(signal_uid)`` once per registered signal, together (``each_together``), each
+    deleting its weights and its ``SignalMetadata`` in one Markets call. Markets refuses while a
+    ``Portfolio`` names the signal, and only the signal's manager may end it; refusals propagate
+    once every call has ended. Answers each registered signal's result.
     """
     from msm_portfolios.api import SignalMetadata
     from msm_portfolios.recipes import end_signal
@@ -686,7 +708,8 @@ def end_signals(signal_uids: Iterable[str]) -> dict[str, Any]:
     rows = read_in_batches(
         lambda batch: SignalMetadata.filter(signal_uid__in=batch, limit=len(batch)), values
     )
-    return {str(row.signal_uid): end_signal(str(row.signal_uid)) for row in rows}
+    uids = [str(row.signal_uid) for row in rows]
+    return dict(zip(uids, each_together(end_signal, uids), strict=True))
 
 
 def delete_private_series(*, tables: Sequence[Any], portfolio_identifiers: Iterable[str]) -> None:

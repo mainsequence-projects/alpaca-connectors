@@ -584,33 +584,47 @@ def end_portfolio_configurations(
 ) -> list[PortfolioRemoval]:
     """End several portfolios as ``end_portfolio_configuration`` ends one, set-based (#46).
 
-    Retiring is ms-markets' one-portfolio route, so each `Portfolio` is retired in turn, first.
-    Then one read of the definitions they followed (and of the former feeds of those not yet
-    adopted), one read and one insert of their records, one delete of their configurations,
-    one pass over their definitions and one over their inline rebalance configurations. When
-    retiring one is refused, the portfolios before it in ``configurations`` are ended all the
-    same, as one at a time would have ended them, and then ``portfolio_in_account_target`` is
-    raised: that portfolio and those after it are unchanged.
+    Retiring is ms-markets' one-portfolio route, so the `Portfolio` rows are retired first, one
+    call each, together (``each_together``). Then one read of the definitions they followed (and
+    of the former feeds of those not yet adopted), one read and one insert of their records, one
+    delete of their configurations, one pass over their definitions and one over their inline
+    rebalance configurations. When retiring one is refused, every other portfolio is ended all
+    the same, and then ``portfolio_in_account_target`` is raised: the refused portfolios are
+    unchanged.
     """
     from msm.api.remote import MarketsConflictError
 
-    from alpaca_connectors.markets_api import retire_portfolio
+    from alpaca_connectors.markets_api import each_together, retire_portfolio
     from alpaca_connectors.portfolios.configurations import (
         delete_portfolio_configuration_rows,
         record_ended_portfolios,
     )
     from alpaca_connectors.portfolios.signal_definitions import signal_definitions_by_uids
 
+    def retire(portfolio_uid: str) -> Any:
+        try:
+            return retire_portfolio(portfolio_uid)
+        except MarketsConflictError as exc:
+            return exc
+
+    with_portfolio = [row for row in configurations if row.portfolio_uid is not None]
+    answers = dict(
+        zip(
+            (str(row.uid) for row in with_portfolio),
+            each_together(retire, [str(row.portfolio_uid) for row in with_portfolio]),
+            strict=True,
+        )
+    )
     ended: list[AlpacaPortfolioConfiguration] = []
     retired: dict[str, Any] = {}
     refusal: ProvidedWeightsError | None = None
     for configuration in configurations:
-        if configuration.portfolio_uid is not None:
-            try:
-                retired[str(configuration.uid)] = retire_portfolio(str(configuration.portfolio_uid))
-            except MarketsConflictError as exc:
-                refusal = _in_account_target(exc)
-                break
+        answer = answers.get(str(configuration.uid))
+        if isinstance(answer, MarketsConflictError):
+            refusal = refusal or _in_account_target(answer)
+            continue
+        if answer is not None:
+            retired[str(configuration.uid)] = answer
         ended.append(configuration)
     if not ended:
         if refusal is not None:

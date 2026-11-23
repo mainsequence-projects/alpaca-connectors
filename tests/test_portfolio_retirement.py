@@ -205,10 +205,10 @@ def test_a_portfolio_an_account_targets_is_refused_and_nothing_changes() -> None
     calls.delete.assert_not_called()
 
 
-def test_several_portfolios_end_together_and_a_refusal_keeps_the_rest() -> None:
+def test_several_portfolios_end_together_and_a_refusal_keeps_only_that_one() -> None:
     # The account delete ends its portfolios in one pass (issue #46): retiring is one call per
-    # portfolio, everything else one call for all. A refusal keeps that portfolio and those
-    # after it unchanged; those before it end as they would have one at a time.
+    # portfolio, made together, and everything else one call for all. A refusal keeps that
+    # portfolio unchanged; every other one ends, and the refusal is raised after.
     from alpaca_connectors.portfolios.provided_weights import end_portfolio_configurations
 
     first = configuration()
@@ -234,9 +234,22 @@ def test_several_portfolios_end_together_and_a_refusal_keeps_the_rest() -> None:
         end_portfolio_configurations([first, held, later])
 
     assert raised.value.code == "portfolio_in_account_target"
-    assert calls.retire.call_args_list == [call(str(PORTFOLIO_UID)), call(str(held.portfolio_uid))]
-    assert calls.record.call_args == _recorded()
-    calls.delete.assert_called_once_with([CONFIGURATION_UID])
+    # Every retire is attempted; they run together, so in no particular order.
+    assert sorted(retired.args[0] for retired in calls.retire.call_args_list) == sorted(
+        str(row.portfolio_uid) for row in (first, held, later)
+    )
+    [recorded] = _recorded().args
+    assert calls.record.call_args == call(
+        [
+            *recorded,
+            {
+                **recorded[0],
+                "portfolio_uid": str(later.portfolio_uid),
+                "portfolio_configuration_uid": later.uid,
+            },
+        ]
+    )
+    calls.delete.assert_called_once_with([CONFIGURATION_UID, later.uid])
     calls.definition.assert_called_once_with([DEFINITION])
 
 
