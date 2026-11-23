@@ -348,7 +348,8 @@ def test_deleting_an_account_takes_the_exact_confirmation(vouching) -> None:
     assert wrong.status_code == 400
     assert answer.status_code == 200
     assert answer.json()["deleted"] is True
-    delete.assert_called_once_with(ACCOUNT_UID)
+    # The registration read for the owner check is the delete's: it is not read again (#46).
+    delete.assert_called_once_with(ACCOUNT_UID, registration=registration(PERSON))
 
 
 # ------------------------------------------------------------------------------------------------

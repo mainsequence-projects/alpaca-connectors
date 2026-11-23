@@ -320,11 +320,14 @@ def list_signal_definitions(
         context=runtime.context,
         operation="select",
     )
-    count = compile_markets_statement(count_statement, context=runtime.context, operation="select")
     rows = [
         SignalDefinition.model_validate(row)
         for row in operation_result_rows(execute_markets_operation(page, context=runtime.context))
     ]
+    if len(rows) < limit and (rows or offset == 0):
+        # A short page is the last one: it says how many there are, with no count read.
+        return rows, offset + len(rows)
+    count = compile_markets_statement(count_statement, context=runtime.context, operation="select")
     count_rows = operation_result_rows(execute_markets_operation(count, context=runtime.context))
     return rows, int(count_rows[0].get("count", 0)) if count_rows else 0
 
@@ -430,13 +433,14 @@ def delete_signal_rows(signal_uid: str) -> str:
     return delete_signals_rows([signal_uid])[str(signal_uid)]
 
 
-def delete_signals_rows(signal_uids: Any) -> dict[str, str]:
+def delete_signals_rows(signal_uids: Any, *, kept: Any = ()) -> dict[str, str]:
     """``delete_signal_rows`` for several signals, set-based (issue #46).
 
     One read of which signals a retired ``Portfolio`` keeps; for the others one delete of their
     signal-asset rows, one Markets read of their ``SignalMetadata``, then ``end_signal`` for each
-    registered one, which Markets runs one signal at a time. Answers each signal's
-    ``"deleted"`` or ``"kept"``.
+    registered one, together. ``kept`` names signals the caller knows a retired ``Portfolio``
+    follows, such as the ones it just recorded: they are not read again, and when every signal
+    is among them nothing is read at all. Answers each signal's ``"deleted"`` or ``"kept"``.
     """
     from alpaca_connectors.markets_api import end_signals
     from alpaca_connectors.portfolios.configurations import ended_signal_uids
@@ -445,7 +449,9 @@ def delete_signals_rows(signal_uids: Any) -> dict[str, str]:
     values = list(dict.fromkeys(str(uid) for uid in signal_uids))
     if not values:
         return {}
-    kept = ended_signal_uids(values)
+    known = {str(uid) for uid in kept}
+    unknown = [uid for uid in values if uid not in known]
+    kept = known | (ended_signal_uids(unknown) if unknown else set())
     free = [uid for uid in values if uid not in kept]
     if free:
         forget_signals_assets(free)

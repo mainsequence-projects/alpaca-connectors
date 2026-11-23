@@ -126,7 +126,11 @@ def test_the_signal_definition_list_filters_on_uids() -> None:
         patch("msm.repositories.base.compile_markets_statement", statements.compile),
         patch("msm.repositories.base.execute_markets_operation", statements.execute),
     ):
-        assert signal_definitions.list_signal_definitions(uids=[FIRST, SECOND]) == ([], 0)
+        # A page past the end reads the count too, so both statements are checked.
+        assert signal_definitions.list_signal_definitions(uids=[FIRST, SECOND], offset=25) == (
+            [],
+            0,
+        )
     _assert_filtered_on_uids(statements)
 
 
@@ -143,8 +147,35 @@ def test_the_portfolio_and_rebalance_lists_filter_on_uids(list_name: str) -> Non
         patch("msm.repositories.base.compile_markets_statement", statements.compile),
         patch("msm.repositories.base.execute_markets_operation", statements.execute),
     ):
-        assert getattr(configurations, list_name)(uids=[str(FIRST), str(SECOND)]) == ([], 0)
+        # A page past the end reads the count too, so both statements are checked.
+        assert getattr(configurations, list_name)(uids=[str(FIRST), str(SECOND)], offset=25) == (
+            [],
+            0,
+        )
     _assert_filtered_on_uids(statements)
+
+
+@pytest.mark.parametrize("module_name", ["signal_definitions", "configurations"])
+def test_a_short_first_page_answers_its_own_count(module_name: str) -> None:
+    # Fewer rows than the limit is the whole list: no count is read (issue #46).
+    from alpaca_connectors.portfolios import configurations, signal_definitions
+
+    module = {"signal_definitions": signal_definitions, "configurations": configurations}[
+        module_name
+    ]
+    reader = {
+        "signal_definitions": signal_definitions.list_signal_definitions,
+        "configurations": configurations.list_portfolio_configurations,
+    }[module_name]
+    statements = Statements({"rows": []})
+    with (
+        patch.object(module, "_start_runtime"),
+        patch("msm.bootstrap.resolve_runtime", return_value=SimpleNamespace(context=None)),
+        patch("msm.repositories.base.compile_markets_statement", statements.compile),
+        patch("msm.repositories.base.execute_markets_operation", statements.execute),
+    ):
+        assert reader(uids=[str(FIRST)]) == ([], 0)
+    assert len(statements.compiled) == 1
 
 
 @pytest.mark.parametrize(

@@ -342,11 +342,15 @@ def preflight_delete(account_uid: str, *, owner: AccountOwner) -> dict:
 
 
 def delete_account(account_uid: str, *, owner: AccountOwner) -> dict:
-    """Delete the account and everything that belongs to it, for its owner (decision 8)."""
+    """Delete the account and everything that belongs to it, for its owner (decision 8).
+
+    The registration read for the owner check serves the delete too (issue #46).
+    """
     from alpaca_connectors.account.deletion import delete_account as delete_whole_account
 
-    require_account_owned_by(account_uid, owner)
-    return delete_whole_account(account_uid).summary()
+    registration = get_account_registration(str(account_uid))
+    _require_registration_owned_by(registration, owner)
+    return delete_whole_account(account_uid, registration=registration).summary()
 
 
 __all__ = [

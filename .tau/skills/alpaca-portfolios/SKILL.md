@@ -92,9 +92,8 @@ Deletion requires the person's exact `DELETE <uid>` confirmation. It retires the
 deletes its configuration, and the signal definition it followed once no other portfolio follows
 it; it is refused with `portfolio_in_account_target` while an account's target names the
 portfolio, so that account's owner changes the target first. Retiring keeps the portfolio's series,
-history and signal until its Account is deleted. A `signal_definition` state of `failed` means the
-portfolio is deleted but its definition stays: say so; the account's owner deletes it from the
-account's signals.
+history and signal until its Account is deleted. If the delete fails after the portfolio was
+retired, nothing else changed: repeating the same delete finishes it.
 
 Portfolio/rebalance list limits are 1–100 and offsets are multiples of the fixed limit.
 Detail observation limits are 1–5000; run-history limits are 1–100.

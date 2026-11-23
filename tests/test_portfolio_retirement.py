@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import datetime as dt
 import uuid
+from contextlib import ExitStack
 from types import SimpleNamespace
 from unittest.mock import MagicMock, call, patch
 
@@ -69,65 +70,106 @@ DEFINITION = SimpleNamespace(uid=DEFINITION_UID, signal_key=str(CONFIGURATION_UI
 
 
 def _removal(row, *, retire=None):
-    """Run the removal with Markets and storage replaced; return the recorder of their calls.
+    """Replace Markets and storage around an ending; return the recorder and the patches.
 
     The signal is the one revision 0029 gave the portfolio: its key is still the configuration
-    UID, so its UID is ``provided_signal_uid``. Each kind is one set-based call (issue #46).
+    UID, so its UID is ``provided_signal_uid``. Every write of the ending is one transaction
+    (issue #46): ``calls.transaction`` receives its writes, in order, as ``OwnTableWrites``
+    names them.
     """
     calls = MagicMock()
     calls.retire.side_effect = retire or (
         lambda uid: SimpleNamespace(uid=uid, retired_at=RETIRED_AT)
     )
-    patches = (
+    calls.followers.return_value = {}
+    calls.inline.return_value = {}
+    calls.named.return_value = set()
+    calls.signals.side_effect = lambda signal_uids, kept=(): {
+        uid: "kept" if uid in set(kept) else "deleted" for uid in signal_uids
+    }
+
+    def run(writes):
+        calls.transaction(list(writes.entries))
+
+    patches = [
         patch(f"{CONFIGURATIONS}.get_portfolio_configuration", return_value=row),
         patch("alpaca_connectors.markets_api.retire_portfolio", calls.retire),
-        patch(f"{CONFIGURATIONS}.record_ended_portfolios", calls.record),
-        patch(f"{CONFIGURATIONS}.delete_portfolio_configuration_rows", calls.delete),
+        patch(f"{CONFIGURATIONS}.OwnTableWrites.run", run),
+        patch(f"{CONFIGURATIONS}.portfolio_counts_by_definition", calls.followers),
         patch(
             f"{DEFINITIONS}.signal_definitions_by_uids",
             return_value={str(DEFINITION_UID): DEFINITION},
         ),
-        patch(f"{DEFINITIONS}.end_signal_definitions", calls.definition),
+        patch(f"{DEFINITIONS}.delete_signals_rows", calls.signals),
         # A shared rebalance rule: none was created with this portfolio (issue #42).
-        patch(f"{CONFIGURATIONS}.inline_rebalance_configurations", return_value={}),
-    )
-    calls.definition.return_value = {
-        str(DEFINITION_UID): {
-            "state": "deleted",
-            "signal": {"uid": provided_signal_uid(CONFIGURATION_UID), "state": "kept"},
-        }
-    }
+        patch(f"{CONFIGURATIONS}.inline_rebalance_configurations", calls.inline),
+        patch(f"{CONFIGURATIONS}.rebalance_configuration_uids_named", calls.named),
+    ]
     return calls, patches
 
 
-def _recorded():
-    """The record the account delete finishes: the retired Portfolio and its signal."""
-    return call.record(
-        [
-            {
-                "account_uid": str(ACCOUNT_UID),
-                "portfolio_uid": str(PORTFOLIO_UID),
-                "portfolio_configuration_uid": CONFIGURATION_UID,
-                "signal_uid": provided_signal_uid(CONFIGURATION_UID),
-            }
-        ]
-    )
+def _entered(patches) -> ExitStack:
+    stack = ExitStack()
+    for item in patches:
+        stack.enter_context(item)
+    return stack
+
+
+def _writes(calls) -> list[tuple[str, str, list]]:
+    """The one transaction's writes, ``(kind, table, keys)``; an insert gives its portfolios."""
+    [entries] = [recorded.args[0] for recorded in calls.transaction.call_args_list]
+    return [
+        (
+            kind,
+            table,
+            [row["portfolio_uid"] for row in values] if kind == "insert" else list(values),
+        )
+        for kind, table, _, values in entries
+    ]
+
+
+def _recorded_rows(calls) -> list[dict]:
+    """The records the transaction inserts, without their new uid and time."""
+    [entries] = [recorded.args[0] for recorded in calls.transaction.call_args_list]
+    return [
+        {key: value for key, value in row.items() if key not in {"uid", "ended_at"}}
+        for kind, _, _, values in entries
+        if kind == "insert"
+        for row in values
+    ]
 
 
 def test_the_owner_retires_the_portfolio_then_deletes_its_configuration() -> None:
     calls, patches = _removal(configuration())
-    with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6]:
+    with _entered(patches):
         removal = delete_provided_weights_portfolio(CONFIGURATION_UID, owner=OWNER)
 
-    # Retired first, so a refusal leaves everything as it was; recorded under its account, so the
-    # account's delete deletes the Portfolio and its signal (ADR 0028). Then the definition it
-    # followed goes with it (issue #38); its signal's rows stay with the retired Portfolio.
-    assert calls.mock_calls == [
-        call.retire(str(PORTFOLIO_UID)),
-        _recorded(),
-        call.delete([CONFIGURATION_UID]),
-        call.definition([DEFINITION]),
+    # Retired first, so a refusal leaves everything as it was. Then one transaction records it
+    # under its account, so the account's delete deletes the Portfolio and its signal (ADR 0028),
+    # and deletes the configuration and the definition it followed (issue #38). Its signal's
+    # rows stay with the retired Portfolio, which the record just written keeps: not read again.
+    names = [name for name, *_ in calls.mock_calls]
+    assert names[0] == "retire"
+    assert names.index("transaction") < names.index("signals")
+    assert _writes(calls) == [
+        ("insert", "EndedPortfolioTable", [PORTFOLIO_UID]),
+        ("delete", "AlpacaPortfolioConfigurationTable", [CONFIGURATION_UID]),
+        ("delete", "SignalDefinitionTable", [DEFINITION_UID]),
     ]
+    assert _recorded_rows(calls) == [
+        {
+            "account_uid": ACCOUNT_UID,
+            "portfolio_uid": PORTFOLIO_UID,
+            "portfolio_configuration_uid": CONFIGURATION_UID,
+            "signal_uid": provided_signal_uid(CONFIGURATION_UID),
+        }
+    ]
+    # Its followers are counted without the configuration being deleted, before the write.
+    calls.followers.assert_called_once_with([str(DEFINITION_UID)], excluding=[CONFIGURATION_UID])
+    calls.signals.assert_called_once_with(
+        [provided_signal_uid(CONFIGURATION_UID)],
+        kept=[provided_signal_uid(CONFIGURATION_UID)],
+    )
     assert removal.summary() == {
         "configuration_uid": str(CONFIGURATION_UID),
         "deleted": True,
@@ -146,10 +188,11 @@ def test_the_owner_retires_the_portfolio_then_deletes_its_configuration() -> Non
 
 def test_a_definition_another_portfolio_follows_stays() -> None:
     calls, patches = _removal(configuration())
-    calls.definition.return_value = {str(DEFINITION_UID): {"state": "followed", "signal": None}}
-    with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6]:
+    calls.followers.return_value = {str(DEFINITION_UID): 1}
+    with _entered(patches):
         removal = delete_provided_weights_portfolio(CONFIGURATION_UID, owner=OWNER)
 
+    assert ("delete", "SignalDefinitionTable", [DEFINITION_UID]) not in _writes(calls)
     assert removal.summary()["signal_definition"] == {
         "uid": str(DEFINITION_UID),
         "state": "followed",
@@ -157,58 +200,46 @@ def test_a_definition_another_portfolio_follows_stays() -> None:
     assert removal.summary()["signal"] is None
 
 
-def test_a_definition_whose_delete_fails_never_fails_the_portfolio_delete() -> None:
-    # The configuration row is gone by then, so a raised error could not be retried: say it.
+def test_a_failed_write_raises_and_a_retry_can_finish_it() -> None:
+    # Every write is one transaction: when it fails, nothing of it is stored, the configuration
+    # is still there, and a retry retires the retired Portfolio again, which does nothing.
     calls, patches = _removal(configuration())
-    calls.definition.side_effect = ConnectionError("Markets is unavailable")
-    with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6]:
-        removal = delete_provided_weights_portfolio(CONFIGURATION_UID, owner=OWNER)
+    calls.transaction.side_effect = ConnectionError("MetaTables is unavailable")
+    with _entered(patches), pytest.raises(ConnectionError):
+        delete_provided_weights_portfolio(CONFIGURATION_UID, owner=OWNER)
 
-    assert calls.delete.call_args == call([CONFIGURATION_UID])
-    assert removal.summary()["portfolio"]["state"] == "retired"
-    assert removal.summary()["signal_definition"] == {
-        "uid": str(DEFINITION_UID),
-        "state": "failed",
-    }
-    assert removal.summary()["signal"] is None
+    calls.retire.assert_called_once_with(str(PORTFOLIO_UID))
+    calls.signals.assert_not_called()
 
 
 def test_a_portfolio_not_yet_adopted_has_no_definition_to_delete() -> None:
     calls, patches = _removal(
         configuration(account_uid=None, signal_definition_uid=None, bars_configuration_uid=None)
     )
-    with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6]:
+    with _entered(patches):
         removal = delete_provided_weights_portfolio(CONFIGURATION_UID, owner=OWNER)
 
-    calls.definition.assert_not_called()
+    assert [table for _, table, _ in _writes(calls)] == ["AlpacaPortfolioConfigurationTable"]
     assert removal.summary()["signal_definition"] is None
 
 
 def test_a_portfolio_an_account_targets_is_refused_and_nothing_changes() -> None:
     refusal = MarketsConflictError("Portfolio 5555 cannot be retired: 2 accounts' current target")
     calls, patches = _removal(configuration(), retire=refusal)
-    with (
-        patches[0],
-        patches[1],
-        patches[2],
-        patches[3],
-        patches[4],
-        patches[5],
-        pytest.raises(ProvidedWeightsError) as raised,
-    ):
+    with _entered(patches), pytest.raises(ProvidedWeightsError) as raised:
         delete_provided_weights_portfolio(CONFIGURATION_UID, owner=OWNER)
 
     assert (raised.value.code, raised.value.status_code) == ("portfolio_in_account_target", 409)
     # Names no account and no count.
     assert "2" not in str(raised.value) and "5555" not in str(raised.value)
-    calls.record.assert_not_called()
-    calls.delete.assert_not_called()
+    calls.transaction.assert_not_called()
 
 
 def test_several_portfolios_end_together_and_a_refusal_keeps_only_that_one() -> None:
     # The account delete ends its portfolios in one pass (issue #46): retiring is one call per
-    # portfolio, made together, and everything else one call for all. A refusal keeps that
+    # portfolio, made together, and every write one transaction for all. A refusal keeps that
     # portfolio unchanged; every other one ends, and the refusal is raised after.
+    from alpaca_connectors.portfolios.configurations import OwnTableWrites
     from alpaca_connectors.portfolios.provided_weights import end_portfolio_configurations
 
     first = configuration()
@@ -222,48 +253,46 @@ def test_several_portfolios_end_together_and_a_refusal_keeps_only_that_one() -> 
         return SimpleNamespace(uid=uid, retired_at=RETIRED_AT)
 
     calls, patches = _removal(first, retire=retire)
-    with (
-        patches[1],
-        patches[2],
-        patches[3],
-        patches[4],
-        patches[5],
-        patches[6],
-        pytest.raises(ProvidedWeightsError) as raised,
-    ):
-        end_portfolio_configurations([first, held, later])
+    # The refused portfolio still follows the shared definition, so the definition stays.
+    calls.followers.return_value = {str(DEFINITION_UID): 1}
+    callers_own = OwnTableWrites().delete_in(SimpleNamespace(__name__="Caller"), "uid", ["x"])
+    with _entered(patches), pytest.raises(ProvidedWeightsError) as raised:
+        end_portfolio_configurations([first, held, later], writes=callers_own)
 
     assert raised.value.code == "portfolio_in_account_target"
     # Every retire is attempted; they run together, so in no particular order.
     assert sorted(retired.args[0] for retired in calls.retire.call_args_list) == sorted(
         str(row.portfolio_uid) for row in (first, held, later)
     )
-    [recorded] = _recorded().args
-    assert calls.record.call_args == call(
-        [
-            *recorded,
-            {
-                **recorded[0],
-                "portfolio_uid": str(later.portfolio_uid),
-                "portfolio_configuration_uid": later.uid,
-            },
-        ]
+    # The caller's own writes go only when every portfolio ended: here they stay out.
+    assert _writes(calls) == [
+        ("insert", "EndedPortfolioTable", [PORTFOLIO_UID, later.portfolio_uid]),
+        ("delete", "AlpacaPortfolioConfigurationTable", [CONFIGURATION_UID, later.uid]),
+    ]
+    calls.followers.assert_called_once_with(
+        [str(DEFINITION_UID)], excluding=[CONFIGURATION_UID, later.uid]
     )
-    calls.delete.assert_called_once_with([CONFIGURATION_UID, later.uid])
-    calls.definition.assert_called_once_with([DEFINITION])
+
+
+def test_the_callers_writes_join_the_transaction_when_every_portfolio_ends() -> None:
+    from alpaca_connectors.portfolios.configurations import OwnTableWrites
+    from alpaca_connectors.portfolios.provided_weights import end_portfolio_configurations
+
+    calls, patches = _removal(configuration())
+    callers_own = OwnTableWrites().delete_in(SimpleNamespace(__name__="Caller"), "uid", ["x"])
+    with _entered(patches):
+        end_portfolio_configurations(
+            [configuration()], definitions=[DEFINITION], writes=callers_own
+        )
+
+    # First, in the same transaction; the definitions the caller passed are not read again.
+    assert _writes(calls)[0] == ("delete", "Caller", ["x"])
+    assert len(calls.transaction.call_args_list) == 1
 
 
 def test_only_the_owner_ends_it() -> None:
     calls, patches = _removal(configuration())
-    with (
-        patches[0],
-        patches[1],
-        patches[2],
-        patches[3],
-        patches[4],
-        patches[5],
-        pytest.raises(PortfolioOwnedByAnotherError),
-    ):
+    with _entered(patches), pytest.raises(PortfolioOwnedByAnotherError):
         delete_provided_weights_portfolio(
             CONFIGURATION_UID, owner=AccountOwner.main_sequence_user("someone-else")
         )
@@ -273,12 +302,12 @@ def test_only_the_owner_ends_it() -> None:
 
 def test_a_configuration_without_a_portfolio_is_deleted_without_retiring() -> None:
     calls, patches = _removal(configuration(portfolio_uid=None))
-    with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6]:
+    with _entered(patches):
         removal = delete_provided_weights_portfolio(CONFIGURATION_UID, owner=OWNER)
 
     calls.retire.assert_not_called()
-    calls.record.assert_not_called()
-    calls.delete.assert_called_once_with([CONFIGURATION_UID])
+    assert [kind for kind, *_ in _writes(calls)] == ["delete", "delete"]
+    assert ("delete", "AlpacaPortfolioConfigurationTable", [CONFIGURATION_UID]) in _writes(calls)
     assert removal.summary()["portfolio"]["state"] == "absent"
 
 
@@ -320,15 +349,7 @@ def test_forgetting_a_signals_assets_is_one_delete() -> None:
 def test_delete_route_retires_the_portfolio(api_client, local_caller) -> None:
     owned = configuration(owner_gateway_uid=local_caller.uid, owner_user_uid=local_caller.uid)
     calls, patches = _removal(owned)
-    with (
-        patch(f"{SERVICES}.get_portfolio_configuration", return_value=owned),
-        patches[0],
-        patches[1],
-        patches[2],
-        patches[3],
-        patches[4],
-        patches[5],
-    ):
+    with patch(f"{SERVICES}.get_portfolio_configuration", return_value=owned), _entered(patches):
         response = api_client.delete(f"/v1/portfolio-configurations/{CONFIGURATION_UID}")
 
     assert response.status_code == 200, response.text
@@ -342,20 +363,12 @@ def test_delete_route_retires_the_portfolio(api_client, local_caller) -> None:
 def test_delete_route_answers_409_while_an_account_targets_it(api_client, local_caller) -> None:
     owned = configuration(owner_gateway_uid=local_caller.uid, owner_user_uid=local_caller.uid)
     calls, patches = _removal(owned, retire=MarketsConflictError("named by account targets"))
-    with (
-        patch(f"{SERVICES}.get_portfolio_configuration", return_value=owned),
-        patches[0],
-        patches[1],
-        patches[2],
-        patches[3],
-        patches[4],
-        patches[5],
-    ):
+    with patch(f"{SERVICES}.get_portfolio_configuration", return_value=owned), _entered(patches):
         response = api_client.delete(f"/v1/portfolio-configurations/{CONFIGURATION_UID}")
 
     assert response.status_code == 409
     assert response.json()["detail"]["code"] == "portfolio_in_account_target"
-    calls.delete.assert_not_called()
+    calls.transaction.assert_not_called()
 
 
 def test_the_agent_ends_a_portfolio_through_the_same_delete() -> None:
@@ -388,23 +401,18 @@ def test_the_cli_ends_any_portfolio_for_the_operator() -> None:
         patch(
             "alpaca_connectors.portfolios.get_portfolio_configuration", return_value=configuration()
         ),
-        patches[0],
-        patches[1],
-        patches[2],
-        patches[3],
-        patches[4],
-        patches[5],
+        _entered(patches),
     ):
         assert (
             run_delete_command(Namespace(configuration_uid=str(CONFIGURATION_UID), execute=True))
             == 0
         )
 
-    assert calls.mock_calls == [
-        call.retire(str(PORTFOLIO_UID)),
-        _recorded(),
-        call.delete([CONFIGURATION_UID]),
-        call.definition([DEFINITION]),
+    calls.retire.assert_called_once_with(str(PORTFOLIO_UID))
+    assert [table for _, table, _ in _writes(calls)] == [
+        "EndedPortfolioTable",
+        "AlpacaPortfolioConfigurationTable",
+        "SignalDefinitionTable",
     ]
 
 
@@ -414,22 +422,11 @@ def test_the_cli_ends_any_portfolio_for_the_operator() -> None:
 REBALANCE_UID = uuid.UUID("88888888-8888-4888-8888-888888888888")
 
 
-def _end_with_inline_rebalance(*, named_by_another: bool = False, delete_error=None):
+def _end_with_inline_rebalance(*, named_by_another: bool = False):
     calls, patches = _removal(configuration())
-    calls.delete_rebalance.side_effect = delete_error
-    with (
-        patches[0],
-        patches[1],
-        patches[2],
-        patches[3],
-        patches[4],
-        patches[5],
-        patch(f"{CONFIGURATIONS}.inline_rebalance_configurations", calls.rebalances),
-        patch(f"{CONFIGURATIONS}.rebalance_configuration_uids_named", calls.portfolios),
-        patch(f"{CONFIGURATIONS}.delete_rebalance_configuration_rows", calls.delete_rebalance),
-    ):
-        calls.rebalances.return_value = {str(CONFIGURATION_UID): SimpleNamespace(uid=REBALANCE_UID)}
-        calls.portfolios.return_value = {str(REBALANCE_UID)} if named_by_another else set()
+    calls.inline.return_value = {str(CONFIGURATION_UID): SimpleNamespace(uid=REBALANCE_UID)}
+    calls.named.return_value = {str(REBALANCE_UID)} if named_by_another else set()
+    with _entered(patches):
         removal = delete_provided_weights_portfolio(CONFIGURATION_UID, owner=OWNER)
     return calls, removal.summary()["rebalance_configuration"]
 
@@ -437,24 +434,21 @@ def _end_with_inline_rebalance(*, named_by_another: bool = False, delete_error=N
 def test_an_inline_rebalance_configuration_is_deleted_with_its_portfolio() -> None:
     calls, rebalance = _end_with_inline_rebalance()
 
-    # Found by the portfolio it was created with, after the configuration row is gone.
-    calls.rebalances.assert_called_once_with([CONFIGURATION_UID])
-    calls.portfolios.assert_called_once_with([REBALANCE_UID])
-    calls.delete_rebalance.assert_called_once_with([REBALANCE_UID])
+    # Found by the portfolio it was created with; whether another portfolio names it is read
+    # without that portfolio, before the transaction that deletes both.
+    calls.inline.assert_called_once_with([CONFIGURATION_UID])
+    calls.named.assert_called_once_with([REBALANCE_UID], excluding=[CONFIGURATION_UID])
+    writes = _writes(calls)
+    rule = ("delete", "PortfolioRebalanceConfigurationTable", [REBALANCE_UID])
+    assert rule in writes
+    assert writes.index(
+        ("delete", "AlpacaPortfolioConfigurationTable", [CONFIGURATION_UID])
+    ) < writes.index(rule)
     assert rebalance == {"uid": str(REBALANCE_UID), "state": "deleted"}
-    names = [entry[0] for entry in calls.mock_calls]
-    assert names.index("delete") < names.index("delete_rebalance")
 
 
 def test_an_inline_rebalance_configuration_another_portfolio_names_stays() -> None:
     calls, rebalance = _end_with_inline_rebalance(named_by_another=True)
 
-    calls.delete_rebalance.assert_not_called()
+    assert "PortfolioRebalanceConfigurationTable" not in [t for _, t, _ in _writes(calls)]
     assert rebalance == {"uid": str(REBALANCE_UID), "state": "followed"}
-
-
-def test_a_failed_rebalance_delete_never_fails_the_portfolio_s_delete() -> None:
-    calls, rebalance = _end_with_inline_rebalance(delete_error=RuntimeError("storage unavailable"))
-
-    calls.delete.assert_called_once_with([CONFIGURATION_UID])
-    assert rebalance == {"uid": str(REBALANCE_UID), "state": "failed"}

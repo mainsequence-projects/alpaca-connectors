@@ -1140,15 +1140,18 @@ def list_portfolio_configurations(
         context=runtime.context,
         operation="select",
     )
+    rows = [
+        AlpacaPortfolioConfiguration.model_validate(row)
+        for row in operation_result_rows(execute_markets_operation(page, context=runtime.context))
+    ]
+    if len(rows) < limit and (rows or offset == 0):
+        # A short page is the last one: it says how many there are, with no count read.
+        return rows, offset + len(rows)
     count = compile_markets_statement(
         count_statement,
         context=runtime.context,
         operation="select",
     )
-    rows = [
-        AlpacaPortfolioConfiguration.model_validate(row)
-        for row in operation_result_rows(execute_markets_operation(page, context=runtime.context))
-    ]
     count_rows = operation_result_rows(execute_markets_operation(count, context=runtime.context))
     return rows, int(count_rows[0].get("count", 0)) if count_rows else 0
 
@@ -1323,6 +1326,117 @@ def delete_rows_in(table: type[ProjectBase], column: str, values: Sequence[Any])
     write_in_batches(write, values)
 
 
+# Statements one MetaTables transaction holds (MetaTables ADR 0026).
+STATEMENT_LIST_LIMIT = 32
+
+
+def _delete_in_statement(table: type[Any], column: str, values: list[Any], dialect: str) -> Any:
+    """``DELETE FROM table WHERE column IN (values)``, the same in every dialect."""
+    from sqlalchemy import delete
+
+    return delete(table).where(getattr(table, column).in_(values))
+
+
+class OwnTableWrites:
+    """Writes to this application's own tables, sent as one MetaTables transaction (#46).
+
+    The deletes and inserts added here run in the order they were added, as one statement list
+    (MetaTables ADR 0026): all of them, or none. A list longer than ``STATEMENT_LIST_LIMIT``
+    goes as several transactions, in order. Each write is one statement per
+    ``MARKETS_BATCH_SIZE`` keys or rows. ``entries`` names each one, ``(kind, table, column,
+    values)``, for tests and logs.
+    """
+
+    def __init__(self) -> None:
+        self.entries: list[tuple[str, str, str, list[Any]]] = []
+        self._builders: list[Any] = []
+        self._tables: list[type[Any]] = []
+
+    def __len__(self) -> int:
+        return len(self._builders)
+
+    def _remember(self, table: type[Any]) -> None:
+        if table not in self._tables:
+            self._tables.append(table)
+
+    def delete_in(self, table: type[Any], column: str, values: Sequence[Any]) -> OwnTableWrites:
+        """Delete the rows whose ``column`` is one of ``values``."""
+        from functools import partial
+
+        from alpaca_connectors.markets_api import batches
+
+        for batch in batches(values):
+            self.entries.append(("delete", table.__name__, column, batch))
+            self._builders.append(partial(_delete_in_statement, table, column, batch))
+            self._remember(table)
+        return self
+
+    def insert_missing(
+        self, table: type[Any], rows: Sequence[dict[str, Any]], *, conflict_columns: Sequence[str]
+    ) -> OwnTableWrites:
+        """Insert ``rows``, leaving a row whose ``conflict_columns`` are already stored as it is."""
+        from alpaca_connectors.markets_api import MARKETS_BATCH_SIZE
+
+        rows = list(rows)
+        for start in range(0, len(rows), MARKETS_BATCH_SIZE):
+            chunk = rows[start : start + MARKETS_BATCH_SIZE]
+            self.entries.append(("insert", table.__name__, ",".join(conflict_columns), chunk))
+
+            def build(dialect: str, chunk: list[dict[str, Any]] = chunk) -> Any:
+                from sqlalchemy.dialects.postgresql import insert as postgresql_insert
+                from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+
+                insert = postgresql_insert if dialect == "postgresql" else sqlite_insert
+                return (
+                    insert(table)
+                    .values(chunk)
+                    .on_conflict_do_nothing(
+                        index_elements=[table.__table__.c[name] for name in conflict_columns]
+                    )
+                )
+
+            self._builders.append(build)
+            self._remember(table)
+        return self
+
+    def extend(self, other: OwnTableWrites) -> OwnTableWrites:
+        """Add ``other``'s writes after these, in their order."""
+        self.entries.extend(other.entries)
+        self._builders.extend(other._builders)
+        for table in other._tables:
+            self._remember(table)
+        return self
+
+    def run(self) -> None:
+        """Send the writes, in order, as one transaction per ``STATEMENT_LIST_LIMIT``."""
+        from msm.bootstrap import resolve_runtime
+        from msm.repositories.base import (
+            compile_markets_statements,
+            execute_markets_write,
+            resolve_markets_sql_target,
+        )
+
+        if not self._builders:
+            return
+        _start_runtime()
+        runtime = resolve_runtime(
+            models=list(self._tables), row_model_name="alpaca_connectors.own_table_writes"
+        )
+        data_source_uid, dialect = resolve_markets_sql_target(runtime.context)
+        statements = [build(dialect) for build in self._builders]
+        for start in range(0, len(statements), STATEMENT_LIST_LIMIT):
+            execute_markets_write(
+                compile_markets_statements(
+                    statements[start : start + STATEMENT_LIST_LIMIT],
+                    context=runtime.context,
+                    operation="delete",
+                    data_source_uid=data_source_uid,
+                    dialect=dialect,
+                ),
+                context=runtime.context,
+            )
+
+
 def delete_portfolio_configuration_rows(configuration_uids: Sequence[uuid.UUID | str]) -> None:
     """Delete several portfolio configurations in one statement; their own bars go with them."""
     delete_rows_in(AlpacaPortfolioConfigurationTable, "uid", _uuid_list(configuration_uids))
@@ -1353,22 +1467,30 @@ def inline_rebalance_configurations(
 
 def rebalance_configuration_uids_named(
     rebalance_configuration_uids: Sequence[uuid.UUID | str],
+    *,
+    excluding: Sequence[uuid.UUID | str] = (),
 ) -> set[str]:
-    """Which of these rules a portfolio configuration names, in one read."""
+    """Which of these rules a portfolio configuration names, in one read.
+
+    ``excluding`` leaves those portfolio configurations out: the ones a write about to be sent
+    deletes.
+    """
     from sqlalchemy import select
 
     from alpaca_connectors.markets_api import read_in_batches
 
     table = AlpacaPortfolioConfigurationTable
-    rows = read_in_batches(
-        lambda batch: _select_rows(
-            table,
-            select(table.rebalance_configuration_uid)
-            .where(table.rebalance_configuration_uid.in_(batch))
-            .distinct(),
-        ),
-        _uuid_list(rebalance_configuration_uids),
-    )
+    left_out = _uuid_list(excluding)
+
+    def read(batch: list[Any]) -> list[dict[str, Any]]:
+        statement = select(table.rebalance_configuration_uid).where(
+            table.rebalance_configuration_uid.in_(batch)
+        )
+        if left_out:
+            statement = statement.where(table.uid.notin_(left_out))
+        return _select_rows(table, statement.distinct())
+
+    rows = read_in_batches(read, _uuid_list(rebalance_configuration_uids))
     return {str(uuid.UUID(str(row["rebalance_configuration_uid"]))) for row in rows}
 
 
@@ -1446,8 +1568,14 @@ def unadopted_portfolio_configurations() -> list[AlpacaPortfolioConfiguration]:
 
 def portfolio_counts_by_definition(
     signal_definition_uids: Sequence[uuid.UUID | str],
+    *,
+    excluding: Sequence[uuid.UUID | str] = (),
 ) -> dict[str, int]:
-    """How many portfolios follow each signal definition, in one grouped read."""
+    """How many portfolios follow each signal definition, in one grouped read.
+
+    ``excluding`` leaves those portfolio configurations out: the ones a write about to be sent
+    deletes, so the count can be read before it.
+    """
     from msm.bootstrap import resolve_runtime
     from msm.repositories.base import compile_markets_statement, execute_markets_operation
     from sqlalchemy import func, select
@@ -1458,10 +1586,13 @@ def portfolio_counts_by_definition(
     table = AlpacaPortfolioConfigurationTable
     _start_runtime()
     runtime = resolve_runtime(models=[table], row_model_name="AlpacaPortfolioConfiguration")
+    statement = select(table.signal_definition_uid, func.count().label("count")).where(
+        table.signal_definition_uid.in_(uids)
+    )
+    if excluding:
+        statement = statement.where(table.uid.notin_(_uuid_list(excluding)))
     operation = compile_markets_statement(
-        select(table.signal_definition_uid, func.count().label("count"))
-        .where(table.signal_definition_uid.in_(uids))
-        .group_by(table.signal_definition_uid),
+        statement.group_by(table.signal_definition_uid),
         context=runtime.context,
         operation="select",
     )
@@ -1498,6 +1629,27 @@ def record_ended_portfolio(
     )[0]
 
 
+def ended_portfolio_rows(records: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The ``EndedPortfolioTable`` rows of these records, each with a new uid, ended now.
+
+    Each record names ``account_uid``, ``portfolio_uid``, ``portfolio_configuration_uid`` and
+    ``signal_uid``. ``OwnTableWrites.insert_missing`` inserts them in a caller's transaction,
+    keyed by ``portfolio_uid``.
+    """
+    now = utc_now()
+    return [
+        {
+            "uid": new_markets_uid(),
+            "account_uid": uuid.UUID(str(record["account_uid"])),
+            "portfolio_uid": uuid.UUID(str(record["portfolio_uid"])),
+            "portfolio_configuration_uid": uuid.UUID(str(record["portfolio_configuration_uid"])),
+            "signal_uid": str(record["signal_uid"]),
+            "ended_at": now,
+        }
+        for record in records
+    ]
+
+
 def record_ended_portfolios(records: Sequence[dict[str, Any]]) -> list[EndedPortfolio]:
     """Record several retired ``Portfolio`` rows and their signals: one read, one insert (#46).
 
@@ -1527,18 +1679,10 @@ def record_ended_portfolios(records: Sequence[dict[str, Any]]) -> list[EndedPort
             )
         )
     }
-    now = utc_now()
     missing = {
-        str(uuid.UUID(str(record["portfolio_uid"]))): {
-            "uid": new_markets_uid(),
-            "account_uid": uuid.UUID(str(record["account_uid"])),
-            "portfolio_uid": uuid.UUID(str(record["portfolio_uid"])),
-            "portfolio_configuration_uid": uuid.UUID(str(record["portfolio_configuration_uid"])),
-            "signal_uid": str(record["signal_uid"]),
-            "ended_at": now,
-        }
-        for record in records
-        if str(uuid.UUID(str(record["portfolio_uid"]))) not in stored
+        str(row["portfolio_uid"]): row
+        for row in ended_portfolio_rows(records)
+        if str(row["portfolio_uid"]) not in stored
     }
     if missing:
         runtime = resolve_runtime(models=[table], row_model_name=table.__markets_base_identifier__)
@@ -1581,20 +1725,31 @@ def forget_ended_portfolios(records: Sequence[EndedPortfolio]) -> None:
     delete_rows_in(EndedPortfolioTable, "uid", _uuid_list([record.uid for record in records]))
 
 
-def ended_signal_uids(signal_uids: Sequence[str]) -> set[str]:
-    """Which of these signals a recorded, retired ``Portfolio`` still follows, in one read."""
+def ended_signal_uids(
+    signal_uids: Sequence[str],
+    *,
+    excluding_portfolio_uids: Sequence[uuid.UUID | str] = (),
+) -> set[str]:
+    """Which of these signals a recorded, retired ``Portfolio`` still follows, in one read.
+
+    ``excluding_portfolio_uids`` leaves those records out: the ones a write about to be sent
+    forgets, so the answer can be read before it.
+    """
     from sqlalchemy import select
 
     from alpaca_connectors.markets_api import read_in_batches
 
     table = EndedPortfolioTable
     values = list(dict.fromkeys(str(uid) for uid in signal_uids))
-    rows = read_in_batches(
-        lambda batch: _select_rows(
-            table, select(table.signal_uid).where(table.signal_uid.in_(batch)).distinct()
-        ),
-        values,
-    )
+    left_out = _uuid_list(excluding_portfolio_uids)
+
+    def read(batch: list[str]) -> list[dict[str, Any]]:
+        statement = select(table.signal_uid).where(table.signal_uid.in_(batch))
+        if left_out:
+            statement = statement.where(table.portfolio_uid.notin_(left_out))
+        return _select_rows(table, statement.distinct())
+
+    rows = read_in_batches(read, values)
     return {str(row["signal_uid"]) for row in rows}
 
 

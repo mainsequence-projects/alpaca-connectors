@@ -777,12 +777,16 @@ def get_account_registration(account_uid: str) -> dict[str, Any] | None:
     """
     from msm.api.accounts import Account
 
+    from alpaca_connectors.markets_api import all_together
     from alpaca_connectors.runtime import account_runtime_models, start_markets_engine
 
     runtime = start_markets_engine(models=account_runtime_models())
-    account = Account.get_by_uid(account_uid)
-    detail = _registration_details(
-        runtime.context, ProviderAccountDetails.__table__.c.account_uid == account_uid
+    # The Markets account and this application's detail row are read together (issue #46).
+    account, detail = all_together(
+        lambda: Account.get_by_uid(account_uid),
+        lambda: _registration_details(
+            runtime.context, ProviderAccountDetails.__table__.c.account_uid == account_uid
+        ),
     )
     if account is None or detail is None:
         return None

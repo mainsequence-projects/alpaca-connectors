@@ -24,14 +24,17 @@ import logging
 import math
 import numbers
 import uuid
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
 from msm.base import new_markets_uid
 
 from alpaca_connectors.account.ownership import AccountOwner
-from alpaca_connectors.portfolios.configurations import AlpacaPortfolioConfiguration
+from alpaca_connectors.portfolios.configurations import (
+    AlpacaPortfolioConfiguration,
+    OwnTableWrites,
+)
 from alpaca_connectors.portfolios.signal_definitions import (
     SignalDefinition,
     legacy_signal_key,
@@ -380,17 +383,19 @@ class PortfolioRemoval:
     portfolio_unique_identifier: str
     portfolio_state: str
     retired_at: dt.datetime | None
-    # The definition it followed: ``deleted`` with it, ``followed`` by another portfolio, or
-    # ``failed``: the portfolio is deleted, and the definition's own delete did not complete.
+    # The definition it followed: ``deleted`` with it, or ``followed`` by another portfolio.
     signal_definition_uid: str | None = None
     signal_definition_state: str | None = None
     # Its signal's rows, when the definition went: ``deleted``, or ``kept`` while a retired
     # `Portfolio` still follows the signal.
     signal: dict[str, Any] | None = None
-    # The rebalance configuration created inline with it (issue #42): ``deleted`` with it,
-    # ``followed`` while another portfolio names it, or ``failed``. None for a shared rule.
+    # The rebalance configuration created inline with it (issue #42): ``deleted`` with it, or
+    # ``followed`` while another portfolio names it. None for a shared rule.
     rebalance_configuration_uid: str | None = None
     rebalance_configuration_state: str | None = None
+    # The signal recorded with its retired `Portfolio` under the account (ADR 0028), which the
+    # account's delete deletes; None when nothing was recorded. Not part of the answer.
+    recorded_signal_uid: str | None = None
 
     def summary(self) -> dict[str, Any]:
         return {
@@ -473,133 +478,78 @@ def _ended_accounts(configurations: Sequence[AlpacaPortfolioConfiguration]) -> d
     return accounts
 
 
-def _end_followed_definitions(
-    configurations: Sequence[AlpacaPortfolioConfiguration],
-    definitions: Mapping[str, SignalDefinition],
-) -> dict[str, dict[str, Any]]:
-    """Delete the definitions the ended portfolios followed once no portfolio follows them.
-
-    Issue #38: a portfolio is the connector's, and so is what it is made of, so the application
-    does not delete the definition in a second call. Its signal's rows go as
-    ``delete_signals_rows`` decides: kept while a retired `Portfolio` still follows the signal,
-    which the one just retired does, else deleted. A definition another portfolio still follows
-    stays, and goes with the last of them. Answers each definition's ``{"state", "signal"}``.
-
-    The portfolios are already deleted when this runs, so a failure here never fails their
-    delete, which a retry could not repeat: the answer says ``failed``, and the definition,
-    which no portfolio follows any more, is deleted from the account's signals. One set-based
-    pass for all of them (issue #46).
-    """
-    from alpaca_connectors.portfolios.signal_definitions import end_signal_definitions
-
-    uids = list(
-        dict.fromkeys(
-            str(configuration.signal_definition_uid)
-            for configuration in configurations
-            if configuration.signal_definition_uid is not None
-        )
-    )
-    # A definition no longer stored was deleted by an earlier, interrupted attempt.
-    answers = {uid: {"state": "deleted", "signal": None} for uid in uids if uid not in definitions}
-    present = [definitions[uid] for uid in uids if uid in definitions]
-    if not present:
-        return answers
-    try:
-        answers.update(end_signal_definitions(present))
-    except Exception as exc:  # noqa: BLE001 - reported, never raised: the portfolios are gone
-        logger.warning(
-            "The portfolio is deleted, but its signal definition's delete failed (%s); delete the "
-            "definition from the account's signals.",
-            type(exc).__name__,
-        )
-        answers.update({str(row.uid): {"state": "failed", "signal": None} for row in present})
-    return answers
-
-
-def _end_inline_rebalances(
-    configurations: Sequence[AlpacaPortfolioConfiguration],
-) -> dict[str, tuple[str, str]]:
-    """Delete the rebalance configurations created inline with the ended portfolios (#42).
-
-    Each goes unless another portfolio names it by then, which keeps it as a rule like any other.
-    A rule created on its own names no portfolio and is never touched. As with the definitions,
-    the portfolios are already deleted when this runs: a failure answers ``failed`` and never
-    fails their delete. Answers ``{configuration uid: (rule uid, state)}``; one read of the
-    rules, one of the portfolios that name them and one delete for all (issue #46).
-    """
-    from alpaca_connectors.portfolios.configurations import (
-        delete_rebalance_configuration_rows,
-        inline_rebalance_configurations,
-        rebalance_configuration_uids_named,
-    )
-
-    try:
-        inline = inline_rebalance_configurations([row.uid for row in configurations])
-    except Exception as exc:  # noqa: BLE001 - reported, never raised: the portfolios are gone
-        logger.warning(
-            "The portfolio is deleted, but its rebalance configuration was not read (%s).",
-            type(exc).__name__,
-        )
-        return {}
-    if not inline:
-        return {}
-    try:
-        named = rebalance_configuration_uids_named([rule.uid for rule in inline.values()])
-        free = [rule.uid for rule in inline.values() if str(rule.uid) not in named]
-        if free:
-            delete_rebalance_configuration_rows(free)
-    except Exception as exc:  # noqa: BLE001 - reported, never raised: the portfolios are gone
-        logger.warning(
-            "The portfolio is deleted, but its rebalance configuration's delete failed (%s); "
-            "delete it from the rebalance configurations.",
-            type(exc).__name__,
-        )
-        return {uid: (str(rule.uid), "failed") for uid, rule in inline.items()}
-    return {
-        uid: (str(rule.uid), "followed" if str(rule.uid) in named else "deleted")
-        for uid, rule in inline.items()
-    }
-
-
 def end_portfolio_configuration(
     configuration: AlpacaPortfolioConfiguration,
 ) -> PortfolioRemoval:
-    """End a portfolio: retire its `Portfolio`, record it, then delete its configuration.
+    """End a portfolio: retire its `Portfolio`, then record it and delete what it was made of.
 
-    Every delete ends a portfolio this way (ADR 0027 decision 4, ADR 0028): retiring comes first
+    Every delete ends a portfolio this way (ADR 0027 decision 4, ADR 0028). Retiring comes first
     (ms-markets ADR 0049), so a portfolio an account's current target names is refused with
     ``409 portfolio_in_account_target`` and nothing changes. A configuration whose `Portfolio` no
-    longer exists answers ``absent``. The retired `Portfolio` and the signal it followed are
-    recorded under the account, which deletes them when it is deleted; then the configuration
-    row is deleted, and its own bars configuration with it, then the signal definition it
-    followed once no other portfolio follows it (issue #38). The `Portfolio`, its series, its
-    signal's rows and account history stay. Retiring a retired portfolio does nothing, so a retry
-    after a partial failure is safe. It checks no owner: its callers do.
+    longer exists answers ``absent``. Then one transaction:
+
+    - records the retired `Portfolio` and the signal it followed under the account, which deletes
+      them when it is deleted;
+    - deletes the configuration row, and its own bars configuration with it;
+    - deletes the signal definition it followed, once no other portfolio follows it (issue #38);
+    - deletes a rebalance configuration created inline with it, once no other portfolio names it
+      (issue #42).
+
+    The `Portfolio`, its series, its signal's rows and account history stay. Retiring a retired
+    portfolio does nothing and a record already stored is kept, so a retry after a failure is
+    safe. It checks no owner: its callers do.
     """
     return end_portfolio_configurations([configuration])[0]
 
 
 def end_portfolio_configurations(
     configurations: Sequence[AlpacaPortfolioConfiguration],
+    *,
+    definitions: Iterable[SignalDefinition] | None = None,
+    writes: OwnTableWrites | None = None,
 ) -> list[PortfolioRemoval]:
-    """End several portfolios as ``end_portfolio_configuration`` ends one, set-based (#46).
+    """End several portfolios as ``end_portfolio_configuration`` ends one, in bulk (#46).
 
-    Retiring is ms-markets' one-portfolio route, so the `Portfolio` rows are retired first, one
-    call each, together (``each_together``). Then one read of the definitions they followed (and
-    of the former feeds of those not yet adopted), one read and one insert of their records, one
-    delete of their configurations, one pass over their definitions and one over their inline
-    rebalance configurations. When retiring one is refused, every other portfolio is ended all
-    the same, and then ``portfolio_in_account_target`` is raised: the refused portfolios are
-    unchanged.
+    1. **Retire.** The `Portfolio` rows are retired first, together (``each_together``): ms-markets
+       retires one portfolio per call.
+    2. **Read, in one step.** These reads run together:
+       - the definitions they followed, unless the caller passes ``definitions`` (the account
+         delete passes the account's own, already read);
+       - the portfolios still following each definition and the rules created inline with them,
+         both leaving out the configurations being deleted;
+       - the former feeds of the portfolios not yet adopted.
+
+       Only when there are inline rules, a second read asks which of them another portfolio
+       names.
+    3. **Write, in one transaction** (``OwnTableWrites``): their records, then the configurations,
+       then the definitions no other portfolio follows and the inline rules no other portfolio
+       names. The caller's own ``writes`` go first in the same transaction, when every portfolio
+       was retired.
+    4. **Signals.** The signals of the deleted definitions go as ``delete_signals_rows`` decides.
+       The ones just recorded are known to be kept and are not read.
+
+    When retiring one is refused, every other portfolio is ended all the same, without the
+    caller's ``writes``, and then ``portfolio_in_account_target`` is raised: the refused
+    portfolios are unchanged.
     """
     from msm.api.remote import MarketsConflictError
 
-    from alpaca_connectors.markets_api import each_together, retire_portfolio
+    from alpaca_connectors.markets_api import all_together, each_together, retire_portfolio
     from alpaca_connectors.portfolios.configurations import (
-        delete_portfolio_configuration_rows,
-        record_ended_portfolios,
+        AlpacaPortfolioConfigurationTable,
+        EndedPortfolioTable,
+        PortfolioRebalanceConfigurationTable,
+        ended_portfolio_rows,
+        inline_rebalance_configurations,
+        portfolio_counts_by_definition,
+        rebalance_configuration_uids_named,
     )
-    from alpaca_connectors.portfolios.signal_definitions import signal_definitions_by_uids
+    from alpaca_connectors.portfolios.signal_definitions import (
+        SignalDefinitionTable,
+        definition_signal_uid,
+        delete_signals_rows,
+        signal_definitions_by_uids,
+    )
 
     def retire(portfolio_uid: str) -> Any:
         try:
@@ -631,26 +581,83 @@ def end_portfolio_configurations(
             raise refusal
         return []
 
-    definitions = signal_definitions_by_uids(
-        configuration.signal_definition_uid for configuration in ended
+    ended_uids = [row.uid for row in ended]
+    definition_uids = list(
+        dict.fromkeys(
+            str(row.signal_definition_uid) for row in ended if row.signal_definition_uid is not None
+        )
     )
     retired_rows = [row for row in ended if str(row.uid) in retired]
-    accounts = _ended_accounts(retired_rows)
+    given = None if definitions is None else {str(row.uid): row for row in definitions}
+    followed_definitions, accounts, followers, inline = all_together(
+        (lambda: given)
+        if given is not None
+        else (lambda: signal_definitions_by_uids(definition_uids)),
+        lambda: _ended_accounts(retired_rows),
+        lambda: portfolio_counts_by_definition(definition_uids, excluding=ended_uids),
+        lambda: inline_rebalance_configurations(ended_uids),
+    )
+    named = (
+        rebalance_configuration_uids_named(
+            [rule.uid for rule in inline.values()], excluding=ended_uids
+        )
+        if inline
+        else set()
+    )
     records = [
         {
             "account_uid": accounts[str(row.uid)],
             "portfolio_uid": str(row.portfolio_uid),
             "portfolio_configuration_uid": row.uid,
-            "signal_uid": portfolio_signal_uid(row, definitions=definitions),
+            "signal_uid": portfolio_signal_uid(row, definitions=followed_definitions),
         }
         for row in retired_rows
         if str(row.uid) in accounts
     ]
+    free_definitions = [
+        followed_definitions[uid]
+        for uid in definition_uids
+        if uid in followed_definitions and not followers.get(uid)
+    ]
+    free_rules = [rule.uid for rule in inline.values() if str(rule.uid) not in named]
+
+    transaction = OwnTableWrites()
+    if writes is not None and refusal is None:
+        transaction.extend(writes)
     if records:
-        record_ended_portfolios(records)
-    delete_portfolio_configuration_rows([row.uid for row in ended])
-    definition_answers = _end_followed_definitions(ended, definitions)
-    rebalances = _end_inline_rebalances(ended)
+        transaction.insert_missing(
+            EndedPortfolioTable, ended_portfolio_rows(records), conflict_columns=("portfolio_uid",)
+        )
+    transaction.delete_in(AlpacaPortfolioConfigurationTable, "uid", ended_uids)
+    transaction.delete_in(SignalDefinitionTable, "uid", [row.uid for row in free_definitions])
+    transaction.delete_in(PortfolioRebalanceConfigurationTable, "uid", free_rules)
+    transaction.run()
+
+    recorded = {
+        str(record["portfolio_configuration_uid"]): str(record["signal_uid"]) for record in records
+    }
+    signals = delete_signals_rows(
+        [definition_signal_uid(row) for row in free_definitions], kept=list(recorded.values())
+    )
+    # A definition no longer stored was deleted by an earlier, interrupted attempt.
+    definition_answers: dict[str, dict[str, Any]] = {
+        uid: (
+            {"state": "followed", "signal": None}
+            if followers.get(uid)
+            else {"state": "deleted", "signal": None}
+        )
+        for uid in definition_uids
+    }
+    for row in free_definitions:
+        signal_uid = definition_signal_uid(row)
+        definition_answers[str(row.uid)] = {
+            "state": "deleted",
+            "signal": {"uid": signal_uid, "state": signals[signal_uid]},
+        }
+    rebalances = {
+        uid: (str(rule.uid), "followed" if str(rule.uid) in named else "deleted")
+        for uid, rule in inline.items()
+    }
 
     removals: list[PortfolioRemoval] = []
     for row in ended:
@@ -672,6 +679,7 @@ def end_portfolio_configurations(
                 signal=definition_answer.get("signal"),
                 rebalance_configuration_uid=rebalance_uid,
                 rebalance_configuration_state=rebalance_state,
+                recorded_signal_uid=recorded.get(str(row.uid)),
             )
         )
     if refusal is not None:

@@ -481,6 +481,10 @@ def test_markets_registries_are_reached_only_through_row_calls() -> None:
         # Compile and execute statements on this application's own tables.
         "compile_markets_statement",
         "execute_markets_operation",
+        # Several of them as one transaction (MetaTables ADR 0026, ``OwnTableWrites``).
+        "compile_markets_statements",
+        "execute_markets_write",
+        "resolve_markets_sql_target",
         # Generic CRUD on this application's own row tables.
         "bulk_upsert_model",
         "create_model",

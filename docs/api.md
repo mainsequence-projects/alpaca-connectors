@@ -316,15 +316,15 @@ GET|PATCH|DELETE /v1/portfolio-rebalance-configurations/{configuration_uid}
   account (its owner does not own its bars' account) answers `adopted: false` and works as before:
   it takes weights on its own signal, keyed by its configuration UID, runs on the feed it names,
   and that feed keeps pricing it. Nothing ends it.
-- **Deleting ends it.** `DELETE` retires the ms-markets `Portfolio` (ms-markets ADR 0049), then
-  deletes the configuration with its own bars configuration, then the signal definition it
-  followed once no other portfolio of the account follows it (issue #38). It answers `portfolio:
+- **Deleting ends it.** `DELETE` retires the ms-markets `Portfolio` (ms-markets ADR 0049). Then
+  one transaction deletes the configuration with its own bars configuration, and the signal
+  definition it followed once no other portfolio of the account follows it (issue #38); when it
+  fails, nothing of it is stored and repeating the delete finishes it. It answers `portfolio:
   {uid, unique_identifier, state: "retired", retired_at}`, `signal_definition: {uid, state:
-  "deleted" | "followed" | "failed"}` and `signal: {uid, state: "deleted" | "kept"}`. `failed`
-  means the portfolio is deleted but the definition's own delete did not complete; delete the
-  definition from the account's signals. A rebalance configuration created inline with it goes
-  too, unless another portfolio names it by then (issue #42): `rebalance_configuration: {uid,
-  state: "deleted" | "followed" | "failed"}`, or `null` for a shared rule, which is never touched.
+  "deleted" | "followed"}` and `signal: {uid, state: "deleted" | "kept"}`. A rebalance
+  configuration created inline with it goes in the same transaction, unless another portfolio
+  names it (issue #42): `rebalance_configuration: {uid, state: "deleted" | "followed"}`, or
+  `null` for a shared rule, which is never touched.
   The account delete ends its portfolios the same way. While an account's current target names the portfolio it
   answers `409 portfolio_in_account_target` and changes nothing. The `Portfolio`, its series, the signal's rows and account history stay, recorded under
   the account, whose delete deletes them; a retired portfolio is no longer offered as a target

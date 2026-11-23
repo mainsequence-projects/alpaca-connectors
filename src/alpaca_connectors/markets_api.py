@@ -44,20 +44,31 @@ MARKETS_BATCH_SIZE = 500
 MARKETS_CONCURRENT_CALLS = 8
 
 
-def each_together(call: Callable[[T], R], values: Iterable[T]) -> list[R]:
-    """``call`` once per value, together, for a Markets route that takes one item at a time.
+def all_together(*calls: Callable[[], Any]) -> list[Any]:
+    """Run calls that do not depend on each other together: independent reads of MetaTables
+    and of Markets that would otherwise wait for each other.
 
     At most ``MARKETS_CONCURRENT_CALLS`` are in flight at once. Each runs in a copy of the
     caller's context, so it acts as the caller's own calls do. Answers in the order of
-    ``values``; every call runs, and the first failure in that order is raised once all have
+    ``calls``; every call runs, and the first failure in that order is raised once all have
     ended.
     """
-    items = list(values)
-    if len(items) < 2:
-        return [call(item) for item in items]
-    with ThreadPoolExecutor(max_workers=min(MARKETS_CONCURRENT_CALLS, len(items))) as pool:
-        futures = [pool.submit(contextvars.copy_context().run, call, item) for item in items]
+    if len(calls) < 2:
+        return [call() for call in calls]
+    with ThreadPoolExecutor(max_workers=min(MARKETS_CONCURRENT_CALLS, len(calls))) as pool:
+        futures = [pool.submit(contextvars.copy_context().run, call) for call in calls]
     return [future.result() for future in futures]
+
+
+def each_together(call: Callable[[T], R], values: Iterable[T]) -> list[R]:
+    """``call`` once per value, together, for a Markets route that takes one item at a time.
+
+    As ``all_together``: at most ``MARKETS_CONCURRENT_CALLS`` in flight, each in a copy of the
+    caller's context, answers in the order of ``values``, and the first failure raised once
+    every call has ended.
+    """
+    items = list(values)
+    return all_together(*(lambda item=item: call(item) for item in items))
 
 
 def batches(values: Iterable[T], size: int = MARKETS_BATCH_SIZE) -> list[list[T]]:

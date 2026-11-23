@@ -1,11 +1,14 @@
 """Deleting an account deletes everything that belongs to it (ADR 0028, decision 8).
 
 ms-markets is replaced at the ``markets_api`` composites: what this connector controls is the order
-of its calls, which the ``RESTRICT`` keys of ms-markets impose.
+of its calls, which the ``RESTRICT`` keys of ms-markets impose, and how few of them it makes
+(issue #46): the preflight's reads in one step, and each group of its own writes in one
+transaction (``OwnTableWrites``).
 """
 
 from __future__ import annotations
 
+import threading
 import uuid
 from contextlib import ExitStack
 from types import SimpleNamespace
@@ -26,6 +29,7 @@ KEPT_CONFIGURATION = uuid.UUID(int=21)
 MARKETS = "alpaca_connectors.markets_api"
 CONFIGURATIONS = "alpaca_connectors.portfolios.configurations"
 DEFINITIONS = "alpaca_connectors.portfolios.signal_definitions"
+REGISTRATION = {"account_unique_identifier": "ACCOUNT__ALPACA"}
 
 
 def _record(portfolio, configuration, signal):
@@ -42,75 +46,105 @@ def _run(
     preflight_blockers=(),
     held_by=(),
     refuse_markets=False,
-    registration=True,
-    registration_values=None,
+    registration=REGISTRATION,
     priced=(),
     ended_signal=None,
+    stored=None,
+    together=None,
 ):
-    """Delete the account with Markets and storage replaced; return the recorder."""
+    """Delete the account with Markets and storage replaced; return the result and the recorder.
+
+    ``registration`` is what the API's owner check read and passes on; ``None`` is a retry after
+    the account is gone. ``stored`` are the account's records before the delete; by default the
+    one of KEPT_PORTFOLIO, which another account's history keeps. Ending the account's portfolio
+    records PORTFOLIO with ``signal-followed``.
+    """
     calls = MagicMock()
-    calls.end_portfolios.side_effect = lambda rows: [
+    calls.end_portfolios.side_effect = lambda rows, **kwargs: [
         SimpleNamespace(
-            signal=ended_signal, signal_definition_uid=None, signal_definition_state=None
+            signal=ended_signal,
+            signal_definition_uid=None,
+            signal_definition_state=None,
+            portfolio_uid=str(row.portfolio_uid) if row.portfolio_uid else None,
+            configuration_uid=str(row.uid),
+            recorded_signal_uid="signal-followed" if row.portfolio_uid else None,
         )
-        for _ in rows
+        for row in rows
     ]
     portfolio = SimpleNamespace(uid=CONFIGURATION, portfolio_uid=PORTFOLIO)
     definitions = [
         SimpleNamespace(uid="definition-followed", signal_key="followed"),
         SimpleNamespace(uid="definition-free", signal_key="free"),
     ]
-    records = [
-        _record(PORTFOLIO, CONFIGURATION, "signal-followed"),
-        _record(KEPT_PORTFOLIO, KEPT_CONFIGURATION, "signal-kept"),
-    ]
+    stored = (
+        [_record(KEPT_PORTFOLIO, KEPT_CONFIGURATION, "signal-kept")] if stored is None else stored
+    )
     calls.markets_delete.side_effect = (
         MarketsConflictError("refused by a RESTRICT key") if refuse_markets else None
     )
     calls.blockers.side_effect = lambda uids: {
-        str(uid): ["held"] if uid == KEPT_PORTFOLIO else [] for uid in uids
+        str(uid): ["held"] if uid == str(KEPT_PORTFOLIO) else [] for uid in uids
     }
+    calls.elsewhere.return_value = set()
+    calls.ended.return_value = stored
 
-    def signal_states(signals):
+    def signal_states(signals, kept=()):
         calls.delete_signals(list(signals))
-        # A retired Portfolio follows signal-followed until the account's delete deletes it;
-        # another account's history keeps signal-kept.
-        kept = {"signal-kept"} | (set() if calls.delete_portfolios.called else {"signal-followed"})
-        return {signal: "kept" if signal in kept else "deleted" for signal in signals}
+        # A retired Portfolio follows signal-followed and another account's history keeps
+        # signal-kept until the account's delete deletes them.
+        return {
+            signal: "kept" if signal in {"signal-kept", "signal-followed"} else "deleted"
+            for signal in signals
+        }
+
+    def run(writes):
+        calls.transaction(list(writes.entries))
+
+    def waits(answer):
+        # With ``together``, a preflight read lets go only once all of them wait at once.
+        def read(*args, **kwargs):
+            if together is not None:
+                together.wait()
+            return answer
+
+        return read
 
     # More patches than one `with` statement may nest: an ExitStack enters them.
     patches = [
         patch("alpaca_connectors.runtime.start_markets_engine", return_value=SimpleNamespace()),
         patch(
             "alpaca_connectors.account.services.get_account_registration",
-            return_value=(
-                {"account_unique_identifier": "ACCOUNT__ALPACA", **(registration_values or {})}
-                if registration
-                else None
-            ),
+            calls.read_registration,
         ),
         patch(
             f"{MARKETS}.account_delete_preflight",
-            return_value={"blockers": list(preflight_blockers), "warnings": []},
+            side_effect=waits({"blockers": list(preflight_blockers), "warnings": []}),
         ),
         patch(f"{MARKETS}.current_target_account_uids", return_value=list(held_by)),
         patch(
             f"{MARKETS}.account_target_positions",
-            return_value=SimpleNamespace(positions=[object()]),
+            side_effect=waits(SimpleNamespace(positions=[object()])),
         ),
         patch(f"{MARKETS}.clear_account_target", calls.clear_target),
         patch(f"{MARKETS}.delete_account", calls.markets_delete),
         patch(f"{MARKETS}.portfolios_delete_blockers", calls.blockers),
         patch(f"{MARKETS}.delete_portfolios", calls.delete_portfolios),
-        patch(f"{CONFIGURATIONS}.portfolio_configurations_of_account", return_value=[portfolio]),
-        patch(f"{CONFIGURATIONS}.ended_portfolios_of_account", return_value=records),
-        patch(f"{CONFIGURATIONS}.forget_ended_portfolios", calls.forget_records),
+        patch(f"{MARKETS}.end_signals", calls.end_signals),
+        patch(
+            f"{CONFIGURATIONS}.portfolio_configurations_of_account",
+            side_effect=waits([portfolio]),
+        ),
+        patch(f"{CONFIGURATIONS}.ended_portfolios_of_account", calls.ended),
+        patch(f"{CONFIGURATIONS}.ended_signal_uids", calls.elsewhere),
+        patch(f"{CONFIGURATIONS}.OwnTableWrites.run", run),
         patch(
             "alpaca_connectors.market_data.configurations.bar_configurations_for_account",
-            return_value=[
-                SimpleNamespace(uid=uuid.UUID(int=30), asset_source="account_holdings"),
-                SimpleNamespace(uid=uuid.UUID(int=31), asset_source="portfolios"),
-            ],
+            side_effect=waits(
+                [
+                    SimpleNamespace(uid=uuid.UUID(int=30), asset_source="account_holdings"),
+                    SimpleNamespace(uid=uuid.UUID(int=31), asset_source="portfolios"),
+                ]
+            ),
         ),
         patch(
             f"{CONFIGURATIONS}.portfolio_configurations_naming_any_bars",
@@ -126,41 +160,66 @@ def _run(
             "alpaca_connectors.portfolios.provided_weights.end_portfolio_configurations",
             calls.end_portfolios,
         ),
-        patch.object(deletion, "delete_account_orders_and_trades", calls.orders),
         patch.object(deletion, "delete_portfolio_series", calls.series),
     ]
     calls.naming.return_value = list(priced)
-    calls.definitions.return_value = definitions
+    calls.read_registration.return_value = registration
+    if together is not None:
+        calls.definitions.side_effect = waits(definitions)
+        calls.ended.side_effect = waits(stored)
+    else:
+        calls.definitions.return_value = definitions
     with ExitStack() as stack:
         for item in patches:
             stack.enter_context(item)
-        result = delete_account(ACCOUNT_UID)
+        if registration is None:
+            result = delete_account(ACCOUNT_UID)
+        else:
+            result = delete_account(ACCOUNT_UID, registration=registration)
     return result, calls
+
+
+def _tables(entries):
+    return [(kind, table, list(values)) for kind, table, _, values in entries]
 
 
 def test_the_account_and_all_it_owns_go_in_the_order_markets_keys_impose() -> None:
     result, calls = _run()
     order = [name for name, *_ in calls.mock_calls]
 
-    # Its own target first, so retiring its portfolios is not refused; then they end together.
+    # Its own target first, so retiring its portfolios is not refused; then they end together,
+    # with the definitions the preflight read.
     assert order.index("clear_target") < order.index("end_portfolios")
-    calls.end_portfolios.assert_called_once()
+    [(rows,), kwargs] = calls.end_portfolios.call_args
+    assert kwargs["definitions"] == calls.definitions.return_value
+    # Orders and trades in this application's instances refuse the account delete: they go in
+    # the transaction that ends the portfolios.
+    assert _tables(kwargs["writes"].entries) == [
+        ("delete", "TradesStorage_main_alpaca_connectors", ["ACCOUNT__ALPACA"]),
+        ("delete", "OrdersStorage_main_alpaca_connectors", ["ACCOUNT__ALPACA"]),
+    ]
     # A signal no retired Portfolio follows goes before the account; the followed one waits.
     assert call.delete_signals(["signal-followed", "signal-free"]) in calls.mock_calls
     assert order.index("delete_signals") < order.index("markets_delete")
-    # Orders and trades in this application's instances refuse the account delete: first.
-    calls.orders.assert_called_once_with("ACCOUNT__ALPACA")
-    assert order.index("orders") < order.index("markets_delete")
     calls.markets_delete.assert_called_once_with(ACCOUNT_UID)
-    # One preflight for the recorded Portfolios; for the ones nothing else names, their series,
-    # then one bulk delete of the Portfolios, then one delete of their records.
-    calls.blockers.assert_called_once_with([PORTFOLIO, KEPT_PORTFOLIO])
+    # One preflight for the recorded Portfolios: the one stored before and the one just ended,
+    # known without reading them back. For those nothing else names, their series, then one
+    # bulk delete of the Portfolios.
+    calls.blockers.assert_called_once_with([str(KEPT_PORTFOLIO), str(PORTFOLIO)])
     calls.series.assert_called_once_with(["ALPACA_PORTFOLIO__" + CONFIGURATION.hex.upper()])
     calls.delete_portfolios.assert_called_once_with([str(PORTFOLIO)])
-    [forgotten] = calls.forget_records.call_args.args[0]
-    assert forgotten.portfolio_uid == PORTFOLIO
-    assert order.index("series") < order.index("delete_portfolios") < order.index("forget_records")
-    assert order.index("markets_delete") < order.index("series")
+    assert order.index("markets_delete") < order.index("series") < order.index("delete_portfolios")
+    # Then one transaction forgets their records and the freed signal's asset rows, and
+    # Markets ends that signal.
+    [finish] = [made.args[0] for made in calls.transaction.call_args_list]
+    assert _tables(finish) == [
+        ("delete", "EndedPortfolioTable", [PORTFOLIO]),
+        ("delete", "SignalAssetTable", ["signal-followed"]),
+    ]
+    calls.end_signals.assert_called_once_with(["signal-followed"])
+    assert (
+        order.index("delete_portfolios") < order.index("transaction") < order.index("end_signals")
+    )
     # Another account's history keeps KEPT_PORTFOLIO, and so its signal.
     assert result.kept_portfolio_uids == [str(KEPT_PORTFOLIO)]
     assert result.deleted_portfolio_uids == [str(PORTFOLIO)]
@@ -169,13 +228,24 @@ def test_the_account_and_all_it_owns_go_in_the_order_markets_keys_impose() -> No
 
 
 def test_the_delete_reads_each_kind_once() -> None:
-    # The preflight's reads serve the delete (issue #46): the definitions are read once, and the
-    # portfolios its `portfolios` feeds price in one request for all the feeds.
+    # The preflight's reads serve the delete (issue #46): the registration the owner check read,
+    # the definitions, the records stored before and the portfolios the `portfolios` feeds price,
+    # in one request for all the feeds; the records are not read back after the account delete.
     _, calls = _run()
+    calls.read_registration.assert_not_called()
     calls.definitions.assert_called_once_with(ACCOUNT_UID)
+    calls.ended.assert_called_once_with(ACCOUNT_UID)
     calls.naming.assert_called_once_with([uuid.UUID(int=31)])
-    # The account's signals go in two passes: before the account delete and after it.
-    assert calls.delete_signals.call_count == 2
+    # Whether another record follows the signals is read once, without this account's records.
+    calls.elsewhere.assert_called_once_with(
+        ["signal-kept", "signal-followed"],
+        excluding_portfolio_uids=[str(KEPT_PORTFOLIO), str(PORTFOLIO)],
+    )
+
+
+def test_the_preflight_reads_run_together() -> None:
+    # Six reads that need only the account, in one step: one after another, the barrier times out.
+    _run(together=threading.Barrier(6, timeout=5))
 
 
 @pytest.mark.parametrize(("state", "reported"), [("deleted", True), ("kept", False)])
@@ -208,11 +278,32 @@ def test_the_accounts_own_target_never_blocks_its_delete() -> None:
 
 
 def test_a_retry_after_the_account_is_gone_finishes_its_portfolios_and_signals() -> None:
-    result, calls = _run(registration=False)
+    stored = [
+        _record(PORTFOLIO, CONFIGURATION, "signal-followed"),
+        _record(KEPT_PORTFOLIO, KEPT_CONFIGURATION, "signal-kept"),
+    ]
+    result, calls = _run(registration=None, stored=stored)
+    # The registration is read, as nothing passed it; with none, the records are read back.
+    calls.read_registration.assert_called_once_with(ACCOUNT_UID)
     calls.end_portfolios.assert_not_called()
     calls.markets_delete.assert_not_called()
+    calls.ended.assert_called_once_with(ACCOUNT_UID)
     calls.delete_portfolios.assert_called_once_with([str(PORTFOLIO)])
     assert "signal-followed" in result.deleted_signal_uids
+
+
+def test_an_account_without_portfolios_still_deletes_its_orders_and_trades() -> None:
+    with (
+        patch(f"{CONFIGURATIONS}.portfolio_configurations_of_account", return_value=[]),
+        patch.object(deletion, "_with_priced_portfolios", return_value=[]),
+    ):
+        _, calls = _run(stored=[])
+    calls.end_portfolios.assert_not_called()
+    [entries] = [c.args[0] for c in calls.transaction.call_args_list]
+    assert [table for _, table, _ in _tables(entries)] == [
+        "TradesStorage_main_alpaca_connectors",
+        "OrdersStorage_main_alpaca_connectors",
+    ]
 
 
 def test_a_portfolio_not_yet_adopted_its_portfolios_feed_prices_ends_with_the_account() -> None:
@@ -260,7 +351,8 @@ def test_the_preflight_and_the_signal_delete_call_their_ms_markets_routes(recipe
     assert client.request.call_args_list == [
         call("POST", "/api/v1/account/bulk-delete/preflight/", json=selection),
     ]
-    assert recipes.calls == [
+    # The two run together, so in no particular order.
+    assert sorted(recipes.calls, key=lambda made: made[1]["signal_uid"]) == [
         ("end_signal", {"signal_uid": "signal-a"}),
         ("end_signal", {"signal_uid": "signal-b"}),
     ]

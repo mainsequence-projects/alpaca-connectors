@@ -285,38 +285,53 @@ defines it (ms-markets ADR 0049), and so does every other delete, the CLI's incl
 1. **Retire the `Portfolio`** through `MarketsClient.retire_portfolio`. Markets refuses while an
    account's current target names the portfolio: the call answers
    `409 portfolio_in_account_target`, names no account, and changes nothing.
-2. **Record it under its account**, so the account's delete deletes the retired `Portfolio` and
-   its signal ([ADR 0028](../adrs/0028_every_portfolio_belongs_to_one_account.md), decision 8).
-3. **Delete the configuration row**, and its own bars configuration with it.
-4. **Delete the signal definition it followed** once no other portfolio of the account follows it
-   (issue #38). The signal's rows stay while the retired `Portfolio` follows the signal, and its
-   key cannot be given again while they do. A failure here never fails the delete, which could not
-   be repeated once the row is gone: the answer says `failed`.
-5. **Delete the rebalance configuration created inline with it** (issue #42), which records the
-   portfolio it was created with, unless another portfolio names it by then. A shared rule,
-   created on its own, records none and is never touched. As for the definition, a failure here
-   answers `failed` and never fails the delete.
+2. **Then, in one transaction** (issue #46), all of it or none:
+   - **record it under its account**, so the account's delete deletes the retired `Portfolio`
+     and its signal ([ADR 0028](../adrs/0028_every_portfolio_belongs_to_one_account.md),
+     decision 8);
+   - **delete the configuration row**, and its own bars configuration with it;
+   - **delete the signal definition it followed**, once no other portfolio of the account follows
+     it (issue #38). The signal's rows stay while the retired `Portfolio` follows the signal, and
+     its key cannot be given again while they do;
+   - **delete the rebalance configuration created inline with it** (issue #42), which records the
+     portfolio it was created with, unless another portfolio names it. A shared rule, created on
+     its own, records none and is never touched.
+
+   Whether another portfolio follows the definition or names the rule is read before the
+   transaction, leaving out the configuration it deletes. When the transaction fails, nothing of
+   it is stored, and repeating the delete finishes it.
 
 The answer is `{configuration_uid, deleted: true, portfolio: {uid, unique_identifier, state,
 retired_at}, signal_definition: {uid, state}, signal: {uid, state}, rebalance_configuration:
-{uid, state} | null}`; the rebalance configuration's state is `deleted`, `followed` or `failed`. The portfolio's `state` is
-`retired`, or `absent` for a configuration whose `Portfolio` no longer exists; the definition's is
-`deleted`, `followed` while another portfolio follows it, or `failed` when its own delete did not
-complete (delete it from the account's signals); the signal's is `kept` or `deleted`. A portfolio not yet adopted has no definition: both are `null`. Retiring a retired
-portfolio does nothing, so a call that failed after the retirement is safe to repeat.
+{uid, state} | null}`.
+- The portfolio's `state` is `retired`, or `absent` for a configuration whose `Portfolio` no
+  longer exists.
+- The definition's is `deleted`, or `followed` while another portfolio follows it.
+- The signal's is `kept` or `deleted`.
+- The rebalance configuration's is `deleted` or `followed`.
+
+A portfolio not yet adopted has no definition: both are `null`. Retiring a retired portfolio does
+nothing and a record already stored is kept, so a call that failed after the retirement is safe to
+repeat.
 
 Retiring deletes nothing. The `Portfolio`, its series, its catalog registration and every
 account's history stay. A retired portfolio cannot be named by a new target, gets no virtual-fund
 holdings, leaves discovery, and its updaters write nothing after `retired_at`.
 
-An account's delete ends all its portfolios in one pass (issue #46). ms-markets retires one
-portfolio per call, so the `Portfolio` rows are retired together, at most eight calls at once
-(`markets_api.each_together`). Then one read of the definitions they followed, one read and one
-insert of their records, one delete of their configurations, one pass over their definitions and
-one over their inline rebalance configurations serve them all. A refused retirement leaves that
-portfolio unchanged; every other one ends, and the refusal is answered after. The account delete's
-other one-item Markets calls, the check of which accounts target each portfolio and the end of
-each signal, are made together the same way.
+An account's delete ends all its portfolios in one pass (issue #46):
+
+- **Retires.** ms-markets retires one portfolio per call (MainSequenceMarkets#124), so the
+  `Portfolio` rows are retired together, at most eight calls at once (`markets_api.each_together`).
+- **Reads.** The reads that decide what goes run together: the definitions they followed (the
+  account delete passes its own), which of them other portfolios still follow, and the inline
+  rules.
+- **Writes.** One transaction holds their records, their configurations, the free definitions and
+  rules, and the account's orders and trades.
+
+A refused retirement leaves that portfolio unchanged; every other one ends, without the account's
+own writes, and the refusal is answered after. The account delete's other one-item Markets calls,
+the check of which accounts target each portfolio and the end of each signal, are made together
+the same way.
 
 ## CLI
 
