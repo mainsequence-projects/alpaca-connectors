@@ -204,6 +204,10 @@ def test_migration_job_failure_fails_the_job() -> None:
             "dispatch_alpaca_bars_update.py",
             "alpaca_connectors.operations.bar_updates.run_bars_dispatcher_job",
         ),
+        (
+            "run_lifecycle_check.py",
+            "alpaca_connectors.operations.lifecycle_check.run_platform_job",
+        ),
     ],
 )
 def test_launchers_do_no_work_while_the_schema_is_behind(launcher, work) -> None:
@@ -316,4 +320,5 @@ def test_every_resource_that_uses_metatables_declares_its_branch() -> None:
         "alpaca-portfolio-dispatcher": True,
         "alpaca-bars-update": True,
         "alpaca-bars-update-dispatcher": True,
+        "alpaca-lifecycle-check": True,
     }

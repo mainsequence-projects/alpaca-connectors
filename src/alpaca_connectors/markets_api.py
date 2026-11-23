@@ -566,6 +566,34 @@ def portfolio_weights_recorded(portfolio_identifier: str) -> bool:
     return int(bounds.row_count or 0) > 0
 
 
+def publish_portfolio_weights(portfolio_identifier: str, rows: list[dict[str, Any]]) -> Any:
+    """Publish fixed weights of one portfolio (``PortfolioWeightsSeries.publish``).
+
+    Each row has ``time_index``, ``portfolio_identifier``, ``asset_identifier`` and ``weight``.
+    The lifecycle check publishes its fixed-weight portfolios this way (ADR 0031); Markets'
+    answer is returned as it is. Refusals propagate.
+    """
+    from msm_portfolios.api import PortfolioWeightsSeries
+
+    return PortfolioWeightsSeries.publish(str(portfolio_identifier), rows)
+
+
+def portfolio_series_bounds(
+    portfolio_identifiers: Iterable[str],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Each portfolio's weights and values bounds, keyed by ``unique_identifier``.
+
+    Calls ``PortfolioWeightsSeries.bounds`` and ``PortfolioValuesSeries.bounds`` once each; every
+    bound carries ``row_count`` and ``first_time``. Refusals propagate.
+    """
+    from msm_portfolios.api import PortfolioValuesSeries, PortfolioWeightsSeries
+
+    identifiers = [str(identifier) for identifier in portfolio_identifiers]
+    weights = {str(bounds.key): bounds for bounds in PortfolioWeightsSeries.bounds(identifiers)}
+    values = {str(bounds.key): bounds for bounds in PortfolioValuesSeries.bounds(identifiers)}
+    return weights, values
+
+
 @dataclass(frozen=True, slots=True)
 class PortfolioRunAnswer:
     """What a portfolio run wrote, as Markets answered it."""

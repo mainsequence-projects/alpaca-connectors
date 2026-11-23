@@ -72,18 +72,30 @@ The project requires MetaTables 0.1.66 or later: tables in several namespaces
 
 ## Live Life-Cycle Check
 
-`scripts/lifecycle_check.py` runs the whole account and portfolio life cycle on a real Alpaca paper
-account and a local stack ([ADR 0023](../adrs/0023_account_sync_sizes_and_allocates_funds.md),
+`alpaca_connectors.operations.lifecycle_check` runs the whole account and portfolio life cycle on
+a real Alpaca paper account ([ADR 0023](../adrs/0023_account_sync_sizes_and_allocates_funds.md),
 [ADR 0031](../adrs/0031_markets_series_are_published_not_shared.md)). It times every step, cleans
-up after itself and exits 0 only when every stage passed and the cleanup completed:
+up after itself and exits 0 only when every stage passed and the cleanup completed. It runs in
+three places:
 
-```bash
-MARKETS_API_URL=http://127.0.0.1:8322 .venv/bin/python scripts/lifecycle_check.py
-MARKETS_API_URL=http://127.0.0.1:8322 .venv/bin/python scripts/lifecycle_check.py --json lifecycle.json
-```
+- **Against the local stack**, from this machine:
+
+  ```bash
+  MARKETS_API_URL=http://127.0.0.1:8322 .venv/bin/python scripts/lifecycle_check.py
+  MARKETS_API_URL=http://127.0.0.1:8322 .venv/bin/python scripts/lifecycle_check.py --json lifecycle.json
+  ```
+
+- **Against a deployed release**, from this machine, as the signed-in person:
+  `scripts/lifecycle_check.py --release-uid <uid>`.
+- **In the platform**, as the on-demand `alpaca-lifecycle-check` Job
+  ([ADR 0032](../adrs/0032_the_lifecycle_check_runs_as_an_on_demand_job.md); see
+  [Running it in the platform](#running-it-in-the-platform)). Its times are the platform's own,
+  without this machine's connection.
 
 `--keep` skips the cleanup, to look at what a run left. `tests/test_live_account_lifecycle.py` runs
-the same script once and fails with its report; it is skipped unless `ALPACA_E2E=1`.
+it once against the local stack and fails with its report; it is skipped unless `ALPACA_E2E=1`.
+Calls that do not depend on each other run together: stage 10's three portfolios and their Job
+runs, the weights publishes, and the Markets portfolios' upserts and deletes.
 
 | Stage | What it checks |
 | --- | --- |
@@ -97,7 +109,7 @@ the same script once and fails with its report; it is skipped unless `ALPACA_E2E
 | 7 Rebalance | The deltas are traded; the fills are allocated and NVDA is split between the funds. With the market closed the orders are queued, checked as accepted and cancelled |
 | 8 No weights | A portfolio with no weights fails the sizing and the snapshot stays |
 | 9 Reweight | New weights and a lower exposure are sized again and traded |
-| 10 Portfolio Job | Three portfolios of the account on the immediate-signal rebalance, two first observed at one time and one three sessions earlier, are each run by the portfolio Job; each records weights and values from the close of its own first observation's session. Locally the Job runs as its launcher; against a release, the API starts the deployed Job and the stage polls the run |
+| 10 Portfolio Job | Three portfolios of the account on the immediate-signal rebalance, two first observed at one time and one three sessions earlier, are created together and run by the portfolio Job together, as the dispatcher starts every scheduled portfolio's run; each records weights and values from the close of its own first observation's session. Locally the three runs are its launcher in three processes; against a release, the API starts the deployed Job three times and the stage polls the three runs |
 | Cleanup after | This run's open orders are cancelled; the three symbols are traded back to the positions the run started with (only while the market is open); the target is cleared; the account is deleted with its confirmation, and its portfolios with it; the rebalance configuration and the three portfolios are deleted |
 
 Stage 10 needs ms-markets 5.2.0. Before it, a portfolio's first run in the rebalance-state table
@@ -165,6 +177,23 @@ Results on the local SQLite runtime with ms-markets 3.7.1, on 2026-11-15 with th
 
 It leaves the three registered assets, the three `ALPACA_E2E_*` portfolios, their calendar and
 their weights rows in place; they are reused by the next run.
+
+### Running it in the platform
+
+The `alpaca-lifecycle-check` Job runs the same check inside the platform, against this branch's
+API in the Job's Environment ([ADR 0032](../adrs/0032_the_lifecycle_check_runs_as_an_on_demand_job.md)).
+No push runs it. Before the push that declares it, a person sets the `ALPACA_PAPER_API_KEY` and
+`ALPACA_PAPER_SECRET_KEY` Secrets in that Environment to the paper account's keys. Then:
+
+```bash
+mainsequence code-repository jobs list
+mainsequence code-repository jobs run <alpaca-lifecycle-check uid>
+mainsequence code-repository jobs runs logs <job run uid>
+```
+
+The logs hold the timed report, then its JSON on one line that starts with `lifecycle report`. The
+JobRun ends `FAILED` when any stage failed. The account it registers belongs to the Job's workload.
+A Job run and a run from this machine use the same paper account, so do not run both at once.
 
 ## Exercise The Backend
 

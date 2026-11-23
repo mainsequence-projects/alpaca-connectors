@@ -284,6 +284,23 @@ environment variable. It was retired on 2026-11-09 (issue #11), and its declarat
   configuration at 00:00 UTC through `Alpaca Bars Update`. Until it was declared, nothing updated bars on a
   schedule.
 
+## Lifecycle Check Job
+
+`alpaca-lifecycle-check` (display name `Alpaca Lifecycle Check`) runs the account and portfolio
+life cycle check inside the platform, on demand
+([ADR 0032](../adrs/0032_the_lifecycle_check_runs_as_an_on_demand_job.md)). It is declared in
+`alpaca-connectors-api.yaml` with no schedule and is no step of the execution graph, so a push never
+runs it. Its launcher is `src/jobs/run_lifecycle_check.py`, which starts with the schema gate.
+
+| Access | Why |
+| --- | --- |
+| `user` on `alpaca` | It calls this branch's API as its own workload, as any caller does |
+| `reader` on the MetaTables and MainSequenceMarkets branches | It reaches Markets through the Markets API, as every Job does |
+| `value_reader` on `ALPACA_PAPER_API_KEY` and `ALPACA_PAPER_SECRET_KEY` | The paper account's keys, sent only to the account create route and to Alpaca |
+
+It holds no `runner`: the API starts stage 10's portfolio Job runs. How to run it and read its
+report: [Development Workflow](development.md#running-it-in-the-platform).
+
 ## FastAPI Release
 
 `.mainsequence/workflows/alpaca-connectors-api.yaml` declares the registered FastAPI resource with
