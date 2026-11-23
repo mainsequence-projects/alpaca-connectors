@@ -65,7 +65,12 @@ def orders_list(
     "/actions/submit/preflight",
     response_model=BulkActionPreflightResponse,
     summary="Pre-trade checks",
-    description="Run every pre-trade check of a submission without placing an order.",
+    description=(
+        "Run every pre-trade check of a submission without placing an order: the request, the "
+        "registration and the Alpaca account, each asset (registered here, known, tradable, "
+        "fractionable for a fraction), the market hours and the buying power. Call it at the "
+        "start of an operation; submit does not repeat it."
+    ),
 )
 def orders_submit_preflight(
     account_uid: str, request: OrderBatchSubmitRequest = Body(...)
@@ -81,8 +86,12 @@ def orders_submit_preflight(
     response_model=OrderBatchResponse,
     summary="Submit a batch of market orders",
     description=(
-        "Place the batch on the account with its stored credentials after the pre-trade checks "
-        "pass (409 with the failed `checks` otherwise). Idempotent on `client_order_id`."
+        "Place the batch on the account with its stored credentials. Submit refuses the batch "
+        "(409 with the failed `checks`) only for what protects its orders and the ledger: the "
+        "request, an inactive registration, another account's batch, and an asset unknown at "
+        "Alpaca or not registered here. It does not repeat the preflight: Alpaca refuses each "
+        "order it won't take (`rejected` with Alpaca's reason), and queues a day order placed "
+        "while the market is closed. Idempotent on `client_order_id`."
     ),
 )
 def orders_submit(

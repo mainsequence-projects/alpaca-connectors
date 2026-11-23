@@ -487,8 +487,10 @@ class OrderBatchSubmitRequest(BaseModel):
     queue_when_closed: bool = Field(
         default=False,
         description=(
-            "Place the day orders while the market is closed, queued by Alpaca for the next "
-            "session. Off, a closed market refuses the batch with market_closed."
+            "Whether the preflight accepts a batch while the market is closed. Off, the "
+            "preflight refuses it with market_closed. Submit leaves the market hours to "
+            "Alpaca: a day order placed while the market is closed is queued for the next "
+            "session either way."
         ),
     )
 

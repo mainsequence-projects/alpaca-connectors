@@ -13,6 +13,10 @@ exposure, and the connector sizes it at every sync.
 
 The decision marked (owner) was made by the owner on 2026-11-15.
 
+Amended on 2026-11-23: the allocation is one Markets call (decision 5). `allocate_account_virtual_funds`
+plans from the same inputs and writes in one transaction, so the separate plan read (12 s in
+Production) is gone.
+
 Amended on 2026-11-23 for ms-markets 5.3.0, whose ADR 0061 retires `constant_notional_exposure`:
 an account target states no amount any more, so every exposure the sync sizes is a share of NAV
 (decision 4).
@@ -93,7 +97,7 @@ the same client (`use_markets_api().client`). The Markets rule in `AGENTS.md` an
 | --- | --- |
 | `capture_holdings` | As today: read Alpaca, publish the holdings snapshot at time `T` |
 | `size_targets` | Read the account's `PositionSet` in force at `T` and size each of its exposures into units |
-| `allocate_funds` | Plan with those units, then allocate with the plan's digest |
+| `allocate_funds` | Allocate with those units in one call |
 
 The two new steps are marked skipped, and the sync ends after `capture_holdings` as it does
 today, when:
@@ -179,16 +183,16 @@ The result is one `sized_targets` entry per exposure, in the shape ms-markets ta
 }
 ```
 
-### 5. Plan, then allocate
+### 5. Allocate
 
-The connector calls `plan_account_virtual_funds` with the `PositionSet`, `valuation_time=T` and
-the `sized_targets`, then `allocate_account_virtual_funds` with the same inputs and the plan's
-`plan_digest`. It uses the default policy with the version it read from the policy catalog.
+The connector calls `allocate_account_virtual_funds` with the `PositionSet`, `valuation_time=T`
+and the `sized_targets`. Markets plans from those inputs with the default policy and writes in
+one transaction; no plan is read first.
 
 - ms-markets writes each fund's holdings and the sync's lines. The connector stores neither.
 - A shortfall is not refused. The allocation is written and the deltas are recorded.
 - `already_applied` is a success: the same sync repeated writes nothing.
-- A retired portfolio in the target fails the step with the blocker's message.
+- A retired portfolio in the target fails the step (`portfolio_retired`) and nothing is written.
 
 ### 6. What the sync answers
 

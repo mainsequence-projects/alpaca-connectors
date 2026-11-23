@@ -148,8 +148,8 @@ class OrderBatchSubmission:
     batch_id: str
     legs: tuple[OrderLegSpec, ...]
     # A ``day`` market order placed while the market is closed is queued by Alpaca for the next
-    # open. The default refuses such a batch (``market_closed``); a caller that wants the queue
-    # says so explicitly.
+    # open. The preflight refuses such a batch by default (``market_closed``); a caller that wants
+    # the queue says so explicitly. Submit leaves the market hours to Alpaca either way.
     queue_when_closed: bool = False
 
 

@@ -449,72 +449,96 @@ def test_cancel_requests_cancellation_of_open_orders(registration) -> None:
     assert harness.ledger.batches["HUNCH_BATCH__1"].execution_end == NOW
 
 
-def test_pre_trade_checks_refuse_the_batch_before_any_order(registration) -> None:
+def test_the_preflight_reports_every_check_and_places_nothing(registration) -> None:
     harness = Harness()
 
-    def refused(*legs, **kwargs):
-        placed_before = list(harness.client.submitted)
-        with pytest.raises(PreTradeCheckError) as info:
-            submit_order_batch(ACCOUNT_UID, submission(*legs, **kwargs), deps=harness.deps)
-        assert harness.client.submitted == placed_before
-        assert "HUNCH_BATCH__1" not in harness.ledger.batches or kwargs.get("queue_when_closed")
-        return info.value
+    def blockers(*legs, **kwargs) -> list[Any]:
+        preflight = preflight_order_batch(
+            ACCOUNT_UID, submission(*legs, **kwargs), deps=harness.deps
+        )
+        assert harness.client.submitted == [] and harness.ledger.batches == {}
+        assert preflight.allowed is not bool(preflight.blockers)
+        return preflight.blockers
 
-    error = refused(leg("a", MSFT, "MSFT", "buy", 1.5))
-    assert error.code == "fractional_quantity_not_allowed"
-    assert error.checks[0].client_order_id == "a"
-
-    error = refused(leg("a", ZZZ, "ZZZ", "buy", 1))
-    assert error.code == "asset_not_tradable"
-
-    error = refused(leg("a", "BBG000B9XRY4", "AAPL", "buy", 1))
-    assert error.code == "unknown_asset"
-
-    error = refused(leg("a", NEW, "NEWC", "buy", 1))
-    assert error.code == "asset_not_registered"
-
-    error = refused(leg("a", AAPL, "AAPL", "buy", 100))
-    assert error.code == "insufficient_buying_power"
-    assert "20,000.00" in str(error) and "10,000.00" in str(error)
-
-    error = refused(leg("a", AAPL, "AAPL", "buy", 1), leg("a", AAPL, "AAPL", "sell", 1))
-    assert error.code == "duplicate_client_order_id"
-
-    error = refused(leg("a", MSFT, "MSFT", "buy", 1.5), leg("b", ZZZ, "ZZZ", "buy", 1))
-    assert error.code == "pre_trade_checks_failed"
-    assert [check.code for check in error.checks] == [
-        "fractional_quantity_not_allowed",
-        "asset_not_tradable",
+    found = blockers(leg("a", MSFT, "MSFT", "buy", 1.5))
+    assert [c.code for c in found] == ["fractional_quantity_not_allowed"]
+    assert found[0].client_order_id == "a"
+    assert [c.code for c in blockers(leg("a", ZZZ, "ZZZ", "buy", 1))] == ["asset_not_tradable"]
+    assert [c.code for c in blockers(leg("a", "BBG000B9XRY4", "AAPL", "buy", 1))] == [
+        "unknown_asset"
     ]
+    assert [c.code for c in blockers(leg("a", NEW, "NEWC", "buy", 1))] == ["asset_not_registered"]
+    found = blockers(leg("a", AAPL, "AAPL", "buy", 100))
+    assert [c.code for c in found] == ["insufficient_buying_power"]
+    assert "20,000.00" in found[0].message and "10,000.00" in found[0].message
+    found = blockers(leg("a", AAPL, "AAPL", "buy", 1), leg("a", AAPL, "AAPL", "sell", 1))
+    assert [c.code for c in found] == ["duplicate_client_order_id"]
+    found = blockers(leg("a", MSFT, "MSFT", "buy", 1.5), leg("b", ZZZ, "ZZZ", "buy", 1))
+    assert [c.code for c in found] == ["fractional_quantity_not_allowed", "asset_not_tradable"]
 
     harness.client.clock = clock(is_open=False)
-    error = refused(leg("a", AAPL, "AAPL", "buy", 1))
-    assert error.code == "market_closed" and "queue_when_closed" in str(error)
-    queued = submit_order_batch(
-        ACCOUNT_UID,
-        submission(leg("a", AAPL, "AAPL", "buy", 1), batch_id="QUEUED", queue_when_closed=True),
-        deps=harness.deps,
-    )
-    assert queued.orders[0].status == "submitted" and harness.client.submitted == ["a"]
+    found = blockers(leg("a", AAPL, "AAPL", "buy", 1))
+    assert [c.code for c in found] == ["market_closed"] and "queue_when_closed" in found[0].message
+    assert blockers(leg("a", AAPL, "AAPL", "buy", 1), queue_when_closed=True) == []
     harness.client.clock = clock(is_open=True)
 
     harness.client.account = account(trading_blocked=True)
-    error = refused(leg("b", AAPL, "AAPL", "buy", 1))
-    assert error.code == "account_not_tradable"
+    assert [c.code for c in blockers(leg("b", AAPL, "AAPL", "buy", 1))] == ["account_not_tradable"]
     harness.client.account = account(status=SimpleNamespace(value="INACTIVE"))
-    error = refused(leg("b", AAPL, "AAPL", "buy", 1))
-    assert error.code == "account_not_tradable"
-
+    assert [c.code for c in blockers(leg("b", AAPL, "AAPL", "buy", 1))] == ["account_not_tradable"]
     harness.client.account = account()
     with patch(LOAD_REGISTRATION, return_value={**REGISTRATION, "account_is_active": False}):
-        error = refused(leg("b", AAPL, "AAPL", "buy", 1))
-    assert error.code == "account_inactive"
+        assert [c.code for c in blockers(leg("b", AAPL, "AAPL", "buy", 1))] == ["account_inactive"]
 
+
+def test_submit_refuses_only_what_protects_its_orders_and_ledger(registration) -> None:
+    # The identity of each asset and its registration here (the ledger keys to it), the request,
+    # the registration's own state and the account the keys open: Alpaca enforces none of them.
+    harness = Harness()
+
+    def refused(*legs) -> str:
+        with pytest.raises(PreTradeCheckError) as info:
+            submit_order_batch(ACCOUNT_UID, submission(*legs), deps=harness.deps)
+        assert harness.client.submitted == [] and harness.ledger.batches == {}
+        return info.value.code
+
+    assert refused(leg("a", "BBG000B9XRY4", "AAPL", "buy", 1)) == "unknown_asset"
+    assert refused(leg("a", NEW, "NEWC", "buy", 1)) == "asset_not_registered"
+    assert (
+        refused(leg("a", AAPL, "AAPL", "buy", 1), leg("a", AAPL, "AAPL", "sell", 1))
+        == "duplicate_client_order_id"
+    )
+    with patch(LOAD_REGISTRATION, return_value={**REGISTRATION, "account_is_active": False}):
+        assert refused(leg("b", AAPL, "AAPL", "buy", 1)) == "account_inactive"
     harness.client.account = account(id="someone-else")
     with pytest.raises(ValueError, match="different Alpaca account"):
         submit_order_batch(
             ACCOUNT_UID, submission(leg("b", AAPL, "AAPL", "buy", 1)), deps=harness.deps
         )
+
+
+def test_submit_leaves_what_alpaca_refuses_on_its_own_to_alpaca(registration) -> None:
+    # An untradable asset, a fraction, the buying power, the market hours and the account's
+    # status are the preflight's to report. Submit places the orders; Alpaca answers each one.
+    harness = Harness()
+    harness.client.clock = clock(is_open=False)
+    harness.client.account = account(trading_blocked=True)
+    harness.client.reject["z"] = alpaca_error(403, "asset is not tradable", 40310000)
+
+    result = submit_order_batch(
+        ACCOUNT_UID,
+        submission(
+            leg("z", ZZZ, "ZZZ", "buy", 1),
+            leg("m", MSFT, "MSFT", "buy", 1.5),
+            leg("a", AAPL, "AAPL", "buy", 100),
+        ),
+        deps=harness.deps,
+    )
+
+    by_id = {order.client_order_id: order for order in result.orders}
+    assert by_id["z"].status == "rejected" and by_id["z"].message == "asset is not tradable"
+    assert by_id["m"].status == "submitted" and by_id["a"].status == "submitted"
+    assert sorted(harness.client.submitted) == ["a", "m"]
 
 
 def test_buying_power_nets_sells_and_warns_when_unpriced(registration) -> None:

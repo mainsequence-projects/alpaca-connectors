@@ -270,36 +270,21 @@ def _line(line: Any) -> dict[str, Any]:
 
 
 def allocate_sized_target(account_uid: Any, sized: SizedAccountTarget) -> FundAllocationResult:
-    """Plan the snapshot against the sized target, then allocate with the plan's digest.
+    """Allocate the snapshot against the sized target in one Markets call.
 
-    A shortfall is not refused: the allocation is written and its deltas recorded. The same sync
-    again writes nothing (``already_applied``). A plan Markets would not apply, such as one with
-    a retired portfolio, fails here.
+    Markets plans the allocation from these inputs and writes it in one transaction, so no
+    separate plan is read first. A shortfall is not refused: the allocation is written and its
+    deltas recorded. The same sync again writes nothing (``already_applied``). A target that
+    names a retired portfolio is refused (``portfolio_retired``) and nothing is written.
     """
-    from alpaca_connectors.markets_api import (
-        allocate_account_virtual_funds,
-        plan_account_virtual_funds,
-    )
+    from alpaca_connectors.markets_api import allocate_account_virtual_funds
 
-    request = {
-        "position_set_uid": sized.position_set_uid,
-        "valuation_time": sized.valuation_time,
-        "sized_targets": sized.sized_targets,
-    }
     try:
-        plan = plan_account_virtual_funds(account_uid, **request)
-        blockers = list(_get(plan, "apply_blockers") or [])
-        if blockers:
-            code = str(_get(blockers[0], "code") or "portfolio_retired")
-            raise FundAllocationError(
-                code if code in MARKETS_REFUSALS else "portfolio_retired",
-                MARKETS_REFUSALS.get(code, MARKETS_REFUSALS["portfolio_retired"]),
-            )
         allocation = allocate_account_virtual_funds(
             account_uid,
-            **request,
-            policy=_get(plan, "policy"),
-            plan_digest=str(_get(plan, "plan_digest")),
+            position_set_uid=sized.position_set_uid,
+            valuation_time=sized.valuation_time,
+            sized_targets=sized.sized_targets,
         )
     except Exception as exc:
         raise markets_refusal(exc) from exc

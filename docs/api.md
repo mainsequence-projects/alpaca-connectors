@@ -62,7 +62,7 @@ before its work finds the Markets API starting as well.
 | Assets | `GET /v1/assets`, `GET /v1/assets/{asset_uid}`, synchronous registration plan/execute, and observable registration operations |
 | Accounts | `GET/POST /v1/accounts`, `POST /v1/accounts/registration/preflight`, `GET/PATCH /v1/accounts/{account_uid}`, refresh, [remove keys and delete](#removing-keys-and-deleting-an-account), and bulk actions; the signed-in person's key requests under `/v1/accounts/key-requests` |
 | Holdings | list/get and capture under `/v1/accounts/{account_uid}/holdings`; `/latest` lists only the newest immutable snapshot; the [account sync](#account-sync) at `POST /v1/accounts/{account_uid}/actions/sync` |
-| Execution | submit (with preflight), sync and cancel order batches, and list recorded orders, under `/v1/accounts/{account_uid}/orders` |
+| Execution | preflight (every pre-trade check, nothing placed), submit, sync and cancel order batches, and list recorded orders, under `/v1/accounts/{account_uid}/orders` |
 | Market Data | configuration CRUD and resolve/update actions under `/v1/market-data/bar-configurations`; dataset list/get and bounded observations under `/v1/market-data/datasets` |
 | Portfolios | an account's signals under `/v1/signal-definitions`, with their weights at `/{uid}/weights`; the account's portfolios that follow them: create at `POST /v1/portfolio-configurations`, list/get/`PATCH`/`DELETE`, and run and JobRun-history actions on the portfolio Job under `/v1/portfolio-configurations`; ADR 0024's routes `POST /v1/portfolio-configurations/provided-weights` and `/{uid}/weights`, supported with their former rules (Hunch uses them); reusable calendar-event policies under `/v1/portfolio-rebalance-configurations` |
 | Operations | poll an accepted Alpaca bars or portfolio JobRun under `GET /v1/operations/job-runs/{job_run_uid}`; read an account sync again at `GET /v1/operations/{operation_uid}` |
@@ -141,19 +141,27 @@ fills with its `holdings_time`, and `orders`, one per request leg, with `client_
 `venue_status` (Alpaca's own), `filled_quantity`, `average_fill_price`, `submitted_at`,
 `updated_at` and `message`.
 
-- **Preflight and submit** run the pre-trade checks: the registration and the Alpaca account are
-  active and tradable, every asset is a registered Alpaca asset that is tradable (and fractionable
-  when the quantity is a fraction), the market is open (or `queue_when_closed` is set, and Alpaca
-  queues the day orders for the next session), and the buys' latest-trade notional net of the
-  sells fits Alpaca's buying power. A failed check is `409` with
+- **Preflight** runs every pre-trade check and places nothing: the registration and the Alpaca
+  account are active and tradable, every asset is a registered Alpaca asset that is tradable (and
+  fractionable when the quantity is a fraction), the market is open (or `queue_when_closed` is
+  set, and Alpaca queues the day orders for the next session), and the buys' latest-trade
+  notional net of the sells fits Alpaca's buying power. Its answer is the bulk-action preflight
+  contract with each failed check in `checks`. Run it at the start of an operation, before
+  anything is submitted.
+- **Submit** does not repeat the preflight. It refuses a batch only for what protects the orders
+  and the ledger, which Alpaca cannot enforce: `account_inactive`, `unknown_asset`,
+  `asset_not_registered` (the ledger rows key to the asset), `duplicate_client_order_id`,
+  `unsupported_order_type`, `unsupported_time_in_force`, `batch_id_in_use`, and keys that open
+  another Alpaca account. The refusal is `409` with
   `{"code", "message", "retryable": false, "checks": [{"code", "message", "client_order_id"}]}`,
-  `code` being the failed check's code or `pre_trade_checks_failed` when several failed. The
-  preflight answer is the bulk-action preflight contract with the same `checks`.
+  `code` being the failed check's code or `pre_trade_checks_failed` when several failed. The rest
+  is Alpaca's to refuse: an order Alpaca refuses comes back `rejected` with Alpaca's reason while
+  the rest of the batch proceeds, and a day order placed while the market is closed is queued for
+  the next session.
 - **Submit** is idempotent on `client_order_id`: an order Alpaca already holds is read back, not
   placed again. Sells go first; with both sells and buys in one batch, the buys wait up to ten
-  seconds for the sells to settle. An order Alpaca refuses at submission comes back `rejected`
-  with Alpaca's reason while the rest of the batch proceeds; `accepted` stays true because the
-  batch was processed.
+  seconds for the sells to settle. `accepted` stays true when Alpaca refuses some orders, because
+  the batch was processed.
 - **Sync** re-reads every order of the batch from Alpaca, updates the ledger and publishes a
   holdings snapshot when it records new fills. **Cancel** asks Alpaca to cancel the open orders
   and re-reads them; Alpaca cancels asynchronously, so an order can still read `submitted` until
@@ -397,7 +405,7 @@ the account's funds ([ADR 0023](adrs/0023_account_sync_sizes_and_allocates_funds
 | --- | --- |
 | `capture_holdings` | Reads Alpaca and publishes the holdings snapshot at time `T` |
 | `size_targets` | Reads the account's latest target and turns each exposure into units: a share of NAV is taken from Alpaca's reported equity, split by the portfolio's latest weights at or before `T`, and divided by Alpaca's latest trade. A whole share is rounded half up unless the asset is fractionable |
-| `allocate_funds` | Plans the snapshot against those units, then allocates with the plan's digest. ms-markets records each owner's target, what it was assigned and the delta |
+| `allocate_funds` | Allocates the snapshot against those units in one Markets call, which plans and writes in one transaction. ms-markets records each owner's target, what it was assigned and the delta |
 
 The registration and the keys are read once and serve both the capture and the latest trades: the
 route reads the registration for its `404` and passes it on. Reads that do not wait for each other

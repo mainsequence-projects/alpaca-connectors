@@ -100,18 +100,13 @@ def test_a_row_that_cannot_be_sized_is_refused(row) -> None:
 # ------------------------------------------------------------------------------------------------
 @pytest.fixture
 def markets(monkeypatch) -> dict[str, Any]:
-    """Recording stand-ins for the three Markets calls, the weights read and the asset read."""
+    """Recording stand-ins for the two Markets calls, the weights read and the asset read."""
     from alpaca_connectors import markets_api
 
-    calls: dict[str, Any] = {"plan": [], "allocate": [], "weights": [], "assets": []}
+    calls: dict[str, Any] = {"allocate": [], "weights": [], "assets": []}
     state: dict[str, Any] = {
         "calls": calls,
         "target": _target(PORTFOLIO_ROW),
-        "plan": SimpleNamespace(
-            policy={"id": "proportional_attribution", "version": "1.0.0", "arguments": {}},
-            plan_digest="sha256:abc",
-            apply_blockers=[],
-        ),
         "allocation": SimpleNamespace(
             applied=True,
             already_applied=False,
@@ -134,10 +129,6 @@ def markets(monkeypatch) -> dict[str, Any]:
             raise state[name]
         return state[name]
 
-    def plan(account_uid: Any, **request: Any) -> Any:
-        calls["plan"].append((account_uid, request))
-        return answer("plan")
-
     def allocate(account_uid: Any, **request: Any) -> Any:
         calls["allocate"].append((account_uid, request))
         return answer("allocation")
@@ -154,7 +145,6 @@ def markets(monkeypatch) -> dict[str, Any]:
         }
 
     monkeypatch.setattr(markets_api, "account_target_positions", lambda uid: answer("target"))
-    monkeypatch.setattr(markets_api, "plan_account_virtual_funds", plan)
     monkeypatch.setattr(markets_api, "allocate_account_virtual_funds", allocate)
     monkeypatch.setattr(allocation, "read_portfolio_weights", weights)
     monkeypatch.setattr(allocation, "read_asset_terms", assets)
@@ -196,24 +186,25 @@ def test_an_account_with_no_target_sizes_nothing(markets, target) -> None:
     assert size_and_allocate(ACCOUNT, valuation_time=WHEN, equity=1.0, price_reader=dict) == (
         allocation.FundAllocationResult()
     )
-    assert markets["calls"]["plan"] == []
+    assert markets["calls"]["allocate"] == []
 
 
 # ------------------------------------------------------------------------------------------------
-# Plan, then allocate
+# Allocate in one call
 # ------------------------------------------------------------------------------------------------
-def test_the_allocation_is_planned_then_written_with_the_plans_digest(markets) -> None:
+def test_the_allocation_is_one_markets_call_with_no_separate_plan(markets) -> None:
     result = allocate_sized_target(ACCOUNT, SIZED)
 
-    request = {
-        "position_set_uid": POSITION_SET,
-        "valuation_time": WHEN,
-        "sized_targets": SIZED.sized_targets,
-    }
-    assert markets["calls"]["plan"] == [(ACCOUNT, request)]
-    # The policy and the digest are the plan's, so a change since the plan is refused.
+    # Markets plans from the same inputs inside the allocation; no plan is read first.
     assert markets["calls"]["allocate"] == [
-        (ACCOUNT, {**request, "policy": markets["plan"].policy, "plan_digest": "sha256:abc"})
+        (
+            ACCOUNT,
+            {
+                "position_set_uid": POSITION_SET,
+                "valuation_time": WHEN,
+                "sized_targets": SIZED.sized_targets,
+            },
+        )
     ]
     assert (result.position_set_uid, result.allocation_applied) == (POSITION_SET, True)
     assert result.lines == [
@@ -236,15 +227,16 @@ def test_the_same_sync_again_is_a_success_that_wrote_nothing(markets) -> None:
     assert allocate_sized_target(ACCOUNT, SIZED).allocation_applied is False
 
 
-def test_a_retired_portfolio_stops_before_the_write(markets) -> None:
-    markets["plan"].apply_blockers = [{"code": "portfolio_retired", "portfolio_uid": "secret"}]
+def test_a_retired_portfolio_is_refused_without_naming_it(markets) -> None:
+    markets["allocation"] = RuntimeError(
+        "409 {'code': 'portfolio_retired', 'detail': 'names a retired portfolio: secret'}"
+    )
 
     with pytest.raises(FundAllocationError) as refused:
         allocate_sized_target(ACCOUNT, SIZED)
 
     assert refused.value.code == "portfolio_retired"
     assert "secret" not in str(refused.value)
-    assert markets["calls"]["allocate"] == []
 
 
 @pytest.mark.parametrize(
@@ -313,7 +305,7 @@ def test_asset_terms_are_one_details_read_and_one_price_read(monkeypatch) -> Non
     }
 
 
-def test_the_three_markets_calls_go_through_the_process_backend(monkeypatch) -> None:
+def test_the_two_markets_calls_go_through_the_process_backend(monkeypatch) -> None:
     from msm.api import remote
 
     from alpaca_connectors import markets_api
@@ -321,7 +313,6 @@ def test_the_three_markets_calls_go_through_the_process_backend(monkeypatch) -> 
     calls: list[Any] = []
     client = SimpleNamespace(
         account_target_positions=lambda uid: calls.append(("target", uid)) or "target",
-        plan_account_virtual_funds=lambda uid, **kw: calls.append(("plan", uid, kw)) or "plan",
         allocate_account_virtual_funds=lambda uid, **kw: (
             calls.append(("allocate", uid, kw)) or "allocation"
         ),
@@ -330,15 +321,5 @@ def test_the_three_markets_calls_go_through_the_process_backend(monkeypatch) -> 
     request = {"position_set_uid": POSITION_SET, "valuation_time": WHEN, "sized_targets": []}
 
     assert markets_api.account_target_positions(ACCOUNT) == "target"
-    assert markets_api.plan_account_virtual_funds(ACCOUNT, **request) == "plan"
-    assert (
-        markets_api.allocate_account_virtual_funds(
-            ACCOUNT, **request, policy="policy", plan_digest="digest"
-        )
-        == "allocation"
-    )
-    assert calls == [
-        ("target", ACCOUNT),
-        ("plan", ACCOUNT, request),
-        ("allocate", ACCOUNT, {**request, "policy": "policy", "plan_digest": "digest"}),
-    ]
+    assert markets_api.allocate_account_virtual_funds(ACCOUNT, **request) == "allocation"
+    assert calls == [("target", ACCOUNT), ("allocate", ACCOUNT, request)]

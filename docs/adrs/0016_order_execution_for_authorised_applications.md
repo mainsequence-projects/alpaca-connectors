@@ -10,6 +10,10 @@ of ADR 0015 stands.
 Amended on 2026-11-16 by [ADR 0024](0024_portfolios_from_provided_weights.md): a provided-weights
 portfolio has an owner, and only it changes the portfolio.
 
+Amended on 2026-11-23: preflight and submit no longer run the same checks (decision 3). The
+preflight reports every check before anything is placed. Submit runs only those that protect what
+it places and records, which Alpaca cannot enforce, and leaves the rest to Alpaca.
+
 ## Context
 
 Until now the connector was read-only toward Alpaca: it registered accounts, captured holdings and
@@ -57,18 +61,32 @@ already exist here; order placement is the missing step of the same account work
    `ALPACA::<uuid>` identifier; the order is placed under Alpaca's current symbol. No credential,
    Secret name or Alpaca client leaves `alpaca_connectors`.
 
-3. **Pre-trade checks refuse a batch as a structured `409`** before any order is placed:
-   `account_inactive`, `account_not_tradable` (Alpaca status, trading blocked, account blocked,
-   trading suspended), `unknown_asset`, `asset_not_registered`, `asset_not_tradable`,
-   `fractional_quantity_not_allowed`, `market_closed` (unless the caller sets
-   `queue_when_closed`, which lets Alpaca queue the day orders for the next session),
-   `insufficient_buying_power` (the buys' latest-trade notional net of the sells against Alpaca's
-   `buying_power`, skipped with a warning when a price is unavailable), `duplicate_client_order_id`,
-   `unsupported_order_type`, `unsupported_time_in_force`, `batch_id_in_use`. The error body is
-   `{code, message, retryable: false, checks: [{code, message, client_order_id?}]}`; `code` is the
-   one failed check's code, or `pre_trade_checks_failed` when several failed. Alpaca remains the
-   authority: an order it refuses at submission is returned as `rejected` with its reason, and the
-   rest of the batch proceeds.
+3. **The preflight reports every check; submit runs only its own** (amended 2026-11-23). The
+   two routes do not repeat each other's work. The preflight is the one to call at the start of
+   an operation: it places nothing and answers every failed check. Submit refuses a batch only
+   for what protects the orders it places and the ledger it writes, which Alpaca cannot enforce.
+   It leaves the rest to Alpaca, which refuses each order it won't take.
+
+   | Check | Preflight | Submit | Why submit runs it, or who enforces it |
+   | --- | --- | --- | --- |
+   | `duplicate_client_order_id` | yes | yes | Each order is placed and read back by its `client_order_id` |
+   | `unsupported_order_type`, `unsupported_time_in_force` | yes | yes | Only market day orders are placed |
+   | `batch_id_in_use` | yes | yes | The ledger row of another account's batch would take these orders |
+   | `account_inactive` | yes | yes | This connector's registration state; Alpaca doesn't know it |
+   | Keys open the registered Alpaca account | yes | yes | Orders would go to another account (raised as an error, not a check) |
+   | `unknown_asset` | yes | yes | The live Alpaca asset names the symbol the order is placed under |
+   | `asset_not_registered` | yes | yes | The `OrdersTS` and `TradesTS` rows key to the registered asset |
+   | `account_not_tradable` (status, trading blocked, account blocked, trading suspended) | yes | no | Alpaca refuses each order |
+   | `asset_not_tradable` | yes | no | Alpaca refuses the order |
+   | `fractional_quantity_not_allowed` | yes | no | Alpaca refuses the order |
+   | `market_closed` (unless `queue_when_closed`) | yes | no | Alpaca queues a day order placed while the market is closed |
+   | `insufficient_buying_power` (the buys' latest-trade notional net of the sells, skipped with a warning when a price is unavailable) | yes | no | Alpaca refuses the order |
+
+   A failed check is a `409` with `{code, message, retryable: false, checks: [{code, message,
+   client_order_id?}]}` from submit, and the same `checks` in the preflight's answer; `code` is
+   the one failed check's code, or `pre_trade_checks_failed` when several failed. Alpaca remains
+   the authority: an order it refuses at submission is returned as `rejected` with its reason,
+   and the rest of the batch proceeds.
 
 4. **Idempotency and order.** A `client_order_id` Alpaca already holds is read back, never placed
    again, so a retried submission cannot double a trade. Sells are placed before buys; when a
@@ -107,16 +125,19 @@ already exist here; order placement is the missing step of the same account work
   that asserted "no trading" now describe this boundary: the API executes for applications, the
   Agent does not.
 - Hunch needs no change to use the capability beyond setting `HUNCH_ALPACA_CONNECTOR_URL` and
-  declaring `user` on this release; its client already consumes these routes. Hunch should decide
-  whether to send `queue_when_closed` for approvals outside market hours, since the default
-  refuses them with `market_closed`.
+  declaring `user` on this release; its client already consumes these routes. Hunch runs the
+  preflight when it wants a batch refused before anything is placed: since 2026-11-23 submit
+  leaves the account's status, the assets' tradability and fractions, the buying power and the
+  market hours to Alpaca. In particular, submit places a batch while the market is closed and
+  Alpaca queues it for the next session, whatever `queue_when_closed` says; only the preflight
+  refuses an unqueued batch on a closed market (`market_closed`).
 - Market day orders only. Limit orders, notional orders and extended hours are not offered; a
   request for them is a `422`.
 - The ms-markets deployment must have migrated the execution tables (`OrderManager`, `OrdersTS`,
   `TradesTS`), which ms-markets 2.2.x does; the schema gate already waits for the ms-markets
   deployment to reach the version this image pins.
-- The buying-power check needs Alpaca's data API for the latest trade prices; without it the
-  check is skipped with a warning and Alpaca decides.
+- The preflight's buying-power check needs Alpaca's data API for the latest trade prices; without
+  it the check is skipped with a warning and Alpaca decides.
 - Tests cover a paper-account submit, sync and cancel round trip against a fake Alpaca trading
   client and an in-memory ledger that validates every frame against the ms-markets `OrdersTS` and
   `TradesTS` storage contracts (`tests/test_execution.py`, `tests/test_orders_api.py`).

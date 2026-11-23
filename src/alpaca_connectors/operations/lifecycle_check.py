@@ -567,6 +567,24 @@ class Lifecycle:
             deltas[symbol] = deltas.get(symbol, 0.0) + line["delta"]
         return deltas
 
+    def excess(self, operation: dict[str, Any]) -> dict[str, float]:
+        """Units of the run's symbols that no fund takes, to sell: the direct lines' negative
+        deltas, on long positions only and never more than is held.
+
+        A fund is assigned at most its target (``proportional_attribution``), so a lower exposure
+        leaves the units above it on the account's direct line, not as a negative fund delta.
+        """
+        held = self.alpaca.positions()
+        symbol_by_identifier = {i: s for s, i in self.state["identifiers"].items()}
+        excess: dict[str, float] = {}
+        for line in operation["result"]["lines"]:
+            symbol = symbol_by_identifier.get(line["asset_identifier"])
+            if line["owner"] != "direct" or symbol is None or line["delta"] >= 0:
+                continue
+            if held.get(symbol, 0.0) > 0:
+                excess[symbol] = max(excess.get(symbol, 0.0) + line["delta"], -held[symbol])
+        return excess
+
     def trade(self, quantities: dict[str, float]) -> dict[str, Any] | None:
         """Trade signed quantities per symbol in one batch; the filled batch, or None.
 
@@ -596,6 +614,7 @@ class Lifecycle:
         }
         base = f"/v1/accounts/{self.state['account_uid']}/orders/actions"
         if not market_open:
+            # The market hours are the preflight's to report; submit leaves them to Alpaca.
             refused = ok(
                 self.api.post(
                     f"{base}/submit/preflight",
@@ -608,10 +627,6 @@ class Lifecycle:
                 "market_closed" in {c["code"] for c in refused["checks"]},
                 "The refusal does not name the closed market.",
             )
-        preflight = ok(self.api.post(f"{base}/submit/preflight", json=batch))
-        check(
-            preflight["allowed"], f"Pre-trade checks refused the batch: {preflight.get('blockers')}"
-        )
         ids = {order["client_order_id"] for order in orders}
         self.order_ids |= ids
         try:
@@ -918,9 +933,22 @@ class Lifecycle:
                 abs(line["delta"]) <= SIZING_TOLERANCE * line["target"] + UNITS,
                 f"{portfolio} {symbol}: delta {line['delta']} of target {line['target']}",
             )
+        # Both funds hold NVDA. A fund is assigned at most its target, and this sync sizes the
+        # targets again at its own prices, so the funds hold everything up to their combined
+        # target and the rest, if any, is on the direct line.
         held = self.alpaca.positions()["NVDA"]
-        shared = lines[(PORTFOLIO_1, "NVDA")]["assigned"] + lines[(PORTFOLIO_2, "NVDA")]["assigned"]
-        check(math.isclose(shared, held, rel_tol=1e-6), "NVDA is not split between both funds.")
+        first, second = lines[(PORTFOLIO_1, "NVDA")], lines[(PORTFOLIO_2, "NVDA")]
+        shared = first["assigned"] + second["assigned"]
+        expected = min(held, first["target"] + second["target"])
+        check(
+            first["assigned"] > 0 and second["assigned"] > 0,
+            "NVDA is not split between both funds.",
+        )
+        check(
+            math.isclose(shared, expected, rel_tol=1e-6, abs_tol=UNITS),
+            f"The funds hold {shared} NVDA of {held} held, against targets of "
+            f"{first['target']} and {second['target']}.",
+        )
         self.state["funded"] = True
 
     def no_weights(self) -> None:
@@ -984,24 +1012,36 @@ class Lifecycle:
                 ),
                 f"{PORTFOLIO_1} {symbol}: sized wrong after the reweight.",
             )
+        excess = self.excess(operation)
         if self.state.get("funded"):
             nvda = lines[(PORTFOLIO_1, "NVDA")]
             check(
-                nvda["delta"] < 0,
-                "Less NVDA is not sold down: target {target}, assigned {assigned}, delta "
-                "{delta}.".format(**nvda),
+                nvda["assigned"] <= nvda["target"] + UNITS,
+                "A fund holds more NVDA than its lower target: target {target}, assigned "
+                "{assigned}.".format(**nvda),
             )
-        batch = self.trade(self.deltas(operation))
+            check(
+                excess.get("NVDA", 0.0) < 0,
+                f"The NVDA above the lower exposure is not on the direct line to sell: {excess}",
+            )
+        quantities = self.deltas(operation)
+        for symbol, quantity in excess.items():
+            quantities[symbol] = quantities.get(symbol, 0.0) + quantity
+        batch = self.trade(quantities)
         if batch is None:
             return
-        after = self.fund_lines(self.sync())
-        for (_, symbol), line in after.items():
+        operation = self.sync()
+        for (_, symbol), line in self.fund_lines(operation).items():
             if symbol in batch["refused_symbols"]:
                 continue
             check(
                 abs(line["delta"]) <= SIZING_TOLERANCE * line["target"] + UNITS,
                 f"{symbol}: still a delta of {line['delta']} after the trade.",
             )
+        left = {
+            s: q for s, q in self.excess(operation).items() if s not in batch["refused_symbols"]
+        }
+        check(all(abs(q) <= UNITS for q in left.values()), f"Still held above target: {left}")
 
     def portfolio_jobs(self) -> None:
         """Three portfolios share the price and rebalance-state tables; each records its own run.

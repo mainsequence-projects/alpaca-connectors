@@ -81,7 +81,8 @@ Execution places batches of market orders on a registered account for authorised
 
 - batches keyed by the caller's `batch_id`, orders by the caller's `client_order_id`
 - market day orders, whole shares or fractions where Alpaca allows them
-- pre-trade checks reported as structured `409` errors
+- a preflight that reports every pre-trade check without placing anything, and a submit that
+  refuses (`409`) only for what protects its orders and the ledger, leaving the rest to Alpaca
 - the ms-markets execution ledger: `OrderManager`, `OrdersTS`, `TradesTS`
 - a holdings snapshot after fills
 

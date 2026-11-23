@@ -135,3 +135,29 @@ def test_the_paper_keys_come_from_the_two_secrets_and_never_print() -> None:
     assert [call.kwargs["name"] for call in read.call_args_list] == list(values)
     assert (keys.api_key, keys.secret_key) == ("paper-key-value", "paper-secret")
     assert "paper-key-value" not in repr(keys) and "paper-secret" not in repr(keys)
+
+
+def test_the_units_no_fund_takes_are_sold_only_from_long_positions() -> None:
+    # A fund is assigned at most its target, so a lower exposure leaves the units above it on the
+    # account's direct line. Only those of the run's symbols, held long, are sold, never more than
+    # is held; a short and another symbol's line are left alone.
+    lifecycle = Lifecycle(None, None, None, Clock(), PaperKeys("k", "s"), deployed=True)
+    lifecycle.alpaca = SimpleNamespace(positions=lambda: {"NVDA": 30.0, "AAPL": -2.0, "JPM": 1.0})
+    lifecycle.state = {"identifiers": {"NVDA": "N", "AAPL": "A", "JPM": "J"}}
+
+    def line(owner: str, identifier: str, delta: float) -> dict:
+        return {"owner": owner, "asset_identifier": identifier, "delta": delta}
+
+    operation = {
+        "result": {
+            "lines": [
+                line("fund", "N", 0.0),
+                line("direct", "N", -12.5),
+                line("direct", "A", -2.0),
+                line("direct", "J", -4.0),
+                line("direct", "CASH", -1000.0),
+            ]
+        }
+    }
+
+    assert lifecycle.excess(operation) == {"NVDA": -12.5, "JPM": -1.0}

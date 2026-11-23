@@ -6,8 +6,8 @@ remote row backend (``alpaca_connectors.runtime.use_markets_api``; ms-markets AD
 helpers keep those reads set-based: a request carries at most ``MARKETS_BATCH_SIZE`` keys, and a
 collection is read in pages of that size, never one call per row. Composite routes go through
 the same client: ``register_account`` (ms-markets ADR 0051); for the sync that sizes and
-allocates an account's target (ADR 0023, ms-markets ADR 0054), ``account_target_positions``,
-``plan_account_virtual_funds`` and ``allocate_account_virtual_funds``; ``retire_portfolios``
+allocates an account's target (ADR 0023, ms-markets ADR 0054), ``account_target_positions``
+and ``allocate_account_virtual_funds``; ``retire_portfolios``
 (ms-markets ADR 0049), which ends a portfolio its owner deletes (ADR 0024, ADR 0027); and the
 calls of an account delete and a signal delete (ADR 0028): ``current_target_account_uids``,
 ``clear_account_target``, ``account_delete_preflight``, ``delete_account``,
@@ -166,41 +166,18 @@ def account_target_positions(account_uid: Any) -> Any:
     return use_markets_api().client.account_target_positions(account_uid)
 
 
-def plan_account_virtual_funds(
-    account_uid: Any,
-    *,
-    position_set_uid: Any,
-    valuation_time: Any,
-    sized_targets: Sequence[Mapping[str, Any]],
-) -> Any:
-    """Plan the allocation of the holdings snapshot at ``valuation_time``; writes nothing.
-
-    ``sized_targets`` gives every exposure of the ``PositionSet`` in units. No price is sent. The
-    default policy runs, and the answer names the version it ran with.
-    """
-    from alpaca_connectors.runtime import use_markets_api
-
-    return use_markets_api().client.plan_account_virtual_funds(
-        account_uid,
-        position_set_uid=position_set_uid,
-        valuation_time=valuation_time,
-        sized_targets=list(sized_targets),
-    )
-
-
 def allocate_account_virtual_funds(
     account_uid: Any,
     *,
     position_set_uid: Any,
     valuation_time: Any,
     sized_targets: Sequence[Mapping[str, Any]],
-    policy: Any,
-    plan_digest: str,
 ) -> Any:
-    """Write the allocation a plan described (``allocateAccountVirtualFunds``).
+    """Plan and write the allocation of the holdings snapshot at ``valuation_time`` in one call
+    (``allocateAccountVirtualFunds``).
 
-    ``policy`` and ``plan_digest`` are the plan's, so Markets refuses the write when the target,
-    its sizing, the holdings or the policy changed since that plan.
+    ``sized_targets`` gives every exposure of the ``PositionSet`` in units. No price is sent. The
+    default policy runs; Markets plans from these inputs and writes in one transaction.
     """
     from alpaca_connectors.runtime import use_markets_api
 
@@ -209,8 +186,6 @@ def allocate_account_virtual_funds(
         position_set_uid=position_set_uid,
         valuation_time=valuation_time,
         sized_targets=list(sized_targets),
-        policy=policy,
-        plan_digest=plan_digest,
     )
 
 
@@ -824,7 +799,6 @@ __all__ = [
     "end_signals",
     "latest_signal_observations",
     "openfigi_details_by_asset_uid",
-    "plan_account_virtual_funds",
     "portfolio_delete_blockers",
     "portfolio_values",
     "portfolio_weights_as_of",

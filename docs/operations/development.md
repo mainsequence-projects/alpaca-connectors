@@ -106,9 +106,9 @@ runs, the weights publishes, and the Markets portfolios' upserts and deletes.
 | 4 Exposure | A share of NAV in each portfolio, 30% and 20% (a target states no amount since ms-markets 5.3.0); the write creates the funds |
 | 5 Sync | Each exposure is sized into units and the snapshot is allocated |
 | 6 Assignment | Per asset, the lines add up to what the account holds |
-| 7 Rebalance | The deltas are traded; the fills are allocated and NVDA is split between the funds. With the market closed the orders are queued, checked as accepted and cancelled |
+| 7 Rebalance | The deltas are submitted (no preflight: submit refuses what protects its orders, Alpaca the rest); the fills are allocated and NVDA is split between the funds, which hold it up to their combined target, sized again at the sync's prices. With the market closed the preflight must refuse an unqueued batch (`market_closed`), and the orders are then queued, checked as accepted and cancelled |
 | 8 No weights | A portfolio with no weights fails the sizing and the snapshot stays |
-| 9 Reweight | New weights and a lower exposure are sized again and traded |
+| 9 Reweight | New weights and a lower exposure are sized again and traded. A fund is assigned at most its target, so the NVDA above the lower exposure is on the account's direct line; the stage sells it with the funds' deltas, and after the trade nothing of the run's symbols is held above target |
 | 10 Portfolio Job | Three portfolios of the account on the immediate-signal rebalance, two first observed at one time and one three sessions earlier, are created together and run by the portfolio Job together, as the dispatcher starts every scheduled portfolio's run; each records weights and values from the close of its own first observation's session. Locally the three runs are its launcher in three processes; against a release, the API starts the deployed Job three times and the stage polls the three runs |
 | Cleanup after | This run's open orders are cancelled; the three symbols are traded back to the positions the run started with (only while the market is open); the target is cleared; the account is deleted with its confirmation, and its portfolios with it; the rebalance configuration and the three portfolios are deleted |
 

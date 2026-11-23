@@ -7,6 +7,12 @@ one ``TradesTS`` row per filled order. ``OrderEventsTS`` is not written, because
 contract is defective in ms-markets 2.2.12. After fills, a holdings snapshot is published through
 the existing capture.
 
+The preflight and submit do not repeat each other (ADR 0016, decision 3). The preflight runs every
+pre-trade check and places nothing. Submit runs only the checks that protect what it places and
+records, which Alpaca cannot enforce (``_check_batch`` without ``venue_rules``), and leaves the
+account's status, the assets' tradability and fractions, the market hours and the buying power to
+Alpaca.
+
 Every provider and runtime collaborator is injectable through :class:`ExecutionDependencies`, so
 the whole flow runs in tests against a fake Alpaca client and an in-memory ledger. The Alpaca
 Agent has no tool over this module (ADR 0016): it is an HTTP capability for applications.
@@ -482,10 +488,16 @@ def _validate_legs(submission: OrderBatchSubmission) -> list[PreTradeCheck]:
     return checks
 
 
-def _account_checks(registration: dict[str, Any], account: Any) -> list[PreTradeCheck]:
-    checks: list[PreTradeCheck] = []
+def _registration_checks(registration: dict[str, Any]) -> list[PreTradeCheck]:
+    """This connector's own rule on the account, which Alpaca cannot enforce."""
     if not bool(registration.get("account_is_active", True)):
-        checks.append(PreTradeCheck("account_inactive", "The account registration is not active."))
+        return [PreTradeCheck("account_inactive", "The account registration is not active.")]
+    return []
+
+
+def _account_checks(account: Any) -> list[PreTradeCheck]:
+    """What Alpaca refuses an order for on the account's own state."""
+    checks: list[PreTradeCheck] = []
     status = (_enum_str(getattr(account, "status", None)) or "").upper()
     if status != "ACTIVE":
         checks.append(
@@ -524,9 +536,15 @@ def _readable_identifiers(submission: OrderBatchSubmission) -> dict[str, uuid.UU
 
 
 def _resolve_assets(
-    deps: ExecutionDependencies, submission: OrderBatchSubmission, registered: Any = None
+    deps: ExecutionDependencies,
+    submission: OrderBatchSubmission,
+    registered: Any = None,
+    *,
+    venue_rules: bool = True,
 ) -> tuple[list[OrderRecord], list[PreTradeCheck], list[str]]:
-    """Resolve each leg's canonical identifier to the live Alpaca asset and check it is tradable.
+    """Resolve each leg's canonical identifier to the live Alpaca asset, which names the symbol
+    the order is placed under, and check the asset is registered here; with ``venue_rules``,
+    also that Alpaca would trade it (tradable, fractionable for a fraction).
 
     The registered set is one markets query, ``registered`` when the caller read it already (as a
     ``_settled`` answer). Alpaca offers no batched asset lookup by id, so the live state is one
@@ -587,6 +605,9 @@ def _resolve_assets(
             )
         record.venue_symbol = venue_symbol
         record.alpaca_asset_id = str(asset_id)
+        if not venue_rules:
+            records.append(record)
+            continue
         tradable = bool(getattr(asset, "tradable", False))
         asset_status = (_enum_str(getattr(asset, "status", None)) or "active").lower()
         if not tradable or asset_status != "active":
@@ -692,22 +713,38 @@ def _check_batch(
     registration: dict[str, Any],
     submission: OrderBatchSubmission,
     registered: Any = None,
+    *,
+    venue_rules: bool = True,
 ) -> tuple[list[OrderRecord], list[PreTradeCheck], list[str]]:
-    """Every pre-trade check. The Alpaca account, the assets and the clock are read together
-    (issue #46); a failed read raises in that order. The buying power waits for the account and
-    the assets' venue symbols."""
+    """The checks of a batch.
+
+    Without ``venue_rules`` they are submit's: the request, the Alpaca account the keys open, the
+    registration's own state, and each asset's identity at Alpaca and registration here. They
+    protect what submit places and records, and Alpaca cannot enforce them. ``venue_rules`` adds
+    what Alpaca refuses an order for on its own, for the preflight to report before anything is
+    placed: the account's status, each asset's tradability and fractions, the market hours and
+    the buying power. Submit leaves those to Alpaca, which answers each order it refuses.
+
+    The Alpaca account, the assets and the clock are read together (issue #46); a failed read
+    raises in that order. The buying power waits for the account and the assets' venue symbols.
+    """
     from alpaca_connectors.markets_api import all_together
 
     checks = _validate_legs(submission)
-    account, (records, asset_checks, warnings), hours_checks = all_together(
+    reads = [
         lambda: _read_account(deps, registration),
-        lambda: _resolve_assets(deps, submission, registered),
-        lambda: _market_hours_check(deps, submission),
-    )
-    checks.extend(_account_checks(registration, account))
+        lambda: _resolve_assets(deps, submission, registered, venue_rules=venue_rules),
+    ]
+    if venue_rules:
+        reads.append(lambda: _market_hours_check(deps, submission))
+    account, (records, asset_checks, warnings), *hours_checks = all_together(*reads)
+    checks.extend(_registration_checks(registration))
+    if venue_rules:
+        checks.extend(_account_checks(account))
     checks.extend(asset_checks)
-    checks.extend(hours_checks)
-    if not checks:
+    for found in hours_checks:
+        checks.extend(found)
+    if venue_rules and not checks:
         power_checks, power_warnings = _buying_power_check(deps, account, records)
         checks.extend(power_checks)
         warnings.extend(power_warnings)
@@ -1019,7 +1056,12 @@ def submit_order_batch(
     *,
     deps: ExecutionDependencies | None = None,
 ) -> OrderBatchResult:
-    """Place a batch of market orders on the account after the pre-trade checks pass.
+    """Place a batch of market orders on the account.
+
+    Submit runs only the checks that protect what it places and records (``_check_batch`` without
+    ``venue_rules``); what Alpaca refuses on its own is the preflight's to report, and an order
+    Alpaca refuses at submission comes back ``rejected`` with Alpaca's reason. Alpaca decides the
+    market hours: a day order placed while the market is closed is queued for the next session.
 
     Idempotent on ``client_order_id``: an order Alpaca already holds under that identifier is
     read back instead of placed again, so a retried submission never doubles a trade. Sells are
@@ -1036,7 +1078,9 @@ def submit_order_batch(
         raise PreTradeCheckError(
             [PreTradeCheck("batch_id_in_use", "The batch_id already belongs to another account.")]
         )
-    records, checks, warnings = _check_batch(deps, registration, submission, registered)
+    records, checks, warnings = _check_batch(
+        deps, registration, submission, registered, venue_rules=False
+    )
     if checks:
         raise PreTradeCheckError(checks)
     now = deps.now()
