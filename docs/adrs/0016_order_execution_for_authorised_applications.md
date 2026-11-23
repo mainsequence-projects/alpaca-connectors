@@ -14,6 +14,11 @@ Amended on 2026-11-23: preflight and submit no longer run the same checks (decis
 preflight reports every check before anything is placed. Submit runs only those that protect what
 it places and records, which Alpaca cannot enforce, and leaves the rest to Alpaca.
 
+Amended on 2026-11-23 for ms-markets 6.0.0 (its ADR 0064): every order has its own Markets
+`Order` row, written with its batch, and the orders' states and fills are written in one
+transaction with no updater run (decision 5). Revision `0036` re-keys this application's
+instances.
+
 ## Context
 
 Until now the connector was read-only toward Alpaca: it registered accounts, captured holdings and
@@ -102,6 +107,18 @@ already exist here; order placement is the missing step of the same account work
    ms-markets 2.2.12. The runtime attaches `OrderManagerTable`, `OrdersStorage` and
    `TradesStorage` (`account_runtime_models`); they stay ms-markets tables, migrated by the
    ms-markets deployment, never by this project's provider.
+
+   *Amended 2026-11-23 (ms-markets 6.0.0, its ADR 0064).* Each order has a Markets `Order` row:
+   its uid, account, asset, batch and the terms it was placed with. The uid is minted when the
+   order is first placed and kept on the batch's record of it, so a retried submission names
+   the same order; an order recorded before 6.0.0 has the uid revision `0036` gave it,
+   `order_uid_for_identifier(client_order_id)`. A submit writes the batch with its `Order` rows
+   in one `OrderManager.create_batch` call. The `OrdersTS` state row and the `TradesTS` fill
+   name the order by its uid; `write_execution` writes them in one transaction, with no update
+   execution, into this application's instances of `OrdersTS`, `OrderEventsTS` and `TradesTS`.
+   Those instances are migrated by this application's provider (ms-markets ADR 0047; revisions
+   `0020` and `0036`). No order event is written: the state row carries the order's status. A
+   row Markets does not write fails the request, as a failed updater run did.
 
 6. **A holdings snapshot follows fills.** Whenever a submit or sync records a fill quantity the
    batch did not have before, the existing holdings capture publishes a snapshot; its UID is

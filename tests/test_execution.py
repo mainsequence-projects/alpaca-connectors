@@ -1,8 +1,9 @@
 """Order execution on a registered paper account against a fake Alpaca client (ADR 0016).
 
 The fake client behaves like ``alpaca.trading.client.TradingClient`` for the calls the execution
-makes; the fake ledger keeps the ``OrderManager`` rows in memory and validates every ``OrdersTS``
-and ``TradesTS`` frame against the real ms-markets storage contracts.
+makes; the fake ledger keeps the ``OrderManager`` and ``Order`` rows in memory and validates each
+order as ``create_batch`` takes it, and every ``OrdersTS`` and ``TradesTS`` row as
+``write_execution`` does, against the real ms-markets contracts (ms-markets ADR 0064).
 """
 
 from __future__ import annotations
@@ -14,10 +15,12 @@ from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
 
-import pandas as pd
 import pytest
 from alpaca.common.exceptions import APIError
-from msm.time_index.execution import Orders, Trades
+from msm.api.execution import OrderCreate
+from msm.time_index.execution import OrderExecution
+from msm.time_index.execution.storage import OrdersStorage, TradesStorage
+from msm.time_index.execution.writes import normalize_execution_row
 
 from alpaca_connectors.account.credentials import AlpacaCredentialsRejectedError
 from alpaca_connectors.execution import (
@@ -190,14 +193,19 @@ class FakeTradingClient:
 
 
 class FakeLedger:
-    """In-memory ``OrderManager`` rows; every frame is validated against the storage contract."""
+    """In-memory ``OrderManager`` and ``Order`` rows, and the rows ``write_execution`` upserts."""
 
     def __init__(self, registered: set[str] | None = None):
         self.batches: dict[str, SimpleNamespace] = {}
+        # Order rows by uid; an order sent again is left as it is.
+        self.orders: dict[uuid.UUID, dict[str, Any]] = {}
+        # OrdersTS rows upserted on (order_time, order_uid), TradesTS on (trade_time,
+        # trade_identifier).
         self.order_rows: list[dict[str, Any]] = []
         self.trade_rows: list[dict[str, Any]] = []
         self.registered = registered if registered is not None else {AAPL, MSFT, ZZZ}
         self.cash_ensured = 0
+        self.execution_writes = 0
 
     def get_batch(self, batch_id):
         return self.batches.get(batch_id)
@@ -207,17 +215,23 @@ class FakeLedger:
             row for row in self.batches.values() if str(row.target_account_uid) == str(account_uid)
         ][:limit]
 
-    def create_batch(self, *, batch_id, account_uid, target_time, status, metadata):
-        row = SimpleNamespace(
-            uid=uuid.uuid4(),
-            unique_identifier=batch_id,
-            target_account_uid=account_uid,
-            target_time=target_time,
-            status=status,
-            execution_end=None,
-            metadata_json=metadata,
-        )
-        self.batches[batch_id] = row
+    def create_batch(
+        self, *, batch_id, account_uid, target_time, status, metadata, received_time=None, orders=()
+    ):
+        for order in orders:
+            created = OrderCreate.model_validate(order).model_dump()
+            self.orders.setdefault(
+                created["uid"], {**created, "order_manager_identifier": batch_id}
+            )
+        row = self.batches.get(batch_id)
+        if row is None:
+            row = SimpleNamespace(uid=uuid.uuid4(), unique_identifier=batch_id, execution_end=None)
+            self.batches[batch_id] = row
+        row.target_account_uid = account_uid
+        row.target_time = target_time
+        row.order_received_time = received_time or target_time
+        row.status = status
+        row.metadata_json = metadata
         return row
 
     def update_batch(self, batch_uid, **values):
@@ -232,13 +246,52 @@ class FakeLedger:
         self.cash_ensured += 1
         return "USD"
 
-    def write_orders(self, rows):
-        Orders.validate_execution_frame(pd.DataFrame(rows))
-        self.order_rows.extend(rows)
+    def write_execution(self, entries):
+        self.execution_writes += 1
+        for entry in entries:
+            execution = OrderExecution.model_validate(entry)
+            order = execution.order
+            # The keys into Order: the order exists, with this account and asset.
+            stored = self.orders[order.uid]
+            assert (stored["account_identifier"], stored["asset_identifier"]) == (
+                order.account_identifier,
+                order.asset_identifier,
+            )
+            for state in execution.states:
+                row = normalize_execution_row(
+                    OrdersStorage, state, inherited={"order_uid": order.uid}
+                )
+                _upsert(self.order_rows, row, ("order_time", "order_uid"))
+            for trade in execution.trades:
+                row = normalize_execution_row(
+                    TradesStorage,
+                    trade,
+                    inherited={
+                        "order_uid": order.uid,
+                        "account_identifier": order.account_identifier,
+                        "asset_identifier": order.asset_identifier,
+                    },
+                )
+                _upsert(self.trade_rows, row, ("trade_time", "trade_identifier"))
 
-    def write_trades(self, rows):
-        Trades.validate_execution_frame(pd.DataFrame(rows))
-        self.trade_rows.extend(rows)
+    def order(self, client_order_id):
+        """The Order row of ``client_order_id``."""
+        [order] = [o for o in self.orders.values() if o["client_order_id"] == client_order_id]
+        return order
+
+    def state(self, client_order_id):
+        """The OrdersTS row of ``client_order_id``."""
+        uid = self.order(client_order_id)["uid"]
+        [row] = [row for row in self.order_rows if row["order_uid"] == uid]
+        return row
+
+
+def _upsert(rows: list[dict[str, Any]], row: dict[str, Any], key: tuple[str, ...]) -> None:
+    for position, stored in enumerate(rows):
+        if all(stored[name] == row[name] for name in key):
+            rows[position] = row
+            return
+    rows.append(row)
 
 
 class Harness:
@@ -316,21 +369,23 @@ def test_submit_and_sync_round_trip_on_a_paper_account(registration) -> None:
     assert result.status == "partially_filled"
     assert harness.client.orders["c-sell"].requested_qty == 2.0
     assert harness.client.orders["c-buy"].requested_qty == 1.5
-    # The ledger: one batch, one OrdersTS row per order, one TradesTS row for the fill.
+    # The ledger: one batch with an Order row per order, one OrdersTS row per order, one
+    # TradesTS row for the fill, in one write.
     batch = harness.ledger.batches["HUNCH_BATCH__1"]
     assert str(batch.target_account_uid) == ACCOUNT_UID and batch.status == "partially_filled"
     assert batch.execution_end is None
-    assert {row["order_identifier"] for row in harness.ledger.order_rows} == {"c-buy", "c-sell"}
-    assert all(
-        row["order_manager_identifier"] == "HUNCH_BATCH__1" for row in harness.ledger.order_rows
-    )
-    assert all(
-        row["account_identifier"] == "PA3ABC__ALPACA_PAPER" for row in harness.ledger.order_rows
-    )
-    sell_row = next(row for row in harness.ledger.order_rows if row["order_identifier"] == "c-sell")
-    assert sell_row["order_side"] == -1 and sell_row["filled_price"] == 401.0
-    assert [row["trade_identifier"] for row in harness.ledger.trade_rows] == ["c-sell:fill"]
-    assert harness.ledger.trade_rows[0]["settlement_asset_identifier"] == "USD"
+    orders = harness.ledger.orders.values()
+    assert {order["client_order_id"] for order in orders} == {"c-buy", "c-sell"}
+    assert all(order["order_manager_identifier"] == "HUNCH_BATCH__1" for order in orders)
+    assert all(order["account_identifier"] == "PA3ABC__ALPACA_PAPER" for order in orders)
+    sell = harness.ledger.order("c-sell")
+    assert sell["order_side"] == -1 and sell["asset_identifier"] == MSFT
+    assert harness.ledger.state("c-sell")["filled_price"] == 401.0
+    assert len(harness.ledger.order_rows) == 2 and harness.ledger.execution_writes == 1
+    [fill] = harness.ledger.trade_rows
+    assert fill["trade_identifier"] == "c-sell:fill" and fill["order_uid"] == sell["uid"]
+    assert fill["account_identifier"] == "PA3ABC__ALPACA_PAPER"
+    assert fill["settlement_asset_identifier"] == "USD"
     assert harness.ledger.cash_ensured == 1
     # A holdings snapshot follows the fill, once.
     assert harness.captures == 1 and result.holdings_set_uid == "set-1"
@@ -340,6 +395,11 @@ def test_submit_and_sync_round_trip_on_a_paper_account(registration) -> None:
     assert result.as_payload()["holdings_time"] == result.holdings_time
     assert json.dumps(batch.metadata_json)  # JSON-safe
     assert [o["client_order_id"] for o in batch.metadata_json["orders"]] == ["c-buy", "c-sell"]
+    # Each order keeps its Order uid on the batch.
+    assert [uuid.UUID(o["order_uid"]) for o in batch.metadata_json["orders"]] == [
+        harness.ledger.order("c-buy")["uid"],
+        sell["uid"],
+    ]
 
     harness.client.fill("c-buy", 199.5)
     synced = sync_order_batch(ACCOUNT_UID, "HUNCH_BATCH__1", deps=harness.deps)
@@ -399,6 +459,9 @@ def test_resubmitting_a_batch_never_places_an_order_twice(registration) -> None:
     assert harness.client.submitted == ["c-buy"]
     assert second.orders[0].broker_order_id == first.orders[0].broker_order_id
     assert len(harness.ledger.batches) == 1
+    # The retry names the order by the uid its batch holds: one Order row.
+    assert second.orders[0].order_uid == first.orders[0].order_uid
+    assert len(harness.ledger.orders) == 1
 
 
 def test_an_order_alpaca_refuses_is_recorded_as_rejected(registration) -> None:
@@ -416,8 +479,8 @@ def test_an_order_alpaca_refuses_is_recorded_as_rejected(registration) -> None:
     assert by_id["c-buy"].message == "insufficient buying power"
     assert by_id["c-buy-2"].status == "submitted"
     assert result.message == "1 of 2 orders were refused by Alpaca at submission."
-    rejected_row = next(r for r in harness.ledger.order_rows if r["order_identifier"] == "c-buy")
-    assert rejected_row["status"] == "rejected" and rejected_row["order_remote_id"] == ""
+    rejected_row = harness.ledger.state("c-buy")
+    assert rejected_row["status"] == "rejected" and rejected_row["order_remote_id"] is None
     assert harness.captures == 0
 
     # A retry leaves the refused order to Alpaca again and keeps the accepted one.

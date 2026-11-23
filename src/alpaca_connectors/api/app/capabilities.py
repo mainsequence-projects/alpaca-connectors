@@ -110,7 +110,7 @@ CAPABILITIES: tuple[Capability, ...] = (
             "order batches keyed by the caller's batch identifier",
             "market day orders with client order identifiers",
             "pre-trade checks",
-            "ms-markets execution ledger (OrderManager, OrdersTS, TradesTS)",
+            "ms-markets execution ledger (OrderManager, Order, OrdersTS, TradesTS)",
             "holdings snapshot after fills",
         ),
         actions=("preflight", "submit", "sync", "cancel", "list orders"),

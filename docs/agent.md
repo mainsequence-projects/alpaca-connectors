@@ -351,9 +351,14 @@ MetaTables (`mainsequence-metatable`) **0.1.63** and ms-markets **3.4.0**.
   an account target stated (its ADR 0061; ADR 0023 amended). MetaTables 0.1.77 lets a run wait
   for a dependency update another process is running and reuses its connections
   (MetaTables#148, #149).
+- Later on 2026-11-23 the range moved to `ms-markets>=6.0.0`, with MetaTables `>=0.1.79`.
+  ms-markets 6.0.0 gives every order its own `Order` row and writes a batch's execution rows in
+  one transaction with no updater run (its ADR 0064, MainSequenceMarkets#131); revision `0036`
+  re-keys this application's instances. MetaTables 0.1.79 makes a head run wait for a run that
+  holds its update, and a one-shot run send four requests (MetaTables#153, #154).
 
 `pyproject.toml` keeps non-exact compatibility ranges (`mainsequence[mcp]>=9.0.38,<10`,
-`mainsequence-metatable>=0.1.78,<0.2`, `ms-tau-sdk>=2.0.26,<3`, and `ms-markets>=5.3.1` with no
+`mainsequence-metatable>=0.1.79,<0.2`, `ms-tau-sdk>=2.0.26,<3`, and `ms-markets>=6.0.0` with no
 upper bound since [ADR 0031](adrs/0031_markets_series_are_published_not_shared.md)), while
 `uv.lock` and the exported `requirements.txt` record the resolution. On 2026-10-14 Main Sequence
 had moved from 9.0.23 to 9.0.24, which stopped scaffolding `AGENTS.md` and ships its guidance in

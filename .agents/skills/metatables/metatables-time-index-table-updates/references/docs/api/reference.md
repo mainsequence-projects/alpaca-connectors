@@ -124,7 +124,7 @@ These methods and paths are mounted by the current application. See the [OpenAPI
 | PATCH | `/time-index-table-updates/{update_uid}/` | Patch Update | 200 |
 | DELETE | `/time-index-table-updates/{update_uid}/dependencies/` | Clear Dependencies | 200 |
 | GET | `/time-index-table-updates/{update_uid}/get-all-dependencies-update-priority/` | Get All Dependencies Update Priority | 200 |
-| POST | `/time-index-table-updates/{update_uid}/insert-data-into-table/` | Insert Data Into Table | 204 |
+| POST | `/time-index-table-updates/{update_uid}/insert-data-into-table/` | Insert Data Into Table | 200 |
 | GET | `/time-index-table-updates/{update_uid}/logs/` | Update Logs | 200 |
 | PATCH | `/time-index-table-updates/{update_uid}/set-end-of-execution/` | Finish Execution | 200 |
 | POST | `/time-index-table-updates/{update_uid}/set-last-update-index-time-from-update-stats/` | Set Index Time From Statistics | 200 |

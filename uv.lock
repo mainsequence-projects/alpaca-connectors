@@ -52,10 +52,10 @@ requires-dist = [
     { name = "fastapi", specifier = ">=0.135.3" },
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "mainsequence", extras = ["mcp"], specifier = ">=9.0.38,<10" },
-    { name = "mainsequence-metatable", specifier = ">=0.1.78,<0.2" },
+    { name = "mainsequence-metatable", specifier = ">=0.1.79,<0.2" },
     { name = "mkdocs", specifier = ">=1.6.1" },
     { name = "mkdocs-material", specifier = ">=9.7.6" },
-    { name = "ms-markets", specifier = ">=5.3.1" },
+    { name = "ms-markets", specifier = ">=6.0.0" },
     { name = "ms-tau-sdk", specifier = ">=2.0.26,<3" },
     { name = "uvicorn", specifier = ">=0.52.4,<0.53" },
 ]
@@ -776,7 +776,7 @@ mcp = [
 
 [[package]]
 name = "mainsequence-metatable"
-version = "0.1.78"
+version = "0.1.79"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "alembic" },
@@ -809,9 +809,9 @@ dependencies = [
     { name = "urllib3" },
     { name = "uvicorn" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/77/86/8a994df111f4f437643f53d602b5d649b1f580006e760ef40e1d534cc956/mainsequence_metatable-0.1.78.tar.gz", hash = "sha256:99c9fe76eede79f20b20c9204891b6bb570d12c2577d9ce28a83ad9078cce42c", size = 1497519, upload-time = "2026-11-23T14:31:10.044Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/f4/12/1ea15a941a6dc0380271989551088766dca82f9d44508c24166379212b2a/mainsequence_metatable-0.1.79.tar.gz", hash = "sha256:f8fead6d8ac68d7e1c86c25f39528323807b960f70c3f0bd3a1743df0fca6189", size = 1501264, upload-time = "2026-11-23T19:14:19.569Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/1a/d7/eeca07d04cadb92379258d60448faac01ac9690c9ffb9fc16a511fee95ec/mainsequence_metatable-0.1.78-py3-none-any.whl", hash = "sha256:1b2b8476e1fe5e6b8438db8c238fa4889bf8311bfe2ee238c2d04d4add944981", size = 2784372, upload-time = "2026-11-23T14:31:08.406Z" },
+    { url = "https://files.pythonhosted.org/packages/41/1a/740f29cbfa9272c9fb2cf4128f073d8dd7dee33272b4fb0d4f579c8a55b4/mainsequence_metatable-0.1.79-py3-none-any.whl", hash = "sha256:0d5af814de7074b7b0e8f858fc2d38e23a86f045bdf2a8e9688f63a7340b5536", size = 2787902, upload-time = "2026-11-23T19:14:17.77Z" },
 ]
 
 [[package]]
@@ -1061,7 +1061,7 @@ wheels = [
 
 [[package]]
 name = "ms-markets"
-version = "5.3.1"
+version = "6.0.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "alembic" },
@@ -1082,9 +1082,9 @@ dependencies = [
     { name = "sqlalchemy" },
     { name = "uvicorn" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/bf/16/505d4c28c6c95c299bbeccad567ae182d08f2f5b899b61f78858d690f68c/ms_markets-5.3.1.tar.gz", hash = "sha256:a75112111d336ad2b431bc7fe118871b509929f6b5a3e84f82e4eed2b3e8df4e", size = 3162858, upload-time = "2026-11-23T15:14:45.059Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/c3/97/5c729d250ff8249b1398c70b26f869b3b9267bc9922c4b878e3f757868f2/ms_markets-6.0.0.tar.gz", hash = "sha256:899de2a6961f46d49202178076794c60a617c50bd3cff4534fd78231e37d5ef4", size = 3204357, upload-time = "2026-11-23T18:42:47.956Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/54/f5/73ab75e13d87a5a7bfa8475a8f69e444486d4e2671b9eb22f1c4190a8ce9/ms_markets-5.3.1-py3-none-any.whl", hash = "sha256:6b0dfe2974c84e2bb8e06eacc6e253911437aeb80d3ec8c92e28131af01c0aa1", size = 1001994, upload-time = "2026-11-23T15:14:43.571Z" },
+    { url = "https://files.pythonhosted.org/packages/e1/cb/6e852df09e99a9de28bad4a445e38cc59403f19e8399568307aec36119dc/ms_markets-6.0.0-py3-none-any.whl", hash = "sha256:0e0635303e5c0834c207a7e64a831e767aea0c00aa97f3bb080447bfd5249d13", size = 1021704, upload-time = "2026-11-23T18:42:46.225Z" },
 ]
 
 [[package]]

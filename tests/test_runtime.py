@@ -58,6 +58,7 @@ def test_application_runtime_attaches_the_own_execution_ledger_and_portfolio_ins
 
     assert {
         "alpaca_connectors__ordersts__main",
+        "alpaca_connectors__ordereventsts__main",
         "alpaca_connectors__tradests__main",
         "alpaca_connectors__portfoliorebalancestatets__main",
         "alpaca_connectors__portfoliocalendareventsts__main",

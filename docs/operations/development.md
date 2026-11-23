@@ -121,10 +121,10 @@ so the second and third recorded nothing
 The three runs share their interpolated-price update, and a run that finds another process
 updating it must wait for that process. MetaTables 0.1.77 waits when the update is a dependency
 ([MetaTables#148](https://github.com/mainsequence-projects/MetaTables/issues/148)). ms-markets
-starts the price source as a run of its own, though, and that path still fails with "Update
-execution is already active"
-([MetaTables#153](https://github.com/mainsequence-projects/MetaTables/issues/153)). Until that is
-fixed, one of the three runs can fail.
+starts the price source as a run of its own, and before MetaTables 0.1.79 that path failed with
+"Update execution is already active"
+([MetaTables#153](https://github.com/mainsequence-projects/MetaTables/issues/153)). From 0.1.79
+such a head run waits for the run that holds the update too, and starts again once it succeeds.
 
 The report lists each stage with the calls it made: each call to this API, each Markets call and
 each Alpaca read, timed on the caller's side, then the slowest calls and the total. The sync's
@@ -133,7 +133,7 @@ three steps run inside one request, so that request's time is theirs.
 It needs, on this machine:
 
 - the local MetaTables runtime (`metatables serve --local`) with both migrations applied;
-- the Markets API on ms-markets 5.3.1 or later, started from an ms-markets checkout against that
+- the Markets API on ms-markets 6.0.0 or later, started from an ms-markets checkout against that
   runtime, with `MARKETS_API_URL` set for this API and for the script;
 - this API at `http://127.0.0.1:8321` (`ALPACA_LIFECYCLE_API_URL` or `--api-url` names another
   address);

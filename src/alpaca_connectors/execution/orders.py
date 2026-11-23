@@ -177,6 +177,9 @@ class OrderRecord:
     time_in_force: str = "day"
     alpaca_asset_id: str | None = None
     venue_symbol: str | None = None
+    # The order's Markets ``Order`` uid (ms-markets ADR 0064): minted when the order is first
+    # placed, kept on the batch, and the key of its state rows and trades.
+    order_uid: str | None = None
 
     @property
     def terminal(self) -> bool:
@@ -197,6 +200,11 @@ class OrderRecord:
         values = dict(payload)
         for key in ("submitted_at", "updated_at", "terminal_at"):
             values[key] = _utc(values.get(key))
+        if not values.get("order_uid") and values.get("client_order_id"):
+            # Recorded before ms-markets 6.0.0: revision 0036 gave the order this uid.
+            from msm.time_index.execution.upgrade import order_uid_for_identifier
+
+            values["order_uid"] = str(order_uid_for_identifier(str(values["client_order_id"])))
         known = {name for name in cls.__dataclass_fields__}
         return cls(**{key: value for key, value in values.items() if key in known})
 
@@ -295,81 +303,99 @@ def parse_alpaca_asset_identifier(asset_identifier: str) -> uuid.UUID | None:
         return None
 
 
-def orders_ledger_rows(
-    records: list[OrderRecord], *, account_identifier: str, batch_id: str
-) -> list[dict[str, Any]]:
-    """One ``OrdersTS`` row per order, keyed by its submission time so re-syncs update in place."""
-    rows: list[dict[str, Any]] = []
-    for record in records:
-        order_time = record.submitted_at or record.updated_at
-        if order_time is None:
-            continue
-        rows.append(
-            {
-                "order_time": order_time,
-                "order_identifier": record.client_order_id,
-                "account_identifier": account_identifier,
-                "order_manager_identifier": batch_id,
-                "asset_identifier": record.asset_identifier,
-                "order_remote_id": record.broker_order_id or "",
-                "client_order_id": record.client_order_id,
-                "order_type": record.order_type,
-                "order_side": record.side_sign,
-                "quantity": float(record.quantity),
-                "status": record.status,
-                "filled_quantity": float(record.filled_quantity),
-                "filled_price": float(record.average_fill_price or 0.0),
-                "expires_time": order_time,
-                "limit_price": 0.0,
-                "time_in_force": record.time_in_force,
-                "comments": record.message or "",
-                "venue_metadata": {
-                    "venue": "alpaca",
-                    "symbol": record.venue_symbol or record.symbol,
-                    "venue_status": record.venue_status,
-                    "alpaca_asset_id": record.alpaca_asset_id,
-                },
-            }
-        )
-    return rows
+def order_rows(records: list[OrderRecord], *, account_identifier: str) -> list[dict[str, Any]]:
+    """One Markets ``Order`` row per order, as ``OrderManager.create_batch`` takes it: the order's
+    uid, account, asset and the terms it was placed with, which never change (ADR 0064)."""
+    return [
+        {
+            "uid": record.order_uid,
+            "account_identifier": account_identifier,
+            "asset_identifier": record.asset_identifier,
+            "order_side": record.side_sign,
+            "order_type": record.order_type,
+            "quantity": float(record.quantity),
+            "time_in_force": record.time_in_force,
+            "client_order_id": record.client_order_id,
+        }
+        for record in records
+    ]
 
 
-def trades_ledger_rows(
+def _order_state(record: OrderRecord) -> dict[str, Any] | None:
+    """The order's ``OrdersTS`` row, keyed by its submission time so re-syncs update it in place."""
+    order_time = record.submitted_at or record.updated_at
+    if order_time is None:
+        return None
+    return {
+        "order_time": order_time,
+        "order_remote_id": record.broker_order_id,
+        "status": record.status,
+        "filled_quantity": float(record.filled_quantity),
+        "filled_price": record.average_fill_price,
+        "comments": record.message,
+        "venue_metadata": {
+            "venue": "alpaca",
+            "symbol": record.venue_symbol or record.symbol,
+            "venue_status": record.venue_status,
+            "alpaca_asset_id": record.alpaca_asset_id,
+        },
+    }
+
+
+def _order_fill(
+    record: OrderRecord, *, batch_id: str, cash_asset_identifier: str
+) -> dict[str, Any] | None:
+    """The order's ``TradesTS`` row once it is terminal with a fill: Alpaca reports cumulative
+    fills only. It takes the order's uid, account and asset from the order it is written under."""
+    if not record.terminal or record.filled_quantity <= 0 or record.terminal_at is None:
+        return None
+    price = float(record.average_fill_price or 0.0)
+    return {
+        "trade_time": record.terminal_at,
+        "trade_identifier": f"{record.client_order_id}:fill",
+        "trade_side": record.side_sign,
+        "quantity": float(record.filled_quantity),
+        "price": price,
+        "commission": 0.0,
+        "commission_asset_identifier": cash_asset_identifier,
+        "settlement_cost": float(record.filled_quantity) * price,
+        "settlement_asset_identifier": cash_asset_identifier,
+        "comments": batch_id,
+        "venue_metadata": {
+            "venue": "alpaca",
+            "symbol": record.venue_symbol or record.symbol,
+            "broker_order_id": record.broker_order_id,
+        },
+    }
+
+
+def execution_rows(
     records: list[OrderRecord],
     *,
     account_identifier: str,
     batch_id: str,
     cash_asset_identifier: str,
 ) -> list[dict[str, Any]]:
-    """One ``TradesTS`` row per terminal order with a fill: Alpaca reports cumulative fills only."""
-    rows: list[dict[str, Any]] = []
+    """Each order with its state row and fill, as ``write_execution`` takes them: one entry per
+    order that has a row to write, under the order's uid, account and asset."""
+    entries: list[dict[str, Any]] = []
     for record in records:
-        if not record.terminal or record.filled_quantity <= 0 or record.terminal_at is None:
+        state = _order_state(record)
+        fill = _order_fill(record, batch_id=batch_id, cash_asset_identifier=cash_asset_identifier)
+        if state is None and fill is None:
             continue
-        price = float(record.average_fill_price or 0.0)
-        rows.append(
+        entries.append(
             {
-                "trade_time": record.terminal_at,
-                "trade_identifier": f"{record.client_order_id}:fill",
-                "account_identifier": account_identifier,
-                "order_identifier": record.client_order_id,
-                "asset_identifier": record.asset_identifier,
-                "trade_side": record.side_sign,
-                "quantity": float(record.filled_quantity),
-                "price": price,
-                "commission": 0.0,
-                "commission_asset_identifier": cash_asset_identifier,
-                "settlement_cost": float(record.filled_quantity) * price,
-                "settlement_asset_identifier": cash_asset_identifier,
-                "comments": batch_id,
-                "venue_metadata": {
-                    "venue": "alpaca",
-                    "symbol": record.venue_symbol or record.symbol,
-                    "broker_order_id": record.broker_order_id,
+                "order": {
+                    "uid": record.order_uid,
+                    "account_identifier": account_identifier,
+                    "asset_identifier": record.asset_identifier,
                 },
+                "states": [state] if state is not None else [],
+                "trades": [fill] if fill is not None else [],
             }
         )
-    return rows
+    return entries
 
 
 __all__ = [
@@ -384,12 +410,12 @@ __all__ = [
     "PreTradeCheck",
     "PreTradeCheckError",
     "batch_status",
+    "execution_rows",
     "is_whole_quantity",
     "map_alpaca_order_status",
     "new_fills",
     "order_record_from_alpaca",
-    "orders_ledger_rows",
+    "order_rows",
     "parse_alpaca_asset_identifier",
     "rejected_record",
-    "trades_ledger_rows",
 ]

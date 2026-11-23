@@ -7,8 +7,9 @@ identified as ``alpaca-connectors.<Contract>.main``; the interpolated-price tabl
 their configuration (ADR 0029).
 
 They are private, and Markets never reads them (ADR 0031, decision 2): rebalance state and
-calendar events, which a portfolio run writes (``private_portfolio_models``); orders and trades,
-which the execution ledger writes; and one interpolated-price table per bars profile, which values
+calendar events, which a portfolio run writes (``private_portfolio_models``); orders' states,
+their events and trades, which the execution ledger writes (ms-markets ADR 0064: they name their
+order by its Markets ``Order`` row); and one interpolated-price table per bars profile, which values
 the portfolios (``INTERPOLATED_PRICES_BY_PROFILE``). Signal weights, portfolio weights and
 portfolio values are Markets' own published series (ADR 0031, decision 1); revision 0033 dropped
 this application's tables of them.
@@ -43,7 +44,7 @@ def _instance_kwargs() -> dict[str, Any]:
 
 def _build() -> dict[str, type[Any]]:
     from msm.storage_instances import configured_time_index_instance
-    from msm.time_index.execution.storage import OrdersStorage, TradesStorage
+    from msm.time_index.execution.storage import OrderEventsStorage, OrdersStorage, TradesStorage
     from msm_portfolios.time_index.contract_instances import (
         configured_portfolio_calendar_events_storage,
         configured_portfolio_rebalance_state_storage,
@@ -57,6 +58,7 @@ def _build() -> dict[str, type[Any]]:
             **_instance_kwargs()
         ),
         "orders": configured_time_index_instance(OrdersStorage, **_instance_kwargs()),
+        "order_events": configured_time_index_instance(OrderEventsStorage, **_instance_kwargs()),
         "trades": configured_time_index_instance(TradesStorage, **_instance_kwargs()),
     }
 
@@ -66,6 +68,7 @@ _INSTANCES = _build()
 AlpacaPortfolioRebalanceStateStorage = _INSTANCES["portfolio_rebalance_state"]
 AlpacaPortfolioCalendarEventsStorage = _INSTANCES["portfolio_calendar_events"]
 AlpacaOrdersStorage = _INSTANCES["orders"]
+AlpacaOrderEventsStorage = _INSTANCES["order_events"]
 AlpacaTradesStorage = _INSTANCES["trades"]
 
 
@@ -129,13 +132,14 @@ def private_portfolio_models() -> list[type[Any]]:
 
 
 def execution_instance_models() -> list[type[Any]]:
-    """The instances the execution ledger writes."""
-    return [AlpacaOrdersStorage, AlpacaTradesStorage]
+    """The instances the execution ledger writes with ``write_execution``, which takes all three."""
+    return [AlpacaOrdersStorage, AlpacaOrderEventsStorage, AlpacaTradesStorage]
 
 
 __all__ = [
     "INSTANCE_KEY",
     "INSTANCE_NAMESPACE",
+    "AlpacaOrderEventsStorage",
     "AlpacaOrdersStorage",
     "AlpacaPortfolioCalendarEventsStorage",
     "AlpacaPortfolioRebalanceStateStorage",

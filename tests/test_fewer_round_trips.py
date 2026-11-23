@@ -567,15 +567,17 @@ def test_a_batch_cancels_its_open_orders_together() -> None:
     assert {order.status for order in result.orders} == {"cancelled"}
 
 
-def test_fills_write_the_orders_the_trades_and_the_snapshot_together() -> None:
+def test_fills_write_the_batch_the_cash_asset_and_the_snapshot_together() -> None:
     from test_execution import ACCOUNT_UID, MSFT, REGISTRATION, Harness, leg, submission
 
     from alpaca_connectors.execution import services
 
     harness = Harness()
     harness.client.fill_on_lookup["m"] = 401.0
+    # The batch with its orders and the cash asset the fill settles in go before the one write
+    # of the states and the fill, which key to them; the snapshot goes alongside.
     together = threading.Barrier(3, timeout=5)
-    harness.ledger.write_orders = _waiting(together, harness.ledger.write_orders)
+    harness.ledger.create_batch = _waiting(together, harness.ledger.create_batch)
     harness.ledger.ensure_cash_asset = _waiting(together, harness.ledger.ensure_cash_asset)
     harness.deps.capture_holdings = _waiting(together, harness.deps.capture_holdings)
     target = SimpleNamespace(position_set_uid="set", positions=[])

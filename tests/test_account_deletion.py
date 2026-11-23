@@ -27,6 +27,8 @@ PORTFOLIO = uuid.UUID(int=10)
 KEPT_PORTFOLIO = uuid.UUID(int=11)
 CONFIGURATION = uuid.UUID(int=20)
 KEPT_CONFIGURATION = uuid.UUID(int=21)
+# The account's Markets ``Order`` rows (ms-markets ADR 0064).
+ORDERS = [uuid.UUID(int=40), uuid.UUID(int=41)]
 MARKETS = "alpaca_connectors.markets_api"
 CONFIGURATIONS = "alpaca_connectors.portfolios.configurations"
 DEFINITIONS = "alpaca_connectors.portfolios.signal_definitions"
@@ -130,6 +132,7 @@ def _run(
             f"{MARKETS}.account_target_positions",
             side_effect=waits(SimpleNamespace(positions=[object()])),
         ),
+        patch(f"{MARKETS}.account_order_uids", side_effect=waits(list(ORDERS))),
         patch(f"{MARKETS}.clear_account_target", calls.clear_target),
         patch(f"{MARKETS}.delete_account", calls.markets_delete),
         patch(f"{MARKETS}.portfolios_delete_blockers", calls.blockers),
@@ -197,11 +200,13 @@ def test_the_account_and_all_it_owns_go_in_the_order_markets_keys_impose() -> No
     assert order.index("clear_target") < order.index("end_portfolios")
     [(rows,), kwargs] = calls.end_portfolios.call_args
     assert kwargs["definitions"] == calls.definitions.return_value
-    # Orders and trades in this application's instances refuse the account delete: they go in
-    # the transaction that ends the portfolios.
+    # Trades, order states and events in this application's instances refuse the account
+    # delete: they go in the transaction that ends the portfolios. The states and events name
+    # their order by its uid only; the preflight read the account's.
     assert _tables(kwargs["writes"].entries) == [
         ("delete", "TradesStorage_main_alpaca_connectors", ["ACCOUNT__ALPACA"]),
-        ("delete", "OrdersStorage_main_alpaca_connectors", ["ACCOUNT__ALPACA"]),
+        ("delete", "OrderEventsStorage_main_alpaca_connectors", ORDERS),
+        ("delete", "OrdersStorage_main_alpaca_connectors", ORDERS),
     ]
     # A signal no retired Portfolio follows goes before the account; the followed one waits.
     assert call.delete_signals(["signal-followed", "signal-free"]) in calls.mock_calls
@@ -249,8 +254,9 @@ def test_the_delete_reads_each_kind_once() -> None:
 
 
 def test_the_preflight_reads_run_together() -> None:
-    # Six reads that need only the account, in one step: one after another, the barrier times out.
-    _run(together=threading.Barrier(6, timeout=5))
+    # Seven reads that need only the account, in one step: one after another, the barrier times
+    # out.
+    _run(together=threading.Barrier(7, timeout=5))
 
 
 @pytest.mark.parametrize(("state", "reported"), [("deleted", True), ("kept", False)])
@@ -307,6 +313,7 @@ def test_an_account_without_portfolios_still_deletes_its_orders_and_trades() -> 
     [entries] = [c.args[0] for c in calls.transaction.call_args_list]
     assert [table for _, table, _ in _tables(entries)] == [
         "TradesStorage_main_alpaca_connectors",
+        "OrderEventsStorage_main_alpaca_connectors",
         "OrdersStorage_main_alpaca_connectors",
     ]
 

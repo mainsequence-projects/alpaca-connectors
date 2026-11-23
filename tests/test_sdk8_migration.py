@@ -19,8 +19,8 @@ from alpaca_connectors.portfolios.interpolated_prices import (
 
 def test_runtime_dependency_versions_match_the_sdk9_metatables_stack() -> None:
     assert version("mainsequence") in SpecifierSet(">=9.0.38,<10")
-    assert version("mainsequence-metatable") in SpecifierSet(">=0.1.78,<0.2")
-    assert version("ms-markets") in SpecifierSet(">=5.3.1,<6")
+    assert version("mainsequence-metatable") in SpecifierSet(">=0.1.79,<0.2")
+    assert version("ms-markets") in SpecifierSet(">=6.0.0,<7")
 
 
 def test_alpaca_bars_node_declares_sdk8_output_table() -> None:
@@ -59,6 +59,7 @@ def test_migration_metadata_holds_only_this_applications_tables() -> None:
         "alpaca_connectors__portfoliorebalancestatets__main",
         "alpaca_connectors__portfoliocalendareventsts__main",
         "alpaca_connectors__ordersts__main",
+        "alpaca_connectors__ordereventsts__main",
         "alpaca_connectors__tradests__main",
         # One interpolated-price table per bars profile, revision 0034 (ADR 0029).
         "alpaca_connectors__interpolatedpricests__t_1330c8b4c5fd5124",
@@ -74,7 +75,8 @@ def test_migration_metadata_holds_only_this_applications_tables() -> None:
         "ms_markets__account",
         "ms_markets__asset",
         "ms_markets__calendar",
-        "ms_markets__ordermanager",
+        # An order's states, events and trades name its Order row (ms-markets ADR 0064).
+        "ms_markets__order",
         "ms_markets__portfolio",
     }
 

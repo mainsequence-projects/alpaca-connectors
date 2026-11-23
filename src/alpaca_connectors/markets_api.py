@@ -12,7 +12,9 @@ and ``allocate_account_virtual_funds``; ``retire_portfolios``
 calls of an account delete and a signal delete (ADR 0028): ``current_target_account_uids``,
 ``clear_account_target``, ``account_delete_preflight``, ``delete_account``,
 ``portfolio_delete_blockers`` and ``delete_portfolio``, with their set-based forms
-``portfolios_delete_blockers`` and ``delete_portfolios`` (issue #46). The preflights and the bulk
+``portfolios_delete_blockers`` and ``delete_portfolios`` (issue #46), and ``account_order_uids``,
+the account's ``Order`` rows (ms-markets ADR 0064) whose states, events and trades this
+application deletes first. The preflights and the bulk
 portfolio delete have no typed client method in ms-markets 4.0.1, so they call their routes
 through the same client's ``request``. Since ms-markets 5.3.0 several portfolios are retired, and
 several signals ended, in one call (MainSequenceMarkets#124, #126). Listing the accounts whose
@@ -139,6 +141,27 @@ def category_member_asset_uids(category_uid: Any) -> list[str]:
         total,
     )
     return [str(row.asset_uid) for row in rows]
+
+
+def account_order_uids(account_identifier: str) -> list[uuid.UUID]:
+    """The uids of the account's Markets ``Order`` rows (ms-markets ADR 0064), read in pages.
+
+    The account's order states and events in this application's instances name their order by
+    this uid only.
+    """
+    from msm.api import Order
+
+    uids: list[uuid.UUID] = []
+    while True:
+        page = Order.filter(
+            account_identifier=str(account_identifier),
+            order_by="uid",
+            limit=MARKETS_BATCH_SIZE,
+            offset=len(uids),
+        )
+        uids.extend(row.uid for row in page)
+        if len(page) < MARKETS_BATCH_SIZE:
+            return uids
 
 
 def register_account(request: Mapping[str, Any]) -> Any:
@@ -784,6 +807,7 @@ __all__ = [
     "SignalObservationBounds",
     "SignalWeightsRefused",
     "account_delete_preflight",
+    "account_order_uids",
     "account_target_positions",
     "allocate_account_virtual_funds",
     "assets_by_identifier",

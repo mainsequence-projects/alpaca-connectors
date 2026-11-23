@@ -173,21 +173,26 @@ class _AccountContents:
     definitions: list[Any]
     # The account's records of portfolios ended before this delete (ADR 0028).
     ended: list[Any]
-    # The account's current target, read only for a delete.
+    # The account's current target and its Markets ``Order`` uids, read only for a delete.
     target: Any = None
+    order_uids: list[Any] = field(default_factory=list)
 
 
-def _preflight(normalized: str, *, for_delete: bool = False) -> _AccountContents:
+def _preflight(
+    normalized: str, *, for_delete: bool = False, account_identifier: str | None = None
+) -> _AccountContents:
     """Read everything the delete needs, the independent reads in one step.
 
     Markets' delete preflight, the bars feeds, the account's portfolio configurations, its
-    signal definitions, its ended portfolios and, for a delete, its current target need only the
-    account, so they run together (``all_together``). Then the portfolios its ``portfolios``
+    signal definitions, its ended portfolios and, for a delete, its current target and its
+    orders (``account_identifier``) need only the account, so they run together
+    (``all_together``). Then the portfolios its ``portfolios``
     feeds price, when it has one, and the accounts whose current target names each portfolio.
     """
     from alpaca_connectors.market_data.configurations import bar_configurations_for_account
     from alpaca_connectors.markets_api import (
         account_delete_preflight,
+        account_order_uids,
         account_target_positions,
         all_together,
         current_target_account_uids,
@@ -207,7 +212,9 @@ def _preflight(normalized: str, *, for_delete: bool = False) -> _AccountContents
     ]
     if for_delete:
         reads.append(lambda: account_target_positions(normalized))
-    markets, feeds, own, definitions, ended, *target = all_together(*reads)
+        reads.append(lambda: account_order_uids(account_identifier) if account_identifier else [])
+    markets, feeds, own, definitions, ended, *for_delete_reads = all_together(*reads)
+    target, order_uids = for_delete_reads or (None, [])
     blockers = [str(blocker) for blocker in markets.get("blockers") or []]
     warnings = [str(warning) for warning in markets.get("warnings") or []]
     portfolios = _with_priced_portfolios(own, feeds)
@@ -239,7 +246,8 @@ def _preflight(normalized: str, *, for_delete: bool = False) -> _AccountContents
         portfolios=portfolios,
         definitions=definitions,
         ended=ended,
-        target=target[0] if target else None,
+        target=target,
+        order_uids=order_uids,
     )
 
 
@@ -362,7 +370,11 @@ def delete_account(account_uid: Any, *, registration: Any = _UNREAD) -> AccountD
     from msm.api.remote import MarketsConflictError
 
     from alpaca_connectors.account.services import get_account_registration
-    from alpaca_connectors.instances import AlpacaOrdersStorage, AlpacaTradesStorage
+    from alpaca_connectors.instances import (
+        AlpacaOrderEventsStorage,
+        AlpacaOrdersStorage,
+        AlpacaTradesStorage,
+    )
     from alpaca_connectors.markets_api import delete_account as delete_markets_account
     from alpaca_connectors.portfolios.configurations import OwnTableWrites
     from alpaca_connectors.portfolios.provided_weights import end_portfolio_configurations
@@ -379,16 +391,18 @@ def delete_account(account_uid: Any, *, registration: Any = _UNREAD) -> AccountD
     deletion = AccountDeletion(account_uid=normalized)
     records: list[Any] | None = None
     if registration is not None:
-        contents = _preflight(normalized, for_delete=True)
+        identifier = str(registration["account_unique_identifier"])
+        contents = _preflight(normalized, for_delete=True, account_identifier=identifier)
         if not contents.preflight.allowed:
             raise AccountDeleteRefused(contents.preflight.blockers)
         _clear_own_target(normalized, contents.target)
-        # The account's orders and trades: their RESTRICT keys would refuse Markets' account
+        # The account's trades, and its orders' states and events, found by their Markets
+        # ``Order`` uids (ms-markets ADR 0064): their RESTRICT keys would refuse Markets' account
         # delete, so they go in the transaction that ends its portfolios.
-        identifier = str(registration["account_unique_identifier"])
         own = OwnTableWrites()
         own.delete_in(AlpacaTradesStorage, "account_identifier", [identifier])
-        own.delete_in(AlpacaOrdersStorage, "account_identifier", [identifier])
+        own.delete_in(AlpacaOrderEventsStorage, "order_uid", contents.order_uids)
+        own.delete_in(AlpacaOrdersStorage, "order_uid", contents.order_uids)
         removals = []
         if contents.portfolios:
             removals = end_portfolio_configurations(

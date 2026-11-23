@@ -371,7 +371,11 @@ def test_the_signal_publishes_to_markets_and_the_ledger_to_own_instances(monkeyp
     from msm_portfolios.contrib.signals import ApplicationWeights
 
     from alpaca_connectors.execution.services import MarketsExecutionLedger
-    from alpaca_connectors.instances import AlpacaOrdersStorage, AlpacaTradesStorage
+    from alpaca_connectors.instances import (
+        AlpacaOrderEventsStorage,
+        AlpacaOrdersStorage,
+        AlpacaTradesStorage,
+    )
     from alpaca_connectors.portfolios.signal_definitions import weights_signal
 
     built: dict[str, Any] = {}
@@ -384,28 +388,23 @@ def test_the_signal_publishes_to_markets_and_the_ledger_to_own_instances(monkeyp
     # Signal weights are Markets' published series: no table of this application (ADR 0031).
     assert built["signal"] == {}
 
-    class Node:
-        tables: list[Any] = []
+    written: dict[str, Any] = {}
 
-        def __init__(self, config=None, output_table=None):
-            Node.tables.append(output_table)
+    def write_execution(entries, **tables):
+        from msm.time_index.execution import ExecutionWrite
 
-        @classmethod
-        def default_config(cls):
-            return None
+        written.update(tables)
+        return ExecutionWrite()
 
-        def set_frame(self, frame):
-            return self
-
-        def run(self):
-            return False, None
-
-    monkeypatch.setattr("msm.time_index.execution.Orders", Node)
-    monkeypatch.setattr("msm.time_index.execution.Trades", Node)
-    ledger = MarketsExecutionLedger()
-    ledger.write_orders([{"order_identifier": "o"}])
-    ledger.write_trades([{"trade_identifier": "t"}])
-    assert Node.tables == [AlpacaOrdersStorage, AlpacaTradesStorage]
+    # The ledger writes the orders' states and trades into this application's instances of the
+    # three execution tables, in one ``write_execution`` call (ms-markets ADR 0064).
+    monkeypatch.setattr("msm.time_index.execution.write_execution", write_execution)
+    MarketsExecutionLedger().write_execution([{"order": {}}])
+    assert written == {
+        "orders_table": AlpacaOrdersStorage,
+        "order_events_table": AlpacaOrderEventsStorage,
+        "trades_table": AlpacaTradesStorage,
+    }
 
 
 # Markets table classes may appear only where this application declares a foreign key to a

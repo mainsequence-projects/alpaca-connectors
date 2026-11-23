@@ -53,6 +53,7 @@ happens to that row when the row it names is deleted.
 | `AccountTargetAllocation`, `AccountHoldingsSet`, `VirtualFund`, `OrderManager` | their `Account` | `account_uid`, `target_account_uid` | `CASCADE` |
 | A provider's account details, a sidecar in the provider's namespace (ms-markets ADR 0047) | its `Account`, one to one | `uid` = `ms_markets__account.uid` | `CASCADE` |
 | Orders and trades | their `Account` | `account_identifier` (its `unique_identifier`) | `RESTRICT` |
+| Order states and events, since ms-markets 6.0.0 | their `Order` (ms-markets ADR 0064) | `order_uid` | `RESTRICT` |
 
 What names nothing:
 
@@ -312,7 +313,9 @@ before the signal it follows.
    not yet adopted that a `portfolios` feed of the account prices runs with the account's keys,
    so it ends too (amended 2026-11-18).
 4. This connector deletes the account's orders and trades in its own instances, whose
-   `RESTRICT` keys would refuse the next step.
+   `RESTRICT` keys would refuse the next step. Since ms-markets 6.0.0 the order states and events
+   name only their order: the preflight reads the uids of the account's `Order` rows alongside
+   its other reads, and the states and events go by those uids, the trades by the account.
 5. ms-markets' `Account.delete` deletes the account with its whole history.
    `ProviderAccountDetails`, the account's bars feeds and its signal definitions go with it. A
    registration made before revision `0018` still names the Main Sequence Secrets its keys were

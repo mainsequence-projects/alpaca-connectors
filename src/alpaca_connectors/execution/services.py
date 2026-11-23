@@ -1,11 +1,13 @@
 """Alpaca order execution for authorised applications (ADR 0016).
 
 Submit, sync and cancel market-order batches on a registered account with that account's stored
-credentials, exactly as the holdings capture does, and keep the ms-markets execution ledger: one
-``OrderManager`` row per batch, keyed by the caller's ``batch_id``; one ``OrdersTS`` row per order;
-one ``TradesTS`` row per filled order. ``OrderEventsTS`` is not written, because its asset-index
-contract is defective in ms-markets 2.2.12. After fills, a holdings snapshot is published through
-the existing capture.
+credentials, exactly as the holdings capture does, and keep the ms-markets execution ledger
+(ms-markets ADR 0064): one ``OrderManager`` row per batch, keyed by the caller's ``batch_id``, with
+one Markets ``Order`` row per order, both written by ``OrderManager.create_batch`` in one call; and,
+in this application's instances, one ``OrdersTS`` state row per order and one ``TradesTS`` row per
+filled order, written by ``write_execution`` in one transaction. No order event is recorded: the
+state row carries the order's status. After fills, a holdings snapshot is published through the
+existing capture.
 
 The preflight and submit do not repeat each other (ADR 0016, decision 3). The preflight runs every
 pre-trade check and places nothing. Submit runs only the checks that protect what it places and
@@ -26,7 +28,7 @@ import logging
 import time
 import uuid
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from functools import partial
 from typing import Any, Protocol
 
@@ -38,13 +40,13 @@ from alpaca_connectors.execution.orders import (
     PreTradeCheck,
     PreTradeCheckError,
     batch_status,
+    execution_rows,
     is_whole_quantity,
     new_fills,
     order_record_from_alpaca,
-    orders_ledger_rows,
+    order_rows,
     parse_alpaca_asset_identifier,
     rejected_record,
-    trades_ledger_rows,
 )
 from alpaca_connectors.holdings.account import DEFAULT_CASH_ASSET_IDENTIFIER
 
@@ -104,8 +106,10 @@ class ExecutionLedger(Protocol):
         batch_id: str,
         account_uid: str,
         target_time: dt.datetime,
+        received_time: dt.datetime,
         status: str,
         metadata: dict[str, Any],
+        orders: list[dict[str, Any]],
     ) -> Any: ...
 
     def update_batch(self, batch_uid: Any, **values: Any) -> None: ...
@@ -114,33 +118,25 @@ class ExecutionLedger(Protocol):
 
     def ensure_cash_asset(self) -> str: ...
 
-    def write_orders(self, rows: list[dict[str, Any]]) -> None: ...
-
-    def write_trades(self, rows: list[dict[str, Any]]) -> None: ...
+    def write_execution(self, entries: list[dict[str, Any]]) -> None: ...
 
 
-def _run_execution_node(
-    node_class: Any, output_table: Any, rows: list[dict[str, Any]], label: str
-) -> None:
-    if not rows:
-        return
-    import pandas as pd
-
-    # The ledger rows land in this application's OrdersTS / TradesTS instances (ms-markets
-    # ADR 0047); the output table does not enter the update hash.
-    node = node_class(config=node_class.default_config(), output_table=output_table)
-    node.set_frame(pd.DataFrame(rows))
-    error, _ = node.run()
-    if error:
-        raise RuntimeError(f"Writing the execution {label} failed.")
+def _refused(label: str, failed: Sequence[Any]) -> None:
+    """Fail when ms-markets lists rows it did not write (it writes the others, issue #128)."""
+    if failed:
+        for refusal in failed:
+            logger.error("Execution %s row not written: %s", label, refusal)
+        raise RuntimeError(f"Writing the execution {label} rows failed for {len(failed)} rows.")
 
 
 class MarketsExecutionLedger:
-    """The real ledger: Markets ``OrderManager`` rows and this application's orders and trades.
+    """The real ledger: Markets ``OrderManager`` and ``Order`` rows, and this application's order
+    states and trades.
 
-    Order managers are Markets registry rows written through the Markets API; orders and trades
-    are written by the ms-markets ``Orders`` and ``Trades`` updaters into
-    ``alpaca_connectors.instances`` tables.
+    A batch and its orders are written through the Markets API in one call
+    (``OrderManager.create_batch``); the orders' state rows and trades are written by
+    ``write_execution`` into the ``alpaca_connectors.instances`` tables, in one MetaTables
+    transaction with no update execution (ms-markets ADR 0064).
     """
 
     def get_batch(self, batch_id: str) -> Any | None:
@@ -159,19 +155,24 @@ class MarketsExecutionLedger:
         batch_id: str,
         account_uid: str,
         target_time: dt.datetime,
+        received_time: dt.datetime,
         status: str,
         metadata: dict[str, Any],
+        orders: list[dict[str, Any]],
     ) -> Any:
         from msm.api.execution import OrderManager
 
-        return OrderManager.create_batch(
+        written = OrderManager.create_batch(
             unique_identifier=batch_id,
             target_account_uid=str(account_uid),
             target_time=target_time,
-            order_received_time=target_time,
+            order_received_time=received_time,
             status=status,
             metadata_json=metadata,
+            orders=orders,
         )
+        _refused("order", written.failed)
+        return written.order_manager
 
     def update_batch(self, batch_uid: Any, **values: Any) -> None:
         from msm.api.execution import OrderManager
@@ -188,19 +189,24 @@ class MarketsExecutionLedger:
 
         return ensure_cash_currency_asset(DEFAULT_CASH_ASSET_IDENTIFIER)
 
-    def write_orders(self, rows: list[dict[str, Any]]) -> None:
-        from msm.time_index.execution import Orders
+    def write_execution(self, entries: list[dict[str, Any]]) -> None:
+        if not entries:
+            return
+        from msm.time_index.execution import write_execution
 
-        from alpaca_connectors.instances import AlpacaOrdersStorage
+        from alpaca_connectors.instances import (
+            AlpacaOrderEventsStorage,
+            AlpacaOrdersStorage,
+            AlpacaTradesStorage,
+        )
 
-        _run_execution_node(Orders, AlpacaOrdersStorage, rows, "orders")
-
-    def write_trades(self, rows: list[dict[str, Any]]) -> None:
-        from msm.time_index.execution import Trades
-
-        from alpaca_connectors.instances import AlpacaTradesStorage
-
-        _run_execution_node(Trades, AlpacaTradesStorage, rows, "trades")
+        written = write_execution(
+            entries,
+            orders_table=AlpacaOrdersStorage,
+            order_events_table=AlpacaOrderEventsStorage,
+            trades_table=AlpacaTradesStorage,
+        )
+        _refused("state and trade", written.failed)
 
 
 PriceReader = Callable[[Sequence[str]], Mapping[str, float]]
@@ -929,14 +935,18 @@ def _persist(
     now: dt.datetime,
     warnings: list[str],
     message: str | None = None,
+    create_orders: bool = False,
 ) -> OrderBatchResult:
-    """Write the batch, order and trade rows, publish holdings after fills, return the result.
+    """Write the batch, its orders, their states and trades, publish holdings after fills, and
+    return the result.
 
-    Three independent pieces run together (issue #46): the batch row (created first when new,
-    since the order rows key to it) and the order rows; the cash asset and the trade rows; and,
-    after new fills, the holdings snapshot with its allocation. The batch row's final state is
-    written once all three have ended. A failure of the capture or of the allocation is a warning
-    on the answer, never an error.
+    Two independent pieces run together (issue #46): the ledger, and, after new fills, the
+    holdings snapshot with its allocation. The ledger is two Markets requests (ms-markets ADR
+    0064): ``create_batch`` writes the batch with its ``Order`` rows, on submit (``create_orders``)
+    or for a new batch, alongside the cash asset the fills settle in; then ``write_execution``
+    writes the orders' state rows and fills, which key to those rows, in one transaction. The
+    batch row's final state is written once both pieces have ended. A failure of the capture or
+    of the allocation is a warning on the answer, never an error.
     """
     from alpaca_connectors.markets_api import all_together
 
@@ -945,45 +955,46 @@ def _persist(
     status = batch_status(records)
     terminal = bool(records) and all(record.terminal for record in records)
     previous_metadata = dict(getattr(batch, "metadata_json", None) or {}) if batch else None
-    order_rows = orders_ledger_rows(
-        records, account_identifier=account_identifier, batch_id=batch_id
-    )
-    trade_rows = trades_ledger_rows(
+    entries = execution_rows(
         records,
         account_identifier=account_identifier,
         batch_id=batch_id,
         cash_asset_identifier=DEFAULT_CASH_ASSET_IDENTIFIER,
     )
 
-    def write_batch_and_orders() -> Any:
-        written = batch
-        if written is None:
-            written = deps.ledger.create_batch(
-                batch_id=batch_id,
-                account_uid=account_uid,
-                target_time=now,
-                status="submitted",
-                metadata=_batch_metadata(
-                    registration,
-                    records,
-                    warnings=warnings,
-                    now=now,
-                    holdings_set_uid=None,
-                    previous=None,
-                ),
-            )
-        deps.ledger.write_orders(order_rows)
+    def create_batch() -> Any:
+        if batch is not None and not create_orders:
+            return batch
+        # A batch sent again keeps its own times and status; its existing orders stay as they are.
+        target_time = getattr(batch, "target_time", None) or now
+        return deps.ledger.create_batch(
+            batch_id=batch_id,
+            account_uid=account_uid,
+            target_time=target_time,
+            received_time=getattr(batch, "order_received_time", None) or target_time,
+            status=getattr(batch, "status", None) or "submitted",
+            metadata=_batch_metadata(
+                registration,
+                records,
+                warnings=warnings,
+                now=now,
+                holdings_set_uid=None,
+                previous=previous_metadata,
+            ),
+            orders=order_rows(records, account_identifier=account_identifier),
+        )
+
+    def write_ledger() -> Any:
+        fills = any(entry["trades"] for entry in entries)
+        written, *_ = all_together(
+            create_batch, *([deps.ledger.ensure_cash_asset] if fills else [])
+        )
+        deps.ledger.write_execution(entries)
         return written
 
-    def write_trades() -> None:
-        if trade_rows:
-            deps.ledger.ensure_cash_asset()
-            deps.ledger.write_trades(trade_rows)
-
     fills = new_fills(previous, records)
-    batch, _, published = all_together(
-        write_batch_and_orders,
-        write_trades,
+    batch, published = all_together(
+        write_ledger,
         (lambda: _publish_after_fills(deps, account_uid)) if fills else (lambda: None),
     )
     holdings_set_uid = (previous_metadata or {}).get("holdings_set_uid")
@@ -1085,6 +1096,12 @@ def submit_order_batch(
         raise PreTradeCheckError(checks)
     now = deps.now()
     previous = _records_from_batch(batch) if batch is not None else []
+    # Each order's Markets uid: the one its batch already holds for it on a retry, else a new one.
+    known = {record.client_order_id: record.order_uid for record in previous}
+    records = [
+        replace(record, order_uid=known.get(record.client_order_id) or str(uuid.uuid4()))
+        for record in records
+    ]
     placed: dict[str, OrderRecord] = {}
     pending: list[OrderRecord] = []
     held = each_together(
@@ -1119,6 +1136,7 @@ def submit_order_batch(
         now=now,
         warnings=warnings,
         message=message,
+        create_orders=True,
     )
 
 

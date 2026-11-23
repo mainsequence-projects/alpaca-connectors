@@ -2,7 +2,8 @@
 
 Import the capability from here. ``orders`` holds the pure contract and ledger-row logic;
 ``services`` places the orders with the account's stored credentials and keeps the ms-markets
-execution ledger (``OrderManager``, ``OrdersTS``, ``TradesTS``).
+execution ledger (``OrderManager`` and ``Order`` rows, the ``OrdersTS`` and ``TradesTS``
+instances; ms-markets ADR 0064).
 """
 
 from .orders import (
@@ -31,11 +32,12 @@ from .services import (
 
 
 def execution_runtime_models() -> list[type]:
-    """The execution tables this capability writes at runtime: its orders and trades instances.
+    """The execution tables this capability writes at runtime: its execution instances.
 
-    Orders and trades live in this application's ``OrdersTS`` / ``TradesTS`` instances
-    (``alpaca_connectors.instances``, ms-markets ADR 0047), migrated by its own provider. Order
-    managers are Markets registry rows reached through the Markets API, so no Markets table is
+    Order states and trades live in this application's ``OrdersTS`` / ``TradesTS`` instances,
+    with the ``OrderEventsTS`` instance ``write_execution`` also takes (``alpaca_connectors
+    .instances``, ms-markets ADR 0047 and ADR 0064), migrated by its own provider. Order managers
+    and orders are Markets registry rows reached through the Markets API, so no Markets table is
     attached.
     """
     from alpaca_connectors.instances import execution_instance_models

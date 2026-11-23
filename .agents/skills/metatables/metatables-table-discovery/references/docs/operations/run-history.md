@@ -131,14 +131,23 @@ same admission identity; new invocations use new identities.
 
 Two runs of one updater never overlap. While one runs, a start of the same updater
 answers HTTP 409 with `{"code": "update_execution_active", "execution_run_uid": ...}`,
-naming the run that holds it. A run that needs that updater as a dependency waits
-for the holding run to end, for up to 30 minutes, then starts the dependency again
-in its own graph; its data is then current. If the holding run failed, or is still
-running when the wait ends, the dependent run fails and names it.
+naming the run that holds it. A run that needs that updater, as a dependency or as
+the head of its own `run()`, waits for the holding run to end, for up to 30 minutes,
+then starts the updater again in its own graph: a dependency's data is then current,
+and a head given its frame still writes it. If the holding run failed, or is still
+running when the wait ends, the waiting run fails and names it.
 
 The runner reports calculation start or explicit skip through
 `PATCH /table-update-runs/{run_uid}/node-state/`; the existing finish action records
-completion and finalizes node outcomes. Dependency completion is awaited before
+completion and finalizes node outcomes. A root whose plan has no other node records its
+calculation start in its admission instead (`"start_calculation": true`).
+
+A run of an updater with no dependencies makes four requests: it reads its update,
+starts, inserts and ends. It does not read its registered dependencies when it declares
+none: the start refuses a plan that differs from them with HTTP 409
+`{"code": "run_plan_differs", ...}`, and the run rebuilds them and starts again. The
+last chunk of an insert carries the writer's progress (`update_statistics`), merges it
+into the table's statistics and answers them, so the run reads no statistics of its own. Dependency completion is awaited before
 starting its consumers. Low-level start calls without a plan preserve their
 existing individual-run behavior and have no captured graph.
 

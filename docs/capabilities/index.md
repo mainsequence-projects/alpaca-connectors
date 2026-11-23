@@ -83,7 +83,8 @@ Execution places batches of market orders on a registered account for authorised
 - market day orders, whole shares or fractions where Alpaca allows them
 - a preflight that reports every pre-trade check without placing anything, and a submit that
   refuses (`409`) only for what protects its orders and the ledger, leaving the rest to Alpaca
-- the ms-markets execution ledger: `OrderManager`, `OrdersTS`, `TradesTS`
+- the ms-markets execution ledger: `OrderManager` and `Order` rows, and this application's
+  `OrdersTS` and `TradesTS` instances (ms-markets ADR 0064)
 - a holdings snapshot after fills
 
 It is an API capability. The Alpaca Agent has no tool over it and places no orders.

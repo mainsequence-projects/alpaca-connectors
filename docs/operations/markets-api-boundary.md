@@ -23,6 +23,8 @@ agent session; every command below is run by the person the step names.
 | Signal weights, portfolio weights and values in this application's instances, which Markets read through its catalog | published to Markets' own tables and read back with the ms-markets recipes; no catalog row, no second namespace ([ADR 0031](../adrs/0031_markets_series_are_published_not_shared.md)) |
 | Job schema gate read the ms-markets Alembic version table | waits until the Markets API's `/health` reports at least the ms-markets release of the image |
 | 13 project tables in `mainsequence.markets` | in `alpaca-connectors` (step 7) |
+| Orders and trades written by the ms-markets `Orders` and `Trades` updaters, an update execution each, keyed by the order's identifier | the batch with its `Order` rows in one `OrderManager.create_batch(orders=...)` call, then the states and fills in one `write_execution` transaction, keyed by the order's uid (ms-markets 6.0.0, its ADR 0064; revision 0036, which gives the orders recorded before it their `Order` rows with `Order.upsert_many`) |
+| An account delete deleted its orders and trades by account | its order states and events by the uids of its `Order` rows (`Order.filter`), its trades by account |
 
 Identities do not change: the uid of every table, the physical names of the project tables, every
 `update_hash` (output tables and catalog namespaces do not enter it, and no hash namespace is

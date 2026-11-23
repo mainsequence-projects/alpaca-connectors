@@ -279,6 +279,17 @@
             "minimum": 1.0,
             "title": "Total Chunks",
             "type": "integer"
+          },
+          "update_statistics": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Update Statistics"
           }
         },
         "required": [
@@ -3885,6 +3896,11 @@
               }
             ],
             "title": "Root Run Uid"
+          },
+          "start_calculation": {
+            "default": false,
+            "title": "Start Calculation",
+            "type": "boolean"
           },
           "trace_id": {
             "anyOf": [
@@ -10992,7 +11008,7 @@
     },
     "/time-index-table-updates/{update_uid}/insert-data-into-table/": {
       "post": {
-        "description": "Persist intent, then serialize writes to this table through finalization.",
+        "description": "Persist intent, then serialize writes to this table through finalization.\n\nA chunk that writes answers the table's statistics after it; a receipt that was\nalready applied answers 204 without them.",
         "operationId": "insert_data_into_table_time_index_table_updates__update_uid__insert_data_into_table__post",
         "parameters": [
           {
@@ -11017,7 +11033,12 @@
           "required": true
         },
         "responses": {
-          "204": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
             "description": "Successful Response"
           },
           "422": {
