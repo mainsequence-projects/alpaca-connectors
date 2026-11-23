@@ -1,6 +1,7 @@
-"""Entry point of the workflow-declared, unscheduled `alpaca-lifecycle-check` Job (ADR 0032).
+"""Entry point of the unscheduled `alpaca-lifecycle-check` Job (ADR 0032).
 
-A person runs it on demand. It runs the account and portfolio life cycle from inside the platform
+The Job is not declared for now: the check runs from a person's machine. Once it is declared again
+in `alpaca-connectors-api.yaml`, a person runs it on demand. It runs the account and portfolio life cycle from inside the platform
 against this branch's deployed API, as its workload, and prints the timed report. Its exit status
 is 1 when any stage failed. The schema gate (ADR 0012) comes first.
 """

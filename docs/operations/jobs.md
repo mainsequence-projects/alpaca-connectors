@@ -286,11 +286,14 @@ environment variable. It was retired on 2026-11-09 (issue #11), and its declarat
 
 ## Lifecycle Check Job
 
+**Not declared for now.** The check runs only from a person's machine
+([ADR 0032](../adrs/0032_the_lifecycle_check_runs_as_an_on_demand_job.md), status). Its launcher
+and code stay, and this section is what the declaration is when it comes back.
+
 `alpaca-lifecycle-check` (display name `Alpaca Lifecycle Check`) runs the account and portfolio
-life cycle check inside the platform, on demand
-([ADR 0032](../adrs/0032_the_lifecycle_check_runs_as_an_on_demand_job.md)). It is declared in
-`alpaca-connectors-api.yaml` with no schedule and is no step of the execution graph, so a push never
-runs it. Its launcher is `src/jobs/run_lifecycle_check.py`, which starts with the schema gate.
+life cycle check inside the platform, on demand. It is declared in `alpaca-connectors-api.yaml`
+with no schedule and is no step of the execution graph, so a push never runs it. Its launcher is
+`src/jobs/run_lifecycle_check.py`, which starts with the schema gate.
 
 | Access | Why |
 | --- | --- |

@@ -2,7 +2,13 @@
 
 ## Status
 
-Accepted and implemented on 2026-11-23.
+Accepted on 2026-11-23. Decisions 1 and 2 are implemented. The Job of decisions 3 to 6 was
+declared on 2026-11-23 and its declaration removed the same day: for now the check runs only from
+a person's machine, because a run in the platform is as slow as one from there (the platform's own
+services reach their database and backend through tunnels). Its launcher,
+`src/jobs/run_lifecycle_check.py`, and `run_platform_job` stay, and the
+`ALPACA_PAPER_API_KEY` and `ALPACA_PAPER_SECRET_KEY` Secrets stay in Production, for when the Job is
+declared again in `alpaca-connectors-api.yaml`.
 
 ## Context
 

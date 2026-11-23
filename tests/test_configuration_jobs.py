@@ -778,11 +778,9 @@ def test_workflow_declares_one_job_and_one_dispatcher_per_kind_outside_the_steps
         # The API starts and lists the kind's runs and reports the dispatcher's schedule.
         assert {"key": spec.workflow_key, "policy": "runner"} in api_entries
         assert {"key": spec.dispatcher_workflow_key, "policy": "viewer"} in api_entries
-    # No other configuration Job is declared any more (ADR 0027); the lifecycle check is an
-    # on-demand Job, not a configuration kind (ADR 0032).
+    # No other configuration Job is declared any more (ADR 0027).
     assert {key for key in resources if key not in {"alpaca", "alpaca-connectors-agent"}} == {
         "alpaca-connectors-migrate",
         "alpaca-portfolio",
         "alpaca-portfolio-dispatcher",
-        "alpaca-lifecycle-check",
     }

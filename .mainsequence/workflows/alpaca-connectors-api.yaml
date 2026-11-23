@@ -186,41 +186,6 @@ resources:
     automatic_redeployment:
       enabled: true
       tag_regex: null
-# The account and portfolio life cycle, run on demand inside the platform (ADR 0032). It has no
-# schedule and is no step of the execution graph, so a push never runs it. It calls this branch's
-# API as its own workload (`user` on `alpaca`, which only this file can name) and Markets as every
-# Job does, and reads the paper account's keys from the two Secrets; it sends them only to the
-# account create route and to Alpaca. The API starts its portfolio Job runs, so it holds no
-# `runner` itself.
-- key: alpaca-lifecycle-check
-  kind: job
-  access:
-    branches:
-    - repository: MetaTables
-      policy: reader
-    - repository: MainSequenceMarkets
-      policy: reader
-    resources:
-    - key: alpaca
-      policy: user
-    secrets:
-    - name: ALPACA_PAPER_API_KEY
-      policy: value_reader
-    - name: ALPACA_PAPER_SECRET_KEY
-      policy: value_reader
-  spec:
-    name: Alpaca Lifecycle Check
-    description: Run the account and portfolio life cycle against this branch's API and print the timed report.
-    execution_path: src/jobs/run_lifecycle_check.py
-    cpu_request: '0.25'
-    memory_request: '0.5'
-    max_runtime_seconds: 3600
-    spot: false
-    task_schedule: null
-    scheduled_command_args: []
-    automatic_redeployment:
-      enabled: true
-      tag_regex: null
 # The migration Job runs from the API's candidate image. The API deploys only after it succeeds,
 # and the Agent deploys from its own image only after the API whose MCP it uses.
 execution:

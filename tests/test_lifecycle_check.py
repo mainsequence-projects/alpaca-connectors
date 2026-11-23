@@ -1,4 +1,4 @@
-"""The lifecycle check's parallel stage 10 and its on-demand platform Job (ADR 0032)."""
+"""The lifecycle check's parallel stage 10 and its paper keys (ADR 0032)."""
 
 from __future__ import annotations
 
@@ -6,18 +6,13 @@ import datetime as dt
 import json
 import threading
 import time
-from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
-import yaml
 
 from alpaca_connectors.operations import lifecycle_check
 from alpaca_connectors.operations.lifecycle_check import Clock, Lifecycle, PaperKeys, at_once
-
-ROOT = Path(__file__).resolve().parents[1]
-WORKFLOW = ROOT / ".mainsequence/workflows/alpaca-connectors-api.yaml"
 
 
 class Answer:
@@ -140,36 +135,3 @@ def test_the_paper_keys_come_from_the_two_secrets_and_never_print() -> None:
     assert [call.kwargs["name"] for call in read.call_args_list] == list(values)
     assert (keys.api_key, keys.secret_key) == ("paper-key-value", "paper-secret")
     assert "paper-key-value" not in repr(keys) and "paper-secret" not in repr(keys)
-
-
-def test_the_lifecycle_check_is_an_on_demand_job_that_calls_the_api() -> None:
-    workflow = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
-    resources = {resource["key"]: resource for resource in workflow["resources"]}
-    job = resources["alpaca-lifecycle-check"]
-    in_steps = {
-        value
-        for step in workflow["execution"]["steps"].values()
-        for key, value in step.items()
-        if key in {"prepare_image", "run_job", "deploy"}
-    }
-
-    assert job["kind"] == "job"
-    # Run only when a person starts it: no schedule, and no push runs it.
-    assert job["spec"]["task_schedule"] is None
-    assert job["spec"]["scheduled_command_args"] == []
-    assert "alpaca-lifecycle-check" not in in_steps
-    assert job["spec"]["execution_path"] == "src/jobs/run_lifecycle_check.py"
-    assert (ROOT / job["spec"]["execution_path"]).is_file()
-    # It calls the API as its workload, finds Markets as every Job does and reads the paper keys;
-    # the API starts the portfolio Job runs, so it holds no runner.
-    assert job["access"] == {
-        "branches": [
-            {"repository": "MetaTables", "policy": "reader"},
-            {"repository": "MainSequenceMarkets", "policy": "reader"},
-        ],
-        "resources": [{"key": "alpaca", "policy": "user"}],
-        "secrets": [
-            {"name": "ALPACA_PAPER_API_KEY", "policy": "value_reader"},
-            {"name": "ALPACA_PAPER_SECRET_KEY", "policy": "value_reader"},
-        ],
-    }

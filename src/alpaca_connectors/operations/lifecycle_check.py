@@ -3,7 +3,8 @@
     .venv/bin/python scripts/lifecycle_check.py [--release-uid UID] [--keep] [--json PATH]
 
 or, in the platform, a run of the unscheduled ``alpaca-lifecycle-check`` Job (ADR 0032), whose
-launcher calls ``run_platform_job``.
+launcher calls ``run_platform_job``. That Job is not declared for now: the check runs from a
+person's machine.
 
 It drives a real Alpaca paper account through this API, the way an application does
 (ADR 0023, ADR 0031):

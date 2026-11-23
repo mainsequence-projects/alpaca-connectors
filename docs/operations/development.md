@@ -75,8 +75,8 @@ The project requires MetaTables 0.1.66 or later: tables in several namespaces
 `alpaca_connectors.operations.lifecycle_check` runs the whole account and portfolio life cycle on
 a real Alpaca paper account ([ADR 0023](../adrs/0023_account_sync_sizes_and_allocates_funds.md),
 [ADR 0031](../adrs/0031_markets_series_are_published_not_shared.md)). It times every step, cleans
-up after itself and exits 0 only when every stage passed and the cleanup completed. It runs in
-three places:
+up after itself and exits 0 only when every stage passed and the cleanup completed. It runs from
+this machine, in two ways:
 
 - **Against the local stack**, from this machine:
 
@@ -87,10 +87,10 @@ three places:
 
 - **Against a deployed release**, from this machine, as the signed-in person:
   `scripts/lifecycle_check.py --release-uid <uid>`.
-- **In the platform**, as the on-demand `alpaca-lifecycle-check` Job
-  ([ADR 0032](../adrs/0032_the_lifecycle_check_runs_as_an_on_demand_job.md); see
-  [Running it in the platform](#running-it-in-the-platform)). Its times are the platform's own,
-  without this machine's connection.
+
+Its code can also run in the platform as the on-demand `alpaca-lifecycle-check` Job, but that Job
+is not declared for now ([ADR 0032](../adrs/0032_the_lifecycle_check_runs_as_an_on_demand_job.md);
+see [Running it in the platform](#running-it-in-the-platform)).
 
 `--keep` skips the cleanup, to look at what a run left. `tests/test_live_account_lifecycle.py` runs
 it once against the local stack and fails with its report; it is skipped unless `ALPACA_E2E=1`.
@@ -180,10 +180,16 @@ their weights rows in place; they are reused by the next run.
 
 ### Running it in the platform
 
+**Not declared for now:** the check runs only from this machine. A run in the platform is as slow
+as one from here, because the platform's own services reach their database and backend through
+tunnels. What follows applies once the Job is declared again in `alpaca-connectors-api.yaml`, as
+[Jobs](jobs.md#lifecycle-check-job) describes.
+
 The `alpaca-lifecycle-check` Job runs the same check inside the platform, against this branch's
 API in the Job's Environment ([ADR 0032](../adrs/0032_the_lifecycle_check_runs_as_an_on_demand_job.md)).
 No push runs it. Before the push that declares it, a person sets the `ALPACA_PAPER_API_KEY` and
-`ALPACA_PAPER_SECRET_KEY` Secrets in that Environment to the paper account's keys. Then:
+`ALPACA_PAPER_SECRET_KEY` Secrets in that Environment to the paper account's keys (Production has
+them since 2026-11-23). Then:
 
 ```bash
 mainsequence code-repository jobs list
