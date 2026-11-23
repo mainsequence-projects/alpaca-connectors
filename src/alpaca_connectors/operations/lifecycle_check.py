@@ -99,10 +99,12 @@ WEIGHTS = {
     PORTFOLIO_2: {"JPM": 0.5, "NVDA": 0.5},
 }
 REWEIGHTED = {PORTFOLIO_1: {"AAPL": 0.7, "NVDA": 0.3}}
-# Portfolio 1 is a share of NAV and portfolio 2 an amount, so both kinds of exposure are sized.
+# Each portfolio is a share of NAV: an account target states no amount since ms-markets 5.3.0
+# (its ADR 0061).
 SHARE_OF_NAV = 0.30
 LOWER_SHARE_OF_NAV = 0.15
-AMOUNT = 20_000.0
+SECOND_SHARE_OF_NAV = 0.20
+NO_WEIGHTS_SHARE_OF_NAV = 0.01
 # A sized target is checked against this run's own read of equity and prices, taken seconds
 # apart from the sync's, so the comparison allows for that drift.
 SIZING_TOLERANCE = 0.03
@@ -813,7 +815,7 @@ class Lifecycle:
         target = self.write_target(
             [
                 self.exposure(PORTFOLIO_1, weight_notional_exposure=SHARE_OF_NAV),
-                self.exposure(PORTFOLIO_2, constant_notional_exposure=AMOUNT),
+                self.exposure(PORTFOLIO_2, weight_notional_exposure=SECOND_SHARE_OF_NAV),
             ]
         )
         self.state["position_set_uid"] = str(target.position_set_uid)
@@ -839,7 +841,7 @@ class Lifecycle:
         check(result["position_set_uid"] == self.state["position_set_uid"], "Wrong target sized.")
         check(result["allocation_applied"] is True, "The snapshot was not allocated.")
         lines = self.fund_lines(operation)
-        sizes = {PORTFOLIO_1: SHARE_OF_NAV * equity, PORTFOLIO_2: AMOUNT}
+        sizes = {PORTFOLIO_1: SHARE_OF_NAV * equity, PORTFOLIO_2: SECOND_SHARE_OF_NAV * equity}
         check(
             set(lines) == {(p, s) for p, legs in WEIGHTS.items() for s in legs},
             f"Unexpected fund lines: {sorted(lines)}",
@@ -926,8 +928,10 @@ class Lifecycle:
         self.write_target(
             [
                 self.exposure(PORTFOLIO_1, weight_notional_exposure=SHARE_OF_NAV),
-                self.exposure(PORTFOLIO_2, constant_notional_exposure=AMOUNT),
-                self.exposure(PORTFOLIO_WITHOUT_WEIGHTS, constant_notional_exposure=1_000.0),
+                self.exposure(PORTFOLIO_2, weight_notional_exposure=SECOND_SHARE_OF_NAV),
+                self.exposure(
+                    PORTFOLIO_WITHOUT_WEIGHTS, weight_notional_exposure=NO_WEIGHTS_SHARE_OF_NAV
+                ),
             ]
         )
         operation = self.sync()
@@ -961,7 +965,7 @@ class Lifecycle:
         target = self.write_target(
             [
                 self.exposure(PORTFOLIO_1, weight_notional_exposure=LOWER_SHARE_OF_NAV),
-                self.exposure(PORTFOLIO_2, constant_notional_exposure=AMOUNT),
+                self.exposure(PORTFOLIO_2, weight_notional_exposure=SECOND_SHARE_OF_NAV),
             ]
         )
         equity, prices = self.alpaca.equity(), self.alpaca.prices()

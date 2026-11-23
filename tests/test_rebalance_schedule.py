@@ -160,8 +160,7 @@ def test_the_sync_refuses_with_the_first_rebalance(monkeypatch, portfolio) -> No
     row = {
         "target_type": "portfolio",
         "target_uid": "portfolio-uid",
-        "weight_notional_exposure": None,
-        "constant_notional_exposure": "1000",
+        "weight_notional_exposure": "0.1",
         "portfolio": {"unique_identifier": identifier},
     }
     monkeypatch.setattr(

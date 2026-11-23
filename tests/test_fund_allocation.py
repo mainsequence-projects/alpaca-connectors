@@ -33,7 +33,6 @@ PORTFOLIO_ROW = {
     "target_uid": "portfolio-a-uid",
     "portfolio_uid": "portfolio-a-uid",
     "weight_notional_exposure": "0.40",
-    "constant_notional_exposure": None,
     "portfolio": {"uid": "portfolio-a-uid", "unique_identifier": "A"},
 }
 SIZED = SizedAccountTarget(
@@ -56,14 +55,13 @@ def _target(*rows: Any, position_set_uid: str | None = POSITION_SET) -> Any:
 # ------------------------------------------------------------------------------------------------
 # The target's rows
 # ------------------------------------------------------------------------------------------------
-def test_exposures_are_the_rows_stated_as_a_share_or_an_amount() -> None:
+def test_exposures_are_the_rows_stated_as_a_share() -> None:
     rows = [
         PORTFOLIO_ROW,
         SimpleNamespace(
             target_type="portfolio",
             target_uid="portfolio-b-uid",
-            weight_notional_exposure=None,
-            constant_notional_exposure="300000",
+            weight_notional_exposure="0.30",
             portfolio=SimpleNamespace(unique_identifier="B"),
         ),
         {
@@ -78,7 +76,7 @@ def test_exposures_are_the_rows_stated_as_a_share_or_an_amount() -> None:
 
     assert account_exposures(rows) == [
         Exposure("portfolio", "portfolio-a-uid", "A", weight=0.40),
-        Exposure("portfolio", "portfolio-b-uid", "B", amount=300_000.0),
+        Exposure("portfolio", "portfolio-b-uid", "B", weight=0.30),
         Exposure("asset", "tsla-uid", "TSLA", weight=0.05),
     ]
 

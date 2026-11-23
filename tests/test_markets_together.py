@@ -63,20 +63,3 @@ def test_no_more_than_the_limit_are_in_flight() -> None:
     values = list(range(markets_api.MARKETS_CONCURRENT_CALLS * 3))
     assert each_together(call, values) == values
     assert most[0] <= markets_api.MARKETS_CONCURRENT_CALLS
-
-
-def test_the_signals_end_together() -> None:
-    together = threading.Barrier(3, timeout=5)
-    rows = [SimpleNamespace(signal_uid=uid) for uid in ("s1", "s2", "s3")]
-
-    def end_signal(uid: str) -> dict[str, str]:
-        together.wait()
-        return {"uid": uid, "state": "deleted"}
-
-    with (
-        patch("msm_portfolios.api.SignalMetadata.filter", return_value=rows),
-        patch("msm_portfolios.recipes.end_signal", side_effect=end_signal),
-    ):
-        answers = markets_api.end_signals(["s1", "s2", "s3", "never-published"])
-
-    assert answers == {uid: {"uid": uid, "state": "deleted"} for uid in ("s1", "s2", "s3")}

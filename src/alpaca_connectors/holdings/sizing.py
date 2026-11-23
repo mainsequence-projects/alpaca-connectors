@@ -1,7 +1,7 @@
 """The sizing rule: an account's exposures turned into target units (ADR 0023).
 
-ms-markets stores an account target as exposure, a share of the account's NAV or an amount per
-portfolio, and reads no price (ms-markets ADR 0054). This module is the only place in the
+ms-markets stores an account target as exposure, a share of the account's NAV per portfolio (no
+amount since its ADR 0061), and reads no price (ms-markets ADR 0054). This module is the only place in the
 connector that prices a target. It is a pure function of the exposure rows, Alpaca's equity, the
 portfolio weights, the latest trades and the ``fractionable`` flags, so it runs without Alpaca or
 Markets.
@@ -34,16 +34,16 @@ class FundAllocationError(ValueError):
 class Exposure:
     """One row of the account target that has to be sized.
 
-    ``weight`` is a share of the account's NAV and ``amount`` a notional in USD; exactly one is
-    set. For a portfolio, ``identifier`` is the portfolio's ``unique_identifier``, the key of its
-    weights. For an asset it is the asset's ``unique_identifier``.
+    ``weight`` is a share of the account's NAV. An account target states no amount since
+    ms-markets 5.3.0 (its ADR 0061). For a portfolio, ``identifier`` is the portfolio's
+    ``unique_identifier``, the key of its weights. For an asset it is the asset's
+    ``unique_identifier``.
     """
 
     target_type: Literal["portfolio", "asset"]
     target_uid: str
     identifier: str
     weight: float | None = None
-    amount: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -66,13 +66,11 @@ def _finite(value: Any) -> float | None:
 
 
 def exposure_size(exposure: Exposure, *, equity: float | None) -> float:
-    """The exposure in USD: its amount, or its share of Alpaca's reported equity."""
-    if exposure.amount is not None:
-        return float(exposure.amount)
+    """The exposure in USD: its share of Alpaca's reported equity."""
     if exposure.weight is None:
         raise FundAllocationError(
             "invalid_account_target",
-            "A row of the account target states neither a share of NAV nor an amount.",
+            "A row of the account target states no share of NAV.",
         )
     account_equity = _finite(equity)
     if account_equity is None:

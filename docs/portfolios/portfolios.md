@@ -320,8 +320,8 @@ holdings, leaves discovery, and its updaters write nothing after `retired_at`.
 
 An account's delete ends all its portfolios in one pass (issue #46):
 
-- **Retires.** ms-markets retires one portfolio per call (MainSequenceMarkets#124), so the
-  `Portfolio` rows are retired together, at most eight calls at once (`markets_api.each_together`).
+- **Retires.** The `Portfolio` rows are retired in one ms-markets call
+  (`retire_portfolios`, MainSequenceMarkets#124). One Markets no longer has ends as `absent`.
 - **Reads.** The reads that decide what goes run together: the definitions they followed (the
   account delete passes its own), which of them other portfolios still follow, and the inline
   rules.
@@ -329,9 +329,9 @@ An account's delete ends all its portfolios in one pass (issue #46):
   rules, and the account's orders and trades.
 
 A refused retirement leaves that portfolio unchanged; every other one ends, without the account's
-own writes, and the refusal is answered after. The account delete's other one-item Markets calls,
-the check of which accounts target each portfolio and the end of each signal, are made together
-the same way.
+own writes, and the refusal is answered after. The account's signals then end in one call too
+(#126). Only the check of which accounts target each portfolio stays one call per portfolio, made
+together (`markets_api.each_together`; #125).
 
 ## CLI
 
@@ -390,7 +390,7 @@ since-inception. Alpha and beta are absent: a portfolio has no benchmark.
 
 Before a portfolio's first run in an Environment:
 
-- the installed ms-markets release, 5.2.0 or later, is the one the Environment's Markets API runs
+- the installed ms-markets release, 5.3.0 or later, is the one the Environment's Markets API runs
   (the Job's schema gate checks it); this application holds no role on `mainsequence.markets` and
   reaches the `Portfolio`, calendar and signal metadata through the Markets API;
 - this project's revisions are applied by the migration Job, including the private instances, the

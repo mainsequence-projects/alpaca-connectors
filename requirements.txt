@@ -169,7 +169,7 @@ mainsequence==9.0.38
     #   alpaca-connectors
     #   mainsequence-metatable
     #   ms-markets
-mainsequence-metatable==0.1.74
+mainsequence-metatable==0.1.78
     # via
     #   alpaca-connectors
     #   ms-markets
@@ -220,7 +220,7 @@ more-itertools==11.1.0
     # via
     #   jaraco-classes
     #   jaraco-functools
-ms-markets==5.2.0
+ms-markets==5.3.0
     # via alpaca-connectors
 ms-tau-sdk==2.0.26
     # via alpaca-connectors

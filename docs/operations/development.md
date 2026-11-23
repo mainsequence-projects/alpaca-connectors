@@ -103,7 +103,7 @@ runs, the weights publishes, and the Markets portfolios' upserts and deletes.
 | 1 Register | The account is created with the paper keys of `.env`; no key value comes back |
 | 2 Sync, no target | Only the capture runs; the two other steps are skipped |
 | 3 Two fixed-weight portfolios | AAPL and NVDA, and JPM and NVDA, published in Markets' portfolio-weights series |
-| 4 Exposure | A share of NAV in the first portfolio and an amount in the second; the write creates the funds |
+| 4 Exposure | A share of NAV in each portfolio, 30% and 20% (a target states no amount since ms-markets 5.3.0); the write creates the funds |
 | 5 Sync | Each exposure is sized into units and the snapshot is allocated |
 | 6 Assignment | Per asset, the lines add up to what the account holds |
 | 7 Rebalance | The deltas are traded; the fills are allocated and NVDA is split between the funds. With the market closed the orders are queued, checked as accepted and cancelled |
@@ -125,7 +125,7 @@ three steps run inside one request, so that request's time is theirs.
 It needs, on this machine:
 
 - the local MetaTables runtime (`metatables serve --local`) with both migrations applied;
-- the Markets API on ms-markets 5.2.0 or later, started from an ms-markets checkout against that
+- the Markets API on ms-markets 5.3.0 or later, started from an ms-markets checkout against that
   runtime, with `MARKETS_API_URL` set for this API and for the script;
 - this API at `http://127.0.0.1:8321` (`ALPACA_LIFECYCLE_API_URL` or `--api-url` names another
   address);

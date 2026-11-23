@@ -91,9 +91,22 @@ def _removal(row, *, retire=None):
     def run(writes):
         calls.transaction(list(writes.entries))
 
+    def retire_portfolios(uids):
+        """One bulk retirement (MainSequenceMarkets#124); ``calls.retire`` sees each portfolio."""
+        from alpaca_connectors.markets_api import Retirements
+
+        calls.retire_portfolios(list(uids))
+        retired, refused = {}, {}
+        for uid in (str(uuid.UUID(str(uid))) for uid in uids):
+            try:
+                retired[uid] = calls.retire(uid)
+            except MarketsConflictError as exc:
+                refused[uid] = str(exc)
+        return Retirements(retired=retired, missing=set(), refused=refused)
+
     patches = [
         patch(f"{CONFIGURATIONS}.get_portfolio_configuration", return_value=row),
-        patch("alpaca_connectors.markets_api.retire_portfolio", calls.retire),
+        patch("alpaca_connectors.markets_api.retire_portfolios", retire_portfolios),
         patch(f"{CONFIGURATIONS}.OwnTableWrites.run", run),
         patch(f"{CONFIGURATIONS}.portfolio_counts_by_definition", calls.followers),
         patch(
@@ -149,7 +162,7 @@ def test_the_owner_retires_the_portfolio_then_deletes_its_configuration() -> Non
     # and deletes the configuration and the definition it followed (issue #38). Its signal's
     # rows stay with the retired Portfolio, which the record just written keeps: not read again.
     names = [name for name, *_ in calls.mock_calls]
-    assert names[0] == "retire"
+    assert names[:2] == ["retire_portfolios", "retire"]
     assert names.index("transaction") < names.index("signals")
     assert _writes(calls) == [
         ("insert", "EndedPortfolioTable", [PORTFOLIO_UID]),
@@ -311,14 +324,48 @@ def test_a_configuration_without_a_portfolio_is_deleted_without_retiring() -> No
     assert removal.summary()["portfolio"]["state"] == "absent"
 
 
-def test_the_retire_composite_calls_the_markets_client() -> None:
+def test_the_retire_composite_retires_them_in_one_call() -> None:
     from alpaca_connectors import markets_api
 
+    held, missing = uuid.UUID(int=2), uuid.UUID(int=3)
     runtime = SimpleNamespace(client=MagicMock())
+    runtime.client.bulk_retire_portfolios.return_value = SimpleNamespace(
+        retired=[SimpleNamespace(uid=str(PORTFOLIO_UID), retired_at=RETIRED_AT)],
+        failed=[
+            SimpleNamespace(uid=str(held), detail=f"Portfolio {held} cannot be retired: ..."),
+            SimpleNamespace(uid=str(missing), detail=f"Portfolio {missing} was not found."),
+        ],
+    )
     with patch("alpaca_connectors.runtime.use_markets_api", return_value=runtime):
-        markets_api.retire_portfolio(str(PORTFOLIO_UID))
+        retirement = markets_api.retire_portfolios([PORTFOLIO_UID, held, missing])
 
-    runtime.client.retire_portfolio.assert_called_once_with(str(PORTFOLIO_UID))
+    # One bulkRetirePortfolios for all of them (MainSequenceMarkets#124).
+    runtime.client.bulk_retire_portfolios.assert_called_once_with(
+        [str(PORTFOLIO_UID), str(held), str(missing)]
+    )
+    assert list(retirement.retired) == [str(PORTFOLIO_UID)]
+    assert retirement.missing == {str(missing)}
+    assert list(retirement.refused) == [str(held)]
+
+
+def test_a_portfolio_markets_no_longer_has_ends_as_absent() -> None:
+    from alpaca_connectors.markets_api import Retirements
+    from alpaca_connectors.portfolios.provided_weights import end_portfolio_configurations
+
+    calls, patches = _removal(configuration())
+    gone = Retirements(retired={}, missing={str(PORTFOLIO_UID)}, refused={})
+    with (
+        _entered(patches),
+        patch("alpaca_connectors.markets_api.retire_portfolios", return_value=gone),
+    ):
+        [removal] = end_portfolio_configurations([configuration()])
+
+    # Nothing to record: the configuration and its definition go, as for one without a Portfolio.
+    assert removal.portfolio_state == "absent"
+    assert [table for _, table, _ in _writes(calls)] == [
+        "AlpacaPortfolioConfigurationTable",
+        "SignalDefinitionTable",
+    ]
 
 
 def test_forgetting_a_signals_assets_is_one_delete() -> None:

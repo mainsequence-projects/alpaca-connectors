@@ -280,6 +280,7 @@ class FakeRecipes:
         "portfolio_preflight",
         "run_portfolio",
         "end_signal",
+        "end_signals",
         "delete_private_series",
     )
 

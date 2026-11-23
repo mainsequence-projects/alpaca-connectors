@@ -19,6 +19,7 @@ from msm.api.remote import MarketsConflictError
 
 from alpaca_connectors.account import deletion
 from alpaca_connectors.account.deletion import AccountDeleteRefused, delete_account
+from alpaca_connectors.markets_api import PortfolioDeletes
 
 ACCOUNT_UID = str(uuid.UUID("55555555-5555-4555-8555-555555555555"))
 OTHER_ACCOUNT = str(uuid.UUID("66666666-6666-4666-8666-666666666666"))
@@ -87,6 +88,10 @@ def _run(
     }
     calls.elsewhere.return_value = set()
     calls.ended.return_value = stored
+    # Markets deletes every portfolio asked for here (MainSequenceMarkets#127's answer).
+    calls.delete_portfolios.side_effect = lambda uids: PortfolioDeletes(
+        deleted=[str(uuid.UUID(str(uid))) for uid in uids], failed={}
+    )
 
     def signal_states(signals, kept=()):
         calls.delete_signals(list(signals))
@@ -328,35 +333,45 @@ def test_the_preflight_and_the_signal_delete_call_their_ms_markets_routes(recipe
 
     client = MagicMock()
     client.request.return_value = {"blockers": []}
-    rows = [
-        SimpleNamespace(uid="metadata-a", signal_uid="signal-a"),
-        SimpleNamespace(uid="metadata-b", signal_uid="signal-b"),
-    ]
-    recipes.answer("end_signal", lambda signal_uid: {"deleted": signal_uid})
-    with (
-        patch(
-            "alpaca_connectors.runtime.use_markets_api", return_value=SimpleNamespace(client=client)
-        ),
-        patch(
-            "msm_portfolios.api.market_metadata.SignalMetadata.filter", return_value=rows
-        ) as read,
+    recipes.answer(
+        "end_signals",
+        lambda signal_uids: {
+            "ended": [
+                {"signal_uid": uid, "detail": "Signal metadata deleted."} for uid in ("a", "b")
+            ],
+            "failed": [{"signal_uid": "c", "detail": "No SignalMetadata row has signal_uid 'c'."}],
+        },
+    )
+    with patch(
+        "alpaca_connectors.runtime.use_markets_api", return_value=SimpleNamespace(client=client)
     ):
         markets_api.account_delete_preflight(ACCOUNT_UID)
-        ended = markets_api.end_signals(["signal-a", "signal-b", "signal-c"])
+        ended = markets_api.end_signals(["a", "b", "c"])
 
     selection = {"selection": {"mode": "explicit", "uids": [ACCOUNT_UID]}, "options": {}}
-    # One read of the signals' metadata; ending a signal is a one-signal recipe, and a signal
-    # Markets never registered costs no call.
-    read.assert_called_once_with(signal_uid__in=["signal-a", "signal-b", "signal-c"], limit=3)
     assert client.request.call_args_list == [
         call("POST", "/api/v1/account/bulk-delete/preflight/", json=selection),
     ]
-    # The two run together, so in no particular order.
-    assert sorted(recipes.calls, key=lambda made: made[1]["signal_uid"]) == [
-        ("end_signal", {"signal_uid": "signal-a"}),
-        ("end_signal", {"signal_uid": "signal-b"}),
-    ]
-    assert ended == {"signal-a": {"deleted": "signal-a"}, "signal-b": {"deleted": "signal-b"}}
+    # The signals end in one call (MainSequenceMarkets#126); one Markets never registered has
+    # nothing to end.
+    assert recipes.calls == [("end_signals", {"signal_uids": ["a", "b", "c"]})]
+    assert list(ended) == ["a", "b"]
+
+
+def test_a_signal_markets_refuses_to_end_is_raised_after_the_others_end(recipes) -> None:
+    from alpaca_connectors import markets_api
+
+    refusal = "Signal 'b' is referenced by protected rows (1 portfolio names it)."
+    recipes.answer(
+        "end_signals",
+        lambda signal_uids: {
+            "ended": [{"signal_uid": "a"}],
+            "failed": [{"signal_uid": "b", "detail": refusal}],
+        },
+    )
+    with pytest.raises(markets_api.SignalsNotEnded) as raised:
+        markets_api.end_signals(["a", "b"])
+    assert raised.value.refused == {"b": refusal}
 
 
 def test_several_portfolios_are_preflighted_and_deleted_in_one_request_each() -> None:

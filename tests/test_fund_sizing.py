@@ -35,7 +35,7 @@ def test_the_worked_example_of_the_adr() -> None:
     sized = size_targets(
         [
             Exposure("portfolio", PORTFOLIO_A, "A", weight=0.40),
-            Exposure("portfolio", PORTFOLIO_B, "B", amount=300_000),
+            Exposure("portfolio", PORTFOLIO_B, "B", weight=0.30),
         ],
         equity=1_000_000,
         weights=WEIGHTS,
@@ -82,8 +82,8 @@ def test_units_are_whole_and_half_up_unless_fractionable(raw, fractionable, expe
 
 def test_a_negative_weight_is_a_short_with_a_positive_quantity() -> None:
     sized = size_targets(
-        [Exposure("portfolio", PORTFOLIO_A, "A", amount=100_000)],
-        equity=None,
+        [Exposure("portfolio", PORTFOLIO_A, "A", weight=0.10)],
+        equity=1_000_000,
         weights={"A": {"AAPL": 1.3, "MSFT": -0.3}},
         assets=ASSETS,
     )
@@ -93,8 +93,8 @@ def test_a_negative_weight_is_a_short_with_a_positive_quantity() -> None:
 
 def test_an_asset_that_rounds_to_zero_has_no_position() -> None:
     sized = size_targets(
-        [Exposure("portfolio", PORTFOLIO_A, "A", amount=250)],
-        equity=None,
+        [Exposure("portfolio", PORTFOLIO_A, "A", weight=0.00025)],
+        equity=1_000_000,
         weights=WEIGHTS,
         assets=ASSETS,
     )
@@ -114,11 +114,11 @@ def test_a_fund_sized_to_nothing_keeps_its_entry() -> None:
     assert sized == [{"target_type": "portfolio", "target_uid": PORTFOLIO_A, "positions": []}]
 
 
-def test_an_amount_needs_no_equity_but_a_share_does() -> None:
-    amount = [Exposure("portfolio", PORTFOLIO_A, "A", amount=1000)]
+def test_a_share_needs_equity() -> None:
+    # An account target states no amount since ms-markets 5.3.0 (its ADR 0061): every exposure
+    # is a share of the account's equity.
     share = [Exposure("portfolio", PORTFOLIO_A, "A", weight=0.1)]
 
-    assert size_targets(amount, equity=None, weights=WEIGHTS, assets=ASSETS)
     with pytest.raises(FundAllocationError) as refused:
         size_targets(share, equity=None, weights=WEIGHTS, assets=ASSETS)
     assert refused.value.code == "account_equity_missing"
@@ -140,8 +140,8 @@ def test_an_amount_needs_no_equity_but_a_share_does() -> None:
 def test_nothing_is_sized_with_part_of_a_target(weights, assets, code) -> None:
     with pytest.raises(FundAllocationError) as refused:
         size_targets(
-            [Exposure("portfolio", PORTFOLIO_A, "A", amount=1000)],
-            equity=None,
+            [Exposure("portfolio", PORTFOLIO_A, "A", weight=0.001)],
+            equity=1_000_000,
             weights=weights,
             assets=assets,
         )

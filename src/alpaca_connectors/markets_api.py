@@ -7,16 +7,18 @@ helpers keep those reads set-based: a request carries at most ``MARKETS_BATCH_SI
 collection is read in pages of that size, never one call per row. Composite routes go through
 the same client: ``register_account`` (ms-markets ADR 0051); for the sync that sizes and
 allocates an account's target (ADR 0023, ms-markets ADR 0054), ``account_target_positions``,
-``plan_account_virtual_funds`` and ``allocate_account_virtual_funds``; ``retire_portfolio``
+``plan_account_virtual_funds`` and ``allocate_account_virtual_funds``; ``retire_portfolios``
 (ms-markets ADR 0049), which ends a portfolio its owner deletes (ADR 0024, ADR 0027); and the
 calls of an account delete and a signal delete (ADR 0028): ``current_target_account_uids``,
 ``clear_account_target``, ``account_delete_preflight``, ``delete_account``,
 ``portfolio_delete_blockers`` and ``delete_portfolio``, with their set-based forms
 ``portfolios_delete_blockers`` and ``delete_portfolios`` (issue #46). The preflights and the bulk
 portfolio delete have no typed client method in ms-markets 4.0.1, so they call their routes
-through the same client's ``request``. Retiring a portfolio and listing the accounts whose current
-target names it have only one-item routes there, as ending a signal does; ``each_together`` makes
-those one-item calls together instead of one after another.
+through the same client's ``request``. Since ms-markets 5.3.0 several portfolios are retired, and
+several signals ended, in one call (MainSequenceMarkets#124, #126). Listing the accounts whose
+current target names a portfolio stays a one-item route (#125: the account delete's own
+``delete_portfolios`` option answers that); ``each_together`` makes those calls together instead
+of one after another.
 
 Signal weights, portfolio weights and portfolio values are published to Markets and read back
 from it through the ms-markets recipes (ADR 0031, ms-markets ADR 0060), only by the composites of
@@ -212,15 +214,44 @@ def allocate_account_virtual_funds(
     )
 
 
-def retire_portfolio(portfolio_uid: Any) -> Any:
-    """Retire a portfolio from now on (``retirePortfolio``, ms-markets ADR 0049).
+@dataclass(frozen=True, slots=True)
+class Retirements:
+    """What retiring several portfolios did, by canonical portfolio uid."""
 
-    Nothing is deleted; retiring a retired portfolio returns it unchanged. Markets refuses it with
-    ``MarketsConflictError`` while an account's current target names the portfolio.
+    # Retired by this call or already retired: the ``Portfolio`` as Markets answered it.
+    retired: dict[str, Any]
+    # Markets has no such portfolio.
+    missing: set[str]
+    # Not retired, with Markets' reason: an account's current target names it, or it changed
+    # while it was being retired.
+    refused: dict[str, str]
+
+
+def retire_portfolios(portfolio_uids: Iterable[Any]) -> Retirements:
+    """Retire portfolios from now on: one ``bulkRetirePortfolios`` per batch (ms-markets ADR
+    0049, MainSequenceMarkets#124).
+
+    Nothing is deleted; retiring a retired portfolio returns it unchanged. Markets retires every
+    selected portfolio no account's current target names, in one update, and lists each other
+    one in ``failed`` with the reason, which never stops the others.
     """
     from alpaca_connectors.runtime import use_markets_api
 
-    return use_markets_api().client.retire_portfolio(portfolio_uid)
+    client = use_markets_api().client
+    retired: dict[str, Any] = {}
+    missing: set[str] = set()
+    refused: dict[str, str] = {}
+    for batch in batches(str(uuid.UUID(str(uid))) for uid in portfolio_uids):
+        answer = client.bulk_retire_portfolios(batch)
+        for portfolio in answer.retired:
+            retired[str(uuid.UUID(str(portfolio.uid)))] = portfolio
+        for failure in answer.failed:
+            uid = str(uuid.UUID(str(failure.uid)))
+            if failure.detail == f"Portfolio {uid} was not found.":
+                missing.add(uid)
+            else:
+                refused[uid] = failure.detail
+    return Retirements(retired=retired, missing=missing, refused=refused)
 
 
 def _client() -> Any:
@@ -335,21 +366,38 @@ def portfolios_delete_blockers(portfolio_uids: Iterable[Any]) -> dict[str, list[
     return blockers
 
 
-def delete_portfolios(portfolio_uids: Iterable[Any]) -> list[dict[str, Any]]:
+@dataclass(frozen=True, slots=True)
+class PortfolioDeletes:
+    """What deleting several portfolios did, by canonical portfolio uid."""
+
+    deleted: list[str]
+    # Not deleted, with Markets' reason: missing, referenced, or not the caller's to delete.
+    failed: dict[str, str]
+
+
+def delete_portfolios(portfolio_uids: Iterable[Any]) -> PortfolioDeletes:
     """Delete several portfolios nothing references: one ``bulkDeletePortfolios`` per batch.
 
-    The set-based form of ``delete_portfolio`` (issue #46). ms-markets runs its preflight again
-    and refuses the whole request (``MarketsConflictError``) when one of them is referenced or
-    missing; its own weights and values go with each.
+    The set-based form of ``delete_portfolio`` (issue #46). Since ms-markets 5.3.0
+    (MainSequenceMarkets#127) it deletes every portfolio that may go in one transaction, its own
+    weights and values with each, and lists each other one in ``failed`` with the reason instead
+    of refusing the request.
     """
     from msm.client.client import API_PREFIX
 
-    return [
-        _client().request(
-            "POST", f"{API_PREFIX}/portfolio/bulk-delete/", json=_explicit_selections(batch)
+    deleted: list[str] = []
+    failed: dict[str, str] = {}
+    for batch in batches(str(uuid.UUID(str(uid))) for uid in portfolio_uids):
+        answer = (
+            _client().request(
+                "POST", f"{API_PREFIX}/portfolio/bulk-delete/", json=_explicit_selections(batch)
+            )
+            or {}
         )
-        for batch in batches(str(uid) for uid in portfolio_uids)
-    ]
+        deleted.extend(str(uuid.UUID(str(item["uid"]))) for item in answer.get("deleted") or [])
+        for item in answer.get("failed") or []:
+            failed[str(uuid.UUID(str(item["uid"])))] = str(item.get("detail") or "")
+    return PortfolioDeletes(deleted=deleted, failed=failed)
 
 
 def delete_portfolio(portfolio_uid: Any) -> dict[str, Any]:
@@ -702,25 +750,40 @@ def run_portfolio(
     )
 
 
+class SignalsNotEnded(RuntimeError):
+    """Markets refused to end some signals; the others were ended. ``refused`` gives each
+    refused signal's reason: its manager is another, or a ``Portfolio`` still names it."""
+
+    def __init__(self, refused: Mapping[str, str]) -> None:
+        self.refused = dict(refused)
+        super().__init__("Markets did not end these signals: " + "; ".join(self.refused.values()))
+
+
 def end_signals(signal_uids: Iterable[str]) -> dict[str, Any]:
-    """Delete signals' weights and metadata in Markets (``recipes.end_signal``).
+    """Delete signals' weights and metadata in Markets: one ``recipes.end_signals`` call per
+    batch (MainSequenceMarkets#126).
 
-    Their ``SignalMetadata`` rows are read in one ``filter`` per batch (issue #46), so a signal
-    Markets never registered (nothing was ever published to it) costs no call. Then
-    ``end_signal(signal_uid)`` once per registered signal, together (``each_together``), each
-    deleting its weights and its ``SignalMetadata`` in one Markets call. Markets refuses while a
-    ``Portfolio`` names the signal, and only the signal's manager may end it; refusals propagate
-    once every call has ended. Answers each registered signal's result.
+    Markets ends every signal that may go in one transaction and lists each other one in
+    ``failed`` with the reason. A signal Markets never registered (nothing was ever published to
+    it) has nothing to end and is left out. Any other refusal, from a signal another manager
+    manages or a ``Portfolio`` still names, raises ``SignalsNotEnded`` once the others are ended.
+    Answers each ended signal's result, by signal uid.
     """
-    from msm_portfolios.api import SignalMetadata
-    from msm_portfolios.recipes import end_signal
+    from msm_portfolios.recipes import end_signals as end_many
 
-    values = list(dict.fromkeys(str(uid) for uid in signal_uids))
-    rows = read_in_batches(
-        lambda batch: SignalMetadata.filter(signal_uid__in=batch, limit=len(batch)), values
-    )
-    uids = [str(row.signal_uid) for row in rows]
-    return dict(zip(uids, each_together(end_signal, uids), strict=True))
+    ended: dict[str, Any] = {}
+    refused: dict[str, str] = {}
+    for batch in batches(str(uid) for uid in signal_uids):
+        answer = end_many(batch) or {}
+        for item in answer.get("ended") or []:
+            ended[str(item["signal_uid"])] = item
+        for item in answer.get("failed") or []:
+            uid, detail = str(item["signal_uid"]), str(item["detail"])
+            if detail != f"No SignalMetadata row has signal_uid {uid!r}.":
+                refused[uid] = detail
+    if refused:
+        raise SignalsNotEnded(refused)
+    return ended
 
 
 def delete_private_series(*, tables: Sequence[Any], portfolio_identifiers: Iterable[str]) -> None:
@@ -770,7 +833,10 @@ __all__ = [
     "read_all_pages",
     "read_in_batches",
     "register_account",
-    "retire_portfolio",
+    "PortfolioDeletes",
+    "Retirements",
+    "SignalsNotEnded",
+    "retire_portfolios",
     "portfolio_weights_recorded",
     "run_portfolio",
     "signal_bounds",

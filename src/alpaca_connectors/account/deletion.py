@@ -38,11 +38,12 @@ The delete works in bulk (issue #46):
   lists (``OwnTableWrites``, MetaTables ADR 0026): ending the portfolios with the orders and
   trades is one transaction, and forgetting the deleted ``Portfolio`` rows' records with their
   signals' asset rows is another.
-- **One Markets call per kind.** The retired ``Portfolio`` rows go through one preflight and one
-  bulk delete of ms-markets. ms-markets has only one-portfolio routes to list the accounts whose
-  current target names a portfolio and to retire one, and only a one-signal ``end_signal``, so
-  those calls stay one per portfolio or signal, made together (``markets_api.each_together``)
-  until it has bulk forms (MainSequenceMarkets#124, #125, #126).
+- **One Markets call per kind.** The portfolios are retired in one call, the retired
+  ``Portfolio`` rows go through one preflight and one bulk delete, and the signals end in one
+  call (ms-markets 5.3.0, MainSequenceMarkets#124, #126, #127). Listing the accounts whose
+  current target names a portfolio stays one call per portfolio, made together
+  (``markets_api.each_together``; #125 points to the account delete's own
+  ``delete_portfolios`` option instead).
 """
 
 from __future__ import annotations
@@ -285,8 +286,9 @@ def _finish(account_uid: str, deletion: AccountDeletion, records: list[Any] | No
     gone, reads them. Then, in one step, ms-markets' preflight of the ``Portfolio`` rows and the
     read of which of their signals another record still follows. Then the free ``Portfolio``
     rows: their rebalance state (one ``delete_private_series`` call) and one bulk delete, which
-    takes their weights and values. Then one transaction forgets their records and deletes the
-    free signals' asset rows, and Markets ends those signals.
+    takes their weights and values; one Markets reports in ``failed`` stays, recorded, with its
+    signal. Then one transaction forgets the deleted ones' records and deletes the free signals'
+    asset rows, and Markets ends those signals in one call.
     """
     from alpaca_connectors.markets_api import (
         all_together,
@@ -318,14 +320,16 @@ def _finish(account_uid: str, deletion: AccountDeletion, records: list[Any] | No
     free = [
         record for record, uid in zip(records, portfolio_uids, strict=True) if not blockers[uid]
     ]
-    free_uids = {str(uuid.UUID(str(record.portfolio_uid))) for record in free}
-    deletion.kept_portfolio_uids.extend(uid for uid in portfolio_uids if uid not in free_uids)
+    free_uids: set[str] = set()
     if free:
         delete_portfolio_series(
             [provided_portfolio_unique_identifier(r.portfolio_configuration_uid) for r in free]
         )
-        delete_portfolios([str(record.portfolio_uid) for record in free])
-        deletion.deleted_portfolio_uids.extend(str(record.portfolio_uid) for record in free)
+        # Markets deletes what may go and reports the rest (MainSequenceMarkets#127): only those
+        # it deleted lose their record and free their signal.
+        free_uids = set(delete_portfolios([str(record.portfolio_uid) for record in free]).deleted)
+    deletion.deleted_portfolio_uids.extend(uid for uid in portfolio_uids if uid in free_uids)
+    deletion.kept_portfolio_uids.extend(uid for uid in portfolio_uids if uid not in free_uids)
     # A signal stays while a Portfolio that is not deleted, recorded here or elsewhere, follows it.
     kept = set(followed_elsewhere) | {
         str(record.signal_uid)

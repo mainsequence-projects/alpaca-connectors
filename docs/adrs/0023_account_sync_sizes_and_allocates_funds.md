@@ -13,6 +13,10 @@ exposure, and the connector sizes it at every sync.
 
 The decision marked (owner) was made by the owner on 2026-11-15.
 
+Amended on 2026-11-23 for ms-markets 5.3.0, whose ADR 0061 retires `constant_notional_exposure`:
+an account target states no amount any more, so every exposure the sync sizes is a share of NAV
+(decision 4).
+
 Amended on 2026-11-16 by [ADR 0024](0024_portfolios_from_provided_weights.md): a provided-weights
 portfolio publishes its weights like any other, so `portfolio_weights_missing` is left for a
 portfolio that has not run yet.
@@ -22,8 +26,9 @@ portfolio that has not run yet.
 ms-markets 3.7 fixes who owns what (ms-markets ADR 0054):
 
 - **The account target states exposure.** A row of `TargetPositionsStorage` with
-  `target_type="portfolio"` holds `weight_notional_exposure` (a share of the account's NAV) or
-  `constant_notional_exposure` (an amount) in one `Portfolio`. It names no asset and no units.
+  `target_type="portfolio"` holds `weight_notional_exposure` (a share of the account's NAV) in
+  one `Portfolio`. It names no asset and no units. (It could also state an amount,
+  `constant_notional_exposure`, until ms-markets 5.3.0 retired it in its ADR 0061.)
   Writing it creates the `VirtualFund` of that account and portfolio.
 - **ms-markets prices nothing.** Turning an exposure into units needs prices, so it is the
   provider's work, done at a sync.
@@ -133,7 +138,6 @@ For each exposure row of the `PositionSet`:
 | Row | Size `S` in USD |
 | --- | --- |
 | `weight_notional_exposure = x` | `x × the account's Alpaca equity` |
-| `constant_notional_exposure = a` | `a` |
 | An asset row with `single_asset_quantity` | Not sized: it is already in units |
 
 **The account value is Alpaca's reported equity (owner).** Which value a share of NAV is

@@ -93,20 +93,20 @@ def markets_refusal(exc: Exception) -> Exception:
 def account_exposures(positions: Sequence[Any]) -> list[Exposure]:
     """The rows of an account target that have to be sized.
 
-    A portfolio row states a share of NAV or an amount. An asset row stated the same way is sized
-    too; one stated as ``single_asset_quantity`` is already in units and is left out.
+    A portfolio row states a share of NAV (``weight_notional_exposure``); an account target states
+    no amount since ms-markets 5.3.0 (its ADR 0061). An asset row stated as a share is sized too;
+    one stated as ``single_asset_quantity`` is already in units and is left out.
     """
     exposures: list[Exposure] = []
     for row in positions:
         target_type = str(_get(row, "target_type"))
         weight = _number(_get(row, "weight_notional_exposure"))
-        amount = _number(_get(row, "constant_notional_exposure"))
-        if weight is None and amount is None:
+        if weight is None:
             if target_type == "asset" and _get(row, "single_asset_quantity") not in (None, ""):
                 continue
             raise FundAllocationError(
                 "invalid_account_target",
-                "A row of the account target states neither a share of NAV nor an amount.",
+                "A row of the account target states no share of NAV.",
             )
         reference = _get(row, "portfolio" if target_type == "portfolio" else "asset")
         identifier = str(_get(reference, "unique_identifier") or "").strip()
@@ -121,7 +121,6 @@ def account_exposures(positions: Sequence[Any]) -> list[Exposure]:
                 target_uid=str(_get(row, "target_uid")),
                 identifier=identifier,
                 weight=weight,
-                amount=amount,
             )
         )
     return exposures

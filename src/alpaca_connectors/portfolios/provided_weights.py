@@ -510,8 +510,9 @@ def end_portfolio_configurations(
 ) -> list[PortfolioRemoval]:
     """End several portfolios as ``end_portfolio_configuration`` ends one, in bulk (#46).
 
-    1. **Retire.** The `Portfolio` rows are retired first, together (``each_together``): ms-markets
-       retires one portfolio per call.
+    1. **Retire.** The `Portfolio` rows are retired first, in one ms-markets call
+       (``retire_portfolios``, MainSequenceMarkets#124). One Markets no longer has ends as
+       ``absent``.
     2. **Read, in one step.** These reads run together:
        - the definitions they followed, unless the caller passes ``definitions`` (the account
          delete passes the account's own, already read);
@@ -534,7 +535,7 @@ def end_portfolio_configurations(
     """
     from msm.api.remote import MarketsConflictError
 
-    from alpaca_connectors.markets_api import all_together, each_together, retire_portfolio
+    from alpaca_connectors.markets_api import all_together, retire_portfolios
     from alpaca_connectors.portfolios.configurations import (
         AlpacaPortfolioConfigurationTable,
         EndedPortfolioTable,
@@ -551,30 +552,22 @@ def end_portfolio_configurations(
         signal_definitions_by_uids,
     )
 
-    def retire(portfolio_uid: str) -> Any:
-        try:
-            return retire_portfolio(portfolio_uid)
-        except MarketsConflictError as exc:
-            return exc
-
-    with_portfolio = [row for row in configurations if row.portfolio_uid is not None]
-    answers = dict(
-        zip(
-            (str(row.uid) for row in with_portfolio),
-            each_together(retire, [str(row.portfolio_uid) for row in with_portfolio]),
-            strict=True,
-        )
+    retirement = retire_portfolios(
+        [row.portfolio_uid for row in configurations if row.portfolio_uid is not None]
     )
     ended: list[AlpacaPortfolioConfiguration] = []
     retired: dict[str, Any] = {}
     refusal: ProvidedWeightsError | None = None
     for configuration in configurations:
-        answer = answers.get(str(configuration.uid))
-        if isinstance(answer, MarketsConflictError):
-            refusal = refusal or _in_account_target(answer)
-            continue
-        if answer is not None:
-            retired[str(configuration.uid)] = answer
+        if configuration.portfolio_uid is not None:
+            portfolio_uid = str(uuid.UUID(str(configuration.portfolio_uid)))
+            if portfolio_uid in retirement.refused:
+                refusal = refusal or _in_account_target(
+                    MarketsConflictError(retirement.refused[portfolio_uid])
+                )
+                continue
+            if portfolio_uid in retirement.retired:
+                retired[str(configuration.uid)] = retirement.retired[portfolio_uid]
         ended.append(configuration)
     if not ended:
         if refusal is not None:
