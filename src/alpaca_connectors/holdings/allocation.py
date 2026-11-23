@@ -202,24 +202,32 @@ def read_asset_terms(
     }
 
 
+UNREAD: Any = object()
+"""``size_account_target``'s ``target`` when the caller has not read it."""
+
+
 def size_account_target(
     account_uid: Any,
     *,
     valuation_time: dt.datetime,
     equity: float | None,
     price_reader: PriceReader,
+    target: Any = UNREAD,
 ) -> SizedAccountTarget | None:
     """Read the account's target in force and size every exposure of it into units.
 
     Returns None when the account has no target, so there is nothing to allocate. The latest
     target is the one in force at a snapshot just captured; Markets refuses one written after it.
+    ``target`` is that target (None for none) when the caller read it already, alongside the
+    capture; it is read here only when left ``UNREAD``.
     """
     from alpaca_connectors.markets_api import account_target_positions
 
-    try:
-        target = account_target_positions(account_uid)
-    except Exception as exc:
-        raise markets_refusal(exc) from exc
+    if target is UNREAD:
+        try:
+            target = account_target_positions(account_uid)
+        except Exception as exc:
+            raise markets_refusal(exc) from exc
     position_set_uid = _get(target, "position_set_uid") if target is not None else None
     positions = list(_get(target, "positions") or []) if target is not None else []
     if not position_set_uid or not positions:
@@ -332,13 +340,18 @@ def size_and_allocate(
     valuation_time: dt.datetime,
     equity: float | None,
     price_reader: PriceReader | None = None,
+    target: Any = UNREAD,
 ) -> FundAllocationResult:
-    """Both steps for one published snapshot; an account with no target allocates nothing."""
+    """Both steps for one published snapshot; an account with no target allocates nothing.
+
+    ``target`` is the account's target when the caller read it already (``size_account_target``).
+    """
     sized = size_account_target(
         account_uid,
         valuation_time=valuation_time,
         equity=equity,
         price_reader=price_reader or registered_account_price_reader(account_uid),
+        target=target,
     )
     if sized is None:
         return FundAllocationResult()
@@ -347,6 +360,7 @@ def size_and_allocate(
 
 __all__ = [
     "MARKETS_REFUSALS",
+    "UNREAD",
     "RETRYABLE_REFUSALS",
     "FundAllocationResult",
     "SizedAccountTarget",

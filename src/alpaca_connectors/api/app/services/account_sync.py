@@ -158,17 +158,32 @@ def _log_timings(account_uid: str, status: str, steps: dict[str, float], alpaca:
     )
 
 
-def sync_account(account_uid: str, *, owner: AccountOwner) -> AccountSyncOperationResponse:
+def sync_account(
+    account_uid: str,
+    *,
+    owner: AccountOwner,
+    registration: Mapping[str, Any] | None = None,
+) -> AccountSyncOperationResponse:
     """Capture the holdings, size the target, allocate, and answer the terminal operation.
 
     The registration and the keys are read once and serve the capture and the sizing's latest
-    trades. A step that fails is the operation's ``failed`` outcome at that step, not an HTTP
-    error; only a failure to record the operation itself propagates. A snapshot published before a
+    trades; ``registration`` is the one the route read for its 404, not read again. Reads that do
+    not depend on each other run together (issue #46): the operation's record with the keys, and
+    the account's target with the capture. A step that fails is the operation's ``failed``
+    outcome at that step, not an HTTP error; only a failure to record the operation itself
+    propagates. A snapshot published before a
     later step failed stays published. An account with no target, or a capture that published no
     snapshot, ends after the capture with the two other steps skipped. Each step's duration and
     the time spent in Alpaca are logged in one line when the sync ends.
     """
-    operation = start_account_sync_operation(account_uid=account_uid, owner=owner)
+    from alpaca_connectors.markets_api import all_together
+
+    if registration is None:
+        registration = get_account_registration(account_uid)
+    operation, credentials = all_together(
+        lambda: start_account_sync_operation(account_uid=account_uid, owner=owner),
+        lambda: _credentials_or_error(registration),
+    )
     step = CAPTURE_STEP
     alpaca = _AlpacaTime()
     durations: dict[str, float] = {}
@@ -181,25 +196,29 @@ def sync_account(account_uid: str, *, owner: AccountOwner) -> AccountSyncOperati
         step, started = next_step, now
 
     try:
-        registration = get_account_registration(account_uid)
-        if registration is None:
-            raise LookupError(f"Alpaca account registration {account_uid!s} does not exist.")
-        credentials = resolve_registered_alpaca_credentials(registration)
+        if isinstance(credentials, Exception):
+            raise credentials
         client = _TimedClient(
             build_alpaca_trading_client(
                 credentials=credentials, paper=bool(registration["is_paper"])
             ),
             alpaca,
         )
-        captured = capture_holdings(account_uid, registration=registration, client=client)
+        captured, target = all_together(
+            lambda: capture_holdings(account_uid, registration=registration, client=client),
+            lambda: _target_or_error(account_uid),
+        )
         allocation = None
         if captured.get("holdings_set_uid") is not None:
             finish_step(SIZE_STEP)
+            if isinstance(target, Exception):
+                raise target
             sized = size_account_target(
                 account_uid,
                 valuation_time=captured["time_index"],
                 equity=captured.get("equity"),
                 price_reader=alpaca.timed(account_price_reader(credentials)),
+                target=target,
             )
             if sized is not None:
                 finish_step(ALLOCATE_STEP)
@@ -220,6 +239,29 @@ def sync_account(account_uid: str, *, owner: AccountOwner) -> AccountSyncOperati
             skipped=() if allocation is not None else (SIZE_STEP, ALLOCATE_STEP),
         )
     )
+
+
+def _credentials_or_error(registration: Mapping[str, Any] | None) -> Any:
+    """The account's keys, or the error that reading them raised, which the sync records as its
+    capture step's failure once its operation exists."""
+    try:
+        if registration is None:
+            raise LookupError("Alpaca account registration does not exist.")
+        return resolve_registered_alpaca_credentials(registration)
+    except Exception as exc:  # noqa: BLE001 - recorded as the operation's failure
+        return exc
+
+
+def _target_or_error(account_uid: str) -> Any:
+    """The account's target in force, read alongside the capture; the error, as Markets refused
+    it, is raised at the size step, so a capture that publishes nothing never meets it."""
+    from alpaca_connectors.holdings.allocation import markets_refusal
+    from alpaca_connectors.markets_api import account_target_positions
+
+    try:
+        return account_target_positions(account_uid)
+    except Exception as exc:  # noqa: BLE001 - raised at the size step
+        return markets_refusal(exc)
 
 
 def get_sync_operation(

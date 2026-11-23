@@ -216,15 +216,30 @@ def read_alpaca_account(
     client: Any,
     *,
     include_positions: bool = True,
+    include_details: bool = True,
 ) -> AlpacaAccountSnapshot:
-    """Fetch account state, optionally including the independently managed positions state."""
-    account = read_alpaca_account_or_reject(client)
-    try:
-        configuration = client.get_account_configurations()
-    except Exception:
-        configuration = None
-    positions = list(client.get_all_positions()) if include_positions else []
-    raw_account = _safe_raw_get(client, "/account")
+    """Fetch account state, optionally including the independently managed positions state.
+
+    The reads do not depend on each other and run together. ``include_details=False`` leaves
+    out the account configuration and the raw account, which only the registration and its
+    refresh use: a holdings capture needs the account and its positions alone.
+    """
+    from alpaca_connectors.markets_api import all_together
+
+    def configuration_or_none() -> Any:
+        try:
+            return client.get_account_configurations()
+        except Exception:
+            return None
+
+    reads = [
+        lambda: read_alpaca_account_or_reject(client),
+        (lambda: list(client.get_all_positions())) if include_positions else (lambda: []),
+    ]
+    if include_details:
+        reads += [configuration_or_none, lambda: _safe_raw_get(client, "/account")]
+    account, positions, *details = all_together(*reads)
+    configuration, raw_account = details if details else (None, None)
     return AlpacaAccountSnapshot(
         account=account,
         configuration=configuration,

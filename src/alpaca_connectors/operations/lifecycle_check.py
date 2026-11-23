@@ -985,7 +985,12 @@ class Lifecycle:
                 f"{PORTFOLIO_1} {symbol}: sized wrong after the reweight.",
             )
         if self.state.get("funded"):
-            check(lines[(PORTFOLIO_1, "NVDA")]["delta"] < 0, "Less NVDA is not sold down.")
+            nvda = lines[(PORTFOLIO_1, "NVDA")]
+            check(
+                nvda["delta"] < 0,
+                "Less NVDA is not sold down: target {target}, assigned {assigned}, delta "
+                "{delta}.".format(**nvda),
+            )
         batch = self.trade(self.deltas(operation))
         if batch is None:
             return

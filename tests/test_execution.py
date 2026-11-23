@@ -251,6 +251,7 @@ class Harness:
         self.captures = 0
         self.allocated: list[Any] = []
         self.allocation_failure: Exception | None = None
+        self.targets: list[Any] = []
         self.sleeps: list[float] = []
         self.deps = ExecutionDependencies(
             client=self.client,
@@ -272,7 +273,8 @@ class Harness:
             equity=1_000_000.0,
         )
 
-    def _allocate(self, capture):
+    def _allocate(self, capture, target):
+        self.targets.append(target)
         if self.allocation_failure is not None:
             raise self.allocation_failure
         self.allocated.append(capture.holdings_set_uid)

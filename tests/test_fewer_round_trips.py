@@ -5,6 +5,9 @@
 - The bulk account actions read all selected registrations at once (one details statement and the
   Accounts in Markets batches) and remove the keys of all of them in one update statement.
 - An order batch reads its Alpaca assets concurrently; Alpaca has no read of several by id.
+- The order routes read the registration, the batch and the registered assets together, take
+  each Alpaca step's orders together, and write the orders, the trades and the snapshot after
+  fills together.
 """
 
 from __future__ import annotations
@@ -495,3 +498,93 @@ def test_a_concurrent_asset_read_still_rejects_refused_keys() -> None:
             harness.deps,
             submission(leg("a", AAPL, "AAPL", "buy", 1), leg("m", MSFT, "MSFT", "sell", 1)),
         )
+
+
+# ------------------------------------------------------------------------------------------------
+# The order routes: independent reads and writes go together
+# ------------------------------------------------------------------------------------------------
+def _waiting(barrier: threading.Barrier, call):
+    """``call`` that first waits for the barrier's other parties: read in turn, it times out."""
+
+    def waited(*args, **kwargs):
+        barrier.wait()
+        return call(*args, **kwargs)
+
+    return waited
+
+
+def test_a_submission_reads_its_registration_batch_and_registered_assets_together() -> None:
+    from test_execution import ACCOUNT_UID, MSFT, REGISTRATION, Harness, leg, submission
+
+    from alpaca_connectors.execution import services
+
+    harness = Harness()
+    together = threading.Barrier(3, timeout=5)
+    harness.ledger.get_batch = _waiting(together, harness.ledger.get_batch)
+    harness.ledger.registered_asset_identifiers = _waiting(
+        together, harness.ledger.registered_asset_identifiers
+    )
+    with patch.object(
+        services,
+        "load_account_registration",
+        side_effect=_waiting(together, lambda uid: dict(REGISTRATION)),
+    ):
+        preflight = services.preflight_order_batch(
+            ACCOUNT_UID, submission(leg("m", MSFT, "MSFT", "sell", 1)), deps=harness.deps
+        )
+    assert preflight.allowed, preflight.blockers
+
+
+def test_an_unknown_account_is_refused_before_the_batch_read_fails() -> None:
+    from test_execution import ACCOUNT_UID, Harness
+
+    from alpaca_connectors.execution import services
+
+    harness = Harness()
+    harness.ledger.get_batch = lambda batch_id: (_ for _ in ()).throw(RuntimeError("down"))
+    with patch.object(services, "load_account_registration", side_effect=LookupError("gone")):
+        with pytest.raises(LookupError):
+            services.sync_order_batch(ACCOUNT_UID, "HUNCH_BATCH__1", deps=harness.deps)
+
+
+def test_a_batch_cancels_its_open_orders_together() -> None:
+    from test_execution import AAPL, ACCOUNT_UID, MSFT, REGISTRATION, Harness, leg, submission
+
+    from alpaca_connectors.execution import services
+
+    harness = Harness()
+    with patch.object(services, "load_account_registration", return_value=dict(REGISTRATION)):
+        services.submit_order_batch(
+            ACCOUNT_UID,
+            submission(leg("a", AAPL, "AAPL", "buy", 1), leg("m", MSFT, "MSFT", "buy", 1)),
+            deps=harness.deps,
+        )
+        harness.client.cancel_order_by_id = _waiting(
+            threading.Barrier(2, timeout=5), harness.client.cancel_order_by_id
+        )
+        result = services.cancel_order_batch(ACCOUNT_UID, "HUNCH_BATCH__1", deps=harness.deps)
+    assert result.message == "Cancellation requested for 2 orders."
+    assert {order.status for order in result.orders} == {"cancelled"}
+
+
+def test_fills_write_the_orders_the_trades_and_the_snapshot_together() -> None:
+    from test_execution import ACCOUNT_UID, MSFT, REGISTRATION, Harness, leg, submission
+
+    from alpaca_connectors.execution import services
+
+    harness = Harness()
+    harness.client.fill_on_lookup["m"] = 401.0
+    together = threading.Barrier(3, timeout=5)
+    harness.ledger.write_orders = _waiting(together, harness.ledger.write_orders)
+    harness.ledger.ensure_cash_asset = _waiting(together, harness.ledger.ensure_cash_asset)
+    harness.deps.capture_holdings = _waiting(together, harness.deps.capture_holdings)
+    target = SimpleNamespace(position_set_uid="set", positions=[])
+    harness.deps.read_target = lambda: target
+    with patch.object(services, "load_account_registration", return_value=dict(REGISTRATION)):
+        result = services.submit_order_batch(
+            ACCOUNT_UID, submission(leg("m", MSFT, "MSFT", "sell", 1)), deps=harness.deps
+        )
+    assert result.status == "filled" and result.holdings_set_uid == "set-1"
+    # The target read alongside the capture is the one the allocation sizes.
+    assert harness.targets == [target]
+    assert harness.ledger.batches["HUNCH_BATCH__1"].metadata_json["holdings_set_uid"] == "set-1"

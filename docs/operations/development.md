@@ -118,6 +118,14 @@ the portfolios share started after the newest row of any portfolio
 so the second and third recorded nothing
 ([ADR 0029](../adrs/0029_interpolated_price_tables_are_named_like_every_project_table.md#rollout)).
 
+The three runs share their interpolated-price update, and a run that finds another process
+updating it must wait for that process. MetaTables 0.1.77 waits when the update is a dependency
+([MetaTables#148](https://github.com/mainsequence-projects/MetaTables/issues/148)). ms-markets
+starts the price source as a run of its own, though, and that path still fails with "Update
+execution is already active"
+([MetaTables#153](https://github.com/mainsequence-projects/MetaTables/issues/153)). Until that is
+fixed, one of the three runs can fail.
+
 The report lists each stage with the calls it made: each call to this API, each Markets call and
 each Alpaca read, timed on the caller's side, then the slowest calls and the total. The sync's
 three steps run inside one request, so that request's time is theirs.

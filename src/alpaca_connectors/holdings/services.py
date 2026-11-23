@@ -457,7 +457,8 @@ def capture_alpaca_account_holdings(
     if registration is None:
         raise LookupError(f"Alpaca account registration {account_uid!s} does not exist.")
     active_client = client or build_registered_account_client(registration)
-    snapshot = read_alpaca_account(active_client)
+    # A capture needs the account and its positions; their reads run together (issue #46).
+    snapshot = read_alpaca_account(active_client, include_details=False)
     if str(getattr(snapshot.account, "id", "")) != str(registration["alpaca_account_id"]):
         raise ValueError(
             "The stored keys resolve to a different Alpaca account than the registered row."

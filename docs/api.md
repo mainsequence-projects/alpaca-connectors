@@ -161,6 +161,14 @@ fills with its `holdings_time`, and `orders`, one per request leg, with `client_
 - **The ledger** is ms-markets': one `OrderManager` row per batch (`unique_identifier` is the
   `batch_id`), one `OrdersTS` row per order and one `TradesTS` row per terminal order with a fill.
   `GET .../orders` reads the batch rows only and never calls Alpaca.
+- **Round trips**
+  ([issue #46](https://github.com/mainsequence-projects/alpaca-connectors/issues/46)): every
+  route reads the registration and the batch together (a submission adds its registered assets);
+  the Alpaca account, the assets and the clock are read together; Alpaca takes one order per
+  request, so each step's lookups, placements, re-reads and cancellations go together. The batch
+  row with its `OrdersTS` rows, the cash asset with the `TradesTS` rows, and the holdings snapshot
+  after fills (captured alongside the target read, then allocated) are written together; the batch
+  row's final state is written once they have ended.
 - `GET /v1/project-state/capabilities` lists every capability as a feature too:
   `{"id": "execution", "status": "available"}` says this release executes.
 
@@ -391,9 +399,13 @@ the account's funds ([ADR 0023](adrs/0023_account_sync_sizes_and_allocates_funds
 | `size_targets` | Reads the account's latest target and turns each exposure into units: a share of NAV is taken from Alpaca's reported equity, split by the portfolio's latest weights at or before `T`, and divided by Alpaca's latest trade. A whole share is rounded half up unless the asset is fractionable |
 | `allocate_funds` | Plans the snapshot against those units, then allocates with the plan's digest. ms-markets records each owner's target, what it was assigned and the delta |
 
-The registration and the keys are read once and serve both the capture and the latest trades. The
-capture asks Alpaca only about held assets this project does not describe yet, one asset each, and
-never reads Alpaca's whole asset list ([holdings](account/registration.md#holdings)). When a sync
+The registration and the keys are read once and serve both the capture and the latest trades: the
+route reads the registration for its `404` and passes it on. Reads that do not wait for each other
+run together ([issue #46](https://github.com/mainsequence-projects/alpaca-connectors/issues/46)):
+the operation's row with the keys, the target with the capture, and the capture's Alpaca account
+with its positions. The capture asks Alpaca only about held assets this project does not describe
+yet, one asset each, and never reads Alpaca's whole asset list
+([holdings](account/registration.md#holdings)). When a sync
 ends, the API logs one line, `account sync <status> account=<uid>`, with each step's duration in
 seconds and the seconds spent in Alpaca calls, so the time outside Markets and MetaTables can be
 read from the log.

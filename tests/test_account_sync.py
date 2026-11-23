@@ -72,6 +72,8 @@ ALLOCATED = FundAllocationResult(
     position_set_uid=POSITION_SET_UID, allocation_applied=True, lines=[LINE]
 )
 SERVICE = "alpaca_connectors.api.app.services.account_sync"
+# The account's target as Markets answers it; the sizing it feeds is replaced.
+TARGET = {"position_set_uid": POSITION_SET_UID, "positions": [{"target_uid": "portfolio-uid"}]}
 
 
 class OperationRows:
@@ -126,17 +128,14 @@ def _sync(
     sized: Any = None,
     allocated: Any = ALLOCATED,
     registered: Any = None,
+    target: Any = TARGET,
     steps: dict[str, Any] | None = None,
     **kwargs,
 ):
     """Run one sync. By default the account has no target, so only the capture runs."""
     with (
         patch(
-            "alpaca_connectors.api.app.routers.accounts.get_account",
-            return_value=registration(None) if registered is None else registered,
-        ),
-        patch(
-            f"{SERVICE}.get_account_registration",
+            "alpaca_connectors.api.app.routers.accounts.get_account_registration",
             return_value=registration(None) if registered is None else registered,
         ) as read_registration,
         patch(
@@ -144,6 +143,8 @@ def _sync(
         ) as open_keys,
         patch(f"{SERVICE}.build_alpaca_trading_client", return_value=MagicMock()),
         patch(f"{SERVICE}.account_price_reader", return_value=lambda symbols: {}) as prices,
+        # The target read answers a refusal as its value; the size step raises it.
+        patch(f"{SERVICE}._target_or_error", return_value=target) as read_target,
         _replaced("capture_holdings", captured) as capture_holdings,
         _replaced("size_account_target", sized) as size,
         _replaced("allocate_sized_target", allocated) as allocate,
@@ -156,6 +157,7 @@ def _sync(
             read_registration=read_registration,
             open_keys=open_keys,
             prices=prices,
+            read_target=read_target,
         )
     return response, capture_holdings
 
@@ -263,6 +265,9 @@ def test_a_sync_sizes_the_target_and_allocates_the_snapshot(client, rows) -> Non
     assert steps["size"].call_args.args == (ACCOUNT_UID,)
     assert steps["size"].call_args.kwargs["valuation_time"] == SNAPSHOT_TIME
     assert steps["size"].call_args.kwargs["equity"] == 1_000_000.0
+    # The target read alongside the capture is the one sized, not read again.
+    steps["read_target"].assert_called_once_with(ACCOUNT_UID)
+    assert steps["size"].call_args.kwargs["target"] is TARGET
     steps["allocate"].assert_called_once_with(ACCOUNT_UID, SIZED)
     # The registration and the keys are read once: the latest trades use the same keys.
     steps["read_registration"].assert_called_once_with(ACCOUNT_UID)
@@ -310,6 +315,13 @@ def test_a_capture_that_published_no_snapshot_allocates_nothing(client, rows) ->
             ["succeeded", "succeeded", "failed"],
             True,
         ),
+        # The target is read alongside the capture; Markets' refusal fails the size step.
+        (
+            {"sized": SIZED, "target": FundAllocationError("target_unavailable", "Refused.")},
+            "size_targets",
+            ["succeeded", "failed", "skipped"],
+            False,
+        ),
     ],
 )
 def test_a_failure_after_the_capture_fails_at_its_step(
@@ -323,7 +335,8 @@ def test_a_failure_after_the_capture_fails_at_its_step(
     assert capture.call_args.args == (ACCOUNT_UID,)
     assert (operation.status, operation.current_step, operation.result) == ("failed", step, None)
     assert [item.status for item in operation.steps] == statuses
-    assert operation.error.code == failure.get("allocated", failure["sized"]).code
+    expected = failure.get("target", failure.get("allocated", failure["sized"]))
+    assert operation.error.code == expected.code
     assert operation.error.retryable is retryable
 
 
@@ -343,7 +356,9 @@ def test_an_unexpected_failure_is_sanitized(client, rows) -> None:
 
 
 def test_an_unknown_account_is_refused_and_nothing_runs(client, rows) -> None:
-    with patch("alpaca_connectors.api.app.routers.accounts.get_account", return_value=None):
+    with patch(
+        "alpaca_connectors.api.app.routers.accounts.get_account_registration", return_value=None
+    ):
         with patch("alpaca_connectors.api.app.services.account_sync.capture_holdings") as capture:
             response = client.post(f"/v1/accounts/{ACCOUNT_UID}/actions/sync")
 

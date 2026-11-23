@@ -20,8 +20,8 @@ import logging
 import time
 import uuid
 from collections.abc import Callable, Mapping, Sequence
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
+from functools import partial
 from typing import Any, Protocol
 
 from alpaca_connectors.execution.orders import (
@@ -231,8 +231,11 @@ class ExecutionDependencies:
     ledger: ExecutionLedger
     price_reader: PriceReader
     capture_holdings: Callable[[], Any]
-    # Sizes the account's target and allocates the snapshot a capture just published (ADR 0023).
-    allocate_holdings: Callable[[Any], Any] | None = None
+    # Sizes the account's target and allocates the snapshot a capture just published (ADR 0023);
+    # the second argument is the target ``read_target`` answered, or ``UNREAD`` to read it there.
+    allocate_holdings: Callable[[Any, Any], Any] | None = None
+    # Reads the account's target in force; it runs alongside the capture after fills (issue #46).
+    read_target: Callable[[], Any] | None = None
     now: Callable[[], dt.datetime] = _utc_now
     sleep: Callable[[float], None] = time.sleep
     # Sells are placed before buys; when a batch has both, the buys wait this long for the sells to
@@ -254,15 +257,23 @@ def load_account_registration(account_uid: str) -> dict[str, Any]:
 
 
 def build_dependencies(
-    account_uid: str, registration: dict[str, Any], *, client: Any | None = None
+    account_uid: str,
+    registration: dict[str, Any],
+    *,
+    client: Any | None = None,
+    ledger: ExecutionLedger | None = None,
 ) -> ExecutionDependencies:
-    """Clients from the account's stored credentials, the markets ledger and the holdings capture."""
+    """Clients from the account's stored credentials, the markets ledger and the holdings capture.
+
+    The capture uses ``registration`` rather than reading it again.
+    """
     from alpaca_connectors.account.credentials import (
         build_alpaca_trading_client,
         resolve_registered_alpaca_credentials,
     )
     from alpaca_connectors.holdings.allocation import size_and_allocate
     from alpaca_connectors.holdings.services import capture_alpaca_account_holdings
+    from alpaca_connectors.markets_api import account_target_positions
 
     credentials = resolve_registered_alpaca_credentials(registration)
     trading_client = client or build_alpaca_trading_client(
@@ -271,18 +282,74 @@ def build_dependencies(
     price_reader = alpaca_latest_trade_prices(credentials)
     return ExecutionDependencies(
         client=trading_client,
-        ledger=MarketsExecutionLedger(),
+        ledger=ledger or MarketsExecutionLedger(),
         price_reader=price_reader,
         capture_holdings=lambda: capture_alpaca_account_holdings(
-            account_uid, client=trading_client
+            account_uid, client=trading_client, registration=registration
         ),
-        allocate_holdings=lambda capture: size_and_allocate(
+        allocate_holdings=lambda capture, target: size_and_allocate(
             account_uid,
             valuation_time=capture.time_index,
             equity=getattr(capture, "equity", None),
             price_reader=price_reader,
+            target=target,
+        ),
+        read_target=lambda: account_target_positions(account_uid),
+    )
+
+
+def _markets_ledger() -> MarketsExecutionLedger:
+    """The real ledger, once the Markets engine its reads need is started: the reads that go with
+    the registration's must not race its start."""
+    from alpaca_connectors.runtime import account_runtime_models, start_markets_engine
+
+    start_markets_engine(models=account_runtime_models())
+    return MarketsExecutionLedger()
+
+
+def _settled(call: Callable[[], Any]) -> Any:
+    """``call``'s answer, or the exception it raised: a read made ahead, alongside others, whose
+    failure is raised where the read used to be made."""
+    try:
+        return call()
+    except Exception as exc:  # noqa: BLE001 - raised where the answer is used
+        return exc
+
+
+def _answer(value: Any) -> Any:
+    """A ``_settled`` answer, raising the exception it holds."""
+    if isinstance(value, Exception):
+        raise value
+    return value
+
+
+def _start(
+    account_uid: str,
+    batch_id: str,
+    deps: ExecutionDependencies | None,
+    asset_identifiers: Sequence[str] | None = None,
+) -> tuple[dict[str, Any], ExecutionDependencies, Any, Any]:
+    """The registration, the order batch and, for a submission, its registered assets.
+
+    None of the three needs another, so they are read together (issue #46); the registration's
+    failure is raised first, then the batch's, as when they were read in turn. The registered
+    assets answer as ``_settled``: the pre-trade checks raise a failed read where they use it.
+    The dependencies are then opened with the registration's keys.
+    """
+    from alpaca_connectors.markets_api import all_together
+
+    ledger = deps.ledger if deps is not None else _markets_ledger()
+    registration, batch, registered = all_together(
+        lambda: load_account_registration(account_uid),
+        lambda: ledger.get_batch(batch_id),
+        lambda: (
+            None
+            if asset_identifiers is None
+            else _settled(lambda: ledger.registered_asset_identifiers(list(asset_identifiers)))
         ),
     )
+    deps = deps or build_dependencies(account_uid, registration, ledger=ledger)
+    return registration, deps, batch, registered
 
 
 # --------------------------------------------------------------------------------------------------
@@ -436,10 +503,6 @@ def _account_checks(registration: dict[str, Any], account: Any) -> list[PreTrade
     return checks
 
 
-# Alpaca asset reads one order batch runs at once: Alpaca reads one asset per request (issue #46).
-ALPACA_ASSET_READ_WORKERS = 8
-
-
 def _live_alpaca_asset(client: Any, asset_id: uuid.UUID) -> Any | None:
     """One Alpaca asset by immutable id, or ``None`` when Alpaca does not know it."""
     from alpaca.common.exceptions import APIError
@@ -451,44 +514,44 @@ def _live_alpaca_asset(client: Any, asset_id: uuid.UUID) -> Any | None:
         return None
 
 
-def _resolve_assets(
-    deps: ExecutionDependencies, submission: OrderBatchSubmission
-) -> tuple[list[OrderRecord], list[PreTradeCheck], list[str]]:
-    """Resolve each leg's canonical identifier to the live Alpaca asset and check it is tradable.
-
-    The registered set is one markets query. Alpaca offers no batched asset lookup by id, so the
-    live state is one request per distinct asset of the batch, at most
-    ``ALPACA_ASSET_READ_WORKERS`` of them at once (issue #46); the stored ``AlpacaAssetDetails``
-    are registration-time facts and not a pre-trade gate.
-    """
-    checks: list[PreTradeCheck] = []
-    warnings: list[str] = []
-    records: list[OrderRecord] = []
-    asset_ids: dict[str, uuid.UUID | None] = {
+def _readable_identifiers(submission: OrderBatchSubmission) -> dict[str, uuid.UUID]:
+    """The batch's Alpaca asset identifiers and their asset ids, in leg order."""
+    asset_ids = {
         leg.asset_identifier: parse_alpaca_asset_identifier(leg.asset_identifier)
         for leg in submission.legs
     }
-    registered = deps.ledger.registered_asset_identifiers(
-        [identifier for identifier, asset_id in asset_ids.items() if asset_id is not None]
-    )
-    readable = {
-        identifier: asset_id for identifier, asset_id in asset_ids.items() if asset_id is not None
-    }
-    with ThreadPoolExecutor(
-        max_workers=max(1, min(ALPACA_ASSET_READ_WORKERS, len(readable)))
-    ) as pool:
-        live_assets: dict[str, Any] = dict(
-            zip(
-                readable,
-                pool.map(
-                    lambda asset_id: _live_alpaca_asset(deps.client, asset_id), readable.values()
-                ),
-                strict=True,
-            )
+    return {identifier: asset_id for identifier, asset_id in asset_ids.items() if asset_id}
+
+
+def _resolve_assets(
+    deps: ExecutionDependencies, submission: OrderBatchSubmission, registered: Any = None
+) -> tuple[list[OrderRecord], list[PreTradeCheck], list[str]]:
+    """Resolve each leg's canonical identifier to the live Alpaca asset and check it is tradable.
+
+    The registered set is one markets query, ``registered`` when the caller read it already (as a
+    ``_settled`` answer). Alpaca offers no batched asset lookup by id, so the live state is one
+    request per distinct asset of the batch, all together (issue #46); the stored
+    ``AlpacaAssetDetails`` are registration-time facts and not a pre-trade gate.
+    """
+    from alpaca_connectors.markets_api import each_together
+
+    checks: list[PreTradeCheck] = []
+    warnings: list[str] = []
+    records: list[OrderRecord] = []
+    readable = _readable_identifiers(submission)
+    if registered is None:
+        registered = deps.ledger.registered_asset_identifiers(list(readable))
+    registered = _answer(registered)
+    live_assets: dict[str, Any] = dict(
+        zip(
+            readable,
+            each_together(partial(_live_alpaca_asset, deps.client), readable.values()),
+            strict=True,
         )
+    )
     for leg in submission.legs:
         record = OrderRecord.from_leg(leg)
-        asset_id = asset_ids[leg.asset_identifier]
+        asset_id = readable.get(leg.asset_identifier)
         if asset_id is None:
             checks.append(
                 PreTradeCheck(
@@ -625,14 +688,25 @@ def _read_account(deps: ExecutionDependencies, registration: dict[str, Any]) -> 
 
 
 def _check_batch(
-    deps: ExecutionDependencies, registration: dict[str, Any], submission: OrderBatchSubmission
+    deps: ExecutionDependencies,
+    registration: dict[str, Any],
+    submission: OrderBatchSubmission,
+    registered: Any = None,
 ) -> tuple[list[OrderRecord], list[PreTradeCheck], list[str]]:
+    """Every pre-trade check. The Alpaca account, the assets and the clock are read together
+    (issue #46); a failed read raises in that order. The buying power waits for the account and
+    the assets' venue symbols."""
+    from alpaca_connectors.markets_api import all_together
+
     checks = _validate_legs(submission)
-    account = _read_account(deps, registration)
+    account, (records, asset_checks, warnings), hours_checks = all_together(
+        lambda: _read_account(deps, registration),
+        lambda: _resolve_assets(deps, submission, registered),
+        lambda: _market_hours_check(deps, submission),
+    )
     checks.extend(_account_checks(registration, account))
-    records, asset_checks, warnings = _resolve_assets(deps, submission)
     checks.extend(asset_checks)
-    checks.extend(_market_hours_check(deps, submission))
+    checks.extend(hours_checks)
     if not checks:
         power_checks, power_warnings = _buying_power_check(deps, account, records)
         checks.extend(power_checks)
@@ -686,15 +760,17 @@ def _place_order(deps: ExecutionDependencies, record: OrderRecord, now: dt.datet
 
 
 def _refresh(deps: ExecutionDependencies, records: list[OrderRecord]) -> list[OrderRecord]:
-    """Re-read every order Alpaca holds; orders refused at submission keep their state."""
-    refreshed: list[OrderRecord] = []
-    for record in records:
+    """Re-read every order Alpaca holds, together (issue #46); orders refused at submission keep
+    their state."""
+    from alpaca_connectors.markets_api import each_together
+
+    def refreshed(record: OrderRecord) -> OrderRecord:
         if record.terminal and not record.broker_order_id:
-            refreshed.append(record)
-            continue
+            return record
         order = _find_alpaca_order(deps.client, record.client_order_id)
-        refreshed.append(order_record_from_alpaca(record, order) if order is not None else record)
-    return refreshed
+        return order_record_from_alpaca(record, order) if order is not None else record
+
+    return each_together(refreshed, records)
 
 
 def _wait_for_terminal(
@@ -720,8 +796,8 @@ def _records_from_batch(batch: Any) -> list[OrderRecord]:
     return [OrderRecord.from_payload(payload) for payload in metadata.get("orders") or []]
 
 
-def _require_batch(ledger: ExecutionLedger, account_uid: str, batch_id: str) -> Any:
-    batch = ledger.get_batch(batch_id)
+def _require_batch(batch: Any | None, account_uid: str, batch_id: str) -> Any:
+    """The batch read for ``batch_id``, or ``LookupError`` when it is not this account's."""
     if batch is None or not _same_uid(batch.target_account_uid, account_uid):
         raise LookupError(f"Order batch {batch_id!s} does not exist for this account.")
     return batch
@@ -767,6 +843,44 @@ def _batch_metadata(
     return _json_safe(metadata)
 
 
+def _publish_after_fills(
+    deps: ExecutionDependencies, account_uid: str
+) -> tuple[Any | None, list[str]]:
+    """Publish a holdings snapshot after fills and allocate it like a sync's (ADR 0023).
+
+    The capture and the target read run together (issue #46). A failure of either step is a
+    warning, never an error. Answers the capture (None when it failed, which keeps the batch's
+    earlier snapshot) and the warnings.
+    """
+    from alpaca_connectors.holdings.allocation import UNREAD
+    from alpaca_connectors.markets_api import all_together
+
+    read_target = deps.read_target
+    capture, target = all_together(
+        lambda: _settled(deps.capture_holdings),
+        lambda: _settled(read_target) if read_target is not None else UNREAD,
+    )
+    if isinstance(capture, Exception):
+        logger.error(
+            "Holdings snapshot after fills failed for account %s",
+            account_uid,
+            exc_info=capture,
+        )
+        warning = "The holdings snapshot after the fills could not be published; capture holdings."
+        return None, [warning]
+    warnings: list[str] = []
+    if getattr(capture, "holdings_set_uid", None) and deps.allocate_holdings is not None:
+        try:
+            deps.allocate_holdings(capture, _answer(target))
+        except Exception:
+            logger.exception("Fund allocation after fills failed for account %s", account_uid)
+            warnings.append(
+                "The holdings snapshot after the fills was published but could not be "
+                "allocated to the account's funds; sync the account."
+            )
+    return capture, warnings
+
+
 def _persist(
     deps: ExecutionDependencies,
     registration: dict[str, Any],
@@ -781,31 +895,21 @@ def _persist(
 ) -> OrderBatchResult:
     """Write the batch, order and trade rows, publish holdings after fills, return the result.
 
-    A snapshot published after fills is sized and allocated like a sync's (ADR 0023). A failure
-    of the capture or of the allocation is a warning on the answer, never an error.
+    Three independent pieces run together (issue #46): the batch row (created first when new,
+    since the order rows key to it) and the order rows; the cash asset and the trade rows; and,
+    after new fills, the holdings snapshot with its allocation. The batch row's final state is
+    written once all three have ended. A failure of the capture or of the allocation is a warning
+    on the answer, never an error.
     """
+    from alpaca_connectors.markets_api import all_together
+
     account_uid = str(registration["account_uid"])
     account_identifier = str(registration["unique_identifier"])
     status = batch_status(records)
     terminal = bool(records) and all(record.terminal for record in records)
     previous_metadata = dict(getattr(batch, "metadata_json", None) or {}) if batch else None
-    if batch is None:
-        batch = deps.ledger.create_batch(
-            batch_id=batch_id,
-            account_uid=account_uid,
-            target_time=now,
-            status="submitted",
-            metadata=_batch_metadata(
-                registration,
-                records,
-                warnings=warnings,
-                now=now,
-                holdings_set_uid=None,
-                previous=None,
-            ),
-        )
-    deps.ledger.write_orders(
-        orders_ledger_rows(records, account_identifier=account_identifier, batch_id=batch_id)
+    order_rows = orders_ledger_rows(
+        records, account_identifier=account_identifier, batch_id=batch_id
     )
     trade_rows = trades_ledger_rows(
         records,
@@ -813,33 +917,46 @@ def _persist(
         batch_id=batch_id,
         cash_asset_identifier=DEFAULT_CASH_ASSET_IDENTIFIER,
     )
-    if trade_rows:
-        deps.ledger.ensure_cash_asset()
-        deps.ledger.write_trades(trade_rows)
+
+    def write_batch_and_orders() -> Any:
+        written = batch
+        if written is None:
+            written = deps.ledger.create_batch(
+                batch_id=batch_id,
+                account_uid=account_uid,
+                target_time=now,
+                status="submitted",
+                metadata=_batch_metadata(
+                    registration,
+                    records,
+                    warnings=warnings,
+                    now=now,
+                    holdings_set_uid=None,
+                    previous=None,
+                ),
+            )
+        deps.ledger.write_orders(order_rows)
+        return written
+
+    def write_trades() -> None:
+        if trade_rows:
+            deps.ledger.ensure_cash_asset()
+            deps.ledger.write_trades(trade_rows)
+
+    fills = new_fills(previous, records)
+    batch, _, published = all_together(
+        write_batch_and_orders,
+        write_trades,
+        (lambda: _publish_after_fills(deps, account_uid)) if fills else (lambda: None),
+    )
     holdings_set_uid = (previous_metadata or {}).get("holdings_set_uid")
     holdings_time = _stored_time((previous_metadata or {}).get("holdings_time"))
-    if new_fills(previous, records):
-        capture = None
-        try:
-            capture = deps.capture_holdings()
+    if published is not None:
+        capture, fill_warnings = published
+        warnings = [*warnings, *fill_warnings]
+        if capture is not None:
             holdings_set_uid = str(getattr(capture, "holdings_set_uid", None) or "") or None
             holdings_time = getattr(capture, "time_index", None) if holdings_set_uid else None
-        except Exception:
-            logger.exception("Holdings snapshot after fills failed for account %s", account_uid)
-            warnings = [
-                *warnings,
-                "The holdings snapshot after the fills could not be published; capture holdings.",
-            ]
-        if capture is not None and holdings_set_uid and deps.allocate_holdings is not None:
-            try:
-                deps.allocate_holdings(capture)
-            except Exception:
-                logger.exception("Fund allocation after fills failed for account %s", account_uid)
-                warnings = [
-                    *warnings,
-                    "The holdings snapshot after the fills was published but could not be "
-                    "allocated to the account's funds; sync the account.",
-                ]
     deps.ledger.update_batch(
         batch.uid,
         status=status,
@@ -878,15 +995,15 @@ def preflight_order_batch(
     deps: ExecutionDependencies | None = None,
 ) -> OrderBatchPreflight:
     """Run every pre-trade check without placing an order or writing a row."""
-    registration = load_account_registration(account_uid)
-    deps = deps or build_dependencies(account_uid, registration)
-    existing = deps.ledger.get_batch(submission.batch_id)
+    registration, deps, existing, registered = _start(
+        account_uid, submission.batch_id, deps, list(_readable_identifiers(submission))
+    )
     blockers: list[PreTradeCheck] = []
     if existing is not None and not _same_uid(existing.target_account_uid, account_uid):
         blockers.append(
             PreTradeCheck("batch_id_in_use", "The batch_id already belongs to another account.")
         )
-    records, checks, warnings = _check_batch(deps, registration, submission)
+    records, checks, warnings = _check_batch(deps, registration, submission, registered)
     return OrderBatchPreflight(
         batch_id=submission.batch_id,
         account_uid=str(registration["account_uid"]),
@@ -907,37 +1024,42 @@ def submit_order_batch(
     Idempotent on ``client_order_id``: an order Alpaca already holds under that identifier is
     read back instead of placed again, so a retried submission never doubles a trade. Sells are
     placed before buys. An order Alpaca refuses is returned as ``rejected`` with Alpaca's reason;
-    the rest of the batch proceeds.
+    the rest of the batch proceeds. Alpaca takes one order per request, so the orders of one
+    step (the lookups, the sells, the buys) go together (issue #46).
     """
-    registration = load_account_registration(account_uid)
-    deps = deps or build_dependencies(account_uid, registration)
-    batch = deps.ledger.get_batch(submission.batch_id)
+    from alpaca_connectors.markets_api import each_together
+
+    registration, deps, batch, registered = _start(
+        account_uid, submission.batch_id, deps, list(_readable_identifiers(submission))
+    )
     if batch is not None and not _same_uid(batch.target_account_uid, account_uid):
         raise PreTradeCheckError(
             [PreTradeCheck("batch_id_in_use", "The batch_id already belongs to another account.")]
         )
-    records, checks, warnings = _check_batch(deps, registration, submission)
+    records, checks, warnings = _check_batch(deps, registration, submission, registered)
     if checks:
         raise PreTradeCheckError(checks)
     now = deps.now()
     previous = _records_from_batch(batch) if batch is not None else []
     placed: dict[str, OrderRecord] = {}
     pending: list[OrderRecord] = []
-    for record in records:
-        existing_order = _find_alpaca_order(deps.client, record.client_order_id)
+    held = each_together(
+        lambda record: _find_alpaca_order(deps.client, record.client_order_id), records
+    )
+    for record, existing_order in zip(records, held, strict=True):
         if existing_order is not None:
             placed[record.client_order_id] = order_record_from_alpaca(record, existing_order)
         else:
             pending.append(record)
     sells = [record for record in pending if record.side == "sell"]
     buys = [record for record in pending if record.side == "buy"]
-    for record in sells:
-        placed[record.client_order_id] = _place_order(deps, record, now)
+    for record in each_together(lambda record: _place_order(deps, record, now), sells):
+        placed[record.client_order_id] = record
     if sells and buys:
         for record in _wait_for_terminal(deps, [placed[r.client_order_id] for r in sells]):
             placed[record.client_order_id] = record
-    for record in buys:
-        placed[record.client_order_id] = _place_order(deps, record, now)
+    for record in each_together(lambda record: _place_order(deps, record, now), buys):
+        placed[record.client_order_id] = record
     final = _refresh(deps, [placed[record.client_order_id] for record in records])
     refused = [record for record in final if record.terminal and not record.broker_order_id]
     message = None
@@ -963,9 +1085,8 @@ def sync_order_batch(
     deps: ExecutionDependencies | None = None,
 ) -> OrderBatchResult:
     """Re-read the batch's orders from Alpaca, record fills and publish holdings after new ones."""
-    registration = load_account_registration(account_uid)
-    deps = deps or build_dependencies(account_uid, registration)
-    batch = _require_batch(deps.ledger, account_uid, batch_id)
+    registration, deps, batch, _ = _start(account_uid, batch_id, deps)
+    batch = _require_batch(batch, account_uid, batch_id)
     previous = _records_from_batch(batch)
     records = _refresh(deps, previous)
     return _persist(
@@ -989,29 +1110,33 @@ def cancel_order_batch(
     """Ask Alpaca to cancel every open order of the batch, then record the resulting states.
 
     Alpaca cancels asynchronously: an order can still read ``submitted`` (``pending_cancel`` at
-    Alpaca) right after this call; the next sync settles it.
+    Alpaca) right after this call; the next sync settles it. Alpaca cancels one order per
+    request, so the batch's cancellations go together (issue #46).
     """
     from alpaca.common.exceptions import APIError
 
-    registration = load_account_registration(account_uid)
-    deps = deps or build_dependencies(account_uid, registration)
-    batch = _require_batch(deps.ledger, account_uid, batch_id)
+    from alpaca_connectors.markets_api import each_together
+
+    registration, deps, batch, _ = _start(account_uid, batch_id, deps)
+    batch = _require_batch(batch, account_uid, batch_id)
     previous = _records_from_batch(batch)
     current = _refresh(deps, previous)
-    warnings: list[str] = []
-    requested = 0
-    for record in current:
-        if record.terminal or not record.broker_order_id:
-            continue
+
+    def cancel(record: OrderRecord) -> str | None:
+        """None once Alpaca took the cancellation, else the warning saying why not."""
         try:
             deps.client.cancel_order_by_id(record.broker_order_id)
-            requested += 1
         except APIError as exc:
             _reject_credentials_if_unauthorized(exc)
-            warnings.append(
-                f"{record.client_order_id}: "
-                + _alpaca_error_message(exc, "Alpaca did not accept the cancellation.")
+            return f"{record.client_order_id}: " + _alpaca_error_message(
+                exc, "Alpaca did not accept the cancellation."
             )
+        return None
+
+    open_orders = [r for r in current if not r.terminal and r.broker_order_id]
+    refusals = each_together(cancel, open_orders)
+    warnings = [refusal for refusal in refusals if refusal is not None]
+    requested = len(refusals) - len(warnings)
     records = _refresh(deps, current) if requested else current
     return _persist(
         deps,
@@ -1034,19 +1159,29 @@ def list_account_orders(
     offset: int = 0,
     ledger: ExecutionLedger | None = None,
 ) -> tuple[list[dict[str, Any]], int]:
-    """The orders recorded for the account, newest batch first, as last synced; no Alpaca call."""
-    load_account_registration(account_uid)
-    ledger = ledger or MarketsExecutionLedger()
+    """The orders recorded for the account, newest batch first, as last synced; no Alpaca call.
+
+    The registration and the batches are read together (issue #46); an unknown account is
+    refused first, as when the registration was read alone.
+    """
+    from alpaca_connectors.markets_api import all_together
+
+    ledger = ledger or _markets_ledger()
+    _, found = all_together(
+        lambda: load_account_registration(account_uid),
+        (lambda: [ledger.get_batch(batch_id)])
+        if batch_id is not None
+        else (lambda: ledger.list_batches(account_uid)),
+    )
     if batch_id is not None:
-        batch = ledger.get_batch(batch_id)
-        batches = (
-            [batch]
+        batches = [
+            batch
+            for batch in found
             if batch is not None and _same_uid(batch.target_account_uid, account_uid)
-            else []
-        )
+        ]
     else:
         batches = sorted(
-            ledger.list_batches(account_uid),
+            found,
             key=lambda row: (str(row.target_time), str(row.unique_identifier)),
             reverse=True,
         )

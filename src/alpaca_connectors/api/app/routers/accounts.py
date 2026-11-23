@@ -41,6 +41,7 @@ from ..services.accounts import (
     create_account_registration,
     delete_account,
     get_account,
+    get_account_registration,
     list_accounts,
     log_account_action,
     preflight_account_registration,
@@ -404,13 +405,14 @@ def account_sync(account_uid: str) -> AccountSyncOperationResponse:
     owner = acting_owner()
     require_account_access(account_uid, owner)
     try:
-        registered = get_account(account_uid)
+        registration = get_account_registration(account_uid)
     except Exception as exc:
         raise api_http_error(exc) from exc
-    if registered is None:
+    if registration is None:
         raise not_found("Account registration not found.")
     try:
-        operation = sync_account(account_uid, owner=owner)
+        # The registration read for the 404 serves the sync (issue #46).
+        operation = sync_account(account_uid, owner=owner, registration=registration)
     except Exception as exc:
         raise api_http_error(exc) from exc
     log_account_action(
