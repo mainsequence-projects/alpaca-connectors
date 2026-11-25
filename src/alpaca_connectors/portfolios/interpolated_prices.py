@@ -35,19 +35,20 @@ def resolve_alpaca_bars_time_index_meta_table_uid(
     return str(exact_matches[0].uid)
 
 
-def resolve_alpaca_bars_time_index_meta_table_uids(
+def resolve_alpaca_bars_tables(
     profiles: list[tuple[str, str, str]],
-) -> dict[tuple[str, str, str], str | Exception]:
-    """The registered bars table UID of each ``(frequency_id, feed, adjustment)``, in one read.
+) -> dict[tuple[str, str, str], Any]:
+    """The registered bars table of each ``(frequency_id, feed, adjustment)``, in one read.
 
     The batch form of ``resolve_alpaca_bars_time_index_meta_table_uid`` (issue #46): one
-    MetaTables request for every profile. Each profile is answered with its UID, or with the
-    error the single form raises for it: ``ValueError`` for a profile without storage,
-    ``RuntimeError`` when its table is not registered exactly once.
+    MetaTables request for every profile. Each profile is answered with its ``TimeIndexMetaTable``,
+    which a portfolio's interpolated prices read as their source (``TimeIndexTableRef``, ms-markets
+    ADR 0066), or with the error the single form raises for it: ``ValueError`` for a profile
+    without storage, ``RuntimeError`` when its table is not registered exactly once.
     """
     from metatables import TimeIndexMetaTable
 
-    answers: dict[tuple[str, str, str], str | Exception] = {}
+    answers: dict[tuple[str, str, str], Any] = {}
     names: dict[tuple[str, str, str], str] = {}
     for profile in dict.fromkeys(profiles):
         try:
@@ -64,7 +65,7 @@ def resolve_alpaca_bars_time_index_meta_table_uids(
     for profile, name in names.items():
         exact = [table for table in matches if table.physical_table_name == name]
         if len(exact) == 1:
-            answers[profile] = str(exact[0].uid)
+            answers[profile] = exact[0]
         else:
             answers[profile] = RuntimeError(
                 "Expected exactly one registered Alpaca bars TimeIndexMetaTable for "
@@ -74,9 +75,19 @@ def resolve_alpaca_bars_time_index_meta_table_uids(
     return answers
 
 
+def resolve_alpaca_bars_time_index_meta_table_uids(
+    profiles: list[tuple[str, str, str]],
+) -> dict[tuple[str, str, str], str | Exception]:
+    """The registered bars table UID of each profile, as ``resolve_alpaca_bars_tables`` reads it."""
+    return {
+        profile: table if isinstance(table, Exception) else str(table.uid)
+        for profile, table in resolve_alpaca_bars_tables(profiles).items()
+    }
+
+
 def build_alpaca_interpolated_prices(
     *,
-    source_time_index_meta_table_uid: str,
+    source_table: Any,
     asset_identifiers: list[str],
     profile: tuple[str, str, str],
     upsample_frequency_id: str = "1d",
@@ -86,9 +97,11 @@ def build_alpaca_interpolated_prices(
 
     Each asset's bars follow the stored trading calendar it is linked to (ms-markets ADR 0056),
     which registration sets from its Alpaca class (ADR 0026); the scope carries identifiers only,
-    and ms-markets refuses the run when an asset in it has no calendar. It writes the
-    interpolated-price table of the bars profile (``INTERPOLATED_PRICES_BY_PROFILE``, ADR 0029),
-    and ms-markets refuses a table keyed by another configuration.
+    and ms-markets refuses the run when an asset in it has no calendar. It reads the registered
+    bars table ``source_table`` (``resolve_alpaca_bars_tables``) as a ``TimeIndexTableRef``, so the
+    bars are not a node of the portfolio's run: the portfolio Job updates them first. It writes
+    the interpolated-price table of the bars profile (``INTERPOLATED_PRICES_BY_PROFILE``, ADR
+    0029), and ms-markets refuses a table keyed by another configuration.
     """
     from msm_portfolios.contrib.prices.updaters import (
         InterpolatedPrices,
@@ -96,12 +109,13 @@ def build_alpaca_interpolated_prices(
     )
 
     from alpaca_connectors.instances import INTERPOLATED_PRICES_BY_PROFILE
+    from metatables import TimeIndexTableRef
 
     asset_scope = sorted(set(asset_identifiers))
 
     return InterpolatedPrices(
         interpolation_config=InterpolatedPricesConfig(
-            source_time_index_meta_table_uid=source_time_index_meta_table_uid,
+            source_price_instance=TimeIndexTableRef(output_table=source_table),
             asset_list=asset_scope,
             upsample_frequency_id=upsample_frequency_id,
             intraday_bar_interpolation_rule=intraday_bar_interpolation_rule,
@@ -112,6 +126,7 @@ def build_alpaca_interpolated_prices(
 
 __all__ = [
     "build_alpaca_interpolated_prices",
+    "resolve_alpaca_bars_tables",
     "resolve_alpaca_bars_time_index_meta_table_uid",
     "resolve_alpaca_bars_time_index_meta_table_uids",
 ]

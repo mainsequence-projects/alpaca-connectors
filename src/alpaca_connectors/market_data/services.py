@@ -71,7 +71,7 @@ def _physical_dataset_update_statistics(storage: type):
     from sqlalchemy import func, select
 
     from alpaca_connectors.runtime import start_markets_engine
-    from metatables.models import UpdateStatistics
+    from metatables import UpdateStatistics
 
     runtime = start_markets_engine()
     statement = (

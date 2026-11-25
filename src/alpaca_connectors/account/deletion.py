@@ -20,7 +20,8 @@ follows.
    A registration made before revision 0018 still names the Main Sequence Secrets its keys were
    in; those this application created are deleted next, as removing the keys deletes them.
 5. Each retired ``Portfolio`` of the account that no other account's history names is deleted,
-   its rebalance state in this application's instance first (``delete_private_series``); Markets
+   its ledger and rebalance state in this application's instances first
+   (``delete_private_series``); Markets
    deletes its weights and values with it (ADR 0031). One another account's history names stays
    retired, recorded.
 6. Each signal no ``Portfolio`` follows any more is deleted, with the records of the deleted
@@ -116,18 +117,22 @@ class AccountDeletion:
 
 
 def delete_portfolio_series(portfolio_identifiers: list[str]) -> None:
-    """Delete portfolios' private rows: their rebalance state in this application's instance.
+    """Delete portfolios' private rows: their ledger and rebalance state in this application's
+    instances.
 
     Their weights and values are Markets' own rows and go with the ``Portfolio`` (ADR 0031,
-    decision 7). The rebalance state references the ``Portfolio`` with ``RESTRICT``, so it goes
-    before it, through the ms-markets recipe ``delete_private_series``: one call per
-    ``MARKETS_BATCH_SIZE`` portfolios (issue #46).
+    decision 7). The ledger and the rebalance state reference the ``Portfolio`` with
+    ``RESTRICT``, so they go before it, the ledger first, through the ms-markets recipe
+    ``delete_private_series``: one call per ``MARKETS_BATCH_SIZE`` portfolios (issue #46).
     """
-    from alpaca_connectors.instances import AlpacaPortfolioRebalanceStateStorage
+    from alpaca_connectors.instances import (
+        AlpacaPortfolioEventLedgerStorage,
+        AlpacaPortfolioRebalanceStateStorage,
+    )
     from alpaca_connectors.markets_api import delete_private_series
 
     delete_private_series(
-        tables=[AlpacaPortfolioRebalanceStateStorage],
+        tables=[AlpacaPortfolioEventLedgerStorage, AlpacaPortfolioRebalanceStateStorage],
         portfolio_identifiers=portfolio_identifiers,
     )
 

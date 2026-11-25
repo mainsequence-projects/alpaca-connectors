@@ -233,7 +233,7 @@ def keyring():
     them use this ring and never reach a Main Sequence Secret.
     """
 
-    from metatables.encryption import Keyring, set_keyring_source
+    from metatables.models.encryption import Keyring, set_keyring_source
 
     ring = Keyring.new("test")
     set_keyring_source(lambda name: ring.render())

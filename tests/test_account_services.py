@@ -837,20 +837,20 @@ class RegistrationSealingTests(unittest.TestCase):
     """The upsert that stores a registration leaves the process with the keys sealed."""
 
     def setUp(self) -> None:
-        from metatables.encryption import Keyring, set_keyring_source
+        from metatables.models.encryption import Keyring, set_keyring_source
 
         self.ring = Keyring.new("test")
         set_keyring_source(lambda name: self.ring.render())
 
     def tearDown(self) -> None:
-        from metatables.encryption import set_keyring_source
+        from metatables.models.encryption import set_keyring_source
 
         set_keyring_source(None)
 
     def test_the_registration_upsert_carries_envelopes_not_values(self) -> None:
         from msm.repositories import base, crud
 
-        from metatables.encryption import is_envelope
+        from metatables.models.encryption import is_envelope
 
         operations = []
 

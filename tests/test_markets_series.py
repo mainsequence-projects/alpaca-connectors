@@ -99,6 +99,7 @@ def test_the_run_answer_is_translated_once_here(recipes) -> None:
         calendar_uid="calendar-uid",
         portfolio_description="description",
         rebalance_output_table="rebalance-table",
+        event_ledger_output_table="ledger-table",
     )
     assert answer == markets_api.PortfolioRunAnswer(
         portfolio_uid="p-uid",
@@ -109,6 +110,7 @@ def test_the_run_answer_is_translated_once_here(recipes) -> None:
     [(_, arguments)] = recipes.calls
     assert arguments["portfolio_configuration"] == "configuration"
     assert arguments["rebalance_output_table"] == "rebalance-table"
+    assert arguments["event_ledger_output_table"] == "ledger-table"
     assert arguments["portfolio_description"] == "description"
     assert "namespace" not in arguments
 
@@ -121,9 +123,12 @@ def test_private_series_are_deleted_in_batches_of_this_applications_tables(recip
     assert [len(arguments["portfolios"]) for _, arguments in recipes.calls] == [500, 1]
 
 
-def test_an_account_delete_removes_only_the_private_rebalance_state(recipes) -> None:
+def test_an_account_delete_removes_only_the_private_ledger_and_rebalance_state(recipes) -> None:
     from alpaca_connectors.account.deletion import delete_portfolio_series
-    from alpaca_connectors.instances import AlpacaPortfolioRebalanceStateStorage
+    from alpaca_connectors.instances import (
+        AlpacaPortfolioEventLedgerStorage,
+        AlpacaPortfolioRebalanceStateStorage,
+    )
 
     recipes.answer("delete_private_series", {})
     delete_portfolio_series(["ALPACA_PORTFOLIO__A"])
@@ -132,7 +137,8 @@ def test_an_account_delete_removes_only_the_private_rebalance_state(recipes) -> 
         (
             "delete_private_series",
             {
-                "tables": [AlpacaPortfolioRebalanceStateStorage],
+                # The ledger first: it and the rebalance state reference the Portfolio.
+                "tables": [AlpacaPortfolioEventLedgerStorage, AlpacaPortfolioRebalanceStateStorage],
                 "portfolios": ["ALPACA_PORTFOLIO__A"],
             },
         )

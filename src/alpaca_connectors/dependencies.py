@@ -2,7 +2,7 @@
 
 The connector reaches two releases that scale to zero: the Markets API, which ms-markets finds in
 the caller's Environment on the first Markets row call (``msm.client``, ADR 0018), and the
-MetaTables API, which ``metatables.endpoint`` finds when the runtime attaches this project's
+MetaTables API, which ``metatables.client.endpoint`` finds when the runtime attaches this project's
 tables. Each library asks the platform for the release's runtime access, which also starts a
 release that is asleep, and polls until it serves or its own limit (30 s) ends.
 
@@ -40,7 +40,7 @@ ANSWER_MARGIN_SECONDS = 1.0
 # How long a Job waits for each release that is waking (ADR 0020, decision 5). The libraries' own
 # 30 s ended every scheduled dispatcher run while the Markets API was still waking.
 JOB_WAKE_SECONDS = 300.0
-# How ms-markets (`msm.client.discovery`) and MetaTables (`metatables.endpoint`) end the message of
+# How ms-markets (`msm.client.discovery`) and MetaTables (`metatables.client.endpoint`) end the message of
 # a discovery that gave up while the platform still reported the release as starting.
 _STILL_WAKING = "last state: waking"
 # The deployment markers by which the SDK's request identity knows a hosted release.
@@ -116,7 +116,7 @@ def _sdk_starting_errors() -> tuple[type[BaseException], ...]:
 def _discovery_errors() -> tuple[type[BaseException], ...]:
     from msm.client.discovery import MarketsApiResolutionError
 
-    from metatables.endpoint import ApiResolutionError
+    from metatables.client.endpoint import ApiResolutionError
 
     return (MarketsApiResolutionError, ApiResolutionError)
 

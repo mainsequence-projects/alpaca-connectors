@@ -58,7 +58,7 @@ def postgresql(monkeypatch):
     from msm.base import MarketsBase
     from msm.repositories.base import MarketsRepositoryContext
 
-    import metatables.runtime_context
+    import metatables.client.runtime_context
     from alpaca_connectors.account.provider_account_details import ProviderAccountDetails
     from alpaca_connectors.assets.alpaca_asset_details import AlpacaAssetDetailsTable
     from alpaca_connectors.base import ProjectBase
@@ -67,7 +67,7 @@ def postgresql(monkeypatch):
     from alpaca_connectors.operations.asset_registration import AssetRegistrationOperationTable
     from metatables import MetaTable, MetaTableCompiledSQLOperation
     from metatables.api.backend.backends.restricted_sql import json_value, parameters_for
-    from metatables.runtime_contract import RuntimeContext
+    from metatables.contracts.runtime import RuntimeContext
 
     project_tables = [
         AccountSyncOperationTable.__table__,
@@ -94,7 +94,9 @@ def postgresql(monkeypatch):
         data_source={"uid": DATA_SOURCE_UID},
         default_schema="public",
     )
-    monkeypatch.setattr(metatables.runtime_context, "get_runtime_context", lambda **_: runtime)
+    monkeypatch.setattr(
+        metatables.client.runtime_context, "get_runtime_context", lambda **_: runtime
+    )
     dsn = parsed.set(drivername="postgresql").render_as_string(hide_password=False)
     sent: list[SimpleNamespace] = []
     untyped: set[str] = set()

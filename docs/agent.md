@@ -356,9 +356,17 @@ MetaTables (`mainsequence-metatable`) **0.1.63** and ms-markets **3.4.0**.
   one transaction with no updater run (its ADR 0064, MainSequenceMarkets#131); revision `0036`
   re-keys this application's instances. MetaTables 0.1.79 makes a head run wait for a run that
   holds its update, and a one-shot run send four requests (MetaTables#153, #154).
+- On 2026-11-25 the range moved to `ms-markets>=6.2.0`, with MetaTables `>=0.1.84` and Main
+  Sequence 9.0.41 in the lock. ms-markets 6.1.0 books every portfolio in a ledger, whose
+  projections are the published weights and values (its ADR 0065), and runs every portfolio of
+  a `run_portfolios` call in one MetaTables invocation (MainSequenceMarkets#133); revision `0037`
+  creates this application's ledger. 6.2.0 has producers declare their tables as class
+  statements (its ADR 0066) and can run a portfolio's nodes in parallel, each in a run of a node
+  Job (its ADR 0067). MetaTables 0.1.84 moves its client modules under `metatables.client`,
+  `metatables.models` and `metatables.contracts`.
 
 `pyproject.toml` keeps non-exact compatibility ranges (`mainsequence[mcp]>=9.0.38,<10`,
-`mainsequence-metatable>=0.1.79,<0.2`, `ms-tau-sdk>=2.0.26,<3`, and `ms-markets>=6.0.0` with no
+`mainsequence-metatable>=0.1.84,<0.2`, `ms-tau-sdk>=2.0.26,<3`, and `ms-markets>=6.2.0` with no
 upper bound since [ADR 0031](adrs/0031_markets_series_are_published_not_shared.md)), while
 `uv.lock` and the exported `requirements.txt` record the resolution. On 2026-10-14 Main Sequence
 had moved from 9.0.23 to 9.0.24, which stopped scaffolding `AGENTS.md` and ships its guidance in

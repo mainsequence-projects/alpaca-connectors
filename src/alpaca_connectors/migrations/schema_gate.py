@@ -188,7 +188,7 @@ def schema_state(
     release the Markets API reports with the one this image runs. MetaTables discovery inside
     this call waits up to ``wake_seconds`` for a waking MetaTables API.
     """
-    from metatables.endpoint import api_endpoint_scope
+    from metatables.client.endpoint import api_endpoint_scope
 
     with api_endpoint_scope(discovery_timeout=wake_seconds):
         states = [] if read_markets is None else [read_markets()]

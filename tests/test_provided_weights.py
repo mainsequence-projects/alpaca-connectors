@@ -175,8 +175,7 @@ def test_a_portfolio_created_before_adr_0028_keeps_its_signal() -> None:
 
     # The UID the connector computes is the one ms-markets' signal publishes under, and it
     # depends only on the configuration, so new weights never change it.
-    signal = ApplicationWeights.__new__(ApplicationWeights)
-    signal.signal_configuration = configuration
+    signal = ApplicationWeights.from_signal_configuration(configuration)
     assert provided_signal_uid(CONFIGURATION_UID) == compute_signal_uid(signal)
     assert provided_signal_uid(str(CONFIGURATION_UID)) == provided_signal_uid(CONFIGURATION_UID)
     assert provided_signal_uid(OTHER_CONFIGURATION_UID) != provided_signal_uid(CONFIGURATION_UID)
@@ -1303,9 +1302,10 @@ def test_the_portfolio_run_resolves_the_provided_signal() -> None:
         ),
         patch.object(
             execution,
-            "resolve_alpaca_bars_time_index_meta_table_uids",
-            return_value={("1d", "sip", "all"): "t"},
+            "resolve_alpaca_bars_tables",
+            return_value={("1d", "sip", "all"): SimpleNamespace(uid="t")},
         ),
+        patch("alpaca_connectors.runtime.start_markets_engine"),
         patch(
             "alpaca_connectors.portfolios.signal_assets.assets_for_signals",
             return_value=[AAPL, JPM, NVDA],
@@ -1369,9 +1369,10 @@ def test_a_portfolio_not_yet_adopted_runs_on_the_feed_it_names() -> None:
         ),
         patch.object(
             execution,
-            "resolve_alpaca_bars_time_index_meta_table_uids",
-            return_value={("1d", "sip", "all"): "t"},
+            "resolve_alpaca_bars_tables",
+            return_value={("1d", "sip", "all"): SimpleNamespace(uid="t")},
         ),
+        patch("alpaca_connectors.runtime.start_markets_engine"),
         patch("alpaca_connectors.portfolios.signal_assets.assets_for_signals", return_value=[NVDA]),
     ):
         resolved = execution.resolve_portfolio_configuration(CONFIGURATION_UID)

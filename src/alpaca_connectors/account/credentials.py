@@ -248,7 +248,7 @@ def write_stored_credentials(
 
 
 def _open_stored_value(column: Any, value: Any, *, account_uid: str) -> str:
-    from metatables.encryption import is_envelope
+    from metatables.models.encryption import is_envelope
 
     if value is None:
         raise AccountCredentialsMissingError(account_uid)

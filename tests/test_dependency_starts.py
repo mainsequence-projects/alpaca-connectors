@@ -114,11 +114,11 @@ def metatables_token_refresh_error(
 ) -> Exception:
     """What a MetaTables call raises when its release token is refreshed while ``state``.
 
-    ``metatables.transport`` refreshes the token with ``endpoint._release_access`` and raises the
+    ``metatables.client.transport`` refreshes the token with ``endpoint._release_access`` and raises the
     SDK's ``AuthError`` from the discovery error.
     """
     from mainsequence.client.utils import AuthError
-    from metatables import endpoint
+    from metatables.client import endpoint
 
     monkeypatch.setattr(endpoint, "time", FakeClock().module())
     release = SimpleNamespace(
@@ -345,7 +345,7 @@ def test_a_job_still_fails_on_a_markets_api_that_never_wakes(monkeypatch) -> Non
 
 def test_the_schema_gate_waits_out_both_releases_for_a_job(monkeypatch) -> None:
     from alpaca_connectors.migrations import schema_gate
-    from metatables import endpoint
+    from metatables.client import endpoint
 
     markets_waits: list[float] = []
     metatables_waits: list[float] = []

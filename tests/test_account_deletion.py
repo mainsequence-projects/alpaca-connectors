@@ -204,9 +204,9 @@ def test_the_account_and_all_it_owns_go_in_the_order_markets_keys_impose() -> No
     # delete: they go in the transaction that ends the portfolios. The states and events name
     # their order by its uid only; the preflight read the account's.
     assert _tables(kwargs["writes"].entries) == [
-        ("delete", "TradesStorage_main_alpaca_connectors", ["ACCOUNT__ALPACA"]),
-        ("delete", "OrderEventsStorage_main_alpaca_connectors", ORDERS),
-        ("delete", "OrdersStorage_main_alpaca_connectors", ORDERS),
+        ("delete", "AlpacaTradesStorage", ["ACCOUNT__ALPACA"]),
+        ("delete", "AlpacaOrderEventsStorage", ORDERS),
+        ("delete", "AlpacaOrdersStorage", ORDERS),
     ]
     # A signal no retired Portfolio follows goes before the account; the followed one waits.
     assert call.delete_signals(["signal-followed", "signal-free"]) in calls.mock_calls
@@ -312,9 +312,9 @@ def test_an_account_without_portfolios_still_deletes_its_orders_and_trades() -> 
     calls.end_portfolios.assert_not_called()
     [entries] = [c.args[0] for c in calls.transaction.call_args_list]
     assert [table for _, table, _ in _tables(entries)] == [
-        "TradesStorage_main_alpaca_connectors",
-        "OrderEventsStorage_main_alpaca_connectors",
-        "OrdersStorage_main_alpaca_connectors",
+        "AlpacaTradesStorage",
+        "AlpacaOrderEventsStorage",
+        "AlpacaOrdersStorage",
     ]
 
 

@@ -25,6 +25,7 @@ agent session; every command below is run by the person the step names.
 | 13 project tables in `mainsequence.markets` | in `alpaca-connectors` (step 7) |
 | Orders and trades written by the ms-markets `Orders` and `Trades` updaters, an update execution each, keyed by the order's identifier | the batch with its `Order` rows in one `OrderManager.create_batch(orders=...)` call, then the states and fills in one `write_execution` transaction, keyed by the order's uid (ms-markets 6.0.0, its ADR 0064; revision 0036, which gives the orders recorded before it their `Order` rows with `Order.upsert_many`) |
 | An account delete deleted its orders and trades by account | its order states and events by the uids of its `Order` rows (`Order.filter`), its trades by account |
+| A portfolio's values from `PortfoliosUpdater`, over the rebalance book; instances built by the ms-markets factories | every portfolio's ledger (`PortfolioEngine`) in `alpaca_connectors__portfolioeventledgerts__main` (revision 0037), whose projections are the published weights and values, and every instance a class statement in `alpaca_connectors.instances` (ms-markets 6.1.0 and 6.2.0, its ADRs 0065 and 0066) |
 
 Identities do not change: the uid of every table, the physical names of the project tables, every
 `update_hash` (output tables and catalog namespaces do not enter it, and no hash namespace is

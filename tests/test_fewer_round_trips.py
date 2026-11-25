@@ -652,8 +652,11 @@ def test_a_portfolio_runs_inputs_are_read_in_two_steps() -> None:
         ),
         patch.object(
             execution,
-            "resolve_alpaca_bars_time_index_meta_table_uids",
-            _waiting(by_inputs, lambda profiles: {("1d", "sip", "all"): "bars-table"}),
+            "resolve_alpaca_bars_tables",
+            _waiting(
+                by_inputs,
+                lambda profiles: {("1d", "sip", "all"): SimpleNamespace(uid="bars-table")},
+            ),
         ),
     ):
         resolved = execution._resolve_inputs([configuration])

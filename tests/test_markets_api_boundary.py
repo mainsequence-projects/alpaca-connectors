@@ -309,11 +309,12 @@ def test_producers_write_to_own_namespace_instances() -> None:
         assert model.__table__.info["namespace"] == "alpaca-connectors"
         assert model.__table__.name.startswith("alpaca_connectors__")
         assert model in interpolated or model.__table__.name.endswith("__main")
-    # A run writes its private rebalance state and calendar events (ADR 0031) and the
-    # interpolated prices it values with (ADR 0029).
+    # A run writes its private rebalance state, calendar events and ledger (ADR 0031, ms-markets
+    # ADR 0065) and the interpolated prices it values with (ADR 0029).
     assert instances.private_portfolio_models() == [
         instances.AlpacaPortfolioRebalanceStateStorage,
         instances.AlpacaPortfolioCalendarEventsStorage,
+        instances.AlpacaPortfolioEventLedgerStorage,
         *interpolated,
     ]
 
@@ -355,7 +356,7 @@ def test_no_table_of_this_application_is_shared_with_markets() -> None:
     """ADR 0031, decision 3: every table, instances included, is only in `alpaca-connectors`."""
     from alpaca_connectors.instances import INTERPOLATED_PRICES_BY_PROFILE
     from alpaca_connectors.migrations import all_project_metatable_models
-    from metatables.sqlalchemy_contracts import _resolve_namespaces
+    from metatables.models.sqlalchemy_contracts import _resolve_namespaces
 
     models = all_project_metatable_models()
     names = {model.__table__.name for model in models}

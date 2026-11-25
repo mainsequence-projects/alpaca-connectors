@@ -58,6 +58,7 @@ def test_migration_metadata_holds_only_this_applications_tables() -> None:
         # weights, portfolio weights and values are Markets' published series (ADR 0031).
         "alpaca_connectors__portfoliorebalancestatets__main",
         "alpaca_connectors__portfoliocalendareventsts__main",
+        "alpaca_connectors__portfolioeventledgerts__main",
         "alpaca_connectors__ordersts__main",
         "alpaca_connectors__ordereventsts__main",
         "alpaca_connectors__tradests__main",
@@ -103,19 +104,30 @@ def test_portfolio_price_source_resolves_the_migration_catalog_identity() -> Non
 
 
 def test_interpolated_prices_scope_is_identifiers_and_bars_follow_each_asset_calendar() -> None:
+    from metatables import TimeIndexMetaTable, TimeIndexTableRef
+
     node = object()
+    bars = TimeIndexMetaTable.model_construct(
+        uid="source-table-uid",
+        data_source_uid="data-source-uid",
+        physical_table_name="alpaca_connectors__bars_1d_iex_raw",
+    )
 
     with patch(
         "msm_portfolios.contrib.prices.updaters.InterpolatedPrices",
         return_value=node,
     ) as interpolated_prices:
         result = build_alpaca_interpolated_prices(
-            source_time_index_meta_table_uid="source-table-uid",
+            source_table=bars,
             asset_identifiers=["ALPACA::asset-b", "ALPACA::asset-a", "ALPACA::asset-a"],
             profile=("1d", "iex", "raw"),
         )
 
     assert result is node
+    # The bars are read by their registered table, so they are not a node of the run (ms-markets
+    # ADR 0066): the portfolio Job updates them first.
+    source = interpolated_prices.call_args.kwargs["interpolation_config"].source_price_instance
+    assert isinstance(source, TimeIndexTableRef) and source.output_table is bars
     # ms-markets 4 refuses a calendar in the scope; each asset's bars follow the stored calendar
     # registration linked it to (ADR 0026).
     interpolation_config = interpolated_prices.call_args.kwargs["interpolation_config"]

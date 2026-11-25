@@ -249,14 +249,16 @@ def _input_reads(rows, *, bounds, rebalance=None, own_bars=None):
         str(row.signal_definition_uid): SimpleNamespace(signal_key=f"key-{row.uid}") for row in rows
     }
     reads.bounds.side_effect = lambda signals: {signal: bounds for signal in signals}
-    reads.sources.return_value = {("1d", "sip", "all"): "source-table-uid"}
+    reads.sources.return_value = {("1d", "sip", "all"): SimpleNamespace(uid="source-table-uid")}
     patches = (
         patch(f"{CONFIGURATIONS}.rebalance_configurations_by_uids", reads.rebalances),
         patch(f"{BARS}.portfolio_bar_configurations", reads.own_bars),
         patch(f"{BARS}.bar_configuration_rows_by_uids", reads.named_bars),
         patch(f"{DEFINITIONS}.signal_definitions_by_uids", reads.definitions),
         patch(f"{HISTORY}.read_signal_observation_bounds_by_signal", reads.bounds),
-        patch.object(execution, "resolve_alpaca_bars_time_index_meta_table_uids", reads.sources),
+        patch.object(execution, "resolve_alpaca_bars_tables", reads.sources),
+        # The reads share one engine, started first; no backend here.
+        patch("alpaca_connectors.runtime.start_markets_engine"),
     )
     return reads, patches
 
@@ -284,7 +286,7 @@ def test_many_preflights_read_each_kind_of_input_once() -> None:
     reads.own_bars.return_value[str(rows[2].uid)] = SimpleNamespace(
         uid=BARS_CONFIGURATION_UID, enabled=False, frequency_id="1d", feed="sip", adjustment="all"
     )
-    with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5]:
+    with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6]:
         answers = execution.preflight_portfolio_configurations(rows)
 
     # One read per kind for all of them (issue #46), never one per configuration.
@@ -304,7 +306,7 @@ def test_a_signal_without_observations_blocks_its_portfolio() -> None:
         signal_uid="any", first_observation_at=None, last_observation_at=None
     )
     reads, patches = _input_reads([row], bounds=empty)
-    with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5]:
+    with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6]:
         answer = execution.preflight_portfolio_configurations([row])[str(row.uid)]
     assert not answer.allowed
     assert "has no published observations" in answer.blockers[0]
@@ -329,7 +331,7 @@ def test_held_inputs_are_not_read_again() -> None:
     # Asked for nothing, each read answers nothing.
     for read in (reads.rebalances, reads.own_bars, reads.definitions):
         read.return_value = {}
-    with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5]:
+    with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6]:
         answer = execution.preflight_portfolio_configurations([row], held=held)[str(row.uid)]
 
     assert answer.allowed
@@ -394,6 +396,7 @@ def test_portfolio_resolution_uses_published_signal_and_selected_bars_profile() 
         patches[3],
         patches[4],
         patches[5],
+        patches[6],
         patch(
             "alpaca_connectors.portfolios.execution.get_portfolio_configuration", return_value=row
         ),
@@ -643,9 +646,14 @@ def _real_run_plan(strategy: str):
 def test_both_strategies_read_the_calendar_sessions_and_build_with_ms_markets(strategy) -> None:
     """ms-markets ADR 0058: every rebalance waits for an open market and trades at the next
     observed price, so both strategies read the portfolio calendar's open and close."""
+    from msm_portfolios.accounting import MarketPriceValuationModel
     from msm_portfolios.configuration import PortfolioConfiguration
     from msm_portfolios.contrib.signals import ApplicationWeights
-    from msm_portfolios.rebalance_strategy import CalendarEventSignal, ImmediateSignal
+    from msm_portfolios.rebalance_strategy import (
+        CalendarEventSignal,
+        ImmediateSignal,
+        ProportionalExecutionCostModel,
+    )
     from msm_portfolios.rebalance_strategy.base import require_observed_price_column
     from msm_portfolios.time_index import PortfolioCalendarEvents
 
@@ -676,6 +684,22 @@ def test_both_strategies_read_the_calendar_sessions_and_build_with_ms_markets(st
     assert build.valuation_asset_identifier == "USD"
     assert build.fx_source_instance is None
     require_observed_price_column(build.valuation_column)
+    # Every portfolio keeps a ledger (ms-markets ADR 0065): it opens in cash at the signal's first
+    # observation and values each position with the configuration's staleness and missing-price
+    # rule; the commission is a proportional cost of each fill.
+    stored = resolved_configuration().configuration
+    accounting = build.accounting_configuration
+    assert accounting.initial_nav == execution.LEDGER_INITIAL_NAV
+    assert accounting.initial_state_time_index == resolved_configuration().signal_start_time
+    valuation = accounting.position_valuation_model_instance
+    assert type(valuation) is MarketPriceValuationModel
+    assert valuation.maximum_staleness == dt.timedelta(
+        seconds=stored.valuation_maximum_staleness_seconds
+    )
+    assert valuation.fail_on_missing_values is stored.fail_on_missing_prices
+    [cost] = rule.execution_cost_model_instances
+    assert type(cost) is ProportionalExecutionCostModel
+    assert cost.rate == stored.commission_fee
     if strategy == "calendar_event_signal":
         assert (rule.rebalance_event, rule.rebalance_cadence) == ("market_close", "every_session")
     front_end = plan.portfolio_configuration.portfolio_markets_configuration.front_end_details

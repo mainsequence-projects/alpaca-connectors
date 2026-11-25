@@ -360,8 +360,9 @@ There is no Environment request field. A run selects its configuration with
 `--configuration-uid <uid>`, first runs its bars configuration's update (issue #39; a failed update
 leaves it to value with the prices already stored; it is skipped, in one read, when every asset
 already holds its last final daily bar), then runs the ms-markets recipe `run_portfolio`:
-persistent interpolation, calendar events, rebalance state, executed weights, and valuation, with
-the weights and values published to Markets (ADR 0031). Rebalance rows use actual configured
+persistent interpolation, calendar events, rebalance state and the portfolio's ledger in one
+MetaTables invocation, with the weights and values the ledger projects published to Markets
+(ADR 0031, ms-markets ADR 0065). Rebalance rows use actual configured
 market-event timestamps and select the latest observation at or before each event.
 
 The configuration detail `GET` accepts `observation_limit` from 1 through 5,000 (default 2,500). It

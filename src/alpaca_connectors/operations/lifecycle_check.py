@@ -116,7 +116,7 @@ LOCAL_JOB = """
 import os, runpy, sys
 ring = os.environ.get("ALPACA_E2E_LOCAL_KEYRING")
 if ring:
-    from metatables.encryption import set_keyring_source
+    from metatables.models.encryption import set_keyring_source
     set_keyring_source(lambda name: ring)
 launcher = sys.argv[1]
 sys.argv = [launcher, "--configuration-uid", sys.argv[2]]

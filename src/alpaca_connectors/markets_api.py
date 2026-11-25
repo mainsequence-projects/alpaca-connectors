@@ -712,18 +712,20 @@ def run_portfolio(
     calendar_uid: Any,
     portfolio_description: str,
     rebalance_output_table: Any,
+    event_ledger_output_table: Any,
 ) -> PortfolioRunAnswer:
     """Run one portfolio's chain and publish it (``recipes.run_portfolio``).
 
     Calls ``run_portfolio(portfolio_configuration, rebalance_output_table=...,
-    portfolio_resolver=..., portfolio_description=...)``. ms-markets refuses, with
-    ``ValueError``, a portfolio its ``portfolio_preflight`` finds not ready; runs, in order, the
-    rebalance strategy's declared inputs (calendar events), the rebalance state (into this
-    application's private table), the executed weights and the valuation source (this
-    application's interpolated prices); publishes the weights and the values; starts a first run
-    at the signal's first observation; reads the signal's weights by its ``signal_uid`` only; and
-    records the signal on the ``Portfolio`` row. The row itself is this application's
-    ``unique_identifier`` on ``calendar_uid`` (``_ConfigurationPortfolio``).
+    event_ledger_output_table=..., portfolio_resolver=..., portfolio_description=...)``.
+    ms-markets refuses, with ``ValueError``, a portfolio its ``portfolio_preflight`` finds not
+    ready; runs the ledger's graph in one MetaTables invocation: the valuation source (this
+    application's interpolated prices) and the rebalance strategy's declared inputs (calendar
+    events), then the rebalance state and the ledger (both into this application's private
+    tables); publishes the weights and the values the ledger projects (ms-markets ADR 0065);
+    reads the signal's weights by its ``signal_uid`` only; and records the signal on the
+    ``Portfolio`` row. The row itself is this application's ``unique_identifier`` on
+    ``calendar_uid`` (``_ConfigurationPortfolio``).
 
     Its ``PortfolioRun`` answer gives the ``portfolio`` row, the ``SeriesPublication`` of the
     weights and of the values (None when nothing was new) and ``first_rebalance`` (this run made
@@ -734,6 +736,7 @@ def run_portfolio(
     answer = recipe(
         portfolio_configuration,
         rebalance_output_table=rebalance_output_table,
+        event_ledger_output_table=event_ledger_output_table,
         portfolio_resolver=_ConfigurationPortfolio(unique_identifier, calendar_uid),
         portfolio_description=portfolio_description,
     )

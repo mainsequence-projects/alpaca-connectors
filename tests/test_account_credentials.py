@@ -43,7 +43,7 @@ LEGACY_REFERENCE_COLUMNS = (
     "secret_key_secret_uid",
 )
 from metatables.compiled_sql.v1 import compile_sqlalchemy_statement
-from metatables.encryption import (
+from metatables.models.encryption import (
     EncryptionError,
     column_context,
     encrypt_value,

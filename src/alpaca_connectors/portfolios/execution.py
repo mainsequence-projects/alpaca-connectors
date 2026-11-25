@@ -26,7 +26,7 @@ from alpaca_connectors.portfolios.configurations import (
 )
 from alpaca_connectors.portfolios.interpolated_prices import (
     build_alpaca_interpolated_prices,
-    resolve_alpaca_bars_time_index_meta_table_uids,
+    resolve_alpaca_bars_tables,
 )
 from alpaca_connectors.portfolios.rebalance_schedule import first_rebalance_state
 from alpaca_connectors.portfolios.signal_observations import read_signal_observation_matrix
@@ -43,6 +43,8 @@ class ResolvedPortfolioConfiguration:
     signal_start_time: dt.datetime
     asset_identifiers: tuple[str, ...]
     source_time_index_meta_table_uid: str
+    # The registered bars table the interpolated prices read (``resolve_alpaca_bars_tables``).
+    source_table: Any = None
 
     def summary(self) -> dict[str, Any]:
         return {
@@ -115,6 +117,11 @@ class PortfolioRunPlan:
     calendar_uid: Any
 
 
+# The cash a portfolio's ledger opens with, in US dollars (ms-markets ADR 0065). It is the unit the
+# rebalance sizes in; the published values are the NAV over it, so every portfolio starts at 1.
+LEDGER_INITIAL_NAV = 1_000_000.0
+
+
 def portfolio_unique_identifier(configuration_uid: Any) -> str:
     """The `Portfolio` unique identifier of a configuration (ADR 0024, decision 3)."""
     from alpaca_connectors.portfolios.provided_weights import provided_portfolio_unique_identifier
@@ -145,6 +152,7 @@ class _PortfolioInputs:
     signal_uid: str
     signal_start_time: dt.datetime
     source_time_index_meta_table_uid: str
+    source_table: Any = None
 
 
 def _resolve_inputs(
@@ -257,7 +265,7 @@ def _resolve_inputs(
             [value[3] for value in pending.values() if value[3] not in bounds]
         ),
         lambda: (
-            resolve_alpaca_bars_time_index_meta_table_uids(
+            resolve_alpaca_bars_tables(
                 [
                     (value[2].frequency_id, value[2].feed, value[2].adjustment)
                     for value in pending.values()
@@ -290,7 +298,8 @@ def _resolve_inputs(
             bars_configuration=bars,
             signal_uid=signal_uid,
             signal_start_time=signal_bounds.first_observation_at,
-            source_time_index_meta_table_uid=source,
+            source_time_index_meta_table_uid=str(source.uid),
+            source_table=source,
         )
     return resolved
 
@@ -333,6 +342,7 @@ def resolve_portfolio_configuration(
         signal_start_time=inputs.signal_start_time,
         asset_identifiers=asset_identifiers,
         source_time_index_meta_table_uid=inputs.source_time_index_meta_table_uid,
+        source_table=inputs.source_table,
     )
 
 
@@ -383,22 +393,34 @@ def preflight_portfolio_configuration(
 def build_portfolio_run(resolved: ResolvedPortfolioConfiguration) -> PortfolioRunPlan:
     """Build what this application supplies to a portfolio run (ADR 0031, decision 5).
 
-    Its interpolated prices as the valuation source, calendar events only for
-    ``calendar_event_signal`` (in its private table), the rebalance strategy, the calendar and the
-    ``ApplicationWeights`` signal of the configuration, the valuation and fee settings, and the
-    ``ALPACA_PORTFOLIO__<hex>`` identifier. ms-markets' ``run_portfolio`` builds and runs the
+    Its interpolated prices as the valuation source, the calendar's session events (in its
+    private table), the rebalance strategy with the configuration's commission, the calendar and
+    the ``ApplicationWeights`` signal of the configuration, the ledger (ms-markets ADR 0065), and
+    the ``ALPACA_PORTFOLIO__<hex>`` identifier. ms-markets' ``run_portfolio`` builds and runs the
     chain from it.
+
+    The ledger opens at the signal's first observation with ``LEDGER_INITIAL_NAV`` in cash and
+    values every position at its interpolated close (``MarketPriceValuationModel``) with the
+    configuration's staleness limit and missing-price rule. Its published values are the NAV over
+    the initial NAV, so a portfolio starts at 1. The commission is a proportional cost of each
+    fill's notional (``ProportionalExecutionCostModel``).
     """
+    from msm_portfolios.accounting import (
+        MarketPriceValuationModel,
+        PortfolioAccountingConfiguration,
+    )
     from msm_portfolios.configuration import (
         BacktestingWeightsConfig,
         FrontEndDetails,
         PortfolioBuildConfiguration,
         PortfolioConfiguration,
-        PortfolioExecutionConfiguration,
         PortfolioMarketsConfig,
-        ValuationAlignmentPolicy,
     )
-    from msm_portfolios.rebalance_strategy import CalendarEventSignal, ImmediateSignal
+    from msm_portfolios.rebalance_strategy import (
+        CalendarEventSignal,
+        ImmediateSignal,
+        ProportionalExecutionCostModel,
+    )
     from msm_portfolios.rebalance_strategy.immediate_signal import SESSION_EVENT_TYPES
     from msm_portfolios.time_index import (
         PortfolioCalendarEvents,
@@ -415,14 +437,10 @@ def build_portfolio_run(resolved: ResolvedPortfolioConfiguration) -> PortfolioRu
     if rebalance.strategy not in ("calendar_event_signal", "immediate_signal"):
         raise ValueError("Portfolio execution requires CalendarEventSignal or ImmediateSignal.")
     signal = weights_signal(portfolio_signal_key(configuration))
-    # `ApplicationWeights.get_asset_list()` reads the whole signal weights table; the resolved
-    # scope is the same set, from the signal-asset table. The class path, and so the UID, stay.
-    recorded_assets = list(resolved.asset_identifiers)
-    signal.get_asset_list = lambda: list(recorded_assets)
     if signal.signal_uid != resolved.signal_uid:
         raise RuntimeError("Resolved Signal identity changed while building the portfolio run.")
     valuation_source = build_alpaca_interpolated_prices(
-        source_time_index_meta_table_uid=resolved.source_time_index_meta_table_uid,
+        source_table=resolved.source_table,
         asset_identifiers=list(resolved.asset_identifiers),
         profile=(
             resolved.bars_configuration.frequency_id,
@@ -450,11 +468,13 @@ def build_portfolio_run(resolved: ResolvedPortfolioConfiguration) -> PortfolioRu
         ),
         output_table=AlpacaPortfolioCalendarEventsStorage,
     )
+    execution_costs = (ProportionalExecutionCostModel(rate=configuration.commission_fee),)
     if rebalance.strategy == "immediate_signal":
         rebalance_strategy = ImmediateSignal(
             calendar_events_instance=calendar_events,
             calendar_identifier=rebalance.calendar_identifier,
             session_label=rebalance.session_label,
+            execution_cost_model_instances=execution_costs,
         )
         rebalance_strategy_description = (
             "Trade to each set of weights the application provides: from the time it was "
@@ -470,6 +490,7 @@ def build_portfolio_run(resolved: ResolvedPortfolioConfiguration) -> PortfolioRu
             event_offset=dt.timedelta(seconds=rebalance.event_offset_seconds),
             rebalance_cadence=rebalance.rebalance_cadence,
             rebalance_weekday=rebalance.rebalance_weekday,
+            execution_cost_model_instances=execution_costs,
         )
         rebalance_strategy_description = (
             "Select the latest signal observed at or before the configured persisted "
@@ -491,18 +512,19 @@ def build_portfolio_run(resolved: ResolvedPortfolioConfiguration) -> PortfolioRu
             valuation_column=configuration.valuation_column,
             # The portfolio's currency (ms-markets ADR 0059): an Alpaca account's cash, US dollars.
             valuation_asset_identifier=DEFAULT_CASH_ASSET_IDENTIFIER,
-            valuation_alignment_policy=ValuationAlignmentPolicy(
-                maximum_staleness=dt.timedelta(
-                    seconds=configuration.valuation_maximum_staleness_seconds
-                ),
-                fail_on_missing_values=configuration.fail_on_missing_prices,
-            ),
-            execution_configuration=PortfolioExecutionConfiguration(
-                commission_fee=configuration.commission_fee
-            ),
             backtesting_weights_configuration=BacktestingWeightsConfig(
                 rebalance_strategy_instance=rebalance_strategy,
                 signal_weights_instance=signal,
+            ),
+            accounting_configuration=PortfolioAccountingConfiguration(
+                initial_nav=LEDGER_INITIAL_NAV,
+                initial_state_time_index=resolved.signal_start_time,
+                position_valuation_model_instance=MarketPriceValuationModel(
+                    maximum_staleness=dt.timedelta(
+                        seconds=configuration.valuation_maximum_staleness_seconds
+                    ),
+                    fail_on_missing_values=configuration.fail_on_missing_prices,
+                ),
             ),
         ),
         portfolio_markets_configuration=PortfolioMarketsConfig(
@@ -579,11 +601,15 @@ def execute_portfolio_configuration(configuration_uid: Any) -> PortfolioExecutio
     ``calendar_event_signal``), the rebalance state into this application's private table, the
     executed weights and the interpolated prices, then the values, from the signal's first
     observation and reading only its one signal; the `Portfolio` row is the configuration's
-    ``ALPACA_PORTFOLIO__<hex>``, and the weights and values are published to Markets. Nothing is
+    ``ALPACA_PORTFOLIO__<hex>``, the ledger is this application's private table, and the weights
+    and values, projections of the ledger, are published to Markets. Nothing is
     registered or reconciled. The calls that give the portfolio weights remain the signal
     producer; this run publishes no signal observation.
     """
-    from alpaca_connectors.instances import AlpacaPortfolioRebalanceStateStorage
+    from alpaca_connectors.instances import (
+        AlpacaPortfolioEventLedgerStorage,
+        AlpacaPortfolioRebalanceStateStorage,
+    )
     from alpaca_connectors.markets_api import portfolio_weights_recorded, run_portfolio
     from alpaca_connectors.runtime import start_portfolio_job_engine
 
@@ -603,6 +629,7 @@ def execute_portfolio_configuration(configuration_uid: Any) -> PortfolioExecutio
         calendar_uid=plan.calendar_uid,
         portfolio_description=plan.portfolio_description,
         rebalance_output_table=AlpacaPortfolioRebalanceStateStorage,
+        event_ledger_output_table=AlpacaPortfolioEventLedgerStorage,
     )
     portfolio_uid = answer.portfolio_uid
     if (

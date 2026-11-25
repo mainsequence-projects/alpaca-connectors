@@ -212,17 +212,20 @@ Bars Configuration ─> raw Bars ─> persistent InterpolatedPrices
 
 Rebalance Configuration ────────────> PortfolioCalendarEvents ─> CalendarEventSignal
 
-ApplicationWeights + CalendarEventSignal ─> PortfolioRebalance
-                                          └> PortfolioWeights
+ApplicationWeights + CalendarEventSignal ─> PortfolioRebalance ─> rebalance state (fills)
 
-PortfolioWeights + InterpolatedPrices ──> PortfoliosUpdater ─> Markets portfolio values
+rebalance state + InterpolatedPrices ──> PortfolioEngine ─> event ledger
+                                                          ├> PortfolioWeights ─> Markets weights
+                                                          └> PortfolioValues ─> Markets values
 ```
 
 - **Where the outputs live.** The signal weights, the portfolio weights and the values are
   Markets' own rows: they are published to Markets and read back from it with the ms-markets
   recipes (`publish_signal_weights`, `run_portfolio`, `signal_history`, `portfolio_history`,
   `weights_as_of`; [ADR 0031](../adrs/0031_markets_series_are_published_not_shared.md)). The
-  calendar events and rebalance state stay private, in this application's contract instances
+  weights and values are projections of the portfolio's ledger (ms-markets 6.1.0, its ADR 0065).
+  The calendar events, rebalance state and ledger stay private, in this application's contract
+  instances, each a class statement (ms-markets 6.2.0, its ADR 0066)
   (`alpaca_connectors__<contract>__main`, `alpaca_connectors.instances`), and the interpolated
   prices in one table per bars profile (`INTERPOLATED_PRICES_BY_PROFILE`,
   [ADR 0029](../adrs/0029_interpolated_price_tables_are_named_like_every_project_table.md)), all
@@ -235,19 +238,33 @@ PortfolioWeights + InterpolatedPrices ──> PortfoliosUpdater ─> Markets por
   history it started with is valued, including assets that history already dropped.
 - **One producer runs first.** A run requires a published observation, then runs its bars
   configuration's update, the bars Job's own, with the account's keys (issue #39), then the
-  ms-markets recipe `run_portfolio` updates, in order, the interpolated prices, the calendar
-  events, the rebalance decisions, the executed weights and the valuation. The bars keep their own
-  Job and schedule.
+  ms-markets recipe `run_portfolio` runs the ledger's graph in one MetaTables invocation: the
+  interpolated prices and the calendar events, then the rebalance decisions and the ledger; then
+  it publishes the weights and values the ledger projects. The interpolated prices read the bars
+  table by reference (`TimeIndexTableRef`), so the bars are not a node of that graph. The bars
+  keep their own Job and schedule.
 
 ## Valuation
 
-- **Interpolated prices.** `InterpolatedPrices` gives a value at a real portfolio time, and
-  `valuation_maximum_staleness_seconds` bounds how old that price may be.
-- **Missing prices.** `fail_on_missing_prices` decides whether an incomplete valuation fails the
-  run.
-- **No invented times.** Neither setting invents daily times, extends the calculation to the
-  current time or changes when weights are valid. `PortfoliosUpdater` writes only at valuation
-  observations, and `PortfolioWeights` only at rebalance events.
+- **The ledger.** Every portfolio keeps a ledger (ms-markets ADR 0065). It opens at the signal's
+  first observation with 1,000,000 US dollars in cash (`LEDGER_INITIAL_NAV`, the unit the rebalance
+  sizes in), and the published values are the NAV over that, so every portfolio starts at 1.
+- **Interpolated prices.** `InterpolatedPrices` gives a value at a real portfolio time; the
+  ledger values each position with `MarketPriceValuationModel`, and
+  `valuation_maximum_staleness_seconds` is its `maximum_staleness`: how old a price may be before
+  the value is marked stale.
+- **Missing prices.** `fail_on_missing_prices` is the model's `fail_on_missing_values`: whether a
+  price older than the limit fails the run instead. A held asset with no price at all always
+  fails it.
+- **Commission.** `commission_fee` is a proportional cost of each fill's notional, the strategy's
+  `ProportionalExecutionCostModel`.
+- **Events in the price.** Both bars profiles are stated as adjusted (`events_in_price`, the
+  default), so no lifecycle model books dividends or splits. That is true of `1d/sip/all`; the
+  `1d/iex/raw` bars are unadjusted, so a portfolio priced by them misses its dividends and splits,
+  as it did before 6.1.0.
+- **No invented times.** No setting invents daily times, extends the calculation to the current
+  time or changes when weights are valid. The ledger books only at fills and valuation
+  observations, and `PortfolioWeights` publishes only where a position changed.
 - **Calendars.** Every asset's bars follow the trading calendar it is linked to
   ([ADR 0026](../adrs/0026_assets_are_registered_with_their_trading_calendar.md)), and the
   rebalance calendar drives the events and the `Portfolio` row.
@@ -391,12 +408,12 @@ since-inception. Alpha and beta are absent: a portfolio has no benchmark.
 
 Before a portfolio's first run in an Environment:
 
-- the installed ms-markets release, 6.0.0 or later, is the one the Environment's Markets API runs
+- the installed ms-markets release, 6.2.0 or later, is the one the Environment's Markets API runs
   (the Job's schema gate checks it); this application holds no role on `mainsequence.markets` and
   reaches the `Portfolio`, calendar and signal metadata through the Markets API;
 - this project's revisions are applied by the migration Job, including the private instances, the
-  portfolio configuration table of revision `0027` and the interpolated-price tables of revision
-  `0034`;
+  portfolio configuration table of revision `0027`, the interpolated-price tables of revision
+  `0034` and the event ledger of revision `0037`;
 - the bars configuration is enabled, and its bars table holds the portfolio's assets;
 - the declared `Alpaca Portfolio` Job exists on the branch, its image is ready, and its workload
   holds `editor` on `alpaca-connectors`
