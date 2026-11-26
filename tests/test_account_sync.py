@@ -288,6 +288,40 @@ def test_a_sync_logs_each_steps_duration_and_the_alpaca_time(client, rows, caplo
         assert f"{name}_seconds=" in line
 
 
+def _clock(count: int) -> list[dt.datetime]:
+    return [SNAPSHOT_TIME + dt.timedelta(seconds=7 * second) for second in range(count)]
+
+
+def test_each_step_records_its_own_start_and_end(client, rows) -> None:
+    times = _clock(4)
+    with patch(f"{SERVICE}._now", side_effect=times):
+        response, _ = _sync(client, sized=SIZED)
+
+    operation = AccountSyncOperationResponse.model_validate(response.json())
+    assert [(step.key, step.started_at, step.completed_at) for step in operation.steps] == [
+        ("capture_holdings", times[0], times[1]),
+        ("size_targets", times[1], times[2]),
+        ("allocate_funds", times[2], times[3]),
+    ]
+
+
+def test_a_failed_step_records_its_own_times_and_a_skipped_one_none(client, rows) -> None:
+    times = _clock(3)
+    refused = FundAllocationError("target_unavailable", "Refused.")
+    with patch(f"{SERVICE}._now", side_effect=times):
+        response, _ = _sync(client, sized=SIZED, target=refused)
+
+    operation = AccountSyncOperationResponse.model_validate(response.json())
+    capture, size, allocate = operation.steps
+    assert (capture.status, capture.started_at, capture.completed_at) == (
+        "succeeded",
+        times[0],
+        times[1],
+    )
+    assert (size.status, size.started_at, size.completed_at) == ("failed", times[1], times[2])
+    assert (allocate.status, allocate.started_at) == ("skipped", None)
+
+
 def test_a_capture_that_published_no_snapshot_allocates_nothing(client, rows) -> None:
     steps: dict[str, Any] = {}
     empty = {**CAPTURED, "holdings_set_uid": None, "holdings_rows": 0}

@@ -310,18 +310,21 @@ def _updated_steps(
 
 
 def set_asset_registration_step(
-    operation_uid: uuid.UUID | str,
+    operation: AssetRegistrationOperation,
     *,
     step_key: str,
     status: StepStatus,
     message: str | None = None,
 ) -> AssetRegistrationOperation:
-    operation = get_asset_registration_operation(operation_uid)
-    if operation is None:
-        raise LookupError(f"Asset registration operation {operation_uid!s} does not exist.")
+    """Record one step's status on the operation in hand, and answer the row the update returns.
+
+    The run that holds the operation is its only writer, so nothing is read first: each write
+    starts from the row the previous one answered (issue #46). The same holds for
+    ``complete_asset_registration_operation`` and ``fail_asset_registration_operation``.
+    """
     now = utc_now()
     return AssetRegistrationOperation.update(
-        operation_uid,
+        operation.uid,
         {
             "status": "running" if status in {"running", "succeeded"} else operation.status,
             "current_step": step_key if status == "running" else None,
@@ -338,16 +341,13 @@ def set_asset_registration_step(
 
 
 def complete_asset_registration_operation(
-    operation_uid: uuid.UUID | str,
+    operation: AssetRegistrationOperation,
     *,
     result: dict[str, Any],
 ) -> AssetRegistrationOperation:
-    operation = get_asset_registration_operation(operation_uid)
-    if operation is None:
-        raise LookupError(f"Asset registration operation {operation_uid!s} does not exist.")
     now = utc_now()
     return AssetRegistrationOperation.update(
-        operation_uid,
+        operation.uid,
         {
             "status": "succeeded",
             "current_step": None,
@@ -360,14 +360,11 @@ def complete_asset_registration_operation(
 
 
 def fail_asset_registration_operation(
-    operation_uid: uuid.UUID | str,
+    operation: AssetRegistrationOperation,
     *,
     step_key: str,
     error: dict[str, Any],
 ) -> AssetRegistrationOperation:
-    operation = get_asset_registration_operation(operation_uid)
-    if operation is None:
-        raise LookupError(f"Asset registration operation {operation_uid!s} does not exist.")
     now = utc_now()
     validated_error = OperationError.model_validate(error)
     failed_steps = _updated_steps(
@@ -382,7 +379,7 @@ def fail_asset_registration_operation(
             step["message"] = "Not run because a previous step failed."
             step["completed_at"] = now.isoformat()
     return AssetRegistrationOperation.update(
-        operation_uid,
+        operation.uid,
         {
             "status": "failed",
             "current_step": step_key,

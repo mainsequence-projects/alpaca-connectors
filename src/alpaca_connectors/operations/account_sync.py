@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import datetime as dt
 import uuid
+from collections.abc import Mapping
 from typing import Any, ClassVar
 
 from msm.api.base import MarketsMetaTableRow
@@ -38,6 +39,9 @@ ACCOUNT_SYNC_STEPS: tuple[tuple[str, str], ...] = (
 NO_TARGET_MESSAGE = "Not run: the account has no target, or the capture published no snapshot."
 
 UTC = dt.timezone.utc
+
+# Each step's start and end, by step key, as the sync measured them.
+StepTimes = Mapping[str, tuple[dt.datetime, dt.datetime]]
 
 
 def utc_now() -> dt.datetime:
@@ -285,13 +289,18 @@ def _finished_steps(
     skipped: tuple[str, ...],
     message: str | None,
     now: dt.datetime,
+    times: StepTimes | None = None,
 ) -> list[dict[str, Any]]:
     """Every step in its terminal state.
 
     The sync runs inside one request and is written when it ends. Steps before the failed one
     succeeded, the failed one carries the error's message, and the ones after it did not run.
     Without a failure every step succeeded, except the ones named in ``skipped``.
+
+    ``times`` holds the start and end of each step that ran, as the sync measured them (issue
+    #46). A step it does not name runs from its recorded start, or ``now``, to ``now``.
     """
+    times = times or {}
     finished: list[dict[str, Any]] = []
     failed_seen = False
     for step in operation.steps:
@@ -309,6 +318,9 @@ def _finished_steps(
         item["completed_at"] = now.isoformat()
         if item["status"] == "skipped":
             item["started_at"] = None
+        elif item["key"] in times:
+            started, completed = times[item["key"]]
+            item["started_at"], item["completed_at"] = started.isoformat(), completed.isoformat()
         finished.append(item)
     return finished
 
@@ -318,6 +330,7 @@ def succeed_account_sync_operation(
     *,
     result: dict[str, Any],
     skipped: tuple[str, ...] = (),
+    times: StepTimes | None = None,
 ) -> AccountSyncOperation:
     now = utc_now()
     return AccountSyncOperation.update(
@@ -326,7 +339,7 @@ def succeed_account_sync_operation(
             "status": "succeeded",
             "current_step": None,
             "steps": _finished_steps(
-                operation, failed_step=None, skipped=skipped, message=None, now=now
+                operation, failed_step=None, skipped=skipped, message=None, now=now, times=times
             ),
             "result": result,
             "error": None,
@@ -341,6 +354,7 @@ def fail_account_sync_operation(
     *,
     error: OperationError,
     step: str | None = None,
+    times: StepTimes | None = None,
 ) -> AccountSyncOperation:
     """End the sync as failed at ``step``, the capture when none is named."""
     now = utc_now()
@@ -351,7 +365,12 @@ def fail_account_sync_operation(
             "status": "failed",
             "current_step": failed_step,
             "steps": _finished_steps(
-                operation, failed_step=failed_step, skipped=(), message=error.message, now=now
+                operation,
+                failed_step=failed_step,
+                skipped=(),
+                message=error.message,
+                now=now,
+                times=times,
             ),
             "error": error.model_dump(mode="json"),
             "updated_at": now,
@@ -378,6 +397,7 @@ __all__ = [
     "SIZE_STEP",
     "AccountSyncOperation",
     "AccountSyncOperationTable",
+    "StepTimes",
     "fail_account_sync_operation",
     "get_account_sync_operation",
     "project_operation_models",

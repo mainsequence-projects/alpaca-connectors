@@ -133,7 +133,10 @@ class AssetRegistrationOperationTests(unittest.TestCase):
                 "alpaca_connectors.api.app.services.assets.build_asset_registration_discovery",
                 side_effect=fail_loading_catalog,
             ),
-            patch("alpaca_connectors.api.app.services.assets.set_asset_registration_step"),
+            patch("alpaca_connectors.api.app.services.assets.get_asset_registration_operation"),
+            patch(
+                "alpaca_connectors.api.app.services.assets.set_asset_registration_step"
+            ) as set_step,
             patch(
                 "alpaca_connectors.api.app.services.assets.fail_asset_registration_operation"
             ) as fail_operation,
@@ -144,8 +147,9 @@ class AssetRegistrationOperationTests(unittest.TestCase):
                 request=request,
             )
 
+        # The failure is written on the row the last progress write answered.
         fail_operation.assert_called_once_with(
-            "11111111-1111-4111-8111-111111111111",
+            set_step.return_value,
             step_key="resolve_account",
             error={
                 "code": "credential_service_dns_failure",
@@ -159,19 +163,17 @@ class AssetRegistrationOperationTests(unittest.TestCase):
         )
 
     def test_failed_step_marks_future_steps_skipped(self) -> None:
-        operation = SimpleNamespace(steps=registration_steps("execute"))
+        operation = SimpleNamespace(
+            uid="11111111-1111-4111-8111-111111111111", steps=registration_steps("execute")
+        )
         with (
-            patch(
-                "alpaca_connectors.operations.asset_registration.get_asset_registration_operation",
-                return_value=operation,
-            ),
             patch(
                 "alpaca_connectors.operations.asset_registration.AssetRegistrationOperation.update",
                 return_value=operation,
             ) as update_operation,
         ):
             fail_asset_registration_operation(
-                "11111111-1111-4111-8111-111111111111",
+                operation,
                 step_key="resolve_alpaca_identities",
                 error={
                     "code": "provider_failure",
@@ -188,6 +190,47 @@ class AssetRegistrationOperationTests(unittest.TestCase):
         self.assertEqual(steps[5]["status"], "skipped")
         self.assertEqual(steps[6]["status"], "skipped")
         self.assertEqual(steps[7]["status"], "skipped")
+
+    def test_a_run_reads_its_operation_once_and_writes_from_each_answer(self) -> None:
+        """Issue #46: one read, then every progress write starts from the previous answer."""
+        request = AssetRegistrationRequest(account_uid="account-uid", symbols=["AAPL"])
+        first = SimpleNamespace(name="read")
+        answers: list[SimpleNamespace] = []
+
+        def set_step(operation, *, step_key, status, message=None):
+            answers.append(SimpleNamespace(name=f"{step_key}:{status}", previous=operation))
+            return answers[-1]
+
+        def discovery(_request, **kwargs):
+            kwargs["progress"]("prepare_scope", "running", None)
+            kwargs["progress"]("prepare_scope", "succeeded", None)
+            kwargs["progress"]("finalize_plan", "running", None)
+            return SimpleNamespace(model_dump=lambda **_: {"can_register": True})
+
+        with (
+            patch(
+                "alpaca_connectors.api.app.services.assets.get_asset_registration_operation",
+                return_value=first,
+            ) as read,
+            patch(
+                "alpaca_connectors.api.app.services.assets.set_asset_registration_step",
+                side_effect=set_step,
+            ),
+            patch(
+                "alpaca_connectors.api.app.services.assets.build_asset_registration_discovery",
+                side_effect=discovery,
+            ),
+            patch(
+                "alpaca_connectors.api.app.services.assets.complete_asset_registration_operation"
+            ) as complete,
+        ):
+            run_asset_registration_operation(
+                "11111111-1111-4111-8111-111111111111", action="plan", request=request
+            )
+
+        read.assert_called_once_with("11111111-1111-4111-8111-111111111111")
+        self.assertEqual([answer.previous for answer in answers], [first, answers[0], answers[1]])
+        complete.assert_called_once_with(answers[-1], result={"can_register": True})
 
 
 if __name__ == "__main__":

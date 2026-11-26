@@ -974,7 +974,7 @@ def validate_portfolio_references(
     return rebalance
 
 
-def create_portfolio_configuration_row(
+def portfolio_configuration_values(
     *,
     name: str,
     account_uid: uuid.UUID | str,
@@ -991,29 +991,20 @@ def create_portfolio_configuration_row(
     commission_fee: float = 0.00018,
     scheduled: bool = True,
     uid: uuid.UUID | str | None = None,
-    rebalance: PortfolioRebalanceConfiguration | None = None,
-) -> AlpacaPortfolioConfiguration:
-    """Store one portfolio configuration of an account, and its owner; it touches no platform Job.
+) -> dict[str, Any]:
+    """The validated row of one portfolio configuration, without storing it or reading anything.
 
-    The account's owner owns its portfolios (ADR 0028, decision 3): the caller has checked that
-    the owner given here owns ``account_uid``. ``signal_definition_uid`` is ``None`` only while
-    the route of ADR 0024 creates the portfolio's own definition right after. ``rebalance`` is
-    the named rule when the caller already holds it (it resolved it, or just created it), so it
-    is not read again (issue #46).
+    ``create_portfolio_configuration_row`` stores it; the provided-weights create validates it
+    before it writes anything and stores it last, in one transaction with its own bars
+    configuration (issue #46). Its ``portfolio_uid`` is ``None``.
     """
-    from msm.bootstrap import resolve_runtime
-    from msm.repositories.crud import create_model
-
     if not owner_gateway_uid or not owner_user_uid:
         raise ValueError("A portfolio requires its owner.")
     rebalance_uid = uuid.UUID(str(rebalance_configuration_uid))
     if commission_fee < 0:
         raise ValueError("commission_fee must be greater than or equal to zero.")
-    _start_runtime()
-    if rebalance is None:
-        validate_portfolio_references(rebalance_configuration_uid=rebalance_uid)
     now = utc_now()
-    values = {
+    return {
         "uid": uuid.UUID(str(uid)) if uid is not None else new_markets_uid(),
         "name": _name(name, label="Portfolio configuration name"),
         "description": _description(description),
@@ -1049,6 +1040,58 @@ def create_portfolio_configuration_row(
         "created_at": now,
         "updated_at": now,
     }
+
+
+def create_portfolio_configuration_row(
+    *,
+    name: str,
+    account_uid: uuid.UUID | str,
+    signal_definition_uid: uuid.UUID | str | None,
+    rebalance_configuration_uid: uuid.UUID | str,
+    owner_gateway_uid: str,
+    owner_user_uid: str,
+    description: str | None = None,
+    upsample_frequency_id: str = "1d",
+    intraday_bar_interpolation_rule: str = "ffill",
+    valuation_column: str = "close",
+    valuation_maximum_staleness_seconds: int = 86_400,
+    fail_on_missing_prices: bool = True,
+    commission_fee: float = 0.00018,
+    scheduled: bool = True,
+    uid: uuid.UUID | str | None = None,
+    rebalance: PortfolioRebalanceConfiguration | None = None,
+) -> AlpacaPortfolioConfiguration:
+    """Store one portfolio configuration of an account, and its owner; it touches no platform Job.
+
+    The account's owner owns its portfolios (ADR 0028, decision 3): the caller has checked that
+    the owner given here owns ``account_uid``. ``rebalance`` is the named rule when the caller
+    already holds it (it resolved it, or just created it), so it is not read again (issue #46).
+    """
+    from msm.bootstrap import resolve_runtime
+    from msm.repositories.crud import create_model
+
+    values = portfolio_configuration_values(
+        name=name,
+        account_uid=account_uid,
+        signal_definition_uid=signal_definition_uid,
+        rebalance_configuration_uid=rebalance_configuration_uid,
+        owner_gateway_uid=owner_gateway_uid,
+        owner_user_uid=owner_user_uid,
+        description=description,
+        upsample_frequency_id=upsample_frequency_id,
+        intraday_bar_interpolation_rule=intraday_bar_interpolation_rule,
+        valuation_column=valuation_column,
+        valuation_maximum_staleness_seconds=valuation_maximum_staleness_seconds,
+        fail_on_missing_prices=fail_on_missing_prices,
+        commission_fee=commission_fee,
+        scheduled=scheduled,
+        uid=uid,
+    )
+    _start_runtime()
+    if rebalance is None:
+        validate_portfolio_references(
+            rebalance_configuration_uid=values["rebalance_configuration_uid"]
+        )
     runtime = resolve_runtime(
         models=[AlpacaPortfolioConfigurationTable],
         row_model_name="AlpacaPortfolioConfiguration",
@@ -1368,6 +1411,13 @@ def _delete_in_statement(table: type[Any], column: str, values: list[Any], diale
     return delete(table).where(getattr(table, column).in_(values))
 
 
+def _insert_statement(table: type[Any], rows: list[dict[str, Any]], dialect: str) -> Any:
+    """``INSERT INTO table VALUES (rows)``, the same in every dialect."""
+    from sqlalchemy import insert
+
+    return insert(table).values(rows)
+
+
 class OwnTableWrites:
     """Writes to this application's own tables, sent as one MetaTables transaction (#46).
 
@@ -1427,6 +1477,20 @@ class OwnTableWrites:
                 )
 
             self._builders.append(build)
+            self._remember(table)
+        return self
+
+    def insert(self, table: type[Any], rows: Sequence[dict[str, Any]]) -> OwnTableWrites:
+        """Insert ``rows``; a row already stored fails the whole transaction."""
+        from functools import partial
+
+        from alpaca_connectors.markets_api import MARKETS_BATCH_SIZE
+
+        rows = list(rows)
+        for start in range(0, len(rows), MARKETS_BATCH_SIZE):
+            chunk = rows[start : start + MARKETS_BATCH_SIZE]
+            self.entries.append(("insert", table.__name__, "", chunk))
+            self._builders.append(partial(_insert_statement, table, chunk))
             self._remember(table)
         return self
 
@@ -1824,6 +1888,7 @@ __all__ = [
     "REBALANCE_EVENTS",
     "REBALANCE_STRATEGIES",
     "create_portfolio_configuration_row",
+    "portfolio_configuration_values",
     "create_rebalance_configuration",
     "delete_portfolio_configuration_row",
     "delete_rebalance_configuration",

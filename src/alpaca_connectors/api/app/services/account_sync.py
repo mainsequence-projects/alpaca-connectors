@@ -8,6 +8,7 @@ and allocates the snapshot to the account's funds (ADR 0023). It is recorded as 
 
 from __future__ import annotations
 
+import datetime as dt
 import logging
 import time
 import uuid
@@ -36,6 +37,7 @@ from alpaca_connectors.operations.account_sync import (
     CAPTURE_STEP,
     SIZE_STEP,
     AccountSyncOperation,
+    StepTimes,
     fail_account_sync_operation,
     get_account_sync_operation,
     start_account_sync_operation,
@@ -148,12 +150,20 @@ def capture_holdings(
     )
 
 
-def _log_timings(account_uid: str, status: str, steps: dict[str, float], alpaca: float) -> None:
+def _now() -> dt.datetime:
+    """The time a sync step starts or ends, to the microsecond: a step can take under a second."""
+    return dt.datetime.now(dt.UTC)
+
+
+def _log_timings(account_uid: str, status: str, times: StepTimes, alpaca: float) -> None:
     logger.info(
         "account sync %s account=%s %s alpaca_seconds=%.2f",
         status,
         account_uid,
-        " ".join(f"{step}_seconds={seconds:.2f}" for step, seconds in steps.items()),
+        " ".join(
+            f"{step}_seconds={(completed - started).total_seconds():.2f}"
+            for step, (started, completed) in times.items()
+        ),
         alpaca,
     )
 
@@ -173,8 +183,9 @@ def sync_account(
     outcome at that step, not an HTTP error; only a failure to record the operation itself
     propagates. A snapshot published before a
     later step failed stays published. An account with no target, or a capture that published no
-    snapshot, ends after the capture with the two other steps skipped. Each step's duration and
-    the time spent in Alpaca are logged in one line when the sync ends.
+    snapshot, ends after the capture with the two other steps skipped. Each step's own start and
+    end are recorded on the operation's steps, and logged with the time spent in Alpaca in one
+    line, when the sync ends (issue #46).
     """
     from alpaca_connectors.markets_api import all_together
 
@@ -186,13 +197,13 @@ def sync_account(
     )
     step = CAPTURE_STEP
     alpaca = _AlpacaTime()
-    durations: dict[str, float] = {}
-    started = time.monotonic()
+    times: dict[str, tuple[dt.datetime, dt.datetime]] = {}
+    started = _now()
 
     def finish_step(next_step: str) -> None:
         nonlocal step, started
-        now = time.monotonic()
-        durations[step] = now - started
+        now = _now()
+        times[step] = (started, now)
         step, started = next_step, now
 
     try:
@@ -226,17 +237,18 @@ def sync_account(
         result = sync_result(captured, allocation)
     except Exception as exc:
         finish_step(step)
-        _log_timings(account_uid, "failed", durations, alpaca.seconds)
+        _log_timings(account_uid, "failed", times, alpaca.seconds)
         return operation_response(
-            fail_account_sync_operation(operation, error=sync_error(exc), step=step)
+            fail_account_sync_operation(operation, error=sync_error(exc), step=step, times=times)
         )
     finish_step(step)
-    _log_timings(account_uid, "succeeded", durations, alpaca.seconds)
+    _log_timings(account_uid, "succeeded", times, alpaca.seconds)
     return operation_response(
         succeed_account_sync_operation(
             operation,
             result=result.model_dump(mode="json"),
             skipped=() if allocation is not None else (SIZE_STEP, ALLOCATE_STEP),
+            times=times,
         )
     )
 

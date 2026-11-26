@@ -357,13 +357,21 @@ def run_asset_registration_operation(
     action: str,
     request: AssetRegistrationRequest,
 ) -> None:
+    """Run the operation in the background and record its progress.
+
+    The operation is read once; each progress write starts from the row the previous one
+    answered, never from a new read (issue #46).
+    """
+    operation = get_asset_registration_operation(operation_uid)
+    if operation is None:
+        raise LookupError(f"Asset registration operation {operation_uid!s} does not exist.")
     current_step = "prepare_scope"
 
     def progress(step_key: str, status: str, message: str | None) -> None:
-        nonlocal current_step
+        nonlocal current_step, operation
         current_step = step_key
-        set_asset_registration_step(
-            operation_uid,
+        operation = set_asset_registration_step(
+            operation,
             step_key=step_key,
             status=status,
             message=message,
@@ -381,13 +389,13 @@ def run_asset_registration_operation(
             timeout=request.timeout,
         )
         fail_asset_registration_operation(
-            operation_uid,
+            operation,
             step_key=current_step,
             error=public_error,
         )
         return
 
     complete_asset_registration_operation(
-        operation_uid,
+        operation,
         result=result.model_dump(mode="json"),
     )
