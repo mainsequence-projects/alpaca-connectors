@@ -274,10 +274,11 @@ rebalance state + InterpolatedPrices ──> PortfolioEngine ─> event ledger
 ## The Portfolio Job
 
 Every portfolio runs on the `alpaca-portfolio` Job ("Alpaca Portfolio") declared in
-`.mainsequence/workflows/alpaca-connectors-api.yaml`, one configuration per run
-(`--configuration-uid <uid>`). Its dispatcher, `alpaca-portfolio-dispatcher`, starts one run per
-scheduled configuration at 02:00 UTC ([Jobs](../operations/jobs.md),
-[ADR 0013](../adrs/0013_workflow_declared_configuration_jobs.md)).
+`.mainsequence/workflows/alpaca-connectors-api.yaml`. A manual run carries one configuration
+(`--configuration-uid <uid>`). Its dispatcher, `alpaca-portfolio-dispatcher`, starts one run for
+every scheduled configuration at 02:00 UTC, with `--configuration-uid` once each, which runs them
+in one ms-markets `run_portfolios` call ([Jobs](../operations/jobs.md),
+[ADR 0013, decision 9](../adrs/0013_workflow_declared_configuration_jobs.md#9-one-run-per-tick)).
 
 - **The configuration holds no schedule or compute.** Its only operational field is `scheduled`,
   which decides whether the dispatcher includes it. Requests that send schedule or compute settings
@@ -288,7 +289,7 @@ scheduled configuration at 02:00 UTC ([Jobs](../operations/jobs.md),
   dispatcher preflights every scheduled configuration together, from the rows it already read,
   with one read per kind of input (rebalance configurations, bars configurations, signal
   definitions, the signals' first and last observation, the bars tables), never one per
-  configuration (issue #46); it still starts one JobRun per configuration.
+  configuration (issue #46), and starts one JobRun for all of those it allows.
 - **A run** returns `202` with the JobRun UID and a `status_url`. It is refused while the
   configuration's newest run is pending or running, or while the Job's image is not ready.
 - **Responses** report the Job as `job_uid` and `job` (its dispatcher's schedule, compute and

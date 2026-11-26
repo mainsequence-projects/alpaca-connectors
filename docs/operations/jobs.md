@@ -35,14 +35,20 @@ How they run:
   rebalance configuration must exist, and the portfolio must have at least one published
   observation.
 - **The scheduled run belongs to the dispatcher and executes nothing itself.** The dispatcher
-  starts one `--configuration-uid` run of the portfolio Job for each configuration whose scheduled
-  flag is true. It may, because it declares `runner` on that Job. The portfolio Job cannot start its
+  starts one run of the portfolio Job for the whole tick, carrying `--configuration-uid` once for
+  each configuration whose scheduled flag is true ([ADR 0013, decision
+  9](../adrs/0013_workflow_declared_configuration_jobs.md#9-one-run-per-tick)). It may, because it
+  declares `runner` on that Job. That run resolves the configurations together, updates each bars
+  configuration once, and runs every portfolio in one ms-markets `run_portfolios` call: one start
+  and one drain for the tick, and no run waits for another's update. The portfolio Job cannot start its
   own runs: starting a run needs `runner` on the Job, and a Job cannot declare access to itself
   (`self_reference`).
   - It skips configurations with a pending or running run, and those whose preflight is blocked.
     The preflights of all the others read their inputs together, one read per kind, from the
     scheduled rows already read (issue #46).
-  - It prints what it launched, skipped and failed, and fails if any start failed.
+  - It prints what it launched, skipped and failed, and fails if the start failed.
+  - The tick's run prints each portfolio it ran and each that failed, and fails if any failed, so
+    each scheduled configuration's latest run is the tick's.
   - The portfolio Job accepts only `--configuration-uid`; a run with `--scheduled` fails with a
     usage error.
 - **`scheduled` is the only per-configuration operational setting**, and it defaults to true.

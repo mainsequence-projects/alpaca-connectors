@@ -62,7 +62,7 @@ class FakeJob:
         self.calls: list[list[str]] = []
 
     def run_job(self, *, timeout=None, command_args=None):
-        if command_args[1] in self.failing:
+        if set(command_args[1::2]) & self.failing:
             raise RuntimeError("Job 'x' did not start.")
         self.calls.append(list(command_args))
         return {"message": "accepted", "job_run_uid": f"run-{len(self.calls)}"}
@@ -334,8 +334,8 @@ def test_job_run_lookup_owns_only_runs_of_this_branch_jobs(platform) -> None:
     assert configuration_jobs.get_configuration_job_run(missing) is None
 
 
-def test_scheduled_run_starts_one_run_per_scheduled_configuration(platform, monkeypatch) -> None:
-    job = FakeJob(failing={C})
+def test_scheduled_run_starts_one_run_for_the_whole_tick(platform, monkeypatch) -> None:
+    job = FakeJob()
     platform.jobs = [job]
     platform.runs = [_run("b-running", B, status="PENDING"), _run("a-done", A)]
     monkeypatch.setattr(
@@ -353,14 +353,66 @@ def test_scheduled_run_starts_one_run_per_scheduled_configuration(platform, monk
     summary = configuration_jobs.dispatch_scheduled_configurations("portfolio")
 
     # One preflight for every configuration without an active run, from the rows already read
-    # (issue #46); one JobRun per configuration.
+    # (issue #46); one JobRun for all of them, which runs them in one run_portfolios call.
     assert batches == [[A, C]]
-    assert job.calls == [["--configuration-uid", A]]
+    assert job.calls == [["--configuration-uid", A, "--configuration-uid", C]]
     assert summary["job_uid"] == PORTFOLIO_JOB_UID
     assert summary["scheduled_configurations"] == 3
-    assert summary["launched"] == [{"configuration_uid": A, "job_run_uid": "run-1"}]
+    assert summary["launched"] == [
+        {"configuration_uid": A, "job_run_uid": "run-1"},
+        {"configuration_uid": C, "job_run_uid": "run-1"},
+    ]
     assert summary["skipped"] == [{"configuration_uid": B, "reason": "pending or running JobRun"}]
-    assert [item["configuration_uid"] for item in summary["failed"]] == [C]
+    assert summary["failed"] == []
+
+
+def test_a_tick_whose_run_does_not_start_fails_each_of_its_configurations(
+    platform, monkeypatch
+) -> None:
+    job = FakeJob(failing={C})
+    platform.jobs = [job]
+    monkeypatch.setattr(
+        configuration_jobs,
+        "scheduled_portfolio_configurations",
+        lambda: [SimpleNamespace(uid=uuid.UUID(value)) for value in (A, C)],
+    )
+    _preflight(monkeypatch)
+
+    summary = configuration_jobs.dispatch_scheduled_configurations("portfolio")
+
+    assert job.calls == [] and summary["launched"] == []
+    assert [item["configuration_uid"] for item in summary["failed"]] == [A, C]
+
+
+def test_a_ticks_run_is_every_one_of_its_configurations_run(platform) -> None:
+    platform.jobs = [FakeJob()]
+    tick = ["--configuration-uid", A, "--configuration-uid", B]
+    platform.runs = [
+        _run("tick", command_args=tick, status="RUNNING"),
+        _run("a-old", A),
+    ]
+
+    state = configuration_jobs.configuration_job_state("portfolio", [A, B])
+    assert {key: run.uid for key, run in state.latest_runs.items()} == {A: "tick", B: "tick"}
+    # Read for one configuration, the run names it.
+    assert state.latest_runs[B].configuration_uid == B
+    assert state.latest_runs[B].configuration_uids == (A, B)
+    assert [
+        run.uid
+        for run in configuration_jobs.list_configuration_runs(
+            SimpleNamespace(uid=A), kind="portfolio"
+        )
+    ] == ["tick", "a-old"]
+    # An active tick holds back a new run of each of its configurations.
+    assert configuration_jobs._active_configuration_uids(platform.jobs[0]) == {A, B}
+    with pytest.raises(ValueError, match="pending or running"):
+        configuration_jobs.launch_configuration_job(SimpleNamespace(uid=B), kind="portfolio")
+
+    tick_uid = "99999999-9999-4999-8999-999999999999"
+    platform.runs = [_run(tick_uid, command_args=tick, status="FAILED")]
+    run = configuration_jobs.get_configuration_job_run(tick_uid)
+    assert (run.configuration_uid, run.configuration_uids) == (None, (A, B))
+    assert run.failure_message == "The scheduled portfolio run failed for at least one portfolio."
 
 
 def test_scheduled_portfolio_run_skips_a_blocked_preflight(platform, monkeypatch) -> None:
@@ -424,14 +476,16 @@ def test_scheduled_run_needs_the_declared_job(platform, monkeypatch) -> None:
         ["--universe-uid", A],
     ],
 )
-def test_job_entry_points_run_exactly_one_configuration(argv) -> None:
+def test_job_entry_points_run_the_configurations_they_name(argv) -> None:
     # The scheduled run belongs to the dispatcher: a Job cannot declare `runner` on itself.
     with pytest.raises(SystemExit):
         configuration_jobs.build_job_argument_parser("portfolio").parse_args(argv)
-    parsed = configuration_jobs.build_job_argument_parser("portfolio").parse_args(
-        ["--configuration-uid", A.upper()]
-    )
-    assert parsed.configuration_uid == A
+    parser = configuration_jobs.build_job_argument_parser("portfolio")
+    assert parser.parse_args(["--configuration-uid", A.upper()]).configuration_uids == [A]
+    # The dispatcher's tick names several.
+    assert parser.parse_args(
+        ["--configuration-uid", A, "--configuration-uid", B]
+    ).configuration_uids == [A, B]
 
 
 @pytest.mark.parametrize(
@@ -488,6 +542,33 @@ def test_portfolio_entry_point_executes_the_selected_configuration(monkeypatch, 
         "configuration_uid": A,
         "job_run_uid": None,
     }
+
+
+def test_a_ticks_run_executes_its_configurations_together(monkeypatch, capsys) -> None:
+    main = _launcher("run_alpaca_portfolio.py")
+    executed = []
+    monkeypatch.setenv("JOB_RUN_UID", "tick")
+    monkeypatch.setattr(
+        "alpaca_connectors.migrations.schema_gate.skip_if_schema_behind", lambda label: False
+    )
+    monkeypatch.setattr(
+        "alpaca_connectors.portfolios.execution.execute_portfolio_configuration",
+        lambda uid: pytest.fail("a tick runs its portfolios together"),
+    )
+    monkeypatch.setattr(
+        "alpaca_connectors.portfolios.execution.execute_portfolio_configurations",
+        lambda uids: (
+            executed.append(uids)
+            or SimpleNamespace(
+                summary=lambda: {"configuration_uids": uids, "ran": [], "failed": [{"x": B}]}
+            )
+        ),
+    )
+
+    # A portfolio that did not run fails the run, so the platform reports it.
+    assert main(["--configuration-uid", A, "--configuration-uid", B]) == 1
+    assert executed == [[A, B]]
+    assert json.loads(capsys.readouterr().out)["job_run_uid"] == "tick"
 
 
 def test_dispatcher_entry_point_fails_when_a_start_fails(monkeypatch, capsys) -> None:

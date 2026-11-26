@@ -21,6 +21,10 @@ Amended on 2026-11-17 by [ADR 0027](0027_one_portfolio_path.md): only the portfo
 `alpaca-portfolio` and its dispatcher `alpaca-portfolio-dispatcher` (02:00 UTC); the signal Job and
 its 00:30 UTC dispatcher go.
 
+Amended on 2026-11-26: the dispatcher's tick is one run of the portfolio Job for every scheduled
+configuration, which runs them in one ms-markets `run_portfolios` call
+([decision 9](#9-one-run-per-tick)). A manual run still carries one configuration.
+
 ## Context
 
 ADR 0007 gave each signal configuration, and ADR 0008 each portfolio configuration, a dedicated Main
@@ -217,7 +221,36 @@ the same file:
 - A dispatcher reads the configurations (and, for portfolios, the preflight inputs) through
   MetaTables, so its workload User needs `data_viewer` on both namespaces.
 
+### 9. One run per tick
+
+Decided on 2026-11-26, after ms-markets 6.1.0 added `run_portfolios` (MainSequenceMarkets#133). A
+tick of one JobRun per configuration paid each run's start (about 47 s on 0.25 CPU) and the
+platform's drain after it (about 2.5 min), and runs that shared an update waited for each other
+(104 s in the run measured on 2026-11-23).
+
+- **The dispatcher starts one run of the portfolio Job for the whole tick.** Its arguments carry
+  `--configuration-uid` once for every configuration the dispatch allows: not skipped for a
+  pending or running run, and with an allowed preflight. When that start fails, each of them is
+  listed in `failed`.
+- **The portfolio Job runs several configurations together.** With more than one
+  `--configuration-uid` it resolves them together, one read per kind of input; updates each bars
+  configuration once, for every asset of its portfolios; and runs every portfolio in one
+  `run_portfolios` call, whose ledgers are the heads of one MetaTables invocation, so a node
+  several portfolios share runs once and no run waits for another process. Each portfolio
+  publishes its own weights and values. One that does not resolve, build or run is listed in the
+  summary's `failed` and stops no other; the run then fails, so the platform reports it.
+- **A manual run is unchanged.** The API and the CLI start a run with one `--configuration-uid`,
+  which runs `run_portfolio` as before.
+- **A run is every one of its configurations' run.** Run history, a configuration's latest run and
+  the check that refuses a new run while one is pending or running read every
+  `--configuration-uid` of a run. `/v1/operations/job-runs/{uid}` reports a tick's run with
+  `configuration_uid: null`; its `command_args` name its configurations.
+
 ## Consequences
+
+- **A tick's status is shared.** Each scheduled configuration's latest run is the tick's, so one
+  portfolio that fails marks the others' latest run failed too; the run's summary and log say which
+  failed (decision 9).
 
 - **Creating a configuration no longer touches the platform.** It succeeds before the Jobs exist.
   Runs can start once a push has created them.

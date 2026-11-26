@@ -147,6 +147,34 @@ def record_signal_assets(
     return missing
 
 
+def assets_by_signal(signal_uids: Sequence[str]) -> dict[str, list[str]]:
+    """Every asset each of these signals has published, keyed by signal UID, in one read.
+
+    The grouped form of ``assets_for_signals``, for a run of several portfolios. A signal that
+    has published nothing is absent from the answer.
+    """
+    from msm.api.base import operation_result_rows
+    from msm.repositories.base import compile_markets_statement, execute_markets_operation
+    from sqlalchemy import select
+
+    normalized = _normalized(signal_uids)
+    if not normalized:
+        return {}
+    runtime = _start_runtime()
+    table = SignalAssetTable
+    operation = compile_markets_statement(
+        select(table.signal_uid, table.asset_identifier)
+        .where(table.signal_uid.in_(normalized))
+        .order_by(table.signal_uid.asc(), table.asset_identifier.asc()),
+        context=runtime.context,
+        operation="select",
+    )
+    answer: dict[str, list[str]] = {}
+    for row in operation_result_rows(execute_markets_operation(operation, context=runtime.context)):
+        answer.setdefault(str(row["signal_uid"]), []).append(str(row["asset_identifier"]))
+    return answer
+
+
 def assets_for_signals(signal_uids: Sequence[str]) -> list[str]:
     """Every asset any of these signals has published, in one primary-key read."""
     from msm.api.base import operation_result_rows
@@ -210,6 +238,7 @@ def project_signal_asset_models() -> list[type[ProjectBase]]:
 
 __all__ = [
     "SignalAssetTable",
+    "assets_by_signal",
     "assets_for_signals",
     "forget_signal_assets",
     "forget_signals_assets",

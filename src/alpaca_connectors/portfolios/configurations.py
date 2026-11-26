@@ -1281,6 +1281,37 @@ def scheduled_portfolio_configurations() -> list[AlpacaPortfolioConfiguration]:
     ]
 
 
+def portfolio_configurations_by_uids(
+    configuration_uids: Sequence[uuid.UUID | str],
+) -> dict[str, AlpacaPortfolioConfiguration]:
+    """The portfolio configurations of these UIDs, keyed by UID string, in one read.
+
+    A UID with no configuration is absent from the answer.
+    """
+    from msm.bootstrap import resolve_runtime
+    from msm.repositories.base import compile_markets_statement, execute_markets_operation
+    from sqlalchemy import select
+
+    uids = list(dict.fromkeys(_uuid_list(list(configuration_uids))))
+    if not uids:
+        return {}
+    table = AlpacaPortfolioConfigurationTable
+    _start_runtime()
+    runtime = resolve_runtime(models=[table], row_model_name="AlpacaPortfolioConfiguration")
+    operation = compile_markets_statement(
+        select(table).where(table.uid.in_(uids)),
+        context=runtime.context,
+        operation="select",
+    )
+    rows = [
+        AlpacaPortfolioConfiguration.model_validate(row)
+        for row in operation_result_rows(
+            execute_markets_operation(operation, context=runtime.context)
+        )
+    ]
+    return {str(row.uid): row for row in rows}
+
+
 def delete_portfolio_configuration_row(configuration_uid: uuid.UUID | str) -> dict[str, Any]:
     if get_portfolio_configuration(configuration_uid) is None:
         raise LookupError(f"Portfolio configuration {configuration_uid!s} does not exist.")
@@ -1797,6 +1828,7 @@ __all__ = [
     "delete_portfolio_configuration_row",
     "delete_rebalance_configuration",
     "get_portfolio_configuration",
+    "portfolio_configurations_by_uids",
     "get_rebalance_configuration",
     "list_portfolio_configurations",
     "list_rebalance_configurations",

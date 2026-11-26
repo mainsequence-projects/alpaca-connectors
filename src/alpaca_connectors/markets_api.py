@@ -25,7 +25,8 @@ of one after another.
 Signal weights, portfolio weights and portfolio values are published to Markets and read back
 from it through the ms-markets recipes (ADR 0031, ms-markets ADR 0060), only by the composites of
 the last section: ``publish_signal_weights``, ``signal_bounds``, ``latest_signal_observations``,
-``portfolio_values``, ``portfolio_weights_as_of``, ``run_portfolio``, ``end_signals`` and
+``portfolio_values``, ``portfolio_weights_as_of``, ``run_portfolio``, ``run_portfolios``,
+``end_signals`` and
 ``delete_private_series``.
 """
 
@@ -740,15 +741,108 @@ def run_portfolio(
         portfolio_resolver=_ConfigurationPortfolio(unique_identifier, calendar_uid),
         portfolio_description=portfolio_description,
     )
+    return _answer(answer, unique_identifier)
+
+
+def _answer(run: Any, unique_identifier: str) -> PortfolioRunAnswer:
     return PortfolioRunAnswer(
-        portfolio_uid=str(answer.portfolio.uid),
-        portfolio_unique_identifier=str(answer.portfolio.unique_identifier or unique_identifier),
+        portfolio_uid=str(run.portfolio.uid),
+        portfolio_unique_identifier=str(run.portfolio.unique_identifier or unique_identifier),
         written={
-            "weights": 0 if answer.weights is None else int(answer.weights.written),
-            "values": 0 if answer.values is None else int(answer.values.written),
+            "weights": 0 if run.weights is None else int(run.weights.written),
+            "values": 0 if run.values is None else int(run.values.written),
         },
-        first_rebalance=bool(answer.first_rebalance),
+        first_rebalance=bool(run.first_rebalance),
     )
+
+
+@dataclass(frozen=True, slots=True)
+class PortfolioRunEntry:
+    """One portfolio of a ``run_portfolios`` call: its configuration and its ``Portfolio`` row."""
+
+    portfolio_configuration: Any
+    unique_identifier: str
+    calendar_uid: Any
+
+
+class _ConfigurationPortfolios:
+    """The one ``portfolio_resolver`` ``run_portfolios`` asks for each run's ``Portfolio`` row.
+
+    ms-markets passes each configuration's hash (``time_index/portfolio_identity.py``); each hash
+    names one entry, whose row is ``Portfolio.upsert`` of its ``unique_identifier`` on its
+    ``calendar_uid``, as ``_ConfigurationPortfolio`` does for one run.
+    """
+
+    def __init__(self, by_hash: Mapping[str, PortfolioRunEntry]) -> None:
+        self._by_hash = dict(by_hash)
+
+    def get_or_create_from_configuration_hash(
+        self, *, portfolio_configuration_hash: str, **_: Any
+    ) -> Any:
+        from msm.api.portfolios import Portfolio
+
+        entry = self._by_hash.get(str(portfolio_configuration_hash))
+        if entry is None:
+            raise LookupError("The run asked for a portfolio it was not given.")
+        return Portfolio.upsert(
+            unique_identifier=entry.unique_identifier, calendar_uid=entry.calendar_uid
+        )
+
+
+def run_portfolios(
+    entries: Sequence[PortfolioRunEntry],
+    *,
+    rebalance_output_table: Any,
+    event_ledger_output_table: Any,
+) -> list[PortfolioRunAnswer | BaseException]:
+    """Run several portfolios in one MetaTables invocation and publish each (``recipes.run_portfolios``).
+
+    Calls ``run_portfolios(configurations, rebalance_output_table=...,
+    event_ledger_output_table=..., portfolio_resolver=...)``: every portfolio's ledger is a head
+    of one joined graph, so a node several of them share runs once, and the run never waits for
+    another process. Each portfolio is answered in the order given, with its
+    ``PortfolioRunAnswer`` or with what stopped it: its preflight's refusal, its own node's error,
+    a dependency's or its publication's. One portfolio's failure never stops the others.
+
+    Two entries whose configurations hash the same ask the resolver the same question, so they
+    go in separate calls; every other entry shares the first.
+    """
+    from msm_portfolios.recipes import run_portfolios as recipe
+    from msm_portfolios.time_index.portfolio_identity import compute_portfolio_configuration_hash
+
+    hashes = [compute_portfolio_configuration_hash(e.portfolio_configuration) for e in entries]
+    rounds: list[dict[str, int]] = []
+    for position, configuration_hash in enumerate(hashes):
+        target = next((r for r in rounds if configuration_hash not in r), None)
+        if target is None:
+            target = {}
+            rounds.append(target)
+        target[configuration_hash] = position
+    answers: list[PortfolioRunAnswer | BaseException | None] = [None] * len(entries)
+    for positions in rounds:
+        ordered = list(positions.values())
+        runs = recipe(
+            [entries[position].portfolio_configuration for position in ordered],
+            rebalance_output_table=rebalance_output_table,
+            event_ledger_output_table=event_ledger_output_table,
+            portfolio_resolver=_ConfigurationPortfolios(
+                {hashes[position]: entries[position] for position in ordered}
+            ),
+        )
+        for failure in runs.failed:
+            answers[ordered[failure.position]] = failure.error
+        by_identifier = {str(run.portfolio.unique_identifier): run for run in runs.ran}
+        for position in ordered:
+            if answers[position] is not None:
+                continue
+            identifier = entries[position].unique_identifier
+            run = by_identifier.get(identifier)
+            answers[position] = (
+                _answer(run, identifier)
+                if run is not None
+                else RuntimeError("The run answered nothing for this portfolio.")
+            )
+    return answers  # type: ignore[return-value]
 
 
 class SignalsNotEnded(RuntimeError):
@@ -839,7 +933,9 @@ __all__ = [
     "SignalsNotEnded",
     "retire_portfolios",
     "portfolio_weights_recorded",
+    "PortfolioRunEntry",
     "run_portfolio",
+    "run_portfolios",
     "signal_bounds",
     "write_in_batches",
 ]

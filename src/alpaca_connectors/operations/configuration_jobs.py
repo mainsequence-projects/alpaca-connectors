@@ -2,13 +2,14 @@
 
 `.mainsequence/workflows/alpaca-connectors-api.yaml` declares one Job per configuration kind and
 one dispatcher Job per kind; portfolios are the one kind left (ADR 0027). A run of the kind's Job carries ``--configuration-uid <uid>`` and
-executes that configuration; the API, the CLI and the dispatcher start such runs. The dispatcher
-holds the daily schedule: its scheduled run carries ``--scheduled`` and starts one
-``--configuration-uid`` run for every scheduled configuration, so each configuration run is its own
-JobRun. The scheduled run cannot live on the kind's Job, because starting runs of a Job needs
-``runner`` on it and a Job cannot declare access to itself; the dispatcher declares ``runner`` on
-the kind's Job. The backend cannot filter JobRuns by their arguments, so runs map back to their
-configuration through ``JobRun.command_args`` over a bounded scan of the Job's newest runs. No code
+executes that configuration; the API and the CLI start such runs. The dispatcher holds the daily
+schedule: its scheduled run carries ``--scheduled`` and starts one run of the kind's Job for the
+whole tick, carrying ``--configuration-uid`` once per scheduled configuration, which runs them all
+in one ms-markets ``run_portfolios`` call (ADR 0013, as amended on 2026-11-26). The scheduled run
+cannot live on the kind's Job, because starting runs of a Job needs ``runner`` on it and a Job
+cannot declare access to itself; the dispatcher declares ``runner`` on the kind's Job. The backend
+cannot filter JobRuns by their arguments, so runs map back to every configuration they carry
+through ``JobRun.command_args`` over a bounded scan of the Job's newest runs. No code
 here creates a Job or changes its schedule: since mainsequence 9.0.2 only a workflow declaration
 creates a Job, and a push re-applies its schedule.
 """
@@ -80,6 +81,8 @@ class ConfigurationJobRun:
     uid: str
     job_uid: str
     job_name: str
+    # The configuration the run is read for; a tick's run read by its UID alone carries several
+    # (``configuration_uids``) and names none here.
     configuration_uid: str | None
     status: str
     execution_start: Any | None
@@ -90,6 +93,7 @@ class ConfigurationJobRun:
     command_args: list[str]
     logs_url: str | None
     failure_message: str | None
+    configuration_uids: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -167,39 +171,59 @@ def require_configuration_job(kind: ConfigurationKind) -> Any:
     return job
 
 
-def configuration_command_args(configuration_uid: Any) -> list[str]:
-    """Return the per-run arguments that select one configuration."""
-    return [
-        CONFIGURATION_UID_ARGUMENT,
-        _canonical_uid(configuration_uid, label="Configuration UID"),
-    ]
+def configuration_command_args(*configuration_uids: Any) -> list[str]:
+    """Return the per-run arguments that select these configurations, one flag each."""
+    if not configuration_uids:
+        raise ValueError("A run selects at least one configuration.")
+    arguments: list[str] = []
+    for configuration_uid in configuration_uids:
+        arguments += [
+            CONFIGURATION_UID_ARGUMENT,
+            _canonical_uid(configuration_uid, label="Configuration UID"),
+        ]
+    return arguments
+
+
+def configuration_uids_from_command_args(command_args: Sequence[Any] | None) -> tuple[str, ...]:
+    """Return every configuration a JobRun's arguments select, in order."""
+    values = [str(value) for value in (command_args or [])]
+    selected: list[str] = []
+    for position, value in enumerate(values[:-1]):
+        if value != CONFIGURATION_UID_ARGUMENT:
+            continue
+        try:
+            selected.append(str(uuid.UUID(values[position + 1])))
+        except ValueError:
+            continue
+    return tuple(dict.fromkeys(selected))
 
 
 def configuration_uid_from_command_args(command_args: Sequence[Any] | None) -> str | None:
-    """Return the configuration a JobRun's arguments select, or None."""
-    values = [str(value) for value in (command_args or [])]
-    try:
-        value = values[values.index(CONFIGURATION_UID_ARGUMENT) + 1]
-    except (ValueError, IndexError):
-        return None
-    try:
-        return str(uuid.UUID(value))
-    except ValueError:
-        return None
+    """Return the one configuration a JobRun's arguments select, or None: a tick's run selects
+    several."""
+    selected = configuration_uids_from_command_args(command_args)
+    return selected[0] if len(selected) == 1 else None
 
 
-def _shape_run(run: Any, kind: ConfigurationKind) -> ConfigurationJobRun:
+def _shape_run(
+    run: Any, kind: ConfigurationKind, *, for_configuration: str | None = None
+) -> ConfigurationJobRun:
     command_args = [str(value) for value in (run.command_args or [])]
-    configuration_uid = configuration_uid_from_command_args(command_args)
+    configuration_uids = configuration_uids_from_command_args(command_args)
+    configuration_uid = for_configuration or (
+        configuration_uids[0] if len(configuration_uids) == 1 else None
+    )
     observability = run.observability
     status = _status(run.status)
     failure_message = None
     if status == "FAILED":
-        failure_message = (
-            f"The {kind} update failed."
-            if configuration_uid is not None
-            else f"The scheduled {kind} run failed."
-        )
+        if len(configuration_uids) > 1:
+            # The tick's run fails when any of its portfolios does; its log names which.
+            failure_message = f"The scheduled {kind} run failed for at least one {kind}."
+        elif configuration_uids:
+            failure_message = f"The {kind} update failed."
+        else:
+            failure_message = f"The scheduled {kind} run failed."
     return ConfigurationJobRun(
         uid=str(run.uid),
         job_uid=str(run.job_uid),
@@ -214,6 +238,7 @@ def _shape_run(run: Any, kind: ConfigurationKind) -> ConfigurationJobRun:
         command_args=command_args,
         logs_url=observability.application_logs_url if observability else None,
         failure_message=failure_message,
+        configuration_uids=configuration_uids,
     )
 
 
@@ -230,11 +255,13 @@ def _latest_runs(
     if not wanted:
         return latest
     for run in _recent_job_runs(job.uid):
-        configuration_uid = configuration_uid_from_command_args(run.command_args)
-        if configuration_uid in wanted and configuration_uid not in latest:
-            latest[configuration_uid] = _shape_run(run, kind)
-            if len(latest) == len(wanted):
-                break
+        for configuration_uid in configuration_uids_from_command_args(run.command_args):
+            if configuration_uid in wanted and configuration_uid not in latest:
+                latest[configuration_uid] = _shape_run(
+                    run, kind, for_configuration=configuration_uid
+                )
+        if len(latest) == len(wanted):
+            break
     return latest
 
 
@@ -260,8 +287,8 @@ def list_configuration_runs(
     target = _canonical_uid(configuration.uid, label="Configuration UID")
     result: list[ConfigurationJobRun] = []
     for run in _recent_job_runs(job.uid):
-        if configuration_uid_from_command_args(run.command_args) == target:
-            result.append(_shape_run(run, kind))
+        if target in configuration_uids_from_command_args(run.command_args):
+            result.append(_shape_run(run, kind, for_configuration=target))
             if len(result) >= limit:
                 break
     return result
@@ -295,14 +322,18 @@ def get_configuration_job_run(job_run_uid: Any) -> ConfigurationJobRun | None:
     return _shape_run(run, spec.kind)
 
 
-def _start_run(job: Any, configuration_uid: str) -> ConfigurationJobSubmission:
-    payload = job.run_job(timeout=60, command_args=configuration_command_args(configuration_uid))
+def _start_job_run(job: Any, configuration_uids: Sequence[str]) -> tuple[str, str]:
+    """Start one run of ``job`` for these configurations; answer its UID and status."""
+    payload = job.run_job(timeout=60, command_args=configuration_command_args(*configuration_uids))
     run_uid = payload.get("uid") or payload.get("job_run_uid")
     if not run_uid:
         raise RuntimeError("Main Sequence accepted the Job without returning a JobRun UID.")
-    return ConfigurationJobSubmission(
-        configuration_uid, str(job.uid), str(run_uid), _status(payload.get("status"))
-    )
+    return str(run_uid), _status(payload.get("status"))
+
+
+def _start_run(job: Any, configuration_uid: str) -> ConfigurationJobSubmission:
+    run_uid, status = _start_job_run(job, [configuration_uid])
+    return ConfigurationJobSubmission(configuration_uid, str(job.uid), run_uid, status)
 
 
 def launch_configuration_job(
@@ -363,20 +394,20 @@ def launch_portfolio_job(
 def _active_configuration_uids(job: Any) -> set[str]:
     active: set[str] = set()
     for run in _recent_job_runs(job.uid):
-        configuration_uid = configuration_uid_from_command_args(run.command_args)
-        if configuration_uid is not None and _status(run.status) in RUNNING_JOB_STATUSES:
-            active.add(configuration_uid)
+        if _status(run.status) in RUNNING_JOB_STATUSES:
+            active.update(configuration_uids_from_command_args(run.command_args))
     return active
 
 
 def dispatch_scheduled_configurations(kind: ConfigurationKind) -> dict[str, Any]:
-    """Start one run of the kind's Job per scheduled configuration: all the dispatcher does.
+    """Start one run of the kind's Job for the whole tick: all the dispatcher does.
 
     The dispatcher's scheduled run calls this; it holds ``runner`` on the kind's Job. A
     configuration with a pending or running run is skipped, and so is a portfolio whose
     preflight is blocked. The preflights of all the others read their inputs together, one read
-    per kind; one JobRun is still started per configuration. One failed start does not stop the
-    others.
+    per kind, and every configuration they allow goes in one JobRun, which runs them in one
+    ``run_portfolios`` call (ADR 0013, as amended): one start and one drain for the tick, and no
+    run waits for another's update. When that start fails, every one of them is failed.
     """
     from alpaca_connectors.portfolios.execution import preflight_portfolio_configurations
 
@@ -399,6 +430,7 @@ def dispatch_scheduled_configurations(kind: ConfigurationKind) -> dict[str, Any]
             preflights = preflight_portfolio_configurations(candidates)
         except Exception as exc:
             preflights = {str(configuration.uid): exc for configuration in candidates}
+    allowed: list[str] = []
     for configuration in configurations:
         configuration_uid = _canonical_uid(configuration.uid, label="Configuration UID")
         if configuration_uid in active:
@@ -416,14 +448,14 @@ def dispatch_scheduled_configurations(kind: ConfigurationKind) -> dict[str, Any]
                 {"configuration_uid": configuration_uid, "reason": str(_blocked(preflight))}
             )
             continue
+        allowed.append(configuration_uid)
+    if allowed:
         try:
-            submission = _start_run(job, configuration_uid)
+            run_uid, _ = _start_job_run(job, allowed)
         except Exception as exc:
-            failed.append({"configuration_uid": configuration_uid, "error": repr(exc)})
-            continue
-        launched.append(
-            {"configuration_uid": configuration_uid, "job_run_uid": submission.job_run_uid}
-        )
+            failed += [{"configuration_uid": uid, "error": repr(exc)} for uid in allowed]
+        else:
+            launched += [{"configuration_uid": uid, "job_run_uid": run_uid} for uid in allowed]
     return {
         "kind": kind,
         "job_uid": str(job.uid),
@@ -442,18 +474,19 @@ def _configuration_uid_argument(value: str) -> str:
 
 
 def build_job_argument_parser(kind: ConfigurationKind) -> argparse.ArgumentParser:
-    """Arguments of the kind's Job: exactly one configuration to execute."""
+    """Arguments of the kind's Job: the configurations to execute, one flag each."""
     spec = JOB_SPECS[kind]
     parser = argparse.ArgumentParser(
         prog=spec.execution_path,
-        description=f"Run one {kind} configuration as the {spec.name!r} Job.",
+        description=f"Run {kind} configurations as the {spec.name!r} Job.",
     )
     parser.add_argument(
         CONFIGURATION_UID_ARGUMENT,
-        dest="configuration_uid",
+        dest="configuration_uids",
+        action="append",
         type=_configuration_uid_argument,
         required=True,
-        help=f"Execute this {kind} configuration.",
+        help=f"Execute this {kind} configuration; repeat it to run several in one run.",
     )
     return parser
 
@@ -463,13 +496,13 @@ def build_dispatcher_argument_parser(kind: ConfigurationKind) -> argparse.Argume
     spec = JOB_SPECS[kind]
     parser = argparse.ArgumentParser(
         prog=spec.dispatcher_execution_path,
-        description=f"Start one {spec.name!r} run per scheduled {kind} configuration.",
+        description=f"Start one {spec.name!r} run for every scheduled {kind} configuration.",
     )
     parser.add_argument(
         SCHEDULED_ARGUMENT,
         action="store_true",
         required=True,
-        help=f"Start one run per scheduled {kind} configuration (the dispatcher's scheduled run).",
+        help=f"Start one run for every scheduled {kind} configuration (the scheduled run).",
     )
     return parser
 
@@ -485,14 +518,24 @@ def run_dispatcher_job(
 def run_configuration_job(
     kind: ConfigurationKind, argv: Sequence[str] | None = None
 ) -> dict[str, Any]:
-    """Entry point of the kind's Job: execute the configuration ``--configuration-uid`` selects."""
-    from alpaca_connectors.portfolios.execution import execute_portfolio_configuration
+    """Entry point of the kind's Job: execute the configurations ``--configuration-uid`` selects.
+
+    One configuration runs on its own (``run_portfolio``), as the API and the CLI start it; the
+    dispatcher's tick carries several, which run together (``run_portfolios``). The summary's
+    ``failed`` lists each one that did not run.
+    """
+    from alpaca_connectors.portfolios.execution import (
+        execute_portfolio_configuration,
+        execute_portfolio_configurations,
+    )
 
     args = build_job_argument_parser(kind).parse_args(argv)
-    summary = execute_portfolio_configuration(args.configuration_uid).summary()
+    uids = list(dict.fromkeys(args.configuration_uids))
+    if len(uids) == 1:
+        summary = execute_portfolio_configuration(uids[0]).summary()
+        return {**summary, "configuration_uid": uids[0], "job_run_uid": os.getenv("JOB_RUN_UID")}
     return {
-        **summary,
-        "configuration_uid": args.configuration_uid,
+        **execute_portfolio_configurations(uids).summary(),
         "job_run_uid": os.getenv("JOB_RUN_UID"),
     }
 
@@ -516,6 +559,7 @@ __all__ = [
     "configuration_command_args",
     "configuration_job_state",
     "configuration_uid_from_command_args",
+    "configuration_uids_from_command_args",
     "dispatch_scheduled_configurations",
     "get_configuration_job_run",
     "launch_configuration_job",

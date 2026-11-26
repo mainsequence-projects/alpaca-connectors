@@ -74,6 +74,7 @@ nav:
       - "0030 Workloads Get Their Roles Through Their Branch": adrs/0030_workloads_get_their_roles_through_their_branch.md
       - "0031 Markets Series Are Published, Not Shared": adrs/0031_markets_series_are_published_not_shared.md
       - "0032 The Lifecycle Check Runs As An On-Demand Job": adrs/0032_the_lifecycle_check_runs_as_an_on_demand_job.md
+      - "0033 An Account's Portfolios Share One Price Chain": adrs/0033_an_accounts_portfolios_share_one_price_chain.md
   - Implementation Records:
       - SDK 8 And ms-markets Migration: implementation_tasks/0001_ms_markets_storage_first_migration.md
       - Alpaca Account Storage: implementation_tasks/0002_alpaca_account_module.md

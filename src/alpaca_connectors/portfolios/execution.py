@@ -631,6 +631,47 @@ def execute_portfolio_configuration(configuration_uid: Any) -> PortfolioExecutio
         rebalance_output_table=AlpacaPortfolioRebalanceStateStorage,
         event_ledger_output_table=AlpacaPortfolioEventLedgerStorage,
     )
+    first_rebalance = _first_rebalance(resolved, at=rebalanced_through)
+    if first_rebalance["rebalanced"]:
+        first_rebalance = _recorded_rebalance(
+            first_rebalance, portfolio_weights_recorded(answer.portfolio_unique_identifier)
+        )
+    return _finish_run(resolved, answer, bars_update=bars_update, first_rebalance=first_rebalance)
+
+
+def _first_rebalance(
+    resolved: ResolvedPortfolioConfiguration, *, at: dt.datetime
+) -> dict[str, Any]:
+    return first_rebalance_state(
+        resolved.rebalance_configuration, starts_at=resolved.signal_start_time, at=at
+    )
+
+
+def _recorded_rebalance(first_rebalance: dict[str, Any], recorded: bool) -> dict[str, Any]:
+    """The schedule's first rebalance, as Markets holds it (ms-markets issue 118)."""
+    if recorded:
+        return first_rebalance
+    # The first rebalance was due, and no run has recorded it: the run reports what Markets
+    # holds, not what the schedule expected.
+    return {
+        **first_rebalance,
+        "rebalanced": False,
+        "message": (
+            "The portfolio's first rebalance was due at "
+            f"{first_rebalance['first_rebalance_at']}, and Markets holds no weights of it: "
+            "no run has recorded that rebalance."
+        ),
+    }
+
+
+def _finish_run(
+    resolved: ResolvedPortfolioConfiguration,
+    answer: Any,
+    *,
+    bars_update: dict[str, Any],
+    first_rebalance: dict[str, Any],
+) -> PortfolioExecutionResult:
+    """Record the run's ``Portfolio`` on its configuration and shape its result."""
     portfolio_uid = answer.portfolio_uid
     if (
         resolved.configuration.portfolio_uid is None
@@ -640,25 +681,6 @@ def execute_portfolio_configuration(configuration_uid: Any) -> PortfolioExecutio
             resolved.configuration.uid,
             values={"portfolio_uid": uuid.UUID(portfolio_uid)},
         )
-    first_rebalance = first_rebalance_state(
-        resolved.rebalance_configuration,
-        starts_at=resolved.signal_start_time,
-        at=rebalanced_through,
-    )
-    if first_rebalance["rebalanced"] and not portfolio_weights_recorded(
-        answer.portfolio_unique_identifier
-    ):
-        # The first rebalance was due, and no run has recorded it: the run reports what Markets
-        # holds, not what the schedule expected (ms-markets issue 118).
-        first_rebalance = {
-            **first_rebalance,
-            "rebalanced": False,
-            "message": (
-                "The portfolio's first rebalance was due at "
-                f"{first_rebalance['first_rebalance_at']}, and Markets holds no weights of it: "
-                "no run has recorded that rebalance."
-            ),
-        }
     if not first_rebalance["rebalanced"]:
         # Issue #41: a run before the first configured event writes no weights.
         logger.warning("%s", first_rebalance["message"])
@@ -672,6 +694,201 @@ def execute_portfolio_configuration(configuration_uid: Any) -> PortfolioExecutio
     )
 
 
+@dataclass(frozen=True, slots=True)
+class PortfolioBatchResult:
+    """What one run of several portfolio configurations did: each configuration's result, or
+    the error that stopped it, in the order given."""
+
+    results: dict[str, PortfolioExecutionResult | Exception]
+
+    def summary(self) -> dict[str, Any]:
+        return {
+            "configuration_uids": list(self.results),
+            "ran": [
+                result.summary()
+                for result in self.results.values()
+                if isinstance(result, PortfolioExecutionResult)
+            ],
+            "failed": [
+                {"configuration_uid": uid, "error": repr(result)}
+                for uid, result in self.results.items()
+                if isinstance(result, Exception)
+            ],
+        }
+
+
+def resolve_portfolio_configurations(
+    configuration_uids: Sequence[Any],
+) -> dict[str, ResolvedPortfolioConfiguration | Exception]:
+    """``resolve_portfolio_configuration`` for several configurations, one read per kind.
+
+    The configurations, their inputs (``_resolve_inputs``) and the signals' recorded assets are
+    each read once for all of them; each signal's latest observation is read together with the
+    others. Each configuration is answered with what it resolves to, or with the error that
+    blocks it.
+    """
+    from alpaca_connectors.markets_api import all_together, each_together
+    from alpaca_connectors.portfolios.configurations import portfolio_configurations_by_uids
+    from alpaca_connectors.portfolios.signal_assets import assets_by_signal
+
+    uids = [str(uuid.UUID(str(value))) for value in configuration_uids]
+    rows = portfolio_configurations_by_uids(uids)
+    answers: dict[str, ResolvedPortfolioConfiguration | Exception] = {}
+    found = [rows[uid] for uid in uids if uid in rows]
+    inputs = _resolve_inputs(found) if found else {}
+    pending = {uid: value for uid, value in inputs.items() if not isinstance(value, Exception)}
+    signals = list(dict.fromkeys(value.signal_uid for value in pending.values()))
+
+    def latest(signal_uid: str) -> Any:
+        try:
+            return read_signal_observation_matrix(signal_uid=signal_uid, observation_limit=1)
+        except Exception as exc:  # noqa: BLE001 - it blocks only the portfolios on this signal
+            return exc
+
+    matrices, recorded = (
+        all_together(lambda: each_together(latest, signals), lambda: assets_by_signal(signals))
+        if signals
+        else ([], {})
+    )
+    latest_by_signal = dict(zip(signals, matrices))
+    for uid in uids:
+        if uid not in rows:
+            answers[uid] = LookupError(f"Portfolio configuration {uid} does not exist.")
+            continue
+        value = inputs[uid]
+        if isinstance(value, Exception):
+            answers[uid] = value
+            continue
+        matrix = latest_by_signal[value.signal_uid]
+        if isinstance(matrix, Exception):
+            answers[uid] = matrix
+            continue
+        if not matrix.time_indexes or not matrix.assets:
+            answers[uid] = ValueError(
+                f"Signal {value.signal_uid} has no published observations. "
+                "Publish weights to the portfolio's signal before running it."
+            )
+            continue
+        answers[uid] = ResolvedPortfolioConfiguration(
+            configuration=value.configuration,
+            bars_configuration=value.bars_configuration,
+            rebalance_configuration=value.rebalance_configuration,
+            signal_uid=value.signal_uid,
+            signal_start_time=value.signal_start_time,
+            asset_identifiers=tuple(
+                sorted(
+                    {asset.asset_identifier for asset in matrix.assets}
+                    | set(recorded.get(value.signal_uid, []))
+                )
+            ),
+            source_time_index_meta_table_uid=value.source_time_index_meta_table_uid,
+            source_table=value.source_table,
+        )
+    return answers
+
+
+def execute_portfolio_configurations(configuration_uids: Sequence[Any]) -> PortfolioBatchResult:
+    """Run several portfolio configurations in one MetaTables invocation (``run_portfolios``).
+
+    The run of the dispatcher's tick (ADR 0013, as amended): the configurations resolve
+    together (``resolve_portfolio_configurations``); each bars configuration is updated once,
+    for every asset of its portfolios (issue #39); then every portfolio's ledger is a head of one
+    joined graph, so a node several share runs once and no portfolio waits for another process;
+    each publishes its own weights and values. A configuration that does not resolve, build or
+    run is answered with its error; it never stops the others.
+    """
+    from dataclasses import replace
+
+    from alpaca_connectors.instances import (
+        AlpacaPortfolioEventLedgerStorage,
+        AlpacaPortfolioRebalanceStateStorage,
+    )
+    from alpaca_connectors.markets_api import (
+        PortfolioRunEntry,
+        each_together,
+        portfolio_weights_recorded,
+        run_portfolios,
+    )
+    from alpaca_connectors.runtime import start_portfolio_job_engine
+
+    start_portfolio_job_engine()
+    results: dict[str, Any] = dict(resolve_portfolio_configurations(configuration_uids))
+    resolved = {
+        uid: value
+        for uid, value in results.items()
+        if isinstance(value, ResolvedPortfolioConfiguration)
+    }
+
+    # One bars update per bars configuration, for the assets of all its portfolios.
+    by_bars: dict[str, list[str]] = {}
+    for uid, value in resolved.items():
+        by_bars.setdefault(str(value.bars_configuration.uid), []).append(uid)
+    bars_updates: dict[str, dict[str, Any]] = {}
+    for members in by_bars.values():
+        assets = sorted({a for uid in members for a in resolved[uid].asset_identifiers})
+        update = update_portfolio_bars(
+            replace(resolved[members[0]], asset_identifiers=tuple(assets))
+        )
+        for uid in members:
+            bars_updates[uid] = update
+
+    plans: dict[str, PortfolioRunPlan] = {}
+    for uid, value in resolved.items():
+        try:
+            plans[uid] = build_portfolio_run(value)
+        except Exception as exc:  # noqa: BLE001 - one configuration's failure stops only it
+            results[uid] = exc
+    # The rebalances read the events up to their own start, which is after this time.
+    rebalanced_through = dt.datetime.now(dt.UTC)
+    order = list(plans)
+    answers = (
+        run_portfolios(
+            [
+                PortfolioRunEntry(
+                    portfolio_configuration=plans[uid].portfolio_configuration,
+                    unique_identifier=plans[uid].unique_identifier,
+                    calendar_uid=plans[uid].calendar_uid,
+                )
+                for uid in order
+            ],
+            rebalance_output_table=AlpacaPortfolioRebalanceStateStorage,
+            event_ledger_output_table=AlpacaPortfolioEventLedgerStorage,
+        )
+        if order
+        else []
+    )
+    ran = dict(zip(order, answers))
+    firsts = {
+        uid: _first_rebalance(resolved[uid], at=rebalanced_through)
+        for uid, answer in ran.items()
+        if not isinstance(answer, BaseException)
+    }
+    # Markets is asked only about the portfolios whose first rebalance was due, together.
+    due = [uid for uid, first in firsts.items() if first["rebalanced"]]
+    recorded = dict(
+        zip(
+            due,
+            each_together(
+                lambda uid: portfolio_weights_recorded(ran[uid].portfolio_unique_identifier), due
+            ),
+        )
+    )
+    for uid, answer in ran.items():
+        if isinstance(answer, BaseException):
+            results[uid] = answer if isinstance(answer, Exception) else RuntimeError(str(answer))
+            continue
+        first = firsts[uid]
+        if uid in recorded:
+            first = _recorded_rebalance(first, recorded[uid])
+        try:
+            results[uid] = _finish_run(
+                resolved[uid], answer, bars_update=bars_updates[uid], first_rebalance=first
+            )
+        except Exception as exc:  # noqa: BLE001 - one configuration's failure stops only it
+            results[uid] = exc
+    return PortfolioBatchResult(results=results)
+
+
 __all__ = [
     "HeldPortfolioInputs",
     "PortfolioExecutionResult",
@@ -679,9 +896,12 @@ __all__ = [
     "PortfolioPreflight",
     "ResolvedPortfolioConfiguration",
     "build_portfolio_run",
+    "PortfolioBatchResult",
     "execute_portfolio_configuration",
+    "execute_portfolio_configurations",
     "portfolio_unique_identifier",
     "preflight_portfolio_configuration",
     "preflight_portfolio_configurations",
     "resolve_portfolio_configuration",
+    "resolve_portfolio_configurations",
 ]
