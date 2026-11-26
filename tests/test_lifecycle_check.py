@@ -161,3 +161,36 @@ def test_the_units_no_fund_takes_are_sold_only_from_long_positions() -> None:
     }
 
     assert lifecycle.excess(operation) == {"NVDA": -12.5, "JPM": -1.0}
+
+
+def test_a_run_prints_each_stage_as_it_starts_and_ends() -> None:
+    import io
+
+    from alpaca_connectors.operations.lifecycle_check import CheckFailed
+
+    progress = io.StringIO()
+    clock = Clock(progress=progress)
+    with clock.stage("1 register"):
+        with clock.call("POST /v1/accounts"):
+            pass
+    with clock.stage("2 sync"):
+        raise CheckFailed("the sync answered 503")
+    clock.note("        portfolio Job shared_1 (run): RUNNING")
+
+    lines = progress.getvalue().splitlines()
+    assert lines[0].startswith("[") and lines[0].endswith("s] start   1 register")
+    assert lines[1].split("] ", 1)[1].startswith("passed  1 register: ")
+    assert "slowest POST /v1/accounts" in lines[1]
+    assert lines[2].endswith("start   2 sync")
+    assert "failed  2 sync: " in lines[3] and "CheckFailed: the sync answered 503" in lines[3]
+    assert lines[4].endswith("portfolio Job shared_1 (run): RUNNING")
+    # The report at the end is the same with or without progress.
+    assert lifecycle_check.render(clock).splitlines()[2].startswith("1 register")
+
+
+def test_a_clock_without_progress_writes_nothing(capsys) -> None:
+    clock = Clock()
+    with clock.stage("1 register"):
+        pass
+    clock.note("nothing")
+    assert capsys.readouterr().out == ""

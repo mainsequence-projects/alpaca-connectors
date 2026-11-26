@@ -163,6 +163,11 @@ starts the price source as a run of its own, and before MetaTables 0.1.79 that p
 ([MetaTables#153](https://github.com/mainsequence-projects/MetaTables/issues/153)). From 0.1.79
 such a head run waits for the run that holds the update too, and starts again once it succeeds.
 
+While it runs, it prints one line when each stage starts and one when it ends, with its time, its
+status, its slowest call and what failed, and every change of a portfolio Job run's status in stage
+10, each with the run's elapsed time and flushed at once, so a run redirected to a file can be
+followed with `tail -f`. The platform Job prints the same lines to its log.
+
 The report lists each stage with the calls it made: each call to this API, each Markets call and
 each Alpaca read, timed on the caller's side, then the slowest calls and the total. The sync's
 three steps run inside one request, so that request's time is theirs.

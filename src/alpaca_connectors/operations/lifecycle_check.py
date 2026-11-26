@@ -81,7 +81,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass, field
 from functools import partial
 from pathlib import Path
-from typing import Any
+from typing import Any, TextIO
 
 # The repository root, here and in the Job's image: src/alpaca_connectors/operations/<this file>.
 ROOT = Path(__file__).resolve().parents[3]
@@ -163,19 +163,34 @@ class Timed:
 
 
 class Clock:
-    """Stages, each with the calls it made, in the order they ran."""
+    """Stages, each with the calls it made, in the order they ran.
 
-    def __init__(self) -> None:
+    With ``progress``, a text stream, it also writes a line when each stage starts and when it
+    ends (its time, its status, its slowest call and what failed), and each ``note``, flushed at
+    once, so a long run can be followed while it runs. The report at the end is the same.
+    """
+
+    def __init__(self, progress: TextIO | None = None) -> None:
         self.stages: list[Timed] = []
         self._current: Timed | None = None
         self._lock = threading.Lock()
         self.started = time.perf_counter()
+        self.progress = progress
+
+    def note(self, text: str) -> None:
+        """Write one line of progress, with the run's elapsed time, when ``progress`` is set."""
+        if self.progress is None:
+            return
+        with self._lock:
+            self.progress.write(f"[{self.total:7.1f}s] {text}\n")
+            self.progress.flush()
 
     @contextlib.contextmanager
     def stage(self, name: str) -> Iterator[Timed]:
         record = Timed(name, 0.0)
         self.stages.append(record)
         self._current, started = record, time.perf_counter()
+        self.note(f"start   {name}")
         try:
             yield record
         except Skipped as exc:
@@ -185,6 +200,13 @@ class Clock:
         finally:
             record.seconds = time.perf_counter() - started
             self._current = None
+            slowest = max(record.calls, key=lambda call: call.seconds, default=None)
+            line = f"{record.status:<7} {name}: {record.seconds:.1f}s"
+            if slowest is not None:
+                line += f", slowest {slowest.name[:60]} {slowest.seconds:.1f}s"
+            if record.detail:
+                line += f" -> {record.detail[:300]}"
+            self.note(line)
 
     @contextlib.contextmanager
     def call(self, name: str) -> Iterator[None]:
@@ -1153,9 +1175,15 @@ class Lifecycle:
                 202,
             )
             deadline = time.monotonic() + JOB_TIMEOUT_SECONDS
+            last = None
             with self.clock.call(f"portfolio Job {key}: queued to ended"):
                 while True:
                     state = ok(self.api.get(f"/v1/operations/job-runs/{accepted['job_run_uid']}"))
+                    if state["status"] != last:
+                        last = state["status"]
+                        self.clock.note(
+                            f"        portfolio Job {key} ({accepted['job_run_uid']}): {last}"
+                        )
                     if state["status"] in JOB_DONE or time.monotonic() > deadline:
                         break
                     time.sleep(10)
@@ -1316,7 +1344,10 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     clock, warnings = run(
-        api_url=args.api_url.rstrip("/"), release_uid=args.release_uid, keep=args.keep
+        api_url=args.api_url.rstrip("/"),
+        release_uid=args.release_uid,
+        keep=args.keep,
+        clock=Clock(progress=sys.stdout),
     )
     print(render(clock))
     for warning in warnings:
@@ -1341,7 +1372,7 @@ def run_platform_job() -> int:
 
     Its exit status is 1 when any stage failed, so the JobRun ends ``FAILED``.
     """
-    clock, warnings = run(in_platform=True)
+    clock, warnings = run(in_platform=True, clock=Clock(progress=sys.stdout))
     print(render(clock))
     for warning in warnings:
         print(f"warning: {warning}")
