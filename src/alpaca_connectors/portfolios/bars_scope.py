@@ -1,18 +1,19 @@
-"""The assets a ``portfolios`` bars configuration fetches (ADR 0024 decision 5, ADR 0028).
+"""The assets an account's ``AccountStockBars`` fetches on one bars profile (ADR 0033).
 
 The asset list is stored nowhere. Each resolution derives it in bounded reads, none of them over a
 time series:
 
-1. the bars configuration and its portfolios: the one a portfolio's own configuration belongs
-   to, or, for a ``portfolios`` feed of an account, the portfolios not yet adopted that name it,
-   as before ADR 0028;
-2. their `Portfolio` rows in one Markets read, for ``retired_at``; each signal UID is computed
-   from its signal definition's key, or from the configuration UID before adoption;
-3. every asset those signals ever published, from the signal-asset table by primary key.
+1. the account's portfolio configurations, and its ``portfolios`` feeds, together; then the
+   portfolios not yet adopted that name one of those feeds (ADR 0028, as amended);
+2. together: those portfolios' own bars configurations, their `Portfolio` rows in one Markets read
+   for ``retired_at``, and their signal definitions;
+3. every asset the signals of the live portfolios on the profile ever published, from the
+   signal-asset table by primary key.
 
-A feed of explicit assets or holdings resolves to nothing here. A portfolio whose `Portfolio` is
-retired at or before the resolution time is left out. A paused one still counts, and so does one
-whose `Portfolio` does not exist yet.
+A portfolio is priced by its own bars configuration, else by the feed it names. One whose bars
+configuration is on another profile, or disabled, is left out; so is one whose `Portfolio` is
+retired at or before the resolution time. A paused one still counts, and so does one whose
+`Portfolio` does not exist yet. Feeds of explicit assets or holdings resolve to nothing here.
 """
 
 from __future__ import annotations
@@ -27,8 +28,9 @@ UTC = dt.timezone.utc
 
 
 @dataclass(frozen=True, slots=True)
-class PortfolioBarsScope:
-    bars_configuration_uid: str
+class AccountBarsScope:
+    account_uid: str
+    profile: tuple[str, str, str]
     configuration_uids: tuple[str, ...]
     retired_configuration_uids: tuple[str, ...]
     signal_uids: tuple[str, ...]
@@ -40,23 +42,6 @@ class PortfolioBarsScope:
             "retired_portfolio_count": len(self.retired_configuration_uids),
             "signal_count": len(self.signal_uids),
         }
-
-
-def _owning_configurations(bars_configuration_uid: uuid.UUID) -> list[Any]:
-    """The portfolios the bars configuration prices: its own portfolio, or those naming the feed."""
-    from alpaca_connectors.market_data.configurations import get_bar_configuration
-    from alpaca_connectors.portfolios.configurations import (
-        get_portfolio_configuration,
-        portfolio_configurations_naming_bars,
-    )
-
-    bars = get_bar_configuration(bars_configuration_uid)
-    if bars is None or bars.asset_source != "portfolios":
-        return []
-    if bars.portfolio_configuration_uid is None:
-        return portfolio_configurations_naming_bars(bars_configuration_uid)
-    configuration = get_portfolio_configuration(bars.portfolio_configuration_uid)
-    return [] if configuration is None else [configuration]
 
 
 def retired_portfolio_uids(portfolio_uids: Sequence[str], *, at: dt.datetime) -> set[str]:
@@ -81,37 +66,81 @@ def retired_portfolio_uids(portfolio_uids: Sequence[str], *, at: dt.datetime) ->
     return retired
 
 
-def resolve_portfolio_bars_scope(
-    bars_configuration_uid: Any,
+def _normalized_profile(frequency_id: str, feed: str, adjustment: str) -> tuple[str, str, str]:
+    from alpaca_connectors.market_data.alpaca_bars_support import (
+        normalize_adjustment,
+        normalize_feed,
+        normalize_frequency_id,
+    )
+
+    return (
+        normalize_frequency_id(frequency_id),
+        normalize_feed(feed),
+        normalize_adjustment(adjustment),
+    )
+
+
+def resolve_account_bars_scope(
+    account_uid: Any,
+    profile: tuple[str, str, str],
     *,
     at: dt.datetime | None = None,
-) -> PortfolioBarsScope:
-    """Every asset ever published by the signals of the live portfolios the configuration prices."""
+) -> AccountBarsScope:
+    """Every asset ever published by the signals of the account's live portfolios on ``profile``."""
+    from alpaca_connectors.market_data.configurations import (
+        bar_configurations_for_account,
+        portfolio_bar_configurations,
+    )
+    from alpaca_connectors.markets_api import all_together
+    from alpaca_connectors.portfolios.configurations import (
+        portfolio_configurations_naming_any_bars,
+        portfolio_configurations_of_account,
+    )
     from alpaca_connectors.portfolios.provided_weights import portfolio_signal_uid
     from alpaca_connectors.portfolios.signal_assets import assets_for_signals
+    from alpaca_connectors.portfolios.signal_definitions import signal_definitions_by_uids
 
-    normalized_uid = uuid.UUID(str(bars_configuration_uid))
+    account = str(uuid.UUID(str(account_uid)))
+    wanted = _normalized_profile(*profile)
     resolved_at = at or dt.datetime.now(UTC)
-    rows = _owning_configurations(normalized_uid)
-    retired = retired_portfolio_uids(
-        [str(row.portfolio_uid) for row in rows if row.portfolio_uid is not None],
-        at=resolved_at,
+    owned, account_feeds = all_together(
+        lambda: portfolio_configurations_of_account(account),
+        lambda: bar_configurations_for_account(account),
+    )
+    feeds = {str(feed.uid): feed for feed in account_feeds if feed.asset_source == "portfolios"}
+    naming = portfolio_configurations_naming_any_bars(list(feeds)) if feeds else []
+    rows = list({str(row.uid): row for row in [*owned, *naming]}.values())
+    own_bars, retired, definitions = all_together(
+        lambda: portfolio_bar_configurations([row.uid for row in rows]),
+        lambda: retired_portfolio_uids(
+            [str(row.portfolio_uid) for row in rows if row.portfolio_uid is not None],
+            at=resolved_at,
+        ),
+        lambda: signal_definitions_by_uids(row.signal_definition_uid for row in rows),
     )
     live: list[Any] = []
     retired_configurations: list[str] = []
     for row in rows:
+        bars = own_bars.get(str(row.uid))
+        if bars is None and row.bars_configuration_uid is not None:
+            bars = feeds.get(str(row.bars_configuration_uid))
+        if bars is None or not bars.enabled:
+            continue
+        if _normalized_profile(bars.frequency_id, bars.feed, bars.adjustment) != wanted:
+            continue
         if row.portfolio_uid is not None and str(row.portfolio_uid) in retired:
             retired_configurations.append(str(row.uid))
         else:
             live.append(row)
-    ordered_signals = tuple(sorted({portfolio_signal_uid(row) for row in live}))
-    return PortfolioBarsScope(
-        bars_configuration_uid=str(normalized_uid),
+    signals = tuple(sorted({portfolio_signal_uid(row, definitions=definitions) for row in live}))
+    return AccountBarsScope(
+        account_uid=account,
+        profile=wanted,
         configuration_uids=tuple(sorted(str(row.uid) for row in live)),
         retired_configuration_uids=tuple(sorted(retired_configurations)),
-        signal_uids=ordered_signals,
-        asset_identifiers=tuple(assets_for_signals(ordered_signals)),
+        signal_uids=signals,
+        asset_identifiers=tuple(assets_for_signals(signals)) if signals else (),
     )
 
 
-__all__ = ["PortfolioBarsScope", "resolve_portfolio_bars_scope", "retired_portfolio_uids"]
+__all__ = ["AccountBarsScope", "resolve_account_bars_scope", "retired_portfolio_uids"]

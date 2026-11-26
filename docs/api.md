@@ -357,12 +357,11 @@ GET|PATCH|DELETE /v1/portfolio-rebalance-configurations/{configuration_uid}
   signal must have at least one observation.
 
 There is no Environment request field. A run selects its configuration with
-`--configuration-uid <uid>`, first runs its bars configuration's update (issue #39; a failed update
-leaves it to value with the prices already stored; it is skipped, in one read, when every asset
-already holds its last final daily bar), then runs the ms-markets recipe `run_portfolio`:
-persistent interpolation, calendar events, rebalance state and the portfolio's ledger in one
-MetaTables invocation, with the weights and values the ledger projects published to Markets
-(ADR 0031, ms-markets ADR 0065). Rebalance rows use actual configured
+`--configuration-uid <uid>` and runs the ms-markets recipe `run_portfolio`: its account's bars
+and interpolated prices on its profile ([ADR 0033](adrs/0033_an_accounts_portfolios_share_one_price_chain.md)), calendar events, rebalance state and the
+portfolio's ledger in one MetaTables invocation, with the weights and values the ledger projects
+published to Markets (ADR 0031, ms-markets ADR 0065). The bars fetch nothing, in one read, when
+every asset already holds its last final daily bar; a failed fetch fails the run. Rebalance rows use actual configured
 market-event timestamps and select the latest observation at or before each event.
 
 The configuration detail `GET` accepts `observation_limit` from 1 through 5,000 (default 2,500). It
@@ -381,14 +380,15 @@ risk-free-rate assumption. Alpha and beta are not reported because this workflow
 benchmark. If the requested window is shorter than the stored history, the response marks it as
 truncated rather than presenting the statistics as since-inception results.
 
-A `portfolios` bars configuration fetches every asset ever published by the live portfolios that
-name it: a deleted portfolio or one whose `Portfolio` is retired drops out, a paused one still
-counts. The list is derived at every resolution from the portfolio configurations and the
+A `portfolios` bars configuration runs as its account's `AccountStockBars` of its profile
+([ADR 0033](adrs/0033_an_accounts_portfolios_share_one_price_chain.md)), which fetches every asset ever published by the live portfolios of the account
+on that profile: a deleted portfolio or one whose `Portfolio` is retired drops out, a paused one
+still counts. The list is derived at every resolution from the portfolio configurations and the
 signal-asset table (`alpaca_connectors__signal_asset`), never from the signal weights series; the
 `resolve` action shows it. Bars run at 00:00 UTC and portfolios at 02:00 UTC, and every portfolio
-run first runs its own bars configuration's update, so a run started at once after new weights
-has the new asset's prices (issue #39). A failed update does not stop the run: it values with the
-prices already stored, and its summary says so.
+run runs the same `AccountStockBars` as a node of its graph, so a run started at once after new
+weights has the new asset's prices. A failed fetch fails the account's portfolios on that profile
+in that run.
 
 A portfolio rebalances at the events of its rebalance configuration (NYSE `market_close` by
 default) and has weights only from its first rebalance: the first configured event at or after

@@ -6,7 +6,12 @@ Proposed on 2026-11-26, from the owner's design in the session that moved this a
 ms-markets 6.2.0. Revised the same day for ms-markets 6.2.1, whose `InterpolatedPrices` takes its
 assets from its source updater
 ([MainSequenceMarkets#145](https://github.com/mainsequence-projects/MainSequenceMarkets/issues/145)):
-an account needs no asset category, and nothing is migrated. Not implemented.
+an account needs no asset category, and nothing is migrated. Implemented on 2026-11-26:
+`AccountStockBars` in `alpaca_connectors.market_data.account_bars`, its scope in
+`portfolios/bars_scope.py` (`resolve_account_bars_scope`), the chain in
+`portfolios/interpolated_prices.py` (`build_account_interpolated_prices`) and
+`portfolios/execution.py` (`account_price_chain`), and the bars Job's `portfolios` path in
+`market_data/services.py`.
 
 It changes how a portfolio run gets its prices
 ([ADR 0029](0029_interpolated_price_tables_are_named_like_every_project_table.md)), where a
@@ -87,8 +92,12 @@ Each portfolio builds its own chain of updaters. MetaTables joins the graphs of 
 
 ### 2. `AccountStockBars` fetches the account's bars, as a node of the run
 
-`AccountStockBars(AlpacaStockBarsNode)` keeps the bars node's fetch, its storage and its
-`OFFSET_START`.
+`AccountStockBars` shares the bars node's fetch, its storage and its `OFFSET_START` through
+`AlpacaStockBarsFetch`, a mixin with no constructor. It does not subclass `AlpacaStockBarsNode`:
+MetaTables saves the arguments of every constructor between an updater's class and its base, so a
+subclass would save that node's client and asset-list arguments too. The `portfolios` path of
+`AlpacaStockBarsNode` (`AlpacaStockBarsPortfoliosConfig`, `resolve_portfolio_bars_scope`) is
+removed.
 
 - **Its configuration is the account and the bars profile:** `account_uid`, `frequency_id`,
   `feed`, `adjustment`. That is its whole update hash, so it changes only with them.
@@ -247,7 +256,11 @@ rebuild them (ms-markets ADR 0067). Running nodes in node Jobs is not decided he
 
 ## Verification
 
-To do when it is implemented:
+Done with the implementation (`tests/test_account_price_chain.py`, `tests/test_provided_weights.py`,
+`tests/test_portfolio_configurations.py`, `tests/test_portfolio_ticks.py`): two portfolios of one
+account make 7 nodes, and every one passes `node_arguments` and rebuilds with its hash, offline.
+Not done: the lifecycle check against a deployed release, which needs this release pushed. The
+items:
 
 - unit tests: each class's update hash from its configuration only; `AccountStockBars`' assets
   from the account's live portfolios on its profile; the prices' configuration with neither

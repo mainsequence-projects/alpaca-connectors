@@ -475,10 +475,6 @@ def test_execution_runs_the_portfolio_with_the_recipe_and_registers_nothing(
             "alpaca_connectors.portfolios.execution.update_portfolio_configuration_row"
         ) as update_row,
         patch(
-            "alpaca_connectors.portfolios.execution.update_portfolio_bars",
-            side_effect=lambda resolved: (order.bars(), {"updated": True})[1],
-        ) as bars_update,
-        patch(
             "alpaca_connectors.portfolios.execution.first_rebalance_state",
             return_value={"rebalanced": True, "first_rebalance_at": "2026-11-18T21:00:00+00:00"},
         ) as first_rebalance,
@@ -505,10 +501,9 @@ def test_execution_runs_the_portfolio_with_the_recipe_and_registers_nothing(
                 "Markets holds no weights of it: no run has recorded that rebalance."
             ),
         }
-    # Its bars first (issue #39), then the run, once.
+    # The bars are a node of the run's graph (ADR 0033): the plan, then the run, once.
     start_engine.assert_called_once_with()
-    bars_update.assert_called_once_with(resolved)
-    assert [name for name, *_ in order.mock_calls] == ["bars", "plan", "run"]
+    assert [name for name, *_ in order.mock_calls] == ["plan", "run"]
     # The configuration this application built (its prices, calendar events and signal), its
     # private rebalance-state table; ms-markets starts it at the signal's first observation.
     [(name, arguments)] = recipes.calls
@@ -559,7 +554,6 @@ def test_a_run_whose_portfolio_is_stored_does_not_store_it_again(recipes) -> Non
     with (
         patch("alpaca_connectors.runtime.start_portfolio_job_engine"),
         patch.object(execution, "resolve_portfolio_configuration", return_value=resolved),
-        patch.object(execution, "update_portfolio_bars", return_value={}),
         patch.object(
             execution,
             "build_portfolio_run",
@@ -592,8 +586,8 @@ def _real_run_plan(strategy: str):
     """``build_portfolio_run`` with the real ms-markets objects, offline.
 
     Only what needs the MetaTables backend is replaced: the registration of the calendar-events
-    table, the bars source (a real ``TimeIndexTableRef`` of an unregistered table) and the stored
-    calendar. Every configuration and strategy object is ms-markets' own, so a field it requires,
+    table, the account's price chain (a real ``TimeIndexTableRef`` of an unregistered table) and
+    the stored calendar. Every configuration and strategy object is ms-markets' own, so a field it requires,
     refuses or no longer has fails here.
     """
     import metatables.updaters.updaters as updaters
@@ -624,7 +618,7 @@ def _real_run_plan(strategy: str):
             "ensure_registered_output_table",
             lambda output_table, context: output_table,
         ),
-        patch.object(execution, "build_alpaca_interpolated_prices", return_value=prices),
+        patch.object(execution, "build_account_interpolated_prices", return_value=prices),
         patch.object(
             execution,
             "ensure_trading_calendar",
@@ -658,6 +652,7 @@ def test_both_strategies_read_the_calendar_sessions_and_build_with_ms_markets(st
     from msm_portfolios.time_index import PortfolioCalendarEvents
 
     from alpaca_connectors.instances import AlpacaPortfolioCalendarEventsStorage
+    from alpaca_connectors.market_data.alpaca_bars import AlpacaStockBarsFetch
 
     plan = _real_run_plan(strategy)
 
@@ -675,7 +670,8 @@ def test_both_strategies_read_the_calendar_sessions_and_build_with_ms_markets(st
     assert events.output_table is AlpacaPortfolioCalendarEventsStorage
     assert tuple(events.config.event_types) == ("market_open", "market_close")
     assert (events.config.calendar_identifier, events.config.session_label) == ("NYSE", "regular")
-    assert events.config.offset_start == resolved_configuration().signal_start_time
+    # Every portfolio of a calendar shares its events: they start at a fixed time (ADR 0033).
+    assert events.config.offset_start == AlpacaStockBarsFetch.OFFSET_START
     assert (rule.calendar_identifier, rule.session_label) == ("NYSE", "regular")
     # Trades at the next observed price, with ms-markets' execution policy defaults.
     assert rule.fill_rule == "next_observed_price"

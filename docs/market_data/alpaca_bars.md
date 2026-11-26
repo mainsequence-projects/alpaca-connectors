@@ -85,10 +85,17 @@ A bar configuration has exactly one parent
   holdings, or, as before ADR 0028, the assets of the portfolios not yet adopted that name it
   (`portfolios`), and it is deleted with the account. It may not run with another owner's account;
   an account without an owner stays open (ADR 0022).
-- **A portfolio's own configuration** belongs to its portfolio: it fetches every asset the
-  portfolio's signal ever published, read from the signal-asset table rather than the signal
-  weights series, with the portfolio's account's keys, and it is created and deleted with the
-  portfolio ([Portfolios](../portfolios/portfolios.md#bars)). Its source is `portfolios`.
+- **A portfolio's own configuration** belongs to its portfolio: it records the portfolio's profile
+  and whether its bars are enabled, and it is created and deleted with the portfolio
+  ([Portfolios](../portfolios/portfolios.md#bars)). Its source is `portfolios`.
+
+A `portfolios` configuration, a portfolio's own or a feed, runs as its account's `AccountStockBars`
+of its profile ([ADR 0033](../adrs/0033_an_accounts_portfolios_share_one_price_chain.md)): every
+asset the signals of the account's live portfolios on that profile ever published, read from the
+signal-asset table rather than the signal weights series, with the account's keys. The
+configuration and the profile are its whole update hash, so the account's bars keep one update
+record, and a portfolio run's graph runs the same updater. It fetches nothing when every asset
+already holds its last final daily bar.
 
 Either kind writes the one shared price table of its bar profile, whose rows are keyed by time and
 asset and name no account; deleting an account deletes its configurations, never price rows. A

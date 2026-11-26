@@ -15,10 +15,7 @@ from unittest.mock import ANY, MagicMock, Mock, call, patch
 import pytest
 
 from alpaca_connectors.account.ownership import AccountOwner
-from alpaca_connectors.market_data.alpaca_bars import (
-    AlpacaStockBarsConfig,
-    AlpacaStockBarsPortfoliosConfig,
-)
+from alpaca_connectors.market_data.alpaca_bars import AlpacaStockBarsConfig
 from alpaca_connectors.market_data.configurations import (
     AlpacaBarsConfigurationTable,
     validate_configuration_scope,
@@ -730,11 +727,9 @@ def test_only_a_portfolios_own_bars_price_its_portfolio() -> None:
         validate_configuration_scope(
             asset_source="assets", asset_uids=[uuid.uuid4()], portfolio_owned=True
         )
-    config = AlpacaStockBarsPortfoliosConfig(
-        frequency_id="1d", feed="sip", adjustment="all", bars_configuration_uid=BARS_UID
-    )
-    assert (config.asset_source, config.bars_configuration_uid) == ("portfolios", BARS_UID)
-    with pytest.raises(ValueError, match="requires AlpacaStockBarsPortfoliosConfig"):
+    # A `portfolios` configuration runs as its account's AccountStockBars (ADR 0033), never as
+    # a bars node of its own.
+    with pytest.raises(ValueError, match="asset_source"):
         AlpacaStockBarsConfig(
             frequency_id="1d", feed="sip", adjustment="all", asset_source="portfolios"
         )
@@ -786,39 +781,73 @@ def test_no_bars_configuration_follows_a_category_any_more() -> None:
             AlpacaStockBarsConfig(frequency_id="1d", feed="sip", adjustment="all", **values)
 
 
-def test_portfolios_bars_configurations_hash_their_own_uid() -> None:
-    first, second = (
-        AlpacaStockBarsPortfoliosConfig(
-            frequency_id="1d", feed="sip", adjustment="all", bars_configuration_uid=uid
-        )
-        for uid in (BARS_UID, uuid.uuid4())
-    )
-    assert _update_hash(first) != _update_hash(second)
+BARS_READS = "alpaca_connectors.market_data.configurations"
+FEED_UID = uuid.UUID("99999999-9999-4999-8999-999999999999")
 
 
-def _scope(configurations, portfolios):
+def _bars_row(**overrides) -> SimpleNamespace:
+    values = {
+        "uid": BARS_UID,
+        "enabled": True,
+        "asset_source": "portfolios",
+        "frequency_id": "1d",
+        "feed": "sip",
+        "adjustment": "all",
+    }
+    values.update(overrides)
+    return SimpleNamespace(**values)
+
+
+def _account_scope(*, owned=(), feeds=(), naming=(), own_bars=None, portfolios=()):
+    reads = SimpleNamespace()
     with (
-        patch.object(bars_scope, "_owning_configurations", return_value=configurations) as owning,
-        patch("msm.api.portfolios.Portfolio.filter", return_value=portfolios) as portfolio_filter,
-        patch(f"{DEFINITIONS}.get_signal_definition", return_value=definition()),
+        patch(
+            f"{CONFIGURATIONS}.portfolio_configurations_of_account", return_value=list(owned)
+        ) as reads.owned,
+        patch(
+            f"{BARS_READS}.bar_configurations_for_account", return_value=list(feeds)
+        ) as reads.feeds,
+        patch(
+            f"{CONFIGURATIONS}.portfolio_configurations_naming_any_bars", return_value=list(naming)
+        ) as reads.naming,
+        patch(
+            f"{BARS_READS}.portfolio_bar_configurations", return_value=dict(own_bars or {})
+        ) as reads.own_bars,
+        patch(
+            "msm.api.portfolios.Portfolio.filter", return_value=list(portfolios)
+        ) as reads.portfolios,
+        patch(
+            f"{DEFINITIONS}.signal_definitions_by_uids",
+            return_value={str(DEFINITION_UID): definition()},
+        ) as reads.definitions,
         patch(
             "alpaca_connectors.portfolios.signal_assets.assets_for_signals",
             side_effect=lambda signals: [AAPL, JPM, NVDA] if signals else [],
-        ) as assets,
+        ) as reads.assets,
     ):
-        scope = bars_scope.resolve_portfolio_bars_scope(BARS_UID, at=WEDNESDAY)
-    owning.assert_called_once_with(BARS_UID)
-    return scope, portfolio_filter, assets
+        scope = bars_scope.resolve_account_bars_scope(
+            ACCOUNT_UID, ("1d", "SIP", "all"), at=WEDNESDAY
+        )
+    return scope, reads
 
 
-def test_the_scope_is_its_portfolios_signal_assets_in_bounded_reads() -> None:
+def test_an_accounts_bars_are_its_live_portfolios_signal_assets_in_bounded_reads() -> None:
     live = provided_configuration(portfolio_uid=uuid.UUID(int=1))
-    scope, portfolio_filter, assets = _scope(
-        [live], [SimpleNamespace(uid=uuid.UUID(int=1), retired_at=None)]
+    scope, reads = _account_scope(
+        owned=[live],
+        own_bars={str(CONFIGURATION_UID): _bars_row()},
+        portfolios=[SimpleNamespace(uid=uuid.UUID(int=1), retired_at=None)],
     )
 
-    portfolio_filter.assert_called_once()
-    assets.assert_called_once_with((provided_signal_uid(CONFIGURATION_UID),))
+    reads.owned.assert_called_once_with(str(ACCOUNT_UID))
+    reads.feeds.assert_called_once_with(str(ACCOUNT_UID))
+    # The account has no `portfolios` feed, so no portfolio not yet adopted is read.
+    reads.naming.assert_not_called()
+    reads.own_bars.assert_called_once_with([CONFIGURATION_UID])
+    reads.portfolios.assert_called_once()
+    reads.definitions.assert_called_once()
+    reads.assets.assert_called_once_with((provided_signal_uid(CONFIGURATION_UID),))
+    assert scope.profile == ("1d", "sip", "all")
     assert scope.configuration_uids == (str(CONFIGURATION_UID),)
     assert scope.asset_identifiers == (AAPL, JPM, NVDA)
     assert scope.snapshot() == {
@@ -828,40 +857,39 @@ def test_the_scope_is_its_portfolios_signal_assets_in_bounded_reads() -> None:
     }
 
 
-def test_a_retired_portfolios_bars_price_nothing() -> None:
+def test_only_the_accounts_portfolios_priced_on_the_profile_count() -> None:
+    for bars in (_bars_row(feed="iex", adjustment="raw"), _bars_row(enabled=False)):
+        scope, reads = _account_scope(
+            owned=[provided_configuration()], own_bars={str(CONFIGURATION_UID): bars}
+        )
+        assert scope.configuration_uids == ()
+        assert scope.asset_identifiers == ()
+        reads.assets.assert_not_called()
+
+
+def test_a_retired_portfolios_assets_are_not_fetched() -> None:
     retired = provided_configuration(portfolio_uid=uuid.UUID(int=2))
-    scope, _, _ = _scope([retired], [SimpleNamespace(uid=uuid.UUID(int=2), retired_at=MONDAY)])
+    scope, _ = _account_scope(
+        owned=[retired],
+        own_bars={str(CONFIGURATION_UID): _bars_row()},
+        portfolios=[SimpleNamespace(uid=uuid.UUID(int=2), retired_at=MONDAY)],
+    )
 
     assert scope.retired_configuration_uids == (str(CONFIGURATION_UID),)
     assert scope.asset_identifiers == ()
 
 
-def test_a_portfolios_feed_prices_the_portfolios_not_yet_adopted_that_name_it() -> None:
-    bars = "alpaca_connectors.market_data.configurations.get_bar_configuration"
-    naming = f"{CONFIGURATIONS}.portfolio_configurations_naming_bars"
+def test_an_accounts_portfolios_feed_prices_the_portfolios_not_yet_adopted_that_name_it() -> None:
     unadopted = provided_configuration(
-        account_uid=None, signal_definition_uid=None, bars_configuration_uid=BARS_UID
+        account_uid=None, signal_definition_uid=None, bars_configuration_uid=FEED_UID
     )
-    # A feed of holdings or explicit assets prices no portfolio here.
-    feed = SimpleNamespace(asset_source="account_holdings", portfolio_configuration_uid=None)
-    with patch(bars, return_value=feed):
-        assert bars_scope._owning_configurations(BARS_UID) == []
-    # A `portfolios` feed keeps pricing the portfolios that name it, as before ADR 0028.
-    shared = SimpleNamespace(asset_source="portfolios", portfolio_configuration_uid=None)
-    with patch(bars, return_value=shared), patch(naming, return_value=[unadopted]) as named:
-        assert bars_scope._owning_configurations(BARS_UID) == [unadopted]
-    named.assert_called_once_with(BARS_UID)
-    # A portfolio's own prices its portfolio.
-    own = SimpleNamespace(asset_source="portfolios", portfolio_configuration_uid=CONFIGURATION_UID)
-    with (
-        patch(bars, return_value=own),
-        patch(
-            f"{CONFIGURATIONS}.get_portfolio_configuration", return_value=provided_configuration()
-        ),
-    ):
-        assert [row.uid for row in bars_scope._owning_configurations(BARS_UID)] == [
-            CONFIGURATION_UID
-        ]
+    holdings = _bars_row(uid=uuid.uuid4(), asset_source="account_holdings")
+    scope, reads = _account_scope(feeds=[_bars_row(uid=FEED_UID), holdings], naming=[unadopted])
+
+    # Only the `portfolios` feed: a feed of holdings or explicit assets prices no portfolio here.
+    reads.naming.assert_called_once_with([str(FEED_UID)])
+    assert scope.configuration_uids == (str(CONFIGURATION_UID),)
+    assert scope.signal_uids == (signal_uid_for_key(legacy_signal_key(CONFIGURATION_UID)),)
 
 
 def test_a_portfolio_retired_later_still_counts() -> None:
@@ -1195,13 +1223,15 @@ def test_a_signals_assets_are_one_read_of_the_signal_asset_table() -> None:
     assert signal_assets.assets_for_signals([]) == []
 
 
-def test_the_bars_run_resolves_a_portfolios_source_by_its_own_uid() -> None:
+def test_the_bars_run_prices_a_portfolios_configuration_with_its_accounts_bars() -> None:
+    from alpaca_connectors.market_data.account_bars import AccountStockBars
     from alpaca_connectors.market_data.services import build_market_data_update
 
+    account_uid = uuid.uuid4()
     configuration = SimpleNamespace(
         uid=BARS_UID,
         enabled=True,
-        account_uid=uuid.uuid4(),
+        account_uid=account_uid,
         asset_source="portfolios",
         asset_uids=[],
         frequency_id="1d",
@@ -1209,19 +1239,14 @@ def test_the_bars_run_resolves_a_portfolios_source_by_its_own_uid() -> None:
         adjustment="all",
         model_dump=lambda mode=None: {"uid": str(BARS_UID)},
     )
-    scope = bars_scope.PortfolioBarsScope(
-        bars_configuration_uid=str(BARS_UID),
+    scope = bars_scope.AccountBarsScope(
+        account_uid=str(account_uid),
+        profile=("1d", "sip", "all"),
         configuration_uids=("a",),
         retired_configuration_uids=(),
         signal_uids=("signal-a",),
         asset_identifiers=(JPM, NVDA),
     )
-    nodes = []
-
-    class FakeNode:
-        def __init__(self, **kwargs):
-            nodes.append(kwargs)
-            self.update_hash = "hash"
 
     with (
         patch("alpaca_connectors.runtime.account_runtime_models", return_value=[]),
@@ -1241,20 +1266,22 @@ def test_the_bars_run_resolves_a_portfolios_source_by_its_own_uid() -> None:
             "alpaca_connectors.market_data.services._asset_uids_from_identifiers",
             return_value=["uid-jpm", "uid-nvda"],
         ),
-        patch.object(bars_scope, "resolve_portfolio_bars_scope", return_value=scope) as resolve,
-        patch("alpaca_connectors.market_data.alpaca_bars.AlpacaStockBarsNode", FakeNode),
+        patch.object(bars_scope, "resolve_account_bars_scope", return_value=scope) as resolve,
     ):
-        _, summary = build_market_data_update(configuration_uid=BARS_UID)
+        node, summary = build_market_data_update(configuration_uid=BARS_UID)
 
-    resolve.assert_called_once_with(BARS_UID)
+    # The updater a portfolio run's graph builds (ADR 0033, decision 5): its account and profile
+    # are its whole hash, so the account's bars have one update record and no asset mints a new one.
+    assert isinstance(node, AccountStockBars)
+    assert (node.config.account_uid, node.bars_profile) == (account_uid, ("1d", "sip", "all"))
+    assert node.config.asset_list is None
+    resolve.assert_called_once_with(account_uid, ("1d", "sip", "all"))
     assert summary["asset_identifiers"] == [JPM, NVDA]
     assert summary["source_snapshot"] == scope.snapshot()
-    [node] = nodes
-    # The hashed scope is the bars configuration itself, so new assets never mint a new updater.
-    assert isinstance(node["config"], AlpacaStockBarsPortfoliosConfig)
-    assert node["config"].bars_configuration_uid == BARS_UID
-    assert node["config"].asset_list in (None, [])
-    assert node["resolved_asset_identifiers"] == [JPM, NVDA]
+    assert summary["update_hash"] == node.update_hash
+    # The run's statistics read the same list, which the node keeps.
+    assert node.get_asset_list() == [JPM, NVDA]
+    resolve.assert_called_once()
 
 
 def test_the_portfolio_run_resolves_the_provided_signal() -> None:
@@ -1400,80 +1427,6 @@ def test_the_scheduled_run_includes_portfolios_not_yet_adopted() -> None:
     # Only the scheduled flag decides (ADR 0028, as amended 2026-11-18).
     assert "scheduled IS true" in " ".join(where.split())
     assert "account_uid" not in where and "signal_definition_uid" not in where
-
-
-def test_a_run_fetches_the_bars_its_signal_needs_before_it_values() -> None:
-    # Issue #39: a run started at once after new weights brings its prices itself.
-    from alpaca_connectors.portfolios import execution
-
-    resolved = SimpleNamespace(
-        bars_configuration=SimpleNamespace(
-            uid=BARS_UID, frequency_id="1d", feed="sip", adjustment="all"
-        ),
-        asset_identifiers=("ALPACA::a", "ALPACA::b"),
-    )
-    current = "alpaca_connectors.market_data.services.daily_bars_current_through"
-    with (
-        patch(current, return_value=None) as check,
-        patch(
-            "alpaca_connectors.market_data.execute_market_data_update",
-            return_value={"rows_persisted": 12},
-        ) as update,
-    ):
-        assert execution.update_portfolio_bars(resolved) == {
-            "bars_configuration_uid": str(BARS_UID),
-            "updated": True,
-            "rows_persisted": 12,
-        }
-    check.assert_called_once_with(("1d", "sip", "all"), ("ALPACA::a", "ALPACA::b"))
-    update.assert_called_once_with(configuration_uid=str(BARS_UID))
-
-    # Every asset already holds its last final bar: nothing to fetch, and the update does not run.
-    close = dt.datetime(2026, 11, 20, 21, tzinfo=dt.UTC)
-    with (
-        patch(current, return_value=close),
-        patch("alpaca_connectors.market_data.execute_market_data_update") as update,
-    ):
-        assert execution.update_portfolio_bars(resolved) == {
-            "bars_configuration_uid": str(BARS_UID),
-            "updated": True,
-            "rows_persisted": 0,
-            "current_through": close.isoformat(),
-        }
-    update.assert_not_called()
-
-    # A failed update never stops the run: it values with the stored prices, as before.
-    with (
-        patch(current, return_value=None),
-        patch(
-            "alpaca_connectors.market_data.execute_market_data_update",
-            side_effect=RuntimeError("Alpaca said no with secret context"),
-        ),
-    ):
-        answer = execution.update_portfolio_bars(resolved)
-    assert answer == {
-        "bars_configuration_uid": str(BARS_UID),
-        "updated": False,
-        "error": "RuntimeError",
-    }
-
-
-def test_the_bars_update_comes_before_the_valuation() -> None:
-    from alpaca_connectors.portfolios import execution
-
-    order = MagicMock()
-    resolved = SimpleNamespace(bars_configuration=SimpleNamespace(uid=BARS_UID))
-    order.resolve.return_value = resolved
-    order.plan.side_effect = RuntimeError("stop after the order is known")
-    with (
-        patch("alpaca_connectors.runtime.start_portfolio_job_engine"),
-        patch.object(execution, "resolve_portfolio_configuration", order.resolve),
-        patch.object(execution, "update_portfolio_bars", order.bars),
-        patch.object(execution, "build_portfolio_run", order.plan),
-        pytest.raises(RuntimeError, match="stop after"),
-    ):
-        execution.execute_portfolio_configuration(CONFIGURATION_UID)
-    assert [name for name, *_ in order.mock_calls] == ["resolve", "bars", "plan"]
 
 
 # ------------------------------------------------------------------------------------------------

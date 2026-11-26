@@ -117,14 +117,14 @@ def _resolved(name: str, bars_uid: str, assets: tuple[str, ...]) -> ResolvedPort
     )
 
 
-def test_a_tick_updates_each_bars_feed_once_and_isolates_each_failure() -> None:
+def test_a_tick_shares_its_price_chains_and_isolates_each_failure() -> None:
     x, y, z = (str(uuid.UUID(name * 32)) for name in "abc")
     resolved = {
         x: _resolved("a", "bars-1", ("ALPACA::a",)),
         y: _resolved("b", "bars-1", ("ALPACA::b",)),
         z: LookupError("Bars configuration missing."),
     }
-    bars_updates = []
+    chains = []
     entries = []
     recorded_rows = []
 
@@ -145,16 +145,14 @@ def test_a_tick_updates_each_bars_feed_once_and_isolates_each_failure() -> None:
         patch.object(execution, "resolve_portfolio_configurations", return_value=resolved),
         patch.object(
             execution,
-            "update_portfolio_bars",
-            lambda value: bars_updates.append(value) or {"bars_configuration_uid": "bars-1"},
-        ),
-        patch.object(
-            execution,
             "build_portfolio_run",
-            lambda value: SimpleNamespace(
-                portfolio_configuration=value.signal_uid,
-                unique_identifier=f"ALPACA_PORTFOLIO__{value.signal_uid}",
-                calendar_uid="calendar-uid",
+            lambda value, *, price_chains: (
+                chains.append(price_chains)
+                or SimpleNamespace(
+                    portfolio_configuration=value.signal_uid,
+                    unique_identifier=f"ALPACA_PORTFOLIO__{value.signal_uid}",
+                    calendar_uid="calendar-uid",
+                )
             ),
         ),
         patch.object(markets_api, "run_portfolios", run_portfolios),
@@ -172,9 +170,8 @@ def test_a_tick_updates_each_bars_feed_once_and_isolates_each_failure() -> None:
     ):
         result = execution.execute_portfolio_configurations([x, y, z])
 
-    # One update of the shared feed, for every asset of its portfolios.
-    [update] = bars_updates
-    assert update.asset_identifiers == ("ALPACA::a", "ALPACA::b")
+    # No bars update before the run: every build shares one set of price chains (ADR 0033).
+    assert len(chains) == 2 and chains[0] is chains[1]
     # One run for both portfolios that resolved; Markets is asked only about the one that ran.
     assert [entry.unique_identifier for entry in entries] == [
         "ALPACA_PORTFOLIO__signal-a",

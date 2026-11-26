@@ -25,7 +25,7 @@ from alpaca_connectors.portfolios.configurations import (
     update_portfolio_configuration_row,
 )
 from alpaca_connectors.portfolios.interpolated_prices import (
-    build_alpaca_interpolated_prices,
+    build_account_interpolated_prices,
     resolve_alpaca_bars_tables,
 )
 from alpaca_connectors.portfolios.rebalance_schedule import first_rebalance_state
@@ -67,7 +67,6 @@ class PortfolioExecutionResult:
     # Rows the run published per series, ``weights`` and ``values``, as Markets answered
     # (``markets_api.run_portfolio``). The recipe does not count the rows of the private stages.
     written: dict[str, int] = field(default_factory=dict)
-    bars_update: dict[str, Any] = field(default_factory=dict)
     first_rebalance: dict[str, Any] = field(default_factory=dict)
 
     def summary(self) -> dict[str, Any]:
@@ -80,7 +79,6 @@ class PortfolioExecutionResult:
             **self.resolved.summary(),
             "portfolio_uid": self.portfolio_uid,
             "portfolio_unique_identifier": self.portfolio_unique_identifier,
-            "bars_update": dict(self.bars_update),
             "first_rebalance": dict(self.first_rebalance),
             "interpolation": None,
             "calendar_events": None,
@@ -390,14 +388,60 @@ def preflight_portfolio_configuration(
     return answer
 
 
-def build_portfolio_run(resolved: ResolvedPortfolioConfiguration) -> PortfolioRunPlan:
+def _bars_account_uid(resolved: ResolvedPortfolioConfiguration) -> str:
+    """The account the portfolio's bars belong to: its feed's, or its own configuration's."""
+    bars = resolved.bars_configuration
+    account_uid = getattr(bars, "account_uid", None) or resolved.configuration.account_uid
+    if account_uid is None:
+        raise LookupError(
+            f"Bar configuration {bars.uid!s} belongs to a portfolio without an account."
+        )
+    return str(account_uid)
+
+
+def account_price_chain(
+    resolved: ResolvedPortfolioConfiguration,
+    chains: dict[tuple[Any, ...], Any] | None = None,
+) -> Any:
+    """The interpolated prices of the portfolio's account on its bars profile (ADR 0033).
+
+    Their source is the account's ``AccountStockBars``. ``chains`` holds the ones a run has
+    built: every portfolio of one account and profile gets the same instance, so they run once in
+    the run's graph and the account's assets are resolved once in its process.
+    """
+    configuration = resolved.configuration
+    bars = resolved.bars_configuration
+    profile = (bars.frequency_id, bars.feed, bars.adjustment)
+    key = (
+        _bars_account_uid(resolved),
+        profile,
+        configuration.upsample_frequency_id,
+        configuration.intraday_bar_interpolation_rule,
+    )
+    chains = {} if chains is None else chains
+    if key not in chains:
+        chains[key] = build_account_interpolated_prices(
+            account_uid=key[0],
+            profile=profile,
+            upsample_frequency_id=configuration.upsample_frequency_id,
+            intraday_bar_interpolation_rule=configuration.intraday_bar_interpolation_rule,
+        )
+    return chains[key]
+
+
+def build_portfolio_run(
+    resolved: ResolvedPortfolioConfiguration,
+    *,
+    price_chains: dict[tuple[Any, ...], Any] | None = None,
+) -> PortfolioRunPlan:
     """Build what this application supplies to a portfolio run (ADR 0031, decision 5).
 
-    Its interpolated prices as the valuation source, the calendar's session events (in its
-    private table), the rebalance strategy with the configuration's commission, the calendar and
-    the ``ApplicationWeights`` signal of the configuration, the ledger (ms-markets ADR 0065), and
-    the ``ALPACA_PORTFOLIO__<hex>`` identifier. ms-markets' ``run_portfolio`` builds and runs the
-    chain from it.
+    Its account's interpolated prices on its bars profile as the valuation source
+    (``account_price_chain``, ADR 0033), the calendar's session events (in its private table),
+    the rebalance strategy with the configuration's commission, the calendar and the
+    ``ApplicationWeights`` signal of the configuration, the ledger (ms-markets ADR 0065), and the
+    ``ALPACA_PORTFOLIO__<hex>`` identifier. ms-markets' ``run_portfolio`` builds and runs the
+    chain from it. A run of several portfolios passes one ``price_chains`` to every build.
 
     The ledger opens at the signal's first observation with ``LEDGER_INITIAL_NAV`` in cash and
     values every position at its interpolated close (``MarketPriceValuationModel``) with the
@@ -429,6 +473,7 @@ def build_portfolio_run(resolved: ResolvedPortfolioConfiguration) -> PortfolioRu
 
     from alpaca_connectors.holdings.account import DEFAULT_CASH_ASSET_IDENTIFIER
     from alpaca_connectors.instances import AlpacaPortfolioCalendarEventsStorage
+    from alpaca_connectors.market_data.alpaca_bars import AlpacaStockBarsFetch
     from alpaca_connectors.portfolios.provided_weights import portfolio_signal_key
     from alpaca_connectors.portfolios.signal_definitions import weights_signal
 
@@ -439,17 +484,7 @@ def build_portfolio_run(resolved: ResolvedPortfolioConfiguration) -> PortfolioRu
     signal = weights_signal(portfolio_signal_key(configuration))
     if signal.signal_uid != resolved.signal_uid:
         raise RuntimeError("Resolved Signal identity changed while building the portfolio run.")
-    valuation_source = build_alpaca_interpolated_prices(
-        source_table=resolved.source_table,
-        asset_identifiers=list(resolved.asset_identifiers),
-        profile=(
-            resolved.bars_configuration.frequency_id,
-            resolved.bars_configuration.feed,
-            resolved.bars_configuration.adjustment,
-        ),
-        upsample_frequency_id=configuration.upsample_frequency_id,
-        intraday_bar_interpolation_rule=configuration.intraday_bar_interpolation_rule,
-    )
+    valuation_source = account_price_chain(resolved, price_chains)
     calendar_row = ensure_trading_calendar(rebalance.calendar_identifier)
     if str(calendar_row.unique_identifier) != rebalance.calendar_identifier:
         raise RuntimeError(
@@ -458,10 +493,12 @@ def build_portfolio_run(resolved: ResolvedPortfolioConfiguration) -> PortfolioRu
     # Both strategies read the sessions of the portfolio's calendar (ms-markets ADR 0058): a
     # trade waits for the market to be open, and each asset trades at its next observed price.
     # The events table publishes both session boundaries; `calendar_event_signal`'s own event is
-    # one of them. They are this application's private rows.
+    # one of them. They are this application's private rows. They start at a fixed time, not at
+    # the portfolio's signal, so every portfolio of a calendar shares one update (ADR 0033); each
+    # rebalance reads only its own window.
     calendar_events = PortfolioCalendarEvents(
         config=PortfolioCalendarEventsConfiguration(
-            offset_start=resolved.signal_start_time,
+            offset_start=AlpacaStockBarsFetch.OFFSET_START,
             calendar_identifier=rebalance.calendar_identifier,
             session_label=rebalance.session_label,
             event_types=SESSION_EVENT_TYPES,
@@ -547,60 +584,13 @@ def build_portfolio_run(resolved: ResolvedPortfolioConfiguration) -> PortfolioRu
     )
 
 
-def update_portfolio_bars(resolved: ResolvedPortfolioConfiguration) -> dict[str, Any]:
-    """Fetch the bars the run values with, before it values (issue #39).
-
-    Without it, a run started at once after new weights lacks the prices of an asset the signal
-    just gained until the 00:00 UTC bars run, and fails on missing prices. This is the bars Job's
-    own update for the run's bars configuration (the portfolio's own, or the feed a portfolio not
-    yet adopted names), which prices every asset the signal has published, incrementally. A
-    failed update (keys removed, Alpaca unavailable) never stops the run: it values with the
-    prices already stored, as it did before, and the summary says the update failed.
-
-    When every asset of the run already holds its last final daily bar, there is nothing to fetch
-    and the update does not run (``current_through`` in the summary): one read instead of
-    resolving the update's scope, the account and its keys and running the updater.
-    """
-    from alpaca_connectors.market_data import execute_market_data_update
-    from alpaca_connectors.market_data.services import daily_bars_current_through
-
-    bars_uid = str(resolved.bars_configuration.uid)
-    bars = resolved.bars_configuration
-    try:
-        # Nothing to fetch when every asset already holds its last final bar: the update would
-        # resolve its scope, the account and its keys, and run an updater, to write nothing.
-        current = daily_bars_current_through(
-            (bars.frequency_id, bars.feed, bars.adjustment), resolved.asset_identifiers
-        )
-        if current is not None:
-            return {
-                "bars_configuration_uid": bars_uid,
-                "updated": True,
-                "rows_persisted": 0,
-                "current_through": current.isoformat(),
-            }
-        result = execute_market_data_update(configuration_uid=bars_uid)
-    except Exception as exc:  # noqa: BLE001 - the run keeps what worked before (issue #39)
-        # The type only: a provider message can carry request context.
-        logger.warning(
-            "The portfolio's bars update failed (%s); the run values with the stored prices.",
-            type(exc).__name__,
-        )
-        return {"bars_configuration_uid": bars_uid, "updated": False, "error": type(exc).__name__}
-    return {
-        "bars_configuration_uid": bars_uid,
-        "updated": True,
-        "rows_persisted": int(result.get("rows_persisted") or 0),
-    }
-
-
 def execute_portfolio_configuration(configuration_uid: Any) -> PortfolioExecutionResult:
     """Run a portfolio configuration with the ms-markets recipe ``run_portfolio`` (ADR 0031).
 
-    Its bars first (issue #39), then the run: ms-markets runs the calendar events (for
-    ``calendar_event_signal``), the rebalance state into this application's private table, the
-    executed weights and the interpolated prices, then the values, from the signal's first
-    observation and reading only its one signal; the `Portfolio` row is the configuration's
+    ms-markets runs its account's bars and interpolated prices on its profile (ADR 0033), the
+    calendar events, the rebalance state into this application's private table, the executed
+    weights, then the values, from the signal's first observation and reading only its one
+    signal; a failed bars fetch blocks the run. The `Portfolio` row is the configuration's
     ``ALPACA_PORTFOLIO__<hex>``, the ledger is this application's private table, and the weights
     and values, projections of the ledger, are published to Markets. Nothing is
     registered or reconciled. The calls that give the portfolio weights remain the signal
@@ -617,7 +607,6 @@ def execute_portfolio_configuration(configuration_uid: Any) -> PortfolioExecutio
     # portfolio model set before configuration readers can initialize a smaller app runtime.
     start_portfolio_job_engine()
     resolved = resolve_portfolio_configuration(configuration_uid)
-    bars_update = update_portfolio_bars(resolved)
     plan = build_portfolio_run(resolved)
     # The rebalance reads the events up to its own start, which is after this time.
     rebalanced_through = dt.datetime.now(dt.UTC)
@@ -636,7 +625,7 @@ def execute_portfolio_configuration(configuration_uid: Any) -> PortfolioExecutio
         first_rebalance = _recorded_rebalance(
             first_rebalance, portfolio_weights_recorded(answer.portfolio_unique_identifier)
         )
-    return _finish_run(resolved, answer, bars_update=bars_update, first_rebalance=first_rebalance)
+    return _finish_run(resolved, answer, first_rebalance=first_rebalance)
 
 
 def _first_rebalance(
@@ -668,7 +657,6 @@ def _finish_run(
     resolved: ResolvedPortfolioConfiguration,
     answer: Any,
     *,
-    bars_update: dict[str, Any],
     first_rebalance: dict[str, Any],
 ) -> PortfolioExecutionResult:
     """Record the run's ``Portfolio`` on its configuration and shape its result."""
@@ -689,7 +677,6 @@ def _finish_run(
         portfolio_uid=portfolio_uid,
         portfolio_unique_identifier=answer.portfolio_unique_identifier,
         written=dict(answer.written),
-        bars_update=bars_update,
         first_rebalance=first_rebalance,
     )
 
@@ -791,14 +778,13 @@ def execute_portfolio_configurations(configuration_uids: Sequence[Any]) -> Portf
     """Run several portfolio configurations in one MetaTables invocation (``run_portfolios``).
 
     The run of the dispatcher's tick (ADR 0013, as amended): the configurations resolve
-    together (``resolve_portfolio_configurations``); each bars configuration is updated once,
-    for every asset of its portfolios (issue #39); then every portfolio's ledger is a head of one
-    joined graph, so a node several share runs once and no portfolio waits for another process;
-    each publishes its own weights and values. A configuration that does not resolve, build or
-    run is answered with its error; it never stops the others.
+    together (``resolve_portfolio_configurations``); every portfolio of one account and bars
+    profile is valued by one price chain (ADR 0033), and every portfolio's ledger is a head of one
+    joined graph, so the account's bars, its prices and a calendar's events run once and no
+    portfolio waits for another process; each publishes its own weights and values. A
+    configuration that does not resolve, build or run is answered with its error; it never stops
+    the others, but a failed bars fetch blocks every portfolio its prices value.
     """
-    from dataclasses import replace
-
     from alpaca_connectors.instances import (
         AlpacaPortfolioEventLedgerStorage,
         AlpacaPortfolioRebalanceStateStorage,
@@ -819,23 +805,11 @@ def execute_portfolio_configurations(configuration_uids: Sequence[Any]) -> Portf
         if isinstance(value, ResolvedPortfolioConfiguration)
     }
 
-    # One bars update per bars configuration, for the assets of all its portfolios.
-    by_bars: dict[str, list[str]] = {}
-    for uid, value in resolved.items():
-        by_bars.setdefault(str(value.bars_configuration.uid), []).append(uid)
-    bars_updates: dict[str, dict[str, Any]] = {}
-    for members in by_bars.values():
-        assets = sorted({a for uid in members for a in resolved[uid].asset_identifiers})
-        update = update_portfolio_bars(
-            replace(resolved[members[0]], asset_identifiers=tuple(assets))
-        )
-        for uid in members:
-            bars_updates[uid] = update
-
     plans: dict[str, PortfolioRunPlan] = {}
+    price_chains: dict[tuple[Any, ...], Any] = {}
     for uid, value in resolved.items():
         try:
-            plans[uid] = build_portfolio_run(value)
+            plans[uid] = build_portfolio_run(value, price_chains=price_chains)
         except Exception as exc:  # noqa: BLE001 - one configuration's failure stops only it
             results[uid] = exc
     # The rebalances read the events up to their own start, which is after this time.
@@ -881,9 +855,7 @@ def execute_portfolio_configurations(configuration_uids: Sequence[Any]) -> Portf
         if uid in recorded:
             first = _recorded_rebalance(first, recorded[uid])
         try:
-            results[uid] = _finish_run(
-                resolved[uid], answer, bars_update=bars_updates[uid], first_rebalance=first
-            )
+            results[uid] = _finish_run(resolved[uid], answer, first_rebalance=first)
         except Exception as exc:  # noqa: BLE001 - one configuration's failure stops only it
             results[uid] = exc
     return PortfolioBatchResult(results=results)
@@ -895,6 +867,7 @@ __all__ = [
     "PortfolioRunPlan",
     "PortfolioPreflight",
     "ResolvedPortfolioConfiguration",
+    "account_price_chain",
     "build_portfolio_run",
     "PortfolioBatchResult",
     "execute_portfolio_configuration",

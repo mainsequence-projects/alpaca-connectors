@@ -152,16 +152,16 @@ alpaca-connectors portfolio run <PORTFOLIO_CONFIGURATION_UID>
 alpaca-connectors portfolio runs <PORTFOLIO_CONFIGURATION_UID>
 ```
 
-Execution first runs its bars configuration's update, so an asset the signal just gained is priced
-(issue #39); a failed update leaves the run to value with the prices already stored. One read of
-the bars table comes first: when every asset of the run already holds the bar of the last session
-whose daily bar is final (its New York midnight before today's 00:00 UTC), there is nothing to
-fetch and the update does not run (`bars_update.current_through` in the summary). The inputs the
-run resolves are read in three steps, each step's reads together. It then reads
+The inputs the run resolves are read in three steps, each step's reads together. It then reads
 the portfolio's published observations and runs the ms-markets recipe `run_portfolio`: one
-MetaTables invocation runs the configuration-derived persistent `InterpolatedPrices`, the calendar
+MetaTables invocation runs its account's `AccountStockBars` and `InterpolatedPrices` on its bars
+profile ([ADR 0033](../adrs/0033_an_accounts_portfolios_share_one_price_chain.md)), the calendar
 events, the rebalance state and the ledger (`PortfolioEngine`, ms-markets ADR 0065), and the run
-then publishes the weights and values the ledger projects.
+then publishes the weights and values the ledger projects. The bars node reads the bars table
+first: when every asset already holds the bar of the last session whose daily bar is final (its
+New York midnight before today's 00:00 UTC), it fetches nothing and resolves no keys. A failed
+fetch fails the run. In a run of several configurations, every portfolio of one account and
+profile shares the bars and prices nodes, and every portfolio of a calendar its events.
 The interpolated prices are written to the table of the portfolio's bars profile, which revision
 `0034` creates and the migration Job registers
 ([ADR 0029](../adrs/0029_interpolated_price_tables_are_named_like_every_project_table.md)); the

@@ -144,20 +144,21 @@ runs with the portfolio's account's keys, has the `portfolios` source and is del
 portfolio. Its profile (`1d/sip/all` or `1d/iex/raw`) chooses the shared price table its bars land
 in, whose rows name no account ([Alpaca Bars](../market_data/alpaca_bars.md)):
 
-- **Its assets** are every asset the portfolio's signal ever published, read from the
-  signal-asset table, never from the signal weights series. A portfolio whose `Portfolio` is
-  retired prices nothing; a paused one still counts. The `resolve` action
+- **Its bars are its account's** ([ADR 0033](../adrs/0033_an_accounts_portfolios_share_one_price_chain.md)). One `AccountStockBars` per account and
+  profile fetches every asset the signals of the account's live portfolios on that profile ever
+  published, read from the signal-asset table, never from the signal weights series. A portfolio
+  whose `Portfolio` is retired prices nothing; a paused one still counts. The `resolve` action
   (`POST /v1/market-data/bar-configurations/{uid}/actions/resolve`) shows the list a run would use.
 - **New weights need no edit.** The portfolio's next run, or the next bars run, picks up an asset
   the signal was just given.
 - **Shared prices.** Two accounts' configurations on the same profile write the same table; a
   portfolio is valued from it whichever account fetched a price.
 - **The order of the day.** Bars run at 00:00 UTC and portfolios at 02:00 UTC. Every portfolio
-  run, the one `actions/run` starts included, first runs its bars configuration's update, so a
-  run started at once after new weights has the new asset's prices (issue #39). A failed update
-  (keys removed, Alpaca unavailable) does not stop the run: it values with the prices already
-  stored, and the run's summary reports `bars_update`. When every asset already holds its last
-  final daily bar, the update has nothing to fetch and does not run (`current_through`).
+  run, the one `actions/run` starts included, runs its account's `AccountStockBars` as the first
+  node of its graph, so a run started at once after new weights has the new asset's prices. When
+  every asset already holds its last final daily bar, the node fetches nothing and makes no
+  Alpaca request. A failed fetch (keys removed, Alpaca unavailable) blocks the prices, rebalances
+  and ledgers of the account's portfolios on that profile, and each is listed as failed.
 
 ## Rebalance Configurations
 
@@ -236,13 +237,14 @@ rebalance state + InterpolatedPrices ──> PortfolioEngine ─> event ledger
   metadata.
 - **The assets priced** are every asset the portfolio ever held, from the signal-asset table, so a
   history it started with is valued, including assets that history already dropped.
-- **One producer runs first.** A run requires a published observation, then runs its bars
-  configuration's update, the bars Job's own, with the account's keys (issue #39), then the
+- **One price chain per account and profile.** A run requires a published observation, then the
   ms-markets recipe `run_portfolio` runs the ledger's graph in one MetaTables invocation: the
-  interpolated prices and the calendar events, then the rebalance decisions and the ledger; then
-  it publishes the weights and values the ledger projects. The interpolated prices read the bars
-  table by reference (`TimeIndexTableRef`), so the bars are not a node of that graph. The bars
-  keep their own Job and schedule.
+  account's `AccountStockBars`, with the account's keys, then its `InterpolatedPrices`, which take
+  their assets from those bars, and the calendar events, then the rebalance decisions and the
+  ledger; then it publishes the weights and values the ledger projects ([ADR 0033](../adrs/0033_an_accounts_portfolios_share_one_price_chain.md)). Every
+  portfolio of the account on that profile shares the bars and the prices, and every portfolio of
+  a calendar its events, which start at 2018-01-01; no update hash holds an asset. The bars also
+  keep their own Job and schedule, which run the same `AccountStockBars`.
 
 ## Valuation
 

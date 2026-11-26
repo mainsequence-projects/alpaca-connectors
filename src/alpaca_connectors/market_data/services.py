@@ -340,14 +340,19 @@ def build_market_data_update(
 
     The resolver performs governed reads only. In particular it does not contact Alpaca, an
     ``account_holdings`` source never captures a new snapshot, and a ``portfolios`` source reads
-    no time series (ADR 0024).
+    no time series (ADR 0024). A ``portfolios`` configuration runs as its account's
+    ``AccountStockBars`` of its profile (ADR 0033, decision 5), the updater a portfolio run's graph
+    builds, so the account's bars have one update record.
     """
     from alpaca_connectors.account.services import get_account_registration
     from alpaca_connectors.holdings import resolve_recent_account_holdings_assets
+    from alpaca_connectors.market_data.account_bars import (
+        AccountStockBars,
+        AccountStockBarsConfig,
+    )
     from alpaca_connectors.market_data.alpaca_bars import (
         AlpacaStockBarsConfig,
         AlpacaStockBarsNode,
-        AlpacaStockBarsPortfoliosConfig,
     )
     from alpaca_connectors.market_data.configurations import (
         bar_configuration_account_uid,
@@ -377,6 +382,7 @@ def build_market_data_update(
     storage = storage_for(*triple)
     dataset = _dataset_from_storage(triple, storage)
     source_snapshot: dict[str, Any] | None = None
+    node: Any = None
     runtime_config_values: dict[str, Any] = {
         "frequency_id": configuration.frequency_id,
         "feed": configuration.feed,
@@ -388,13 +394,19 @@ def build_market_data_update(
         identifiers = _asset_identifiers_from_uids(asset_uids)
         runtime_config_values["asset_list"] = identifiers
     elif configuration.asset_source == "portfolios":
-        from alpaca_connectors.portfolios.bars_scope import resolve_portfolio_bars_scope
-
-        portfolio_scope = resolve_portfolio_bars_scope(configuration.uid)
-        identifiers = list(portfolio_scope.asset_identifiers)
+        node = AccountStockBars(
+            AccountStockBarsConfig(
+                account_uid=keys_account_uid,
+                frequency_id=configuration.frequency_id,
+                feed=configuration.feed,
+                adjustment=configuration.adjustment,
+            ),
+            hash_namespace=hash_namespace,
+        )
+        account_scope = node.account_scope()
+        identifiers = list(account_scope.asset_identifiers)
         asset_uids = _asset_uids_from_identifiers(identifiers) if identifiers else []
-        source_snapshot = portfolio_scope.snapshot()
-        runtime_config_values["bars_configuration_uid"] = configuration.uid
+        source_snapshot = account_scope.snapshot()
     else:
         account_scope = resolve_recent_account_holdings_assets(configuration.account_uid)
         identifiers = account_scope.asset_identifiers
@@ -408,17 +420,12 @@ def build_market_data_update(
     if not identifiers:
         raise ValueError("The stored bar configuration resolves to no assets.")
 
-    config_class = (
-        AlpacaStockBarsPortfoliosConfig
-        if configuration.asset_source == "portfolios"
-        else AlpacaStockBarsConfig
-    )
-    config = config_class(**runtime_config_values)
-    node = AlpacaStockBarsNode(
-        config=config,
-        resolved_asset_identifiers=identifiers,
-        hash_namespace=hash_namespace,
-    )
+    if node is None:
+        node = AlpacaStockBarsNode(
+            config=AlpacaStockBarsConfig(**runtime_config_values),
+            resolved_asset_identifiers=identifiers,
+            hash_namespace=hash_namespace,
+        )
     summary = {
         "configuration": configuration.model_dump(mode="json"),
         "dataset": asdict(dataset),

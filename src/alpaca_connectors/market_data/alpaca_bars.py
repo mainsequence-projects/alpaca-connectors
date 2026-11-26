@@ -38,11 +38,9 @@ class AlpacaStockBarsConfig(AssetIndexedUpdaterConfiguration):
     foreign key live on the storage class (``alpaca_connectors.market_data.storage``), NOT here. This
     config carries only the fields that select the table meaning and the source identity. For an
     explicit-asset source, the inherited ``asset_list`` is hashed. For account holdings, the
-    Account UID is hashed while the newest eligible snapshot is resolved dynamically. A ``portfolios`` source uses the subclass
-    ``AlpacaStockBarsPortfoliosConfig``, which hashes its bars configuration UID while the assets
-    of its live portfolios are resolved dynamically (ADR 0024); it is a subclass so that this
-    class keeps its fields, and every existing configuration keeps its update hash. Storage
-    identity lives on the selected storage class.
+    Account UID is hashed while the newest eligible snapshot is resolved dynamically. A
+    ``portfolios`` bars configuration runs as its account's ``AccountStockBars`` (ADR 0033), not
+    with this config. Storage identity lives on the selected storage class.
     """
 
     frequency_id: str = Field(
@@ -57,7 +55,7 @@ class AlpacaStockBarsConfig(AssetIndexedUpdaterConfiguration):
         ...,
         description="Alpaca adjustment mode, for example raw, split, dividend, or all.",
     )
-    asset_source: Literal["assets", "account_holdings", "portfolios"] = Field(
+    asset_source: Literal["assets", "account_holdings"] = Field(
         ...,
         description="Asset resolution strategy for this updater identity.",
     )
@@ -94,44 +92,26 @@ class AlpacaStockBarsConfig(AssetIndexedUpdaterConfiguration):
                 raise ValueError("assets source requires a non-empty asset_list.")
             if self.account_uid:
                 raise ValueError("assets source forbids account_uid.")
-        elif self.asset_source == "portfolios":
-            if (
-                not isinstance(self, AlpacaStockBarsPortfoliosConfig)
-                or self.asset_list
-                or self.account_uid
-            ):
-                raise ValueError(
-                    "portfolios source requires AlpacaStockBarsPortfoliosConfig and forbids "
-                    "asset_list and account_uid."
-                )
         elif not self.account_uid or self.asset_list:
             raise ValueError("account_holdings source requires account_uid and forbids asset_list.")
         return self
 
 
-class AlpacaStockBarsPortfoliosConfig(AlpacaStockBarsConfig):
-    """A ``portfolios`` source: the bars configuration UID is its hashed scope (ADR 0024)."""
+class AlpacaStockBarsFetch:
+    """The Alpaca OHLCV fetch shared by the bars updaters.
 
-    asset_source: Literal["portfolios"] = Field(
-        default="portfolios",
-        description="Every asset ever published by the live portfolios that name the configuration.",
-    )
-    bars_configuration_uid: uuid.UUID = Field(
-        ...,
-        description="Bars configuration UID used only as the dynamic portfolios source identity.",
-    )
-
-
-class AlpacaStockBarsNode(AssetIndexedUpdater):
-    """Asset-indexed Alpaca OHLCV bars producer.
-
-    Subclasses ``AssetIndexedUpdater`` (not ``AssetTimestampedUpdater``) because it *fetches*
-    from Alpaca during ``update()`` rather than receiving pre-built frames. The base supplies the
-    asset scoping and per-asset incremental ``update_statistics`` that the old node hand-rolled.
+    A mixin with no constructor, so each updater's own ``__init__`` is the whole of what MetaTables
+    saves and hashes for it. The updater sets ``_historical_client`` and ``_trading_client`` before
+    ``update()`` and answers ``get_asset_list()``; ``config`` carries ``frequency_id``, ``feed`` and
+    ``adjustment``.
     """
 
     # Same value the base already defines; kept explicit so the 2018 first-run floor is obvious.
     OFFSET_START = dt.datetime(2018, 1, 1, tzinfo=UTC)
+
+    _asset_bindings = None
+    _historical_client = None
+    _trading_client = None
 
     @classmethod
     def _required_output_table(cls):
@@ -141,22 +121,6 @@ class AlpacaStockBarsNode(AssetIndexedUpdater):
         ``__init__``; this default only seeds ``_default_identifier()`` at the class level.
         """
         return AlpacaStockBars1dSipAllStorage
-
-    def __init__(
-        self,
-        config: AlpacaStockBarsConfig,
-        *,
-        historical_client=None,
-        trading_client=None,
-        resolved_asset_identifiers: list[str] | None = None,
-        **kwargs,
-    ):
-        self._asset_bindings = None
-        self._historical_client = historical_client
-        self._trading_client = trading_client
-        self._resolved_asset_identifiers = resolved_asset_identifiers
-        output_table = storage_for(config.frequency_id, config.feed, config.adjustment)
-        super().__init__(config=config, output_table=output_table, **kwargs)
 
     @property
     def frequency_id(self) -> str:
@@ -170,6 +134,10 @@ class AlpacaStockBarsNode(AssetIndexedUpdater):
     def adjustment(self) -> str:
         return self.config.adjustment
 
+    @property
+    def bars_profile(self) -> tuple[str, str, str]:
+        return (self.frequency_id, self.feed, self.adjustment)
+
     def dependencies(self) -> dict:
         """No upstream updaters.
 
@@ -179,23 +147,6 @@ class AlpacaStockBarsNode(AssetIndexedUpdater):
         not declared as an upstream table.
         """
         return {}
-
-    def get_asset_list(self) -> list[str]:
-        """Resolve the updater's assets to a list of asset unique identifiers (strings)."""
-        config = self.config
-        if self._resolved_asset_identifiers is not None:
-            return self.validate_asset_list(self._resolved_asset_identifiers)
-        if config.asset_source == "assets":
-            return self.validate_asset_list(list(config.asset_list or []))
-        if isinstance(config, AlpacaStockBarsPortfoliosConfig):
-            from alpaca_connectors.portfolios.bars_scope import resolve_portfolio_bars_scope
-
-            scope = resolve_portfolio_bars_scope(config.bars_configuration_uid)
-            return self.validate_asset_list(list(scope.asset_identifiers))
-        from alpaca_connectors.holdings import resolve_recent_account_holdings_assets
-
-        resolved = resolve_recent_account_holdings_assets(config.account_uid)
-        return self.validate_asset_list(resolved.asset_identifiers)
 
     def _resolve_asset_bindings(self):
         if self._asset_bindings is not None:
@@ -223,7 +174,7 @@ class AlpacaStockBarsNode(AssetIndexedUpdater):
     def _get_historical_client(self):
         if self._historical_client is None:
             raise RuntimeError(
-                "AlpacaStockBarsNode requires an account-resolved historical_client."
+                f"{type(self).__name__} requires an account-resolved historical_client."
             )
         return self._historical_client
 
@@ -307,8 +258,46 @@ class AlpacaStockBarsNode(AssetIndexedUpdater):
         return start_date or offset_start
 
 
+class AlpacaStockBarsNode(AlpacaStockBarsFetch, AssetIndexedUpdater):
+    """Asset-indexed Alpaca OHLCV bars producer of an ``assets`` or ``account_holdings`` source.
+
+    Subclasses ``AssetIndexedUpdater`` (not ``AssetTimestampedUpdater``) because it *fetches*
+    from Alpaca during ``update()`` rather than receiving pre-built frames. The base supplies the
+    asset scoping and per-asset incremental ``update_statistics`` that the old node hand-rolled.
+    """
+
+    def __init__(
+        self,
+        config: AlpacaStockBarsConfig,
+        *,
+        historical_client=None,
+        trading_client=None,
+        resolved_asset_identifiers: list[str] | None = None,
+        **kwargs,
+    ):
+        self._asset_bindings = None
+        self._historical_client = historical_client
+        self._trading_client = trading_client
+        self._resolved_asset_identifiers = resolved_asset_identifiers
+        output_table = storage_for(config.frequency_id, config.feed, config.adjustment)
+        super().__init__(config=config, output_table=output_table, **kwargs)
+
+    def get_asset_list(self) -> list[str]:
+        """Resolve the updater's assets to a list of asset unique identifiers (strings)."""
+        config = self.config
+        if self._resolved_asset_identifiers is not None:
+            return self.validate_asset_list(self._resolved_asset_identifiers)
+        if config.asset_source == "assets":
+            return self.validate_asset_list(list(config.asset_list or []))
+        from alpaca_connectors.holdings import resolve_recent_account_holdings_assets
+
+        resolved = resolve_recent_account_holdings_assets(config.account_uid)
+        return self.validate_asset_list(resolved.asset_identifiers)
+
+
 __all__ = [
     "ASSET_IDENTIFIER_DIMENSION",
     "AlpacaStockBarsConfig",
+    "AlpacaStockBarsFetch",
     "AlpacaStockBarsNode",
 ]

@@ -87,21 +87,20 @@ def resolve_alpaca_bars_time_index_meta_table_uids(
 
 def build_alpaca_interpolated_prices(
     *,
-    source_table: Any,
-    asset_identifiers: list[str],
+    source: Any,
     profile: tuple[str, str, str],
     upsample_frequency_id: str = "1d",
     intraday_bar_interpolation_rule: str = "ffill",
 ) -> Any:
-    """Build InterpolatedPrices sourced from registered Alpaca bars.
+    """Build InterpolatedPrices that take their assets from their source bars updater.
 
-    Each asset's bars follow the stored trading calendar it is linked to (ms-markets ADR 0056),
-    which registration sets from its Alpaca class (ADR 0026); the scope carries identifiers only,
-    and ms-markets refuses the run when an asset in it has no calendar. It reads the registered
-    bars table ``source_table`` (``resolve_alpaca_bars_tables``) as a ``TimeIndexTableRef``, so the
-    bars are not a node of the portfolio's run: the portfolio Job updates them first. It writes
-    the interpolated-price table of the bars profile (``INTERPOLATED_PRICES_BY_PROFILE``, ADR
-    0029), and ms-markets refuses a table keyed by another configuration.
+    Neither ``asset_list`` nor ``asset_category_unique_id`` is set, so the assets are the
+    source's ``get_asset_list()`` (ms-markets 6.2.1) and the update hash holds the source's update
+    hash, never an asset (ADR 0033). The source is a dependency, so the bars run first, in the
+    same graph. Each asset's bars follow the stored trading calendar it is linked to (ms-markets
+    ADR 0056), which registration sets from its Alpaca class (ADR 0026). It writes the
+    interpolated-price table of the bars profile (``INTERPOLATED_PRICES_BY_PROFILE``, ADR 0029),
+    and ms-markets refuses a table keyed by another configuration.
     """
     from msm_portfolios.contrib.prices.updaters import (
         InterpolatedPrices,
@@ -109,14 +108,10 @@ def build_alpaca_interpolated_prices(
     )
 
     from alpaca_connectors.instances import INTERPOLATED_PRICES_BY_PROFILE
-    from metatables import TimeIndexTableRef
-
-    asset_scope = sorted(set(asset_identifiers))
 
     return InterpolatedPrices(
         interpolation_config=InterpolatedPricesConfig(
-            source_price_instance=TimeIndexTableRef(output_table=source_table),
-            asset_list=asset_scope,
+            source_price_instance=source,
             upsample_frequency_id=upsample_frequency_id,
             intraday_bar_interpolation_rule=intraday_bar_interpolation_rule,
         ),
@@ -124,7 +119,38 @@ def build_alpaca_interpolated_prices(
     )
 
 
+def build_account_interpolated_prices(
+    *,
+    account_uid: Any,
+    profile: tuple[str, str, str],
+    upsample_frequency_id: str = "1d",
+    intraday_bar_interpolation_rule: str = "ffill",
+) -> Any:
+    """The account's price chain on one profile: its ``AccountStockBars`` and their prices."""
+    from alpaca_connectors.market_data.account_bars import (
+        AccountStockBars,
+        AccountStockBarsConfig,
+    )
+
+    frequency_id, feed, adjustment = profile
+    bars = AccountStockBars(
+        AccountStockBarsConfig(
+            account_uid=account_uid,
+            frequency_id=frequency_id,
+            feed=feed,
+            adjustment=adjustment,
+        )
+    )
+    return build_alpaca_interpolated_prices(
+        source=bars,
+        profile=bars.bars_profile,
+        upsample_frequency_id=upsample_frequency_id,
+        intraday_bar_interpolation_rule=intraday_bar_interpolation_rule,
+    )
+
+
 __all__ = [
+    "build_account_interpolated_prices",
     "build_alpaca_interpolated_prices",
     "resolve_alpaca_bars_tables",
     "resolve_alpaca_bars_time_index_meta_table_uid",

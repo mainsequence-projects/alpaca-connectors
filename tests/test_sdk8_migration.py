@@ -12,7 +12,7 @@ from alpaca_connectors.market_data.alpaca_bars import AlpacaStockBarsNode
 from alpaca_connectors.market_data.storage import AlpacaStockBars1dSipAllStorage
 from alpaca_connectors.migrations import METADATA, PROJECT_TABLE_NAMES, migration
 from alpaca_connectors.portfolios.interpolated_prices import (
-    build_alpaca_interpolated_prices,
+    build_account_interpolated_prices,
     resolve_alpaca_bars_time_index_meta_table_uid,
 )
 
@@ -20,7 +20,7 @@ from alpaca_connectors.portfolios.interpolated_prices import (
 def test_runtime_dependency_versions_match_the_sdk9_metatables_stack() -> None:
     assert version("mainsequence") in SpecifierSet(">=9.0.38,<10")
     assert version("mainsequence-metatable") in SpecifierSet(">=0.1.79,<0.2")
-    assert version("ms-markets") in SpecifierSet(">=6.0.0,<7")
+    assert version("ms-markets") in SpecifierSet(">=6.2.1,<7")
 
 
 def test_alpaca_bars_node_declares_sdk8_output_table() -> None:
@@ -103,35 +103,32 @@ def test_portfolio_price_source_resolves_the_migration_catalog_identity() -> Non
     )
 
 
-def test_interpolated_prices_scope_is_identifiers_and_bars_follow_each_asset_calendar() -> None:
-    from metatables import TimeIndexMetaTable, TimeIndexTableRef
+def test_interpolated_prices_take_their_assets_from_the_accounts_bars() -> None:
+    import uuid
+
+    from alpaca_connectors.market_data.account_bars import AccountStockBars
 
     node = object()
-    bars = TimeIndexMetaTable.model_construct(
-        uid="source-table-uid",
-        data_source_uid="data-source-uid",
-        physical_table_name="alpaca_connectors__bars_1d_iex_raw",
-    )
+    account_uid = uuid.UUID("66666666-6666-4666-8666-666666666666")
 
     with patch(
         "msm_portfolios.contrib.prices.updaters.InterpolatedPrices",
         return_value=node,
     ) as interpolated_prices:
-        result = build_alpaca_interpolated_prices(
-            source_table=bars,
-            asset_identifiers=["ALPACA::asset-b", "ALPACA::asset-a", "ALPACA::asset-a"],
-            profile=("1d", "iex", "raw"),
+        result = build_account_interpolated_prices(
+            account_uid=account_uid, profile=("1d", "IEX", "raw")
         )
 
     assert result is node
-    # The bars are read by their registered table, so they are not a node of the run (ms-markets
-    # ADR 0066): the portfolio Job updates them first.
-    source = interpolated_prices.call_args.kwargs["interpolation_config"].source_price_instance
-    assert isinstance(source, TimeIndexTableRef) and source.output_table is bars
-    # ms-markets 4 refuses a calendar in the scope; each asset's bars follow the stored calendar
-    # registration linked it to (ADR 0026).
+    # The source is the account's bars updater on the profile, a node of the run (ADR 0033).
     interpolation_config = interpolated_prices.call_args.kwargs["interpolation_config"]
-    assert interpolation_config.asset_list == ["ALPACA::asset-a", "ALPACA::asset-b"]
+    source = interpolation_config.source_price_instance
+    assert isinstance(source, AccountStockBars)
+    assert source.config.account_uid == account_uid
+    assert source.bars_profile == ("1d", "iex", "raw")
+    # No asset in the configuration: the assets are the source's (ms-markets 6.2.1). Each asset's
+    # bars follow the stored calendar registration linked it to (ADR 0026).
+    assert interpolation_config.asset_list is None
     # ms-markets 5.0.0 requires the table; the run writes its bars profile's (ADR 0029).
     assert (
         interpolated_prices.call_args.kwargs["output_table"]
