@@ -41,6 +41,43 @@ past a dependency's pin, and regenerate `requirements.txt`
 The rules for running the CLI, the API and the Jobs against an environment are in the
 [Operator Guide](operator-guide.md).
 
+## Updaters Run In Node Jobs
+
+A portfolio Job run can run every updater of its MetaTables invocation in its own run of the
+portfolio node Job, independent ones at the same time (MetaTables ADR 0032, ms-markets ADR 0067,
+[ADR 0034](../adrs/0034_portfolio_runs_can_run_their_updaters_in_node_jobs.md)). A node Job run is a
+new process: MetaTables rebuilds the updater from its saved configuration and imports its classes
+by their address. So every updater this repository writes, and every table one writes or reads,
+follows these rules, whether or not it runs in a node Job today:
+
+- **Top-level classes.** The updater and its output table are `class` statements at the top level
+  of a module of `alpaca_connectors` (ms-markets ADR 0066), never a class a function builds, so
+  `module:qualname` imports them. A dictionary that looks classes up is fine.
+- **A configuration of rebuildable values.** Its configuration holds identifiers (UIDs, keys,
+  profiles), pydantic models and other updaters, nothing else: no client, no session, no frame, no
+  callable. What enters the update hash is the updater's identity; nothing that changes from run to
+  run, such as an asset list, enters it.
+- **Everything else resolved when it runs, from that configuration.** The Alpaca keys from the
+  account (`ALPACA_CONNECTORS_DATA_KEY`, ADR 0017), the clients built from them, the asset list,
+  the account's category. Nothing is attached by the process that builds the updater, and nothing
+  depends on state of that process (context variables, module caches filled earlier).
+- **Another node's result comes from its table.** An updater reads what a dependency wrote from
+  that dependency's table, never from the dependency's object.
+- **Scoped statistics without an override.** A node of a joined graph gets no
+  `override_update_stats`. Since ms-markets 6.2.1 `AssetIndexedUpdater.prepare_update_statistics`
+  narrows the table's statistics to `get_asset_list()` on every run
+  ([MainSequenceMarkets#144](https://github.com/mainsequence-projects/MainSequenceMarkets/issues/144));
+  an updater that overrides it calls `super()`.
+- **Tested as a node.** A test runs ms-markets' `node_arguments` and MetaTables'
+  `rebuild_updater` on the updater, with its update records stood in, as ms-markets'
+  `tests/msm_portfolios/time_index/test_node_job_rebuild.py` does: the rebuilt updater has the live
+  one's class, table and update hash.
+- **Access for the node Job.** Whatever the updater reaches when it runs, the node Job's workflow
+  declaration grants too: a Secret it reads, the Markets branch, the MetaTables branch.
+
+A local runtime refuses node Jobs, so local runs and the lifecycle check run every updater in one
+process. The rules above are what keep both modes the same code.
+
 ## Verify
 
 ```bash

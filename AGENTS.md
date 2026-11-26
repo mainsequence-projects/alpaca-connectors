@@ -29,6 +29,9 @@ Repository rules:
   Job, holding `runner` on it, starts the scheduled runs (ADR 0013). `src/jobs/` launchers run by
   path and are bound to live Jobs, so never move them. Every launcher except the migration Job
   starts with `skip_if_schema_behind`.
+- Every updater we write runs in its own node Job run (MetaTables ADR 0032, ms-markets ADR 0067):
+  top-level classes, a configuration of identifiers only, keys and asset lists resolved when it
+  runs, nothing attached by the caller. Checklist: docs/operations/development.md (ADR 0034).
 - Hosted schema changes come only from the migration Job (ADR 0012); never run `metatables
   migrations upgrade` or `downgrade` on a hosted Environment. Revisions add first, drop later. Use
   `metatables` interfaces; every table is on `ProjectBase` (ADR 0029). A person owns each namespace;

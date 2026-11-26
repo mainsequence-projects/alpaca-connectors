@@ -143,7 +143,7 @@ resources:
       policy: value_reader
   spec:
     name: Alpaca Portfolio
-    description: Run one portfolio configuration (--configuration-uid).
+    description: Run portfolio configurations (--configuration-uid, once each).
     execution_path: src/jobs/run_alpaca_portfolio.py
     cpu_request: '0.25'
     memory_request: '0.5'
@@ -155,8 +155,9 @@ resources:
       enabled: true
       tag_regex: null
 # The kind's daily scheduled run (ADR 0013). The dispatcher's scheduled run (`--scheduled`) reads
-# the scheduled configurations and starts one run of the portfolio Job per configuration, through
-# `runner` on that Job (operations/configuration_jobs.py). A push re-applies the declared schedule.
+# the scheduled configurations and starts one run of the portfolio Job for all of them, with
+# `--configuration-uid` once each (decision 9), through `runner` on that Job
+# (operations/configuration_jobs.py). A push re-applies the declared schedule.
 # It runs after the US equity close and after the 00:00 UTC bars update.
 - key: alpaca-portfolio-dispatcher
   kind: job
@@ -171,7 +172,7 @@ resources:
       policy: runner
   spec:
     name: Alpaca Portfolio Dispatcher
-    description: Start one Alpaca Portfolio run per scheduled portfolio configuration (--scheduled).
+    description: Start one Alpaca Portfolio run for every scheduled portfolio configuration (--scheduled).
     execution_path: src/jobs/dispatch_alpaca_portfolio.py
     cpu_request: '0.25'
     memory_request: '0.5'

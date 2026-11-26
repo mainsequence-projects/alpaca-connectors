@@ -55,8 +55,9 @@ class AgentArtifactsTests(unittest.TestCase):
         # The deployed Agent reads only .tau/ (ms-tau-sdk ADR 0025): AGENTS.md holds only developer
         # rules, the runtime prompt is .tau/SYSTEM.md, and the operator manual lives in docs/.
         content = AGENTS_PATH.read_text(encoding="utf-8")
-        # 81: two lines carry the Markets API boundary rule (ms-markets ADR 0047).
-        self.assertLess(len(content.splitlines()), 82)
+        # 81: two lines carry the Markets API boundary rule (ms-markets ADR 0047); 84: three carry
+        # the rule that every updater runs in its own node Job run (ADR 0034).
+        self.assertLess(len(content.splitlines()), 85)
         for retired in (
             "dual-mandate agent",
             "mainsequence-agent-scaffold",
