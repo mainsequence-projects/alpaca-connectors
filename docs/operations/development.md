@@ -58,8 +58,8 @@ follows these rules, whether or not it runs in a node Job today:
   callable. What enters the update hash is the updater's identity; nothing that changes from run to
   run, such as an asset list, enters it.
 - **Everything else resolved when it runs, from that configuration.** The Alpaca keys from the
-  account (`ALPACA_CONNECTORS_DATA_KEY`, ADR 0017), the clients built from them, the asset list,
-  the account's category. Nothing is attached by the process that builds the updater, and nothing
+  account (`ALPACA_CONNECTORS_DATA_KEY`, ADR 0017), the clients built from them, the asset list.
+  Nothing is attached by the process that builds the updater, and nothing
   depends on state of that process (context variables, module caches filled earlier).
 - **Another node's result comes from its table.** An updater reads what a dependency wrote from
   that dependency's table, never from the dependency's object.
@@ -170,7 +170,7 @@ three steps run inside one request, so that request's time is theirs.
 It needs, on this machine:
 
 - the local MetaTables runtime (`metatables serve --local`) with both migrations applied;
-- the Markets API on ms-markets 6.2.0 or later, started from an ms-markets checkout against that
+- the Markets API on ms-markets 6.2.1 or later, started from an ms-markets checkout against that
   runtime, with `MARKETS_API_URL` set for this API and for the script;
 - this API at `http://127.0.0.1:8321` (`ALPACA_LIFECYCLE_API_URL` or `--api-url` names another
   address);

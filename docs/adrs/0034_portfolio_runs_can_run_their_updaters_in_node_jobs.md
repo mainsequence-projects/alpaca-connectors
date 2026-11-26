@@ -35,7 +35,7 @@ Measured in Production on 2026-11-23: a Job run starts in about 47 s (imports on
 schema gate, the engine), and an updater's MetaTables bookkeeping takes about 40 to 50 s
 (6 to 8 requests at 3 to 12 s each). With ADR 0033 an invocation of N portfolios of one account
 holds 2N + 3 updaters, in four levels: `AccountStockBars` (with `PortfolioCalendarEvents` beside
-it), `AccountInterpolatedPrices`, every `PortfolioRebalance`, every `PortfolioEngine`.
+it), its `InterpolatedPrices`, every `PortfolioRebalance`, every `PortfolioEngine`.
 
 | Portfolios | In process: (2N + 3) × ~45 s | In node Jobs: 4 × (~47 s + ~45 s) |
 |---|---|---|

@@ -364,9 +364,14 @@ MetaTables (`mainsequence-metatable`) **0.1.63** and ms-markets **3.4.0**.
   statements (its ADR 0066) and can run a portfolio's nodes in parallel, each in a run of a node
   Job (its ADR 0067). MetaTables 0.1.84 moves its client modules under `metatables.client`,
   `metatables.models` and `metatables.contracts`.
+- On 2026-11-26 the range moved to `ms-markets>=6.2.1`. 6.2.1 lets `InterpolatedPrices` take its
+  assets from its source updater (MainSequenceMarkets#145), which
+  [ADR 0033](adrs/0033_an_accounts_portfolios_share_one_price_chain.md) builds on, and scopes an
+  asset-indexed updater's statistics through MetaTables' public hook (MainSequenceMarkets#144).
+  Nothing in this application changes with it.
 
 `pyproject.toml` keeps non-exact compatibility ranges (`mainsequence[mcp]>=9.0.38,<10`,
-`mainsequence-metatable>=0.1.84,<0.2`, `ms-tau-sdk>=2.0.26,<3`, and `ms-markets>=6.2.0` with no
+`mainsequence-metatable>=0.1.84,<0.2`, `ms-tau-sdk>=2.0.26,<3`, and `ms-markets>=6.2.1` with no
 upper bound since [ADR 0031](adrs/0031_markets_series_are_published_not_shared.md)), while
 `uv.lock` and the exported `requirements.txt` record the resolution. On 2026-10-14 Main Sequence
 had moved from 9.0.23 to 9.0.24, which stopped scaffolding `AGENTS.md` and ships its guidance in
