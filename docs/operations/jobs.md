@@ -258,10 +258,24 @@ compute.
   `alpaca-connectors-api.yaml` (`Memory must be between 1x and 6.5x CPU (GiB per vCPU)`), so the
   push of `24fab2b` deployed nothing from that file: no migration, no API, no Agent. The bars
   workflow deployed. The next commit sets 1 GiB, validated before its push.
-- **Measured on a hosted run.** Not yet: the change is not deployed. To record from the first
-  hosted scheduled run after the push: both runs' `start_timings`, the time from
-  `execution_start` to the first log line, and the runs' durations, against the table above and
-  the 9.5 to 12 minutes of the 2026-11-23 runs.
+- **Measured on a hosted run.** JobRun `4e07851b-0aee-4fe9-908b-43dd6fd08a57` (`0c6180c`,
+  2026-11-26, 1 CPU, 1 GiB), one of the lifecycle check's stage-10 runs, from its log, against the
+  0.25 CPU run above:
+
+  | Phase | 0.25 CPU | 1 CPU |
+  |---|---|---|
+  | pod, sidecar, image, until "Run script" | 9.4 s | 13.0 s |
+  | interpreter and imports, nothing logged | 14.0 s | 2.0 s |
+  | schema gate, discovery and the Markets runtime attachment | 21.0 s | 20.9 s |
+  | nothing logged, between those requests | 2.0 s | 2.0 s |
+  | nothing logged, before the first portfolio requests | 7.0 s | 3.1 s |
+  | **to the first portfolio work** | **53.4 s** | **39.0 s** |
+
+  The imports took 2.0 s, as the capped container measured (1.7 s). The 2.0 s gap did not change,
+  so it is not CPU work; the 7.0 s gap is partly. The start is 14.4 s shorter. The platform's phase
+  took 3.6 s longer in this run, which the Job does not control: the Job's own part went from 44 s
+  to 26 s. That run failed later, in its ledger, so it printed no `start_timings`; the first run
+  that succeeds prints them.
 
 ## Alpaca Bars Update Job
 
