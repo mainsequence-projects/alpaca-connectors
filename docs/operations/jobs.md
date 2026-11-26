@@ -175,8 +175,10 @@ portfolio's weights. A run whose first rebalance was due and recorded no weights
 
 ## Job Resources
 
-Each Job's compute is declared in its workflow file and applied by a push. The platform sets a
-Job's `cpu_limit` to its `cpu_request` (tdag-django `pod_manager/services/resource_releases/
+Each Job's compute is declared in its workflow file and applied by a push. The platform requires
+memory between 1 and 6.5 GiB per vCPU, and refuses the whole workflow file otherwise, so a change
+of compute is validated (`POST /api/v1/code-repository-branches/{uid}/validate-workflow/`) before
+it is pushed. The platform sets a Job's `cpu_limit` to its `cpu_request` (tdag-django `pod_manager/services/resource_releases/
 service.py`), so the request is a hard cap: a run never uses more CPU than it declares. Every
 change of a Job's compute is recorded below with what it costs and what it buys, and the measured
 result once hosted runs report it.
@@ -185,8 +187,8 @@ result once hosted runs report it.
 
 | Job | CPU | Memory (GiB) | Max runtime (s) | Since |
 |---|---|---|---|---|
-| `alpaca-portfolio` | 1 | 0.5 | 3600 | 2026-11-26 |
-| `alpaca-portfolio-dispatcher` | 1 | 0.5 | 3600 | 2026-11-26 |
+| `alpaca-portfolio` | 1 | 1 | 3600 | 2026-11-26 |
+| `alpaca-portfolio-dispatcher` | 1 | 1 | 3600 | 2026-11-26 |
 | `alpaca-bars-update` | 0.25 | 0.5 | 3600 | ADR 0021 |
 | `alpaca-bars-update-dispatcher` | 0.25 | 0.5 | 3600 | ADR 0021 |
 | `alpaca-connectors-migrate` | 0.25 | 0.5 | 1800 | ADR 0012 |
@@ -207,8 +209,8 @@ compute.
 
 ### Changes
 
-**2026-11-26: the portfolio Job and its dispatcher from 0.25 CPU to 1 CPU, and `empyrical`
-imported only where it is used.**
+**2026-11-26: the portfolio Job and its dispatcher from 0.25 CPU to 1 CPU and from 0.5 GiB to
+1 GiB, and `empyrical` imported only where it is used.**
 
 - **Where the start went at 0.25 CPU.** JobRun `92e103eb-8e08-46a2-88c7-ca26bdad83f0`
   (2026-11-23, `execution_start` 17:20:09.6 UTC), from its log, up to the requests of its first
@@ -250,7 +252,12 @@ imported only where it is used.**
   and the 9.4 s of the platform do not change.
 - **Cost.** Four times the CPU reserved for each second a run lasts. A portfolio Job run of about
   10 minutes reserves about 600 CPU·s instead of 150; a dispatcher run of 1 to 2 minutes, 60 to
-  120 CPU·s instead of 15 to 30. Memory is unchanged.
+  120 CPU·s instead of 15 to 30. Memory doubles, from 0.5 to 1 GiB, because the platform requires
+  at least 1 GiB per vCPU; nothing measured needs more than 0.5 GiB.
+- **The first push was refused.** `96807b7` raised the CPU and kept 0.5 GiB. The platform refused
+  `alpaca-connectors-api.yaml` (`Memory must be between 1x and 6.5x CPU (GiB per vCPU)`), so the
+  push of `24fab2b` deployed nothing from that file: no migration, no API, no Agent. The bars
+  workflow deployed. The next commit sets 1 GiB, validated before its push.
 - **Measured on a hosted run.** Not yet: the change is not deployed. To record from the first
   hosted scheduled run after the push: both runs' `start_timings`, the time from
   `execution_start` to the first log line, and the runs' durations, against the table above and

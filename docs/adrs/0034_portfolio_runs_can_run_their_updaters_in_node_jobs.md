@@ -79,7 +79,7 @@ estimates from the measured costs, not measured runs.
     description: Run one updater of a portfolio Job run's invocation (started by that run).
     execution_path: src/jobs/run_updater_node.py
     cpu_request: '1'
-    memory_request: '0.5'
+    memory_request: '1'
     max_runtime_seconds: 3600
     spot: false
     task_schedule: null
