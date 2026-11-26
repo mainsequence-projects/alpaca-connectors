@@ -537,11 +537,12 @@ def test_portfolio_entry_point_executes_the_selected_configuration(monkeypatch, 
 
     assert main(["--configuration-uid", A]) == 0
     assert executed == [A]
-    assert json.loads(capsys.readouterr().out) == {
-        "asset_count": 2,
-        "configuration_uid": A,
-        "job_run_uid": None,
-    }
+    printed = json.loads(capsys.readouterr().out)
+    timings = printed.pop("start_timings")
+    assert printed == {"asset_count": 2, "configuration_uid": A, "job_run_uid": None}
+    # The run reports where its time went, so a change of the Job's compute can be measured.
+    assert set(timings) == {"imports_seconds", "schema_gate_seconds", "run_seconds"}
+    assert all(value >= 0 for value in timings.values())
 
 
 def test_a_ticks_run_executes_its_configurations_together(monkeypatch, capsys) -> None:
@@ -837,7 +838,7 @@ def test_workflow_declares_one_job_and_one_dispatcher_per_kind_outside_the_steps
                 declared["spec"]["memory_request"],
                 declared["spec"]["max_runtime_seconds"],
                 declared["spec"]["spot"],
-            ) == ("0.25", "0.5", 3600, False)
+            ) == ("1", "0.5", 3600, False)  # 1 CPU since 2026-11-26 (jobs.md, "Job Resources")
         # The Job runs only when started; a push changes only the fields a declaration states,
         # so the explicit null and empty list remove the schedule earlier pushes set.
         assert resource["spec"]["task_schedule"] is None

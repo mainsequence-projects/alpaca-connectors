@@ -8,7 +8,6 @@ import warnings
 from dataclasses import dataclass
 from typing import Any
 
-import empyrical as emp
 import numpy as np
 
 MAX_PORTFOLIO_OBSERVATIONS = 5_000
@@ -129,6 +128,10 @@ def calculate_portfolio_performance(
     observations: tuple[PortfolioValueObservation, ...],
 ) -> tuple[tuple[PortfolioValueObservation, ...], PortfolioPerformance]:
     """Annotate the value series and calculate standard daily return/risk statistics."""
+    # Imported here: empyrical loads scipy (about 0.5 s of CPU), which only this calculation needs,
+    # and every process that imports the portfolios package would pay it, Jobs included.
+    import empyrical as emp
+
     annotated: list[PortfolioValueObservation] = []
     first_value: float | None = None
     running_peak: float | None = None

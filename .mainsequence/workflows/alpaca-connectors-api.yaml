@@ -145,7 +145,8 @@ resources:
     name: Alpaca Portfolio
     description: Run portfolio configurations (--configuration-uid, once each).
     execution_path: src/jobs/run_alpaca_portfolio.py
-    cpu_request: '0.25'
+    # 1 CPU from 0.25 on 2026-11-26: see docs/operations/jobs.md, "Job Resources".
+    cpu_request: '1'
     memory_request: '0.5'
     max_runtime_seconds: 3600
     spot: false
@@ -174,7 +175,8 @@ resources:
     name: Alpaca Portfolio Dispatcher
     description: Start one Alpaca Portfolio run for every scheduled portfolio configuration (--scheduled).
     execution_path: src/jobs/dispatch_alpaca_portfolio.py
-    cpu_request: '0.25'
+    # 1 CPU from 0.25 on 2026-11-26: see docs/operations/jobs.md, "Job Resources".
+    cpu_request: '1'
     memory_request: '0.5'
     max_runtime_seconds: 3600
     spot: false

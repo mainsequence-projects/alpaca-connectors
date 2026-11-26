@@ -15,7 +15,8 @@ its scheduled runs ([ADR 0013](../adrs/0013_workflow_declared_configuration_jobs
 
 The launchers are `src/jobs/run_alpaca_portfolio.py` and `src/jobs/dispatch_alpaca_portfolio.py`.
 The dispatcher runs after the US equity close and after the 00:00 UTC
-[bars dispatcher](#daily-bars-dispatcher). Both Jobs use 0.25 CPU, 0.5 GiB and 3600 seconds, and
+[bars dispatcher](#daily-bars-dispatcher). Both Jobs use 1 CPU, 0.5 GiB and 3600 seconds
+([Job Resources](#job-resources)), and
 every push promotes their image. No `execution.steps` entry references them, so a push may promote
 their image before the migration Job finishes; the schema gate in each entry point turns a run in
 that window into a clean skip
@@ -171,6 +172,89 @@ Job needs nothing prepared. See
 A run's summary carries `first_rebalance`: `rebalanced` is true only when Markets holds the
 portfolio's weights. A run whose first rebalance was due and recorded no weights says so in its
 `message` and log, instead of reporting the schedule.
+
+## Job Resources
+
+Each Job's compute is declared in its workflow file and applied by a push. The platform sets a
+Job's `cpu_limit` to its `cpu_request` (tdag-django `pod_manager/services/resource_releases/
+service.py`), so the request is a hard cap: a run never uses more CPU than it declares. Every
+change of a Job's compute is recorded below with what it costs and what it buys, and the measured
+result once hosted runs report it.
+
+### Current Compute
+
+| Job | CPU | Memory (GiB) | Max runtime (s) | Since |
+|---|---|---|---|---|
+| `alpaca-portfolio` | 1 | 0.5 | 3600 | 2026-11-26 |
+| `alpaca-portfolio-dispatcher` | 1 | 0.5 | 3600 | 2026-11-26 |
+| `alpaca-bars-update` | 0.25 | 0.5 | 3600 | ADR 0021 |
+| `alpaca-bars-update-dispatcher` | 0.25 | 0.5 | 3600 | ADR 0021 |
+| `alpaca-connectors-migrate` | 0.25 | 0.5 | 1800 | ADR 0012 |
+
+### How A Run Is Measured
+
+The portfolio Job's and its dispatcher's launchers print `start_timings` in their run summary:
+
+- `imports_seconds`: from the launcher's first line to the end of the package's first imports;
+- `schema_gate_seconds`: the schema gate (ADR 0012), mostly requests to the Markets and MetaTables
+  APIs;
+- `run_seconds`: the run's own work.
+
+The time before the launcher's first line (the platform starting the pod, the image and the
+interpreter) is the JobRun's `execution_start` to the run's first log line. The time after it
+(the log drain and the monitor, about 2.5 minutes) is not the Job's and does not change with its
+compute.
+
+### Changes
+
+**2026-11-26: the portfolio Job and its dispatcher from 0.25 CPU to 1 CPU, and `empyrical`
+imported only where it is used.**
+
+- **Where the start went at 0.25 CPU.** JobRun `92e103eb-8e08-46a2-88c7-ca26bdad83f0`
+  (2026-11-23, `execution_start` 17:20:09.6 UTC), from its log, up to the requests of its first
+  portfolio work:
+
+  | From `execution_start` | Phase | Time | Kind |
+  |---|---|---|---|
+  | 0 to 9.4 s | pod, sidecar, image, until "Run script" | 9.4 s | platform |
+  | 9.4 to 23.4 s | interpreter and imports, nothing logged | 14.0 s | CPU |
+  | 23.4 to 36.4 s | the schema gate's and the engine's discovery requests | 13.0 s | network |
+  | 36.4 to 38.4 s | nothing logged | 2.0 s | CPU |
+  | 38.4 to 46.4 s | Markets runtime attachment (catalog filters of 3.7 s and 4.1 s) | 8.0 s | network |
+  | 46.4 to 53.4 s | nothing logged | 7.0 s | CPU |
+
+  About 23 s was CPU work held to a quarter of a core, 21 s waited on the network and 9.4 s was
+  the platform's.
+- **The imports under a CPU cap.** The launcher's first import
+  (`alpaca_connectors.migrations.schema_gate`) in a fresh interpreter, in a `python:3.13-bookworm`
+  container capped with `--cpus`, with this image's `requirements.txt`, median of three:
+
+  | Source | 0.25 CPU | 1 CPU |
+  |---|---|---|
+  | before, no bytecode (an image without compiled sources) | 15.3 s | 1.9 s |
+  | after the `empyrical` change, no bytecode | 12.4 s | 1.7 s |
+  | before, with bytecode | 12.8 s | 1.7 s |
+  | after, with bytecode | 9.9 s | 1.4 s |
+
+  The capped 15.3 s matches the hosted run's 14.0 s, so the container reproduces that phase. At
+  0.25 CPU the same imports also cost about twice the CPU time (3.1 to 3.9 s against 1.6 to 1.9 s)
+  from throttling, so 1 CPU makes this phase about eight times faster, not four.
+- **Imports.** `alpaca_connectors.portfolios.portfolio_history` imported `empyrical`, and with it
+  `scipy`, at module level, so every process that imported the portfolios package paid for
+  statistics only the configuration detail computes. It is now imported inside
+  `calculate_portfolio_performance`: about 3 s less at 0.25 CPU, about 0.2 s at 1 CPU.
+- **Expected gain.** The 14.0 s import phase becomes about 1.7 s. If the two other silent gaps
+  (2.0 s and 7.0 s) are CPU work too, as nothing logged in them suggests, they shrink the same way,
+  to about 1 s. So a portfolio Job run's start goes from about 53 s to about 33 s, and the
+  dispatcher's, which runs the same imports and schema gate, by about as much. The 21 s of network
+  and the 9.4 s of the platform do not change.
+- **Cost.** Four times the CPU reserved for each second a run lasts. A portfolio Job run of about
+  10 minutes reserves about 600 CPU·s instead of 150; a dispatcher run of 1 to 2 minutes, 60 to
+  120 CPU·s instead of 15 to 30. Memory is unchanged.
+- **Measured on a hosted run.** Not yet: the change is not deployed. To record from the first
+  hosted scheduled run after the push: both runs' `start_timings`, the time from
+  `execution_start` to the first log line, and the runs' durations, against the table above and
+  the 9.5 to 12 minutes of the 2026-11-23 runs.
 
 ## Alpaca Bars Update Job
 
