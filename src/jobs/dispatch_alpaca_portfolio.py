@@ -38,6 +38,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         "schema_gate_seconds": _seconds(imported, gated),
         "run_seconds": _seconds(gated, time.perf_counter()),
     }
+    timings = summary["start_timings"]
+    # One plain line too: the platform's log rows keep a JSON line's own fields, not its text, so
+    # the summary's timings are readable there only from this line.
+    print(
+        "start timings: "
+        + ", ".join(f"{name} {seconds:.2f}s" for name, seconds in timings.items()),
+        flush=True,
+    )
     print(json.dumps(summary, sort_keys=True, default=str))
     return 1 if summary.get("failed") else 0
 

@@ -537,7 +537,11 @@ def test_portfolio_entry_point_executes_the_selected_configuration(monkeypatch, 
 
     assert main(["--configuration-uid", A]) == 0
     assert executed == [A]
-    printed = json.loads(capsys.readouterr().out)
+    timing_line, summary_line = capsys.readouterr().out.splitlines()
+    # A plain line the platform's log keeps, then the summary.
+    assert timing_line.startswith("start timings: imports_seconds ")
+    assert "schema_gate_seconds " in timing_line and "run_seconds " in timing_line
+    printed = json.loads(summary_line)
     timings = printed.pop("start_timings")
     assert printed == {"asset_count": 2, "configuration_uid": A, "job_run_uid": None}
     # The run reports where its time went, so a change of the Job's compute can be measured.
@@ -569,7 +573,7 @@ def test_a_ticks_run_executes_its_configurations_together(monkeypatch, capsys) -
     # A portfolio that did not run fails the run, so the platform reports it.
     assert main(["--configuration-uid", A, "--configuration-uid", B]) == 1
     assert executed == [[A, B]]
-    assert json.loads(capsys.readouterr().out)["job_run_uid"] == "tick"
+    assert json.loads(capsys.readouterr().out.splitlines()[-1])["job_run_uid"] == "tick"
 
 
 def test_dispatcher_entry_point_fails_when_a_start_fails(monkeypatch, capsys) -> None:
@@ -584,7 +588,7 @@ def test_dispatcher_entry_point_fails_when_a_start_fails(monkeypatch, capsys) ->
     )
 
     assert main(["--scheduled"]) == 1
-    assert json.loads(capsys.readouterr().out)["kind"] == "portfolio"
+    assert json.loads(capsys.readouterr().out.splitlines()[-1])["kind"] == "portfolio"
 
 
 @pytest.mark.parametrize(

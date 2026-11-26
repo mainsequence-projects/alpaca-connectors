@@ -274,8 +274,23 @@ compute.
   The imports took 2.0 s, as the capped container measured (1.7 s). The 2.0 s gap did not change,
   so it is not CPU work; the 7.0 s gap is partly. The start is 14.4 s shorter. The platform's phase
   took 3.6 s longer in this run, which the Job does not control: the Job's own part went from 44 s
-  to 26 s. That run failed later, in its ledger, so it printed no `start_timings`; the first run
-  that succeeds prints them.
+  to 26 s. That run failed later, in its ledger (fixed in `2384172`).
+- **Measured on successful runs.** The lifecycle check against `a7a72cf` (2026-11-26, 13 of 13
+  stages passed): its three stage-10 runs, from their logs:
+
+  | JobRun | platform, until "Run script" | imports | gate, discovery, runtime | to the first portfolio work | whole run |
+  |---|---|---|---|---|---|
+  | `e7a08026` | 4.7 s | 3.0 s | 24.0 s | 35.7 s | 313 s |
+  | `cc6afab1` | 5.1 s | 3.0 s | 24.0 s | 36.1 s | 422 s |
+  | `c0eafd68` | 23.3 s | 3.0 s | 23.0 s | 53.3 s | 387 s |
+
+  Our part of the start is a steady 26 to 27 s (it was 44 s at 0.25 CPU); the platform's part
+  varies from 5 to 23 s. Stage 10 took 507.6 s, against 757 s on `433a272`.
+- **Reading `start_timings`.** The platform keeps a JSON line's own fields as the log row's
+  fields and sets its message from its `message` or `event` (tdag-django
+  `timeseries_orm/common/runtime_logs.py`). The summary has neither, so its row has no message and
+  its timings are not returned by the log routes. Since `start timings: ...` is also printed as a
+  plain line, each run's log carries them.
 
 ## Alpaca Bars Update Job
 
