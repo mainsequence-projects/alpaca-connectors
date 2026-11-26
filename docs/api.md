@@ -420,10 +420,11 @@ run together ([issue #46](https://github.com/mainsequence-projects/alpaca-connec
 the operation's row with the keys, the target with the capture, and the capture's Alpaca account
 with its positions. The capture asks Alpaca only about held assets this project does not describe
 yet, one asset each, and never reads Alpaca's whole asset list
-([holdings](account/registration.md#holdings)). When a sync
-ends, the API logs one line, `account sync <status> account=<uid>`, with each step's duration in
-seconds and the seconds spent in Alpaca calls, so the time outside Markets and MetaTables can be
-read from the log.
+([holdings](account/registration.md#holdings)). Each step that ran records its own
+`started_at` and `completed_at`, to the microsecond, on the operation; a skipped step has no
+`started_at`. When a sync ends, the API also logs one line, `account sync <status>
+account=<uid>`, with each step's duration in seconds and the seconds spent in Alpaca calls, so the
+time outside Markets and MetaTables can be read from the log.
 
 The connector writes no target and trades no delta. An account with no target, and a capture
 that published no snapshot, end after `capture_holdings` with the two other steps `skipped`.
@@ -530,6 +531,8 @@ operation.
 Progress records are persisted in the project-owned
 `alpaca_connectors__asset_registration_operation` MetaTable and belong to the verified caller who
 started them ([Authentication](#authentication)); polling another caller's operation answers 404.
+The background run reads its operation once; each progress write starts from the row the previous
+write answered, with no read before it (issue #46).
 The existing synchronous plan and execute routes remain available for non-interactive callers.
 Alpaca is asked about the requested symbols only, one each, concurrently; its whole asset list is
 not read. An execution's result carries `registered_assets`: every asset it answers for, registered

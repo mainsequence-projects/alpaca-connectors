@@ -71,6 +71,47 @@ def test_the_writes_go_in_order_as_one_transaction(dialect: str) -> None:
     assert [kind for kind, *_ in writes.entries] == ["insert", "delete"]
 
 
+@pytest.mark.parametrize("dialect", sorted(DIALECTS))
+def test_a_create_inserts_its_configuration_then_its_own_bars(dialect: str) -> None:
+    """The provided-weights create's last write: two plain inserts, in one transaction."""
+    from alpaca_connectors.market_data.configurations import (
+        AlpacaBarsConfigurationTable,
+        portfolio_bar_configuration_values,
+    )
+    from alpaca_connectors.portfolios.configurations import portfolio_configuration_values
+
+    configuration = portfolio_configuration_values(
+        uid=uuid.UUID(int=1),
+        name="Thesis basket",
+        account_uid=uuid.UUID(int=2),
+        signal_definition_uid=uuid.UUID(int=3),
+        rebalance_configuration_uid=uuid.UUID(int=4),
+        owner_gateway_uid="owner",
+        owner_user_uid="owner",
+    )
+    configuration["portfolio_uid"] = uuid.UUID(int=5)
+    bars = portfolio_bar_configuration_values(
+        portfolio_configuration_uid=configuration["uid"],
+        name="Thesis basket prices",
+        frequency_id="1d",
+        feed="sip",
+        adjustment="all",
+    )
+    writes = OwnTableWrites().insert(AlpacaPortfolioConfigurationTable, [configuration])
+    writes.insert(AlpacaBarsConfigurationTable, [bars])
+
+    [statements] = _sent(writes, dialect)
+
+    first, second = (str(s.compile(dialect=DIALECTS[dialect])) for s in statements)
+    assert first.startswith("INSERT INTO alpaca_connectors__portfolio_configuration ")
+    assert second.startswith("INSERT INTO alpaca_connectors__bars_configuration ")
+    assert "ON CONFLICT" not in first + second
+    assert [entry[:2] for entry in writes.entries] == [
+        ("insert", "AlpacaPortfolioConfigurationTable"),
+        ("insert", "AlpacaBarsConfigurationTable"),
+    ]
+
+
 def test_nothing_to_write_sends_nothing() -> None:
     assert _sent(OwnTableWrites()) == []
 

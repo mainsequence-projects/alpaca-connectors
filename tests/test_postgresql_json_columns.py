@@ -243,16 +243,16 @@ def test_an_asset_registration_operation_is_recorded_through_every_step(postgres
     request, _ = postgresql.stored(AssetRegistrationOperationTable, str(created.uid), "request")
     assert request == {"symbols": ["AAPL"]}
 
-    running = set_asset_registration_step(created.uid, step_key=keys[0], status="running")
+    running = set_asset_registration_step(created, step_key=keys[0], status="running")
     assert running.current_step == keys[0]
-    done = complete_asset_registration_operation(created.uid, result={"registered": 1})
+    done = complete_asset_registration_operation(running, result={"registered": 1})
     assert done.status == "succeeded"
     steps, kind = postgresql.stored(AssetRegistrationOperationTable, str(created.uid), "steps")
     assert kind == "array" and len(steps) == len(keys)
 
     other = create_asset_registration_operation(action="plan", request={}, owner_uid=None)
     failed = fail_asset_registration_operation(
-        other.uid,
+        other,
         step_key=registration_steps("plan")[0]["key"],
         error={"code": "provider_failure", "message": "Alpaca refused.", "retryable": True},
     )

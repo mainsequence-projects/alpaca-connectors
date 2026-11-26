@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import datetime as dt
 import uuid
+from collections.abc import Mapping
 from typing import Any, ClassVar, Literal
 
 from msm.api.base import MarketsMetaTableRow, operation_result_rows
@@ -649,6 +650,57 @@ def create_bar_configuration(
     return _with_memberships(row)
 
 
+def portfolio_bar_configuration_values(
+    *,
+    portfolio_configuration_uid: uuid.UUID | str,
+    name: str,
+    frequency_id: str,
+    feed: str,
+    adjustment: str,
+    description: str | None = None,
+    enabled: bool = True,
+    scheduled: bool = True,
+) -> dict[str, Any]:
+    """The validated row of a portfolio's own bars configuration, without storing it.
+
+    ``create_portfolio_bar_configuration`` stores it; the provided-weights create stores it in one
+    transaction with its portfolio configuration (issue #46), and answers it with
+    ``stored_portfolio_bar_configuration``.
+    """
+    from alpaca_connectors.market_data.alpaca_bars_support import (
+        normalize_adjustment,
+        normalize_feed,
+        normalize_frequency_id,
+    )
+    from alpaca_connectors.market_data.storage import storage_for
+
+    normalized_frequency = normalize_frequency_id(frequency_id)
+    normalized_feed = normalize_feed(feed)
+    normalized_adjustment = normalize_adjustment(adjustment)
+    storage_for(normalized_frequency, normalized_feed, normalized_adjustment)
+    now = utc_now()
+    return {
+        "uid": new_markets_uid(),
+        "name": _normalize_name(name),
+        "description": _normalize_description(description),
+        "enabled": bool(enabled),
+        "scheduled": bool(scheduled),
+        "account_uid": None,
+        "portfolio_configuration_uid": uuid.UUID(str(portfolio_configuration_uid)),
+        "asset_source": "portfolios",
+        "frequency_id": normalized_frequency,
+        "feed": normalized_feed,
+        "adjustment": normalized_adjustment,
+        "created_at": now,
+        "updated_at": now,
+    }
+
+
+def stored_portfolio_bar_configuration(values: Mapping[str, Any]) -> AlpacaBarsConfiguration:
+    """The configuration a transaction stored from ``values``; nothing is read back."""
+    return _with_memberships(AlpacaBarsConfiguration.model_validate(dict(values)), asset_uids=[])
+
+
 def create_portfolio_bar_configuration(
     *,
     portfolio_configuration_uid: uuid.UUID | str,
@@ -669,35 +721,19 @@ def create_portfolio_bar_configuration(
     from msm.bootstrap import resolve_runtime
     from msm.repositories.crud import create_model
 
-    from alpaca_connectors.market_data.alpaca_bars_support import (
-        normalize_adjustment,
-        normalize_feed,
-        normalize_frequency_id,
-    )
-    from alpaca_connectors.market_data.storage import storage_for
     from alpaca_connectors.runtime import account_runtime_models, start_markets_engine
 
-    normalized_frequency = normalize_frequency_id(frequency_id)
-    normalized_feed = normalize_feed(feed)
-    normalized_adjustment = normalize_adjustment(adjustment)
-    storage_for(normalized_frequency, normalized_feed, normalized_adjustment)
+    values = portfolio_bar_configuration_values(
+        portfolio_configuration_uid=portfolio_configuration_uid,
+        name=name,
+        frequency_id=frequency_id,
+        feed=feed,
+        adjustment=adjustment,
+        description=description,
+        enabled=enabled,
+        scheduled=scheduled,
+    )
     start_markets_engine(models=account_runtime_models())
-    now = utc_now()
-    values: dict[str, Any] = {
-        "uid": new_markets_uid(),
-        "name": _normalize_name(name),
-        "description": _normalize_description(description),
-        "enabled": bool(enabled),
-        "scheduled": bool(scheduled),
-        "account_uid": None,
-        "portfolio_configuration_uid": uuid.UUID(str(portfolio_configuration_uid)),
-        "asset_source": "portfolios",
-        "frequency_id": normalized_frequency,
-        "feed": normalized_feed,
-        "adjustment": normalized_adjustment,
-        "created_at": now,
-        "updated_at": now,
-    }
     runtime = resolve_runtime(
         models=[AlpacaBarsConfigurationTable, AlpacaBarsConfigurationAssetTable],
         row_model_name="AlpacaBarsConfiguration",
@@ -975,6 +1011,8 @@ __all__ = [
     "bar_configuration_account_uid",
     "create_bar_configuration",
     "create_portfolio_bar_configuration",
+    "portfolio_bar_configuration_values",
+    "stored_portfolio_bar_configuration",
     "bar_configurations_for_account",
     "delete_bar_configuration",
     "disable_bar_configuration",

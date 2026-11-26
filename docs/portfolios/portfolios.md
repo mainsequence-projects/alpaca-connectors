@@ -122,10 +122,24 @@ timezone:
   identifier that is not an Alpaca one, for which no bars can be fetched, is
   `422 asset_not_alpaca`.
 - **A create reads back nothing it wrote** (issue #46). The rebalance configuration it names is
-  read once (one given inline is the row it just created), the configuration row is updated
-  without a read, its new signal has no stored observation or asset to read, and the answer, and
-  the first run's preflight when `run` is true, use the rows it wrote; only the Job's state is
-  read for the answer.
+  read once (one given inline is the row it just created), its new signal has no stored
+  observation or asset to read, and the answer, and the first run's preflight when `run` is true,
+  use the rows it wrote; only the Job's state is read for the answer.
+- **ADR 0024's create makes its independent calls together** (issue #46), in four steps, each
+  waiting for the one before:
+  1. the asset check, the named feed, the named rebalance configuration and, when the inline feed
+     names the account, the portfolio a `key` already made, are read together; then the
+     configuration and its own bars configuration are validated, before anything is written;
+  2. the signal definition is created, with an inline rebalance configuration alongside. The
+     account's unique key refuses a concurrent create with the same `key` here, before its signal
+     or `Portfolio` exists;
+  3. the observations are published and the `Portfolio` row is created together;
+  4. the configuration row, already naming its definition and its `Portfolio`, and its own bars
+     configuration are written in one transaction. Until then a create with the same `key` finds
+     no finished portfolio.
+
+  Errors come in the order the create checks them: the assets, the feed, the `key`, the rebalance
+  configuration. A failure deletes what the earlier steps stored (issue #37).
 
 ## Ownership
 

@@ -715,7 +715,7 @@ def give_portfolio_weights(
     return publish_provided_weights(configuration, observations)
 
 
-def _upsert_portfolio_row(configuration: AlpacaPortfolioConfiguration, rebalance: Any) -> Any:
+def _upsert_portfolio_row(configuration_uid: Any, rebalance: Any) -> Any:
     """The configuration's `Portfolio` row, on the calendar of ``rebalance``, the rule it names,
     which the create already holds."""
     from msm.api.portfolios import Portfolio
@@ -724,7 +724,7 @@ def _upsert_portfolio_row(configuration: AlpacaPortfolioConfiguration, rebalance
 
     calendar_row = ensure_trading_calendar(rebalance.calendar_identifier)
     return Portfolio.upsert(
-        unique_identifier=provided_portfolio_unique_identifier(configuration.uid),
+        unique_identifier=provided_portfolio_unique_identifier(configuration_uid),
         calendar_uid=calendar_row.uid,
     )
 
@@ -810,7 +810,7 @@ def create_portfolio(
             rebalance=rebalance,
         )
         own_bars = _create_own_bars(configuration, bars or {})
-        portfolio_row = _upsert_portfolio_row(configuration, rebalance)
+        portfolio_row = _upsert_portfolio_row(configuration.uid, rebalance)
         configuration = update_portfolio_configuration_row(
             configuration.uid,
             values={"portfolio_uid": uuid.UUID(str(portfolio_row.uid))},
@@ -833,30 +833,24 @@ def create_portfolio(
 
 
 def _discard_failed_creation(
-    configuration: AlpacaPortfolioConfiguration | None,
     definition: SignalDefinition | None,
     portfolio_row: Any,
     rebalance: Any = None,
 ) -> None:
     """Delete what a failed create stored, so nothing of it stays (issue #37).
 
-    The configuration goes first, with its own bars configuration; then the rebalance
-    configuration the request gave inline, which only that configuration named; then the
-    `Portfolio` row when it was created, which nothing references yet; then the signal's rows and
-    its definition. The signal is this call's alone: its key is the new configuration UID. A step
-    that fails is logged and the next still runs, so the caller gets the error that ended the
-    create.
+    The configuration and its own bars configuration are the create's last write, one
+    transaction, so a failed create never stored them. The rebalance configuration the request
+    gave inline goes first; then the `Portfolio` row when it was created, which nothing references
+    yet; then the signal's rows and its definition. The signal is this call's alone: its key is
+    the new configuration UID. A step that fails is logged and the next still runs, so the caller
+    gets the error that ended the create.
     """
     from alpaca_connectors.markets_api import delete_portfolio
-    from alpaca_connectors.portfolios.configurations import (
-        delete_portfolio_configuration_row,
-        delete_rebalance_configuration,
-    )
+    from alpaca_connectors.portfolios.configurations import delete_rebalance_configuration
     from alpaca_connectors.portfolios.signal_definitions import delete_signal_rows
 
     steps: list[Callable[[], Any]] = []
-    if configuration is not None:
-        steps.append(lambda: delete_portfolio_configuration_row(configuration.uid))
     if rebalance is not None:
         steps.append(lambda: delete_rebalance_configuration(rebalance.uid))
     if portfolio_row is not None:
@@ -915,6 +909,32 @@ def _portfolio_created_with_key(
     )
 
 
+def _outcome(call: Callable[[], Any]) -> Any:
+    """What ``call`` answered, or the exception it raised, so calls run together can each be kept
+    or undone before the first failure is raised."""
+    try:
+        return call()
+    except Exception as exc:  # noqa: BLE001 - the caller raises it
+        return exc
+
+
+def _together(*calls: Callable[[], Any]) -> list[Any]:
+    """Run ``calls`` together (``all_together``) and answer each one's outcome."""
+    from alpaca_connectors.markets_api import all_together
+
+    return all_together(*(lambda call=call: _outcome(call) for call in calls))
+
+
+def _kept(outcome: Any) -> Any:
+    return None if isinstance(outcome, Exception) else outcome
+
+
+def _raise_first(outcomes: Iterable[Any]) -> None:
+    for outcome in outcomes:
+        if isinstance(outcome, Exception):
+            raise outcome
+
+
 def create_provided_weights_portfolio(
     *,
     owner: AccountOwner,
@@ -939,28 +959,50 @@ def create_provided_weights_portfolio(
     The portfolio belongs to the account of the bars configuration the request gives inline or
     names, which the caller has checked the owner owns; it gets its own bars configuration with
     that profile, and a signal definition of that account whose key is its configuration UID, as
-    its signal's key was (ADR 0028). Order: validate the observations and assets, store the row,
-    its definition and its own bars configuration, publish, then create the `Portfolio` row. A
-    failure after a row was stored deletes everything this call stored, its signal's rows included
-    (issue #37), so a retry starts clean.
+    its signal's key was (ADR 0028).
 
-    The rebalance configuration is named, or given inline and created first, as the bars
-    configuration is; an inline one goes with the portfolio (issue #42).
+    Calls that do not depend on each other go together (issue #46), in four steps:
+
+    1. **Read.** The assets, the named bars configuration, the named rebalance rule and, once the
+       account is known, the portfolio an earlier create made with ``key``. Their errors come in
+       the order the create checks them: the assets, the bars configuration, the key, the rule.
+       Then the configuration row and its own bars configuration are validated, before anything
+       is written.
+    2. **Definition.** The signal definition, alongside an inline rebalance rule. The account's
+       unique key makes a concurrent create with the same key fail here, before the signal or the
+       `Portfolio` exists.
+    3. **Publish and `Portfolio`.** The observations are published and the `Portfolio` row is
+       created together.
+    4. **Configuration.** The configuration row, naming its definition and its `Portfolio`, and
+       its own bars configuration, in one transaction. Until then a create with the same key finds
+       no finished portfolio.
+
+    A failure deletes everything this call stored, its signal's rows included (issue #37), so a
+    retry starts clean. Nothing it wrote is read back.
+
+    The rebalance configuration is named, or given inline and created with the definition, as the
+    bars configuration is; an inline one goes with the portfolio (issue #42).
 
     ``key`` makes the create repeatable (issue #43): it is the portfolio's signal definition key,
     unique in the account. A key the account already used answers the portfolio created with it
     (``created`` false) and creates and publishes nothing: the repeated ``observations`` are
     ignored. Without a key, the definition's key is the configuration UID, as before.
     """
-    from alpaca_connectors.market_data.configurations import get_bar_configuration
+    from alpaca_connectors.market_data.configurations import (
+        AlpacaBarsConfigurationTable,
+        get_bar_configuration,
+        portfolio_bar_configuration_values,
+        stored_portfolio_bar_configuration,
+    )
     from alpaca_connectors.portfolios.configurations import (
-        create_portfolio_configuration_row,
+        AlpacaPortfolioConfigurationTable,
         create_rebalance_configuration,
-        update_portfolio_configuration_row,
+        portfolio_configuration_values,
         validate_portfolio_references,
     )
     from alpaca_connectors.portfolios.signal_definitions import (
         create_signal_definition,
+        normalize_key,
     )
 
     if (bars_configuration_uid is None) == (bars_configuration is None):
@@ -975,13 +1017,33 @@ def create_provided_weights_portfolio(
         )
     normalized = normalize_observations(observations)
     assets = _observation_assets(normalized)
-    require_alpaca_assets(assets)
+    if key is not None:
+        key = normalize_key(key)
+    profile = dict(bars_configuration) if bars_configuration is not None else None
+    account_uid = profile.get("account_uid") if profile is not None else None
 
-    if bars_configuration is not None:
-        profile = dict(bars_configuration)
-        account_uid = profile.get("account_uid")
-    else:
-        named = get_bar_configuration(bars_configuration_uid)
+    # 1. Read. The assets' and the named bars' errors are raised as they come; the key's answer
+    # and the rule's error wait for the checks before them.
+    replay_read = key is not None and account_uid is not None
+    reads: list[Callable[[], Any]] = [lambda: require_alpaca_assets(assets)]
+    if bars_configuration_uid is not None:
+        reads.append(lambda: get_bar_configuration(bars_configuration_uid))
+    if replay_read:
+        reads.append(lambda: _portfolio_created_with_key(account_uid, key, owner=owner))
+    if rebalance_configuration_uid is not None:
+        reads.append(
+            lambda: validate_portfolio_references(
+                rebalance_configuration_uid=uuid.UUID(str(rebalance_configuration_uid))
+            )
+        )
+    outcomes = _together(*reads)
+    _raise_first(outcomes[: 2 if bars_configuration_uid is not None else 1])
+    answers = iter(outcomes[1:])
+    named = next(answers) if bars_configuration_uid is not None else None
+    replayed = next(answers) if replay_read else None
+    named_rebalance = next(answers) if rebalance_configuration_uid is not None else None
+
+    if profile is None:
         if named is None:
             raise LookupError(f"Bars configuration {bars_configuration_uid!s} does not exist.")
         if named.account_uid is None:
@@ -1002,83 +1064,100 @@ def create_provided_weights_portfolio(
             "invalid_bars_configuration", "The bars configuration must name its account."
         )
     if key is not None:
-        from alpaca_connectors.portfolios.signal_definitions import normalize_key
+        if not replay_read:
+            replayed = _portfolio_created_with_key(account_uid, key, owner=owner)
+        _raise_first([replayed])
+        if replayed is not None:
+            return replayed
+    _raise_first([named_rebalance])
 
-        key = normalize_key(key)
-        existing = _portfolio_created_with_key(account_uid, key, owner=owner)
-        if existing is not None:
-            return existing
+    configuration_uid = new_markets_uid()
+    rebalance_uid = named_rebalance.uid if named_rebalance is not None else new_markets_uid()
+    signal_key = legacy_signal_key(configuration_uid)
+    configuration_values = portfolio_configuration_values(
+        uid=configuration_uid,
+        name=name,
+        description=description,
+        account_uid=account_uid,
+        signal_definition_uid=None,
+        owner_gateway_uid=owner.gateway_uid,
+        owner_user_uid=owner.user_uid,
+        rebalance_configuration_uid=rebalance_uid,
+        upsample_frequency_id=upsample_frequency_id,
+        intraday_bar_interpolation_rule=intraday_bar_interpolation_rule,
+        valuation_column=valuation_column,
+        valuation_maximum_staleness_seconds=valuation_maximum_staleness_seconds,
+        fail_on_missing_prices=fail_on_missing_prices,
+        commission_fee=commission_fee,
+        scheduled=scheduled,
+    )
+    own_bars_values = portfolio_bar_configuration_values(
+        portfolio_configuration_uid=configuration_uid,
+        name=profile.get("name") or (configuration_values["name"] + OWN_BARS_SUFFIX)[:255],
+        description=profile.get("description"),
+        frequency_id=profile.get("frequency_id") or "1d",
+        feed=profile.get("feed") or "sip",
+        adjustment=profile.get("adjustment") or "all",
+        enabled=profile.get("enabled", True),
+        scheduled=profile.get("scheduled", True),
+    )
 
-    configuration: AlpacaPortfolioConfiguration | None = None
     definition: SignalDefinition | None = None
     portfolio_row: Any = None
     rebalance: Any = None
-    # Fixed first, so an inline rebalance configuration records the portfolio it goes with.
-    configuration_uid = new_markets_uid()
-    # The rule the portfolio names, read once or created here; never read back (issue #46).
-    named_rebalance: Any = None
     try:
+        # 2. Definition. The signal keeps the configuration UID as its key; the definition takes
+        # the caller's key when one is given (issue #43), which was read in step 1 or is new.
+        writes: list[Callable[[], Any]] = [
+            lambda: create_signal_definition(
+                account_uid=account_uid,
+                key=key if key is not None else signal_key,
+                name=configuration_values["name"],
+                description=description,
+                signal_key=signal_key,
+                key_checked=True,
+            )
+        ]
         if rebalance_configuration is not None:
-            rebalance = create_rebalance_configuration(
-                **dict(rebalance_configuration), portfolio_configuration_uid=configuration_uid
+            writes.append(
+                lambda: create_rebalance_configuration(
+                    **dict(rebalance_configuration),
+                    uid=rebalance_uid,
+                    portfolio_configuration_uid=configuration_uid,
+                )
             )
-            rebalance_configuration_uid = rebalance.uid
-            named_rebalance = rebalance
-        else:
-            named_rebalance = validate_portfolio_references(
-                rebalance_configuration_uid=uuid.UUID(str(rebalance_configuration_uid))
-            )
-        configuration = create_portfolio_configuration_row(
-            uid=configuration_uid,
-            name=name,
-            description=description,
-            account_uid=account_uid,
-            signal_definition_uid=None,
-            owner_gateway_uid=owner.gateway_uid,
-            owner_user_uid=owner.user_uid,
-            rebalance_configuration_uid=rebalance_configuration_uid,
-            upsample_frequency_id=upsample_frequency_id,
-            intraday_bar_interpolation_rule=intraday_bar_interpolation_rule,
-            valuation_column=valuation_column,
-            valuation_maximum_staleness_seconds=valuation_maximum_staleness_seconds,
-            fail_on_missing_prices=fail_on_missing_prices,
-            commission_fee=commission_fee,
-            scheduled=scheduled,
-            rebalance=named_rebalance,
+        outcomes = _together(*writes)
+        definition = _kept(outcomes[0])
+        if rebalance_configuration is not None:
+            rebalance = _kept(outcomes[1])
+        _raise_first(outcomes)
+        rule = named_rebalance if named_rebalance is not None else rebalance
+
+        # 3. Publish and `Portfolio`.
+        outcomes = _together(
+            lambda: _publish_validated(
+                definition.signal_key,
+                normalized,
+                assets,
+                description=description,
+                metadata_description=_signal_description(definition),
+                new_signal=True,
+            ),
+            lambda: _upsert_portfolio_row(configuration_uid, rule),
         )
-        # The signal keeps the configuration UID as its key; the definition takes the caller's
-        # key when one is given (issue #43). The account's unique key is what makes a concurrent
-        # create with the same key fail here. The key is not read again: the caller's was just
-        # read by `_portfolio_created_with_key`, and the configuration UID is new.
-        signal_key = legacy_signal_key(configuration.uid)
-        definition = create_signal_definition(
-            account_uid=account_uid,
-            key=key if key is not None else signal_key,
-            name=configuration.name,
-            description=description,
-            signal_key=signal_key,
-            key_checked=True,
+        published, portfolio_row = (_kept(outcome) for outcome in outcomes)
+        _raise_first(outcomes)
+
+        # 4. Configuration, with its own bars configuration, which names it.
+        configuration_values.update(
+            signal_definition_uid=definition.uid,
+            portfolio_uid=uuid.UUID(str(portfolio_row.uid)),
         )
-        configuration = update_portfolio_configuration_row(
-            configuration.uid,
-            values={"signal_definition_uid": definition.uid},
-        )
-        own_bars = _create_own_bars(configuration, profile)
-        published = _publish_validated(
-            definition.signal_key,
-            normalized,
-            assets,
-            description=description,
-            metadata_description=_signal_description(definition),
-            new_signal=True,
-        )
-        portfolio_row = _upsert_portfolio_row(configuration, named_rebalance)
-        configuration = update_portfolio_configuration_row(
-            configuration.uid,
-            values={"portfolio_uid": uuid.UUID(str(portfolio_row.uid))},
-        )
+        OwnTableWrites().insert(AlpacaPortfolioConfigurationTable, [configuration_values]).insert(
+            AlpacaBarsConfigurationTable, [own_bars_values]
+        ).run()
     except Exception:
-        _discard_failed_creation(configuration, definition, portfolio_row, rebalance)
+        _discard_failed_creation(definition, portfolio_row, rebalance)
         if key is not None and definition is None:
             from alpaca_connectors.portfolios.signal_definitions import account_signal_definition
 
@@ -1088,8 +1167,9 @@ def create_provided_weights_portfolio(
                 if existing is not None:
                     return existing
         raise
+    own_bars = stored_portfolio_bar_configuration(own_bars_values)
     return ProvidedPortfolioCreation(
-        configuration=configuration,
+        configuration=AlpacaPortfolioConfiguration.model_validate(configuration_values),
         published=published,
         portfolio_uid=str(portfolio_row.uid),
         portfolio_unique_identifier=str(portfolio_row.unique_identifier),
@@ -1097,7 +1177,7 @@ def create_provided_weights_portfolio(
         bars_configuration_uid=str(own_bars.uid),
         signal_definition=definition,
         rebalance_configuration_created=rebalance is not None,
-        rebalance_configuration=named_rebalance,
+        rebalance_configuration=rule,
         bars_configuration=own_bars,
     )
 

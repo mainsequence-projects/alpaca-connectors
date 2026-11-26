@@ -5,11 +5,14 @@ Each belongs to one account and follows one of its account's signal definitions 
 
 from __future__ import annotations
 
+import contextlib
 import datetime as dt
 import importlib.util
+import threading
 import uuid
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import ANY, MagicMock, Mock, call, patch
 
 import pytest
@@ -23,6 +26,7 @@ from alpaca_connectors.market_data.configurations import (
 from alpaca_connectors.portfolios import bars_scope, provided_weights
 from alpaca_connectors.portfolios.configurations import (
     AlpacaPortfolioConfiguration,
+    OwnTableWrites,
     create_portfolio_configuration_row,
 )
 from alpaca_connectors.portfolios.execution import portfolio_unique_identifier
@@ -477,171 +481,254 @@ def _named_rebalance():
     return patch(f"{CONFIGURATIONS}.validate_portfolio_references", return_value=NAMED_REBALANCE)
 
 
+PORTFOLIO_ROW = SimpleNamespace(uid=uuid.UUID(int=7), unique_identifier="ALPACA_PORTFOLIO__X")
+PUBLISHED = provided_weights.PublishedWeights("signal-a", 1, 2, MONDAY, MONDAY)
+INLINE_REBALANCE = SimpleNamespace(uid=REBALANCE_UID, calendar_identifier="NYSE")
+IMMEDIATE = {"name": "Thesis immediate", "strategy": "immediate_signal"}
+
+
+@contextlib.contextmanager
+def _creating(order: MagicMock | None = None, **answers: dict[str, Any]):
+    """Patch every call a create makes. ``order`` records the transaction and the deletes;
+    ``answers`` replaces a call's default answer with patch keywords (``side_effect``...)."""
+    order = order if order is not None else MagicMock()
+    written: list[list[tuple[str, str, str, list[Any]]]] = []
+    failure = answers.pop("transaction", None)
+
+    def run(writes: OwnTableWrites) -> None:
+        written.append(list(writes.entries))
+        order.transaction([entry[1] for entry in writes.entries])
+        if failure is not None:
+            raise failure
+
+    def answer(name: str, **default: Any) -> dict[str, Any]:
+        return answers.get(name, default)
+
+    with contextlib.ExitStack() as stack:
+        mocks = SimpleNamespace(
+            order=order,
+            written=written,
+            assets=stack.enter_context(
+                patch.object(provided_weights, "require_alpaca_assets", **answer("assets"))
+            ),
+            named=stack.enter_context(
+                patch(
+                    f"{CONFIGURATIONS}.validate_portfolio_references",
+                    **answer("named", return_value=NAMED_REBALANCE),
+                )
+            ),
+            create_rebalance=stack.enter_context(
+                patch(
+                    f"{CONFIGURATIONS}.create_rebalance_configuration",
+                    **answer("create_rebalance", return_value=INLINE_REBALANCE),
+                )
+            ),
+            create_definition=stack.enter_context(
+                patch(
+                    f"{DEFINITIONS}.create_signal_definition",
+                    **answer("create_definition", return_value=definition()),
+                )
+            ),
+            publish=stack.enter_context(
+                patch.object(
+                    provided_weights,
+                    "_publish_validated",
+                    **answer("publish", return_value=PUBLISHED),
+                )
+            ),
+            upsert=stack.enter_context(
+                patch.object(
+                    provided_weights,
+                    "_upsert_portfolio_row",
+                    **answer("upsert", return_value=PORTFOLIO_ROW),
+                )
+            ),
+        )
+        stack.enter_context(
+            patch.object(
+                provided_weights, "new_markets_uid", side_effect=[CONFIGURATION_UID, REBALANCE_UID]
+            )
+        )
+        stack.enter_context(
+            patch(
+                "alpaca_connectors.market_data.configurations.new_markets_uid",
+                return_value=BARS_UID,
+            )
+        )
+        stack.enter_context(patch.object(OwnTableWrites, "run", autospec=True, side_effect=run))
+        stack.enter_context(
+            patch(f"{CONFIGURATIONS}.delete_rebalance_configuration", order.delete_rebalance)
+        )
+        stack.enter_context(patch(f"{DEFINITIONS}.delete_signal_rows", order.delete_signal))
+        stack.enter_context(patch.object(SignalDefinition, "delete", order.delete_definition))
+        stack.enter_context(
+            patch("alpaca_connectors.markets_api.delete_portfolio", order.delete_portfolio)
+        )
+        yield mocks
+
+
 def test_create_gives_the_portfolio_its_account_a_definition_and_its_own_bars() -> None:
-    configuration = provided_configuration(signal_definition_uid=None)
-    with_definition = provided_configuration()
-    stored = provided_configuration(portfolio_uid=uuid.UUID(int=7))
-    portfolio_row = SimpleNamespace(uid=uuid.UUID(int=7), unique_identifier="ALPACA_PORTFOLIO__X")
-    published = provided_weights.PublishedWeights("signal-a", 1, 2, MONDAY, MONDAY)
-    with (
-        patch.object(provided_weights, "require_alpaca_assets"),
-        _named_rebalance() as named,
-        patch(
-            f"{CONFIGURATIONS}.create_portfolio_configuration_row", return_value=configuration
-        ) as create_row,
-        patch(
-            f"{DEFINITIONS}.create_signal_definition", return_value=definition()
-        ) as create_definition,
-        patch(
-            f"{CONFIGURATIONS}.update_portfolio_configuration_row",
-            side_effect=[with_definition, stored],
-        ) as update,
-        patch(
-            "alpaca_connectors.market_data.configurations.create_portfolio_bar_configuration",
-            return_value=SimpleNamespace(uid=BARS_UID),
-        ) as create_bars,
-        patch.object(provided_weights, "_publish_validated", return_value=published) as publish,
-        patch.object(
-            provided_weights, "_upsert_portfolio_row", return_value=portfolio_row
-        ) as upsert,
-    ):
+    with _creating() as made:
         created = _create()
 
-    row_kwargs = create_row.call_args.kwargs
-    assert "weights_source" not in row_kwargs and "bars_configuration_uid" not in row_kwargs
-    # The portfolio belongs to the inline bars' account, and its owner is the caller.
-    assert (row_kwargs["account_uid"], row_kwargs["signal_definition_uid"]) == (ACCOUNT_UID, None)
-    assert (row_kwargs["owner_gateway_uid"], row_kwargs["owner_user_uid"]) == (
-        "owner-uid",
-        "owner-uid",
+    # One transaction, last: the configuration, then its own bars configuration, which names it.
+    ((configuration_write, bars_write),) = made.written
+    assert configuration_write[:2] == ("insert", "AlpacaPortfolioConfigurationTable")
+    assert bars_write[:2] == ("insert", "AlpacaBarsConfigurationTable")
+    ((row,), (bars_row,)) = configuration_write[3], bars_write[3]
+    assert "weights_source" not in row and row["bars_configuration_uid"] is None
+    # The portfolio belongs to the inline bars' account, and its owner is the caller. Its row
+    # names its definition and its `Portfolio` as it is written: nothing updates it afterwards.
+    assert (row["uid"], row["account_uid"]) == (CONFIGURATION_UID, ACCOUNT_UID)
+    assert (row["owner_gateway_uid"], row["owner_user_uid"]) == ("owner-uid", "owner-uid")
+    assert (row["signal_definition_uid"], row["portfolio_uid"]) == (
+        DEFINITION_UID,
+        uuid.UUID(int=7),
+    )
+    assert row["rebalance_configuration_uid"] == REBALANCE_UID
+    assert (bars_row["uid"], bars_row["portfolio_configuration_uid"]) == (
+        BARS_UID,
+        CONFIGURATION_UID,
+    )
+    assert (bars_row["account_uid"], bars_row["asset_source"], bars_row["name"]) == (
+        None,
+        "portfolios",
+        "Thesis prices",
     )
     # Its definition keeps the key its signal always had: the configuration UID.
-    definition_kwargs = create_definition.call_args.kwargs
+    definition_kwargs = made.create_definition.call_args.kwargs
     assert definition_kwargs["account_uid"] == ACCOUNT_UID
     assert definition_kwargs["key"] == definition_kwargs["signal_key"] == str(CONFIGURATION_UID)
-    assert update.call_args_list == [
-        call(CONFIGURATION_UID, values={"signal_definition_uid": DEFINITION_UID}),
-        call(CONFIGURATION_UID, values={"portfolio_uid": uuid.UUID(int=7)}),
-    ]
-    assert create_bars.call_args.kwargs["portfolio_configuration_uid"] == CONFIGURATION_UID
+    assert definition_kwargs["name"] == "Thesis basket"
     # The assets were validated once, by the create, before any row existed.
-    assert publish.call_args.args[0] == str(CONFIGURATION_UID)
-    assert publish.call_args.args[2] == [JPM, NVDA]
+    made.assets.assert_called_once_with([JPM, NVDA])
+    assert made.publish.call_args.args[0] == str(CONFIGURATION_UID)
+    assert made.publish.call_args.args[2] == [JPM, NVDA]
     assert created.portfolio_uid == str(uuid.UUID(int=7))
     assert created.bars_configuration_uid == str(BARS_UID)
     # Nothing it wrote is read back (issue #46): the named rule is read once and given to the
-    # row and to the `Portfolio` row; the new key is not read again; the new signal has no
-    # stored observation to read; the answer carries what was written.
-    named.assert_called_once_with(rebalance_configuration_uid=REBALANCE_UID)
-    assert row_kwargs["rebalance"] is NAMED_REBALANCE
-    assert upsert.call_args.args == (with_definition, NAMED_REBALANCE)
+    # `Portfolio` row; the new key is not read again; the new signal has no stored observation to
+    # read; the answer carries what was written.
+    made.named.assert_called_once_with(rebalance_configuration_uid=REBALANCE_UID)
+    assert made.upsert.call_args.args == (CONFIGURATION_UID, NAMED_REBALANCE)
     assert definition_kwargs["key_checked"] is True
-    assert publish.call_args.kwargs["new_signal"] is True
+    assert made.publish.call_args.kwargs["new_signal"] is True
+    made.create_rebalance.assert_not_called()
     assert created.rebalance_configuration is NAMED_REBALANCE
     assert created.bars_configuration.uid == BARS_UID
+    assert created.bars_configuration.asset_uids == []
+    assert (created.configuration.uid, created.configuration.portfolio_uid) == (
+        CONFIGURATION_UID,
+        uuid.UUID(int=7),
+    )
+    assert created.configuration.signal_definition_uid == DEFINITION_UID
+
+
+def _recording(order: MagicMock, name: str, answer: Any, barrier: threading.Barrier | None):
+    """A side effect that records ``name`` in ``order`` and answers ``answer``. With a barrier,
+    it answers only once every other call that shares it is running too: had the create made
+    them one after another, the barrier would time out."""
+
+    def call_it(*args: Any, **kwargs: Any) -> Any:
+        if barrier is not None:
+            barrier.wait()
+        getattr(order, name)()
+        return answer
+
+    return {"side_effect": call_it}
+
+
+def _steps(order: MagicMock) -> list[str]:
+    return [name for name, *_ in order.mock_calls]
+
+
+def test_a_creates_independent_calls_go_together_and_each_step_waits_for_the_last() -> None:
+    """Issue #46: the reads together, the definition, the publication with the `Portfolio`, then
+    the configuration's transaction."""
+    order = MagicMock()
+    reads, publication = threading.Barrier(2, timeout=5), threading.Barrier(2, timeout=5)
+    with _creating(
+        order,
+        assets=_recording(order, "assets", None, reads),
+        named=_recording(order, "named", NAMED_REBALANCE, reads),
+        create_definition=_recording(order, "definition", definition(), None),
+        publish=_recording(order, "publish", PUBLISHED, publication),
+        upsert=_recording(order, "upsert", PORTFOLIO_ROW, publication),
+    ):
+        _create()
+
+    steps = _steps(order)
+    assert sorted(steps[:2]) == ["assets", "named"]
+    assert steps[2] == "definition"
+    assert sorted(steps[3:5]) == ["publish", "upsert"]
+    assert steps[5:] == ["transaction"]
+
+
+def test_an_inline_rule_is_written_alongside_the_definition() -> None:
+    order = MagicMock()
+    writes, publication = threading.Barrier(2, timeout=5), threading.Barrier(2, timeout=5)
+    with _creating(
+        order,
+        assets=_recording(order, "assets", None, None),
+        create_definition=_recording(order, "definition", definition(), writes),
+        create_rebalance=_recording(order, "rebalance", INLINE_REBALANCE, writes),
+        publish=_recording(order, "publish", PUBLISHED, publication),
+        upsert=_recording(order, "upsert", PORTFOLIO_ROW, publication),
+    ):
+        created = _create(rebalance_configuration_uid=None, rebalance_configuration=IMMEDIATE)
+
+    steps = _steps(order)
+    assert steps[0] == "assets"
+    assert sorted(steps[1:3]) == ["definition", "rebalance"]
+    assert sorted(steps[3:5]) == ["publish", "upsert"]
+    assert steps[5:] == ["transaction"]
+    assert created.rebalance_configuration_created is True
 
 
 def test_a_refused_publication_leaves_no_row_behind() -> None:
     order = MagicMock()
     refused = ProvidedWeightsError("unknown_asset", "refused")
-    with (
-        patch.object(provided_weights, "require_alpaca_assets"),
-        _named_rebalance(),
-        patch(
-            f"{CONFIGURATIONS}.create_portfolio_configuration_row",
-            return_value=provided_configuration(signal_definition_uid=None),
-        ),
-        patch(f"{DEFINITIONS}.create_signal_definition", return_value=definition()),
-        patch(
-            f"{CONFIGURATIONS}.update_portfolio_configuration_row",
-            return_value=provided_configuration(),
-        ),
-        patch(
-            "alpaca_connectors.market_data.configurations.create_portfolio_bar_configuration",
-            return_value=SimpleNamespace(uid=BARS_UID),
-        ),
-        patch(f"{CONFIGURATIONS}.delete_portfolio_configuration_row", order.delete_row),
-        patch(f"{DEFINITIONS}.delete_signal_rows", order.delete_signal),
-        patch.object(SignalDefinition, "delete", order.delete_definition),
-        patch("alpaca_connectors.markets_api.delete_portfolio", order.delete_portfolio),
-        patch.object(provided_weights, "_publish_validated", side_effect=refused),
-        pytest.raises(ProvidedWeightsError),
-    ):
+    with _creating(order, publish={"side_effect": refused}), pytest.raises(ProvidedWeightsError):
         _create()
 
-    # The configuration goes first, with its own bars configuration; then its signal's rows,
-    # which a publication may have started (issue #37), and its definition. No Portfolio existed.
+    # No configuration was written. The `Portfolio` made alongside the publication goes, then its
+    # signal's rows, which a publication may have started (issue #37), and its definition.
     assert order.mock_calls == [
-        call.delete_row(CONFIGURATION_UID),
+        call.delete_portfolio(str(uuid.UUID(int=7))),
         call.delete_signal(signal_uid_for_key(str(CONFIGURATION_UID))),
         call.delete_definition(DEFINITION_UID),
     ]
 
 
-IMMEDIATE = {"name": "Thesis immediate", "strategy": "immediate_signal"}
-
-
-def _create_with_inline_rebalance(order: MagicMock, **patches):
-    """Create with an inline rebalance configuration; ``patches`` replaces the defaults below."""
-    published = provided_weights.PublishedWeights("signal-a", 1, 2, MONDAY, MONDAY)
-    portfolio_row = SimpleNamespace(uid=uuid.UUID(int=7), unique_identifier="ALPACA_PORTFOLIO__X")
-    defaults = {
-        "publish": {"return_value": published},
-        "update": {"side_effect": [provided_configuration(), provided_configuration()]},
-    }
-    defaults.update(patches)
-    with (
-        patch.object(provided_weights, "require_alpaca_assets"),
-        patch(
-            f"{CONFIGURATIONS}.create_rebalance_configuration",
-            return_value=SimpleNamespace(uid=REBALANCE_UID),
-        ) as create_rebalance,
-        patch(
-            f"{CONFIGURATIONS}.create_portfolio_configuration_row",
-            return_value=provided_configuration(signal_definition_uid=None),
-        ) as create_row,
-        patch(f"{DEFINITIONS}.create_signal_definition", return_value=definition()),
-        patch(f"{CONFIGURATIONS}.update_portfolio_configuration_row", **defaults["update"]),
-        patch(
-            "alpaca_connectors.market_data.configurations.create_portfolio_bar_configuration",
-            return_value=SimpleNamespace(uid=BARS_UID),
-        ),
-        patch.object(provided_weights, "_publish_validated", **defaults["publish"]),
-        patch.object(provided_weights, "_upsert_portfolio_row", return_value=portfolio_row),
-        patch(f"{CONFIGURATIONS}.delete_portfolio_configuration_row", order.delete_row),
-        patch(f"{CONFIGURATIONS}.delete_rebalance_configuration", order.delete_rebalance),
-        patch(f"{DEFINITIONS}.delete_signal_rows", order.delete_signal),
-        patch.object(SignalDefinition, "delete", order.delete_definition),
-        patch("alpaca_connectors.markets_api.delete_portfolio", order.delete_portfolio),
-    ):
-        created = _create(rebalance_configuration_uid=None, rebalance_configuration=IMMEDIATE)
-    return created, create_rebalance, create_row
-
-
 def test_an_inline_rebalance_configuration_is_created_with_the_portfolio() -> None:
-    created, create_rebalance, create_row = _create_with_inline_rebalance(MagicMock())
+    with _creating() as made:
+        created = _create(rebalance_configuration_uid=None, rebalance_configuration=IMMEDIATE)
 
-    # Created first, as POST /v1/portfolio-rebalance-configurations would, recording the portfolio
-    # it goes with (issue #42), and the portfolio names it.
-    configuration_uid = create_row.call_args.kwargs["uid"]
-    create_rebalance.assert_called_once_with(
-        **IMMEDIATE, portfolio_configuration_uid=configuration_uid
+    # Created with the definition, as POST /v1/portfolio-rebalance-configurations would, recording
+    # the portfolio it goes with (issue #42), and the portfolio names it.
+    made.create_rebalance.assert_called_once_with(
+        **IMMEDIATE, uid=REBALANCE_UID, portfolio_configuration_uid=CONFIGURATION_UID
     )
-    assert create_row.call_args.kwargs["rebalance_configuration_uid"] == REBALANCE_UID
+    made.named.assert_not_called()
+    ((configuration_write, _),) = made.written
+    assert configuration_write[3][0]["rebalance_configuration_uid"] == REBALANCE_UID
+    assert made.upsert.call_args.args == (CONFIGURATION_UID, INLINE_REBALANCE)
     assert created.rebalance_configuration_created is True
+    assert created.rebalance_configuration is INLINE_REBALANCE
 
 
 def test_a_failed_create_deletes_the_inline_rebalance_configuration_too() -> None:
     order = MagicMock()
-    with pytest.raises(ProvidedWeightsError):
-        _create_with_inline_rebalance(
-            order, publish={"side_effect": ProvidedWeightsError("unknown_asset", "refused")}
-        )
+    with (
+        _creating(order, publish={"side_effect": ProvidedWeightsError("unknown_asset", "refused")}),
+        pytest.raises(ProvidedWeightsError),
+    ):
+        _create(rebalance_configuration_uid=None, rebalance_configuration=IMMEDIATE)
 
-    # After the configuration that named it, before the signal's rows (issue #37).
+    # First, as nothing names it; then the `Portfolio` and the signal's rows (issue #37).
     assert order.mock_calls == [
-        call.delete_row(CONFIGURATION_UID),
         call.delete_rebalance(REBALANCE_UID),
+        call.delete_portfolio(str(uuid.UUID(int=7))),
         call.delete_signal(signal_uid_for_key(str(CONFIGURATION_UID))),
         call.delete_definition(DEFINITION_UID),
     ]
@@ -660,44 +747,37 @@ def test_a_create_names_one_rebalance_configuration(rebalance) -> None:
     assert raised.value.code == "invalid_rebalance_configuration"
 
 
-def test_a_create_that_fails_after_its_portfolio_exists_deletes_everything() -> None:
+def test_a_create_whose_last_write_fails_deletes_everything() -> None:
     order = MagicMock()
-    order.delete_row.side_effect = RuntimeError("storage unavailable")
-    portfolio_row = SimpleNamespace(uid=uuid.UUID(int=7), unique_identifier="ALPACA_PORTFOLIO__X")
-    published = provided_weights.PublishedWeights("signal-a", 1, 2, MONDAY, MONDAY)
+    order.delete_portfolio.side_effect = RuntimeError("storage unavailable")
     with (
-        patch.object(provided_weights, "require_alpaca_assets"),
-        _named_rebalance(),
-        patch(
-            f"{CONFIGURATIONS}.create_portfolio_configuration_row",
-            return_value=provided_configuration(signal_definition_uid=None),
-        ),
-        patch(f"{DEFINITIONS}.create_signal_definition", return_value=definition()),
-        patch(
-            f"{CONFIGURATIONS}.update_portfolio_configuration_row",
-            side_effect=[provided_configuration(), RuntimeError("the last write failed")],
-        ),
-        patch(
-            "alpaca_connectors.market_data.configurations.create_portfolio_bar_configuration",
-            return_value=SimpleNamespace(uid=BARS_UID),
-        ),
-        patch.object(provided_weights, "_publish_validated", return_value=published),
-        patch.object(provided_weights, "_upsert_portfolio_row", return_value=portfolio_row),
-        patch(f"{CONFIGURATIONS}.delete_portfolio_configuration_row", order.delete_row),
-        patch(f"{DEFINITIONS}.delete_signal_rows", order.delete_signal),
-        patch.object(SignalDefinition, "delete", order.delete_definition),
-        patch("alpaca_connectors.markets_api.delete_portfolio", order.delete_portfolio),
+        _creating(order, transaction=RuntimeError("the last write failed")),
         pytest.raises(RuntimeError, match="the last write failed"),
     ):
         _create()
 
-    # A step that fails is logged and the next still runs; the create's own error is raised.
+    # The transaction stored nothing. A step that fails is logged and the next still runs; the
+    # create's own error is raised.
     assert order.mock_calls == [
-        call.delete_row(CONFIGURATION_UID),
+        call.transaction(["AlpacaPortfolioConfigurationTable", "AlpacaBarsConfigurationTable"]),
         call.delete_portfolio(str(uuid.UUID(int=7))),
         call.delete_signal(signal_uid_for_key(str(CONFIGURATION_UID))),
         call.delete_definition(DEFINITION_UID),
     ]
+
+
+def test_an_invalid_configuration_is_refused_before_anything_is_written() -> None:
+    order = MagicMock()
+    with (
+        _creating(order) as made,
+        pytest.raises(ValueError, match="commission_fee"),
+    ):
+        _create(commission_fee=-1)
+
+    made.create_definition.assert_not_called()
+    made.publish.assert_not_called()
+    made.upsert.assert_not_called()
+    assert order.mock_calls == []
 
 
 def test_create_names_exactly_one_bars_configuration() -> None:
@@ -1433,41 +1513,17 @@ def test_the_scheduled_run_includes_portfolios_not_yet_adopted() -> None:
 # A key makes the create repeatable (issue #43)
 # ------------------------------------------------------------------------------------------------
 def test_a_new_key_is_the_portfolio_s_definition_key() -> None:
-    order = MagicMock()
     with (
-        patch(f"{DEFINITIONS}.account_signal_definition", return_value=None),
-        patch(f"{DEFINITIONS}.create_signal_definition", return_value=definition()) as create,
-        patch.object(provided_weights, "require_alpaca_assets"),
-        _named_rebalance(),
-        patch(
-            f"{CONFIGURATIONS}.create_portfolio_configuration_row",
-            return_value=provided_configuration(signal_definition_uid=None),
-        ),
-        patch(
-            f"{CONFIGURATIONS}.update_portfolio_configuration_row",
-            side_effect=[provided_configuration(), provided_configuration()],
-        ),
-        patch(
-            "alpaca_connectors.market_data.configurations.create_portfolio_bar_configuration",
-            return_value=SimpleNamespace(uid=BARS_UID),
-        ),
-        patch.object(
-            provided_weights,
-            "_publish_validated",
-            return_value=provided_weights.PublishedWeights("signal-a", 1, 2, MONDAY, MONDAY),
-        ),
-        patch.object(
-            provided_weights,
-            "_upsert_portfolio_row",
-            return_value=SimpleNamespace(uid=uuid.UUID(int=7), unique_identifier="X"),
-        ),
-        patch(f"{CONFIGURATIONS}.delete_portfolio_configuration_row", order.delete_row),
+        patch(f"{DEFINITIONS}.account_signal_definition", return_value=None) as read,
+        _creating() as made,
     ):
         created = _create(key="hunch-portfolio-17")
 
+    # Read once, alongside the assets and the rule: the inline bars name the account.
+    read.assert_called_once_with(ACCOUNT_UID, "hunch-portfolio-17")
     # The definition takes the caller's key; its signal keeps the configuration UID as its key.
-    assert create.call_args.kwargs["key"] == "hunch-portfolio-17"
-    assert create.call_args.kwargs["signal_key"] == str(CONFIGURATION_UID)
+    assert made.create_definition.call_args.kwargs["key"] == "hunch-portfolio-17"
+    assert made.create_definition.call_args.kwargs["signal_key"] == str(CONFIGURATION_UID)
     assert created.created is True
 
 
@@ -1547,17 +1603,30 @@ def test_two_creates_with_one_key_make_one_portfolio() -> None:
             "alpaca_connectors.market_data.configurations.portfolio_bar_configurations",
             return_value={str(CONFIGURATION_UID): SimpleNamespace(uid=BARS_UID)},
         ),
-        patch(f"{DEFINITIONS}.create_signal_definition", side_effect=unique),
-        patch.object(provided_weights, "require_alpaca_assets"),
-        _named_rebalance(),
-        patch(
-            f"{CONFIGURATIONS}.create_portfolio_configuration_row",
-            return_value=provided_configuration(signal_definition_uid=None),
-        ),
-        patch(f"{CONFIGURATIONS}.delete_portfolio_configuration_row", order.delete_row),
+        _creating(order, create_definition={"side_effect": unique}) as made,
     ):
         created = _create(key="hunch-portfolio-17")
 
-    order.delete_row.assert_called_once_with(CONFIGURATION_UID)
+    # It lost before its signal or its `Portfolio` existed: nothing to delete, nothing published.
+    assert order.mock_calls == []
+    made.publish.assert_not_called()
+    made.upsert.assert_not_called()
     assert created.created is False
     assert created.portfolio_uid == str(uuid.UUID(int=7))
+
+
+def test_a_used_key_answers_its_portfolio_even_when_the_rule_is_gone() -> None:
+    """The rule is read with the key, but its error waits: a used key answers first (#43)."""
+    with (
+        patch(f"{DEFINITIONS}.account_signal_definition", return_value=definition()),
+        patch(f"{CONFIGURATIONS}.list_portfolio_configurations", return_value=([_existing()], 1)),
+        patch(
+            "alpaca_connectors.market_data.configurations.portfolio_bar_configurations",
+            return_value={str(CONFIGURATION_UID): SimpleNamespace(uid=BARS_UID)},
+        ),
+        _creating(named={"side_effect": LookupError("no such rule")}) as made,
+    ):
+        created = _create(key="hunch-portfolio-17")
+
+    assert created.created is False
+    made.create_definition.assert_not_called()
