@@ -383,9 +383,15 @@ MetaTables (`mainsequence-metatable`) **0.1.63** and ms-markets **3.4.0**.
   opening (MainSequenceMarkets#150), and a MetaTables write without an answer no longer makes a
   route answer a bare 500: the bulk deletes confirm it with one read and report it in `failed`
   (MainSequenceMarkets#151). Each ledger still opens at the last session close before its signal.
+- Later on 2026-11-26 the range moved to `ms-markets>=6.2.5`, which Production's Markets API
+  runs. A portfolio's interpolated prices now read their source bars in several reads, each
+  within MetaTables' budget of 100,000 rows for one read (MainSequenceMarkets#155). Before, an
+  account's first run with about 45 new daily assets would have failed with
+  `TransferLimitError`. Issue #49's deadline failure had already been fixed in 5.3.0, which reads
+  10,000 rows a page (MainSequenceMarkets#122). Nothing in this application changes with it.
 
 `pyproject.toml` keeps non-exact compatibility ranges (`mainsequence[mcp]>=9.0.38,<10`,
-`mainsequence-metatable>=0.1.86,<0.2`, `ms-tau-sdk>=2.0.26,<3`, and `ms-markets>=6.2.4` with no
+`mainsequence-metatable>=0.1.86,<0.2`, `ms-tau-sdk>=2.0.26,<3`, and `ms-markets>=6.2.5` with no
 upper bound since [ADR 0031](adrs/0031_markets_series_are_published_not_shared.md)), while
 `uv.lock` and the exported `requirements.txt` record the resolution. On 2026-10-14 Main Sequence
 had moved from 9.0.23 to 9.0.24, which stopped scaffolding `AGENTS.md` and ships its guidance in
