@@ -429,7 +429,7 @@ since-inception. Alpha and beta are absent: a portfolio has no benchmark.
 
 Before a portfolio's first run in an Environment:
 
-- the installed ms-markets release, 6.2.4 or later, is the one the Environment's Markets API runs
+- the installed ms-markets release, 6.2.5 or later, is the one the Environment's Markets API runs
   (the Job's schema gate checks it); this application holds no role on `mainsequence.markets` and
   reaches the `Portfolio`, calendar and signal metadata through the Markets API;
 - this project's revisions are applied by the migration Job, including the private instances, the

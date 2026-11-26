@@ -11,7 +11,7 @@ license-files = ["LICENSE"]
 requires-python = ">=3.13,<3.14"
 dependencies = [
     # Keep compatible ranges here and let uv.lock capture the reproducible environment.
-    "ms-markets>=6.2.4",
+    "ms-markets>=6.2.5",
     "mainsequence[mcp]>=9.0.38,<10",
     "mainsequence-metatable>=0.1.86,<0.2",
     # 0.45.0 is the first release whose asset model knows the TXSE exchange.
