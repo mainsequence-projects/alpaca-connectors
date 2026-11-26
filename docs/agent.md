@@ -371,9 +371,13 @@ MetaTables (`mainsequence-metatable`) **0.1.63** and ms-markets **3.4.0**.
   Nothing in this application changes with it.
 - Later on 2026-11-26 MetaTables moved to `>=0.1.85`, which starts and ends a run under a shared
   guard with row locks (MetaTables#167).
+- Later on 2026-11-26 the range moved to `ms-markets>=6.2.3`, the release the Environment's Markets
+  API runs. 6.2.2 requires MetaTables 0.1.85; 6.2.3 lets Markets' revision 0039 take an
+  Index-value table its database already holds, which had stopped every 6.2.x rollout at its
+  migration (MainSequenceMarkets#147). Nothing in this application changes with either.
 
 `pyproject.toml` keeps non-exact compatibility ranges (`mainsequence[mcp]>=9.0.38,<10`,
-`mainsequence-metatable>=0.1.85,<0.2`, `ms-tau-sdk>=2.0.26,<3`, and `ms-markets>=6.2.1` with no
+`mainsequence-metatable>=0.1.85,<0.2`, `ms-tau-sdk>=2.0.26,<3`, and `ms-markets>=6.2.3` with no
 upper bound since [ADR 0031](adrs/0031_markets_series_are_published_not_shared.md)), while
 `uv.lock` and the exported `requirements.txt` record the resolution. On 2026-10-14 Main Sequence
 had moved from 9.0.23 to 9.0.24, which stopped scaffolding `AGENTS.md` and ships its guidance in
