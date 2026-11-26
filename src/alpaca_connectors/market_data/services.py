@@ -266,6 +266,24 @@ def last_final_daily_close(now: dt.datetime | None = None) -> dt.datetime:
     return sessions[max(final)][1]
 
 
+def last_session_close_before(moment: dt.datetime) -> dt.datetime:
+    """The close of the last NYSE session that ended before ``moment``, in UTC.
+
+    A daily price is stamped at its session's close (``stock_sessions``), so this is the time of
+    the last daily price observed before ``moment``: where a portfolio's ledger opens, so that its
+    first rebalance, at ``moment``, finds a price to size its shares with (ms-markets ADR 0058,
+    ADR 0065).
+    """
+    from alpaca_connectors.market_data.alpaca_bars_support import stock_sessions
+
+    moment = _utc_time(moment)
+    sessions = stock_sessions(moment.date() - dt.timedelta(days=14), moment.date())
+    closes = [close for _open, close in sessions.values() if close < moment]
+    if not closes:
+        raise ValueError(f"No NYSE session closed in the two weeks before {moment.isoformat()}.")
+    return max(closes)
+
+
 def daily_bars_current_through(
     profile: tuple[str, str, str],
     asset_identifiers: Sequence[str],
@@ -503,6 +521,7 @@ __all__ = [
     "execute_market_data_update",
     "get_market_data_dataset",
     "last_final_daily_close",
+    "last_session_close_before",
     "list_market_data_datasets",
     "query_price_observations",
     "resolve_market_data_update",

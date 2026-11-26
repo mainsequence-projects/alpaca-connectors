@@ -248,9 +248,13 @@ rebalance state + InterpolatedPrices ──> PortfolioEngine ─> event ledger
 
 ## Valuation
 
-- **The ledger.** Every portfolio keeps a ledger (ms-markets ADR 0065). It opens at the signal's
-  first observation with 1,000,000 US dollars in cash (`LEDGER_INITIAL_NAV`, the unit the rebalance
-  sizes in), and the published values are the NAV over that, so every portfolio starts at 1.
+- **The ledger.** Every portfolio keeps a ledger (ms-markets ADR 0065). It opens with 1,000,000 US
+  dollars in cash (`LEDGER_INITIAL_NAV`, the unit the rebalance sizes in) at the close of the last
+  NYSE session before the signal's first observation (`last_session_close_before`). The first
+  rebalance sizes its shares from the last price observed before it, and the ledger finds only the
+  prices in its own window: a ledger opening at the signal itself refuses that rebalance ("No
+  observed price at or before …"). The published values are the NAV over the initial NAV, so every
+  portfolio starts at 1.
 - **Interpolated prices.** `InterpolatedPrices` gives a value at a real portfolio time; the
   ledger values each position with `MarketPriceValuationModel`, and
   `valuation_maximum_staleness_seconds` is its `maximum_staleness`: how old a price may be before

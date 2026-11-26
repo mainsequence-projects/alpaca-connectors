@@ -18,6 +18,7 @@ from alpaca_connectors.market_data import services
 from alpaca_connectors.market_data.services import (
     daily_bars_current_through,
     last_final_daily_close,
+    last_session_close_before,
 )
 
 
@@ -79,3 +80,22 @@ def test_only_daily_bars_are_checked() -> None:
     answer, compile_statement = _check({}, ["A"], profile=("1h", "sip", "all"))
     assert answer is None
     compile_statement.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("moment", "close"),
+    [
+        # An hour into Thursday's session: Wednesday's close, the last price before it.
+        ("2026-11-19T15:30:00", "2026-11-18T21:00:00"),
+        # Monday morning: Friday's close.
+        ("2026-11-23T15:30:00", "2026-11-20T21:00:00"),
+        # After Monday's close: Monday's close.
+        ("2026-11-23T21:30:00", "2026-11-23T21:00:00"),
+        # Exactly at a close: the session before, since a ledger opens strictly before its signal.
+        ("2026-11-23T21:00:00", "2026-11-20T21:00:00"),
+        # The Monday after Thanksgiving: Friday's early close at 13:00 New York.
+        ("2026-11-30T15:30:00", "2026-11-27T18:00:00"),
+    ],
+)
+def test_a_ledger_opens_at_the_last_close_before_its_signal(moment, close) -> None:
+    assert last_session_close_before(_utc(moment)) == _utc(close)

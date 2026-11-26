@@ -680,13 +680,15 @@ def test_both_strategies_read_the_calendar_sessions_and_build_with_ms_markets(st
     assert build.valuation_asset_identifier == "USD"
     assert build.fx_source_instance is None
     require_observed_price_column(build.valuation_column)
-    # Every portfolio keeps a ledger (ms-markets ADR 0065): it opens in cash at the signal's first
-    # observation and values each position with the configuration's staleness and missing-price
+    # Every portfolio keeps a ledger (ms-markets ADR 0065): it opens in cash before the signal's
+    # first observation and values each position with the configuration's staleness and missing-price
     # rule; the commission is a proportional cost of each fill.
     stored = resolved_configuration().configuration
     accounting = build.accounting_configuration
     assert accounting.initial_nav == execution.LEDGER_INITIAL_NAV
-    assert accounting.initial_state_time_index == resolved_configuration().signal_start_time
+    # It opens at the last close before the signal, so its first rebalance finds a price to size
+    # its shares with: the signal is 2026-09-04 14:00 UTC, the close before it 2026-09-03 16:00 NY.
+    assert accounting.initial_state_time_index == dt.datetime(2026, 9, 3, 20, tzinfo=dt.UTC)
     valuation = accounting.position_valuation_model_instance
     assert type(valuation) is MarketPriceValuationModel
     assert valuation.maximum_staleness == dt.timedelta(

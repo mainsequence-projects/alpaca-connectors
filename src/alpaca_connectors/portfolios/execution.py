@@ -443,8 +443,10 @@ def build_portfolio_run(
     ``ALPACA_PORTFOLIO__<hex>`` identifier. ms-markets' ``run_portfolio`` builds and runs the
     chain from it. A run of several portfolios passes one ``price_chains`` to every build.
 
-    The ledger opens at the signal's first observation with ``LEDGER_INITIAL_NAV`` in cash and
-    values every position at its interpolated close (``MarketPriceValuationModel``) with the
+    The ledger opens with ``LEDGER_INITIAL_NAV`` in cash at the close of the last NYSE session
+    before the signal's first observation (``last_session_close_before``): its first rebalance
+    sizes its shares from the last price observed before it, which must be in the ledger's window,
+    so a ledger opening at the signal itself refuses that rebalance. It values every position at its interpolated close (``MarketPriceValuationModel``) with the
     configuration's staleness limit and missing-price rule. Its published values are the NAV over
     the initial NAV, so a portfolio starts at 1. The commission is a proportional cost of each
     fill's notional (``ProportionalExecutionCostModel``).
@@ -474,6 +476,7 @@ def build_portfolio_run(
     from alpaca_connectors.holdings.account import DEFAULT_CASH_ASSET_IDENTIFIER
     from alpaca_connectors.instances import AlpacaPortfolioCalendarEventsStorage
     from alpaca_connectors.market_data.alpaca_bars import AlpacaStockBarsFetch
+    from alpaca_connectors.market_data.services import last_session_close_before
     from alpaca_connectors.portfolios.provided_weights import portfolio_signal_key
     from alpaca_connectors.portfolios.signal_definitions import weights_signal
 
@@ -555,7 +558,7 @@ def build_portfolio_run(
             ),
             accounting_configuration=PortfolioAccountingConfiguration(
                 initial_nav=LEDGER_INITIAL_NAV,
-                initial_state_time_index=resolved.signal_start_time,
+                initial_state_time_index=last_session_close_before(resolved.signal_start_time),
                 position_valuation_model_instance=MarketPriceValuationModel(
                     maximum_staleness=dt.timedelta(
                         seconds=configuration.valuation_maximum_staleness_seconds
