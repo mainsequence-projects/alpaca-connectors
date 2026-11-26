@@ -66,6 +66,25 @@ UNREGISTERED = f"ALPACA::{uuid.UUID(int=9)}"
 NOT_ALPACA = "FIGI::BBG000BLNNH6"
 MONDAY = dt.datetime(2026, 11, 16, 14, tzinfo=dt.UTC)
 WEDNESDAY = dt.datetime(2026, 11, 18, 14, tzinfo=dt.UTC)
+# The NYSE close after each of them: when weights observed then take effect (issue #48).
+MONDAY_CLOSE = dt.datetime(2026, 11, 16, 21, tzinfo=dt.UTC)
+WEDNESDAY_CLOSE = dt.datetime(2026, 11, 18, 21, tzinfo=dt.UTC)
+
+
+@pytest.fixture(autouse=True)
+def calendar(monkeypatch) -> list[tuple]:
+    """The stored calendar as ``first_rebalance_at`` reads it: the close of the weights' day.
+    Answers the rules and times it was asked about."""
+    from alpaca_connectors.portfolios import rebalance_schedule
+
+    asked: list[tuple] = []
+
+    def rebalance_after(rebalance, *, starts_at):
+        asked.append((rebalance, starts_at))
+        return starts_at.replace(hour=21, minute=0)
+
+    monkeypatch.setattr(rebalance_schedule, "first_rebalance_at", rebalance_after)
+    return asked
 
 
 def provided_configuration(**overrides) -> AlpacaPortfolioConfiguration:
@@ -567,7 +586,7 @@ def _creating(order: MagicMock | None = None, **answers: dict[str, Any]):
         yield mocks
 
 
-def test_create_gives_the_portfolio_its_account_a_definition_and_its_own_bars() -> None:
+def test_create_gives_the_portfolio_its_account_a_definition_and_its_own_bars(calendar) -> None:
     with _creating() as made:
         created = _create()
 
@@ -622,6 +641,9 @@ def test_create_gives_the_portfolio_its_account_a_definition_and_its_own_bars() 
         uuid.UUID(int=7),
     )
     assert created.configuration.signal_definition_uid == DEFINITION_UID
+    # Its first rebalance, read by the rule it names from its first weights (issue #48).
+    assert calendar == [(NAMED_REBALANCE, MONDAY)]
+    assert created.first_rebalance_at == MONDAY_CLOSE
 
 
 def _recording(order: MagicMock, name: str, answer: Any, barrier: threading.Barrier | None):
@@ -664,7 +686,7 @@ def test_a_creates_independent_calls_go_together_and_each_step_waits_for_the_las
     assert steps[5:] == ["transaction"]
 
 
-def test_an_inline_rule_is_written_alongside_the_definition() -> None:
+def test_an_inline_rule_is_written_alongside_the_definition(calendar) -> None:
     order = MagicMock()
     writes, publication = threading.Barrier(2, timeout=5), threading.Barrier(2, timeout=5)
     with _creating(
@@ -683,6 +705,8 @@ def test_an_inline_rule_is_written_alongside_the_definition() -> None:
     assert sorted(steps[3:5]) == ["publish", "upsert"]
     assert steps[5:] == ["transaction"]
     assert created.rebalance_configuration_created is True
+    # Its first rebalance is read by the inline rule it created (issue #48).
+    assert calendar == [(INLINE_REBALANCE, MONDAY)]
 
 
 def test_a_refused_publication_leaves_no_row_behind() -> None:
@@ -1169,16 +1193,21 @@ def test_another_caller_cannot_give_weights_pause_or_delete(api_client, local_ca
     delete.assert_not_called()
 
 
-def test_the_owner_gives_weights(api_client, local_caller) -> None:
+def test_the_owner_gives_weights(api_client, local_caller, calendar) -> None:
     owned = provided_configuration(
         owner_gateway_uid=local_caller.uid, owner_user_uid=local_caller.uid
     )
     published = provided_weights.PublishedWeights("signal-a", 1, 2, WEDNESDAY, WEDNESDAY)
+    rule = SimpleNamespace(uid=REBALANCE_UID, calendar_identifier="NYSE")
     with (
         patch(
             "alpaca_connectors.portfolios.configurations.get_portfolio_configuration",
             return_value=owned,
         ),
+        patch(
+            "alpaca_connectors.portfolios.configurations.get_rebalance_configuration",
+            return_value=rule,
+        ) as read_rule,
         patch.object(provided_weights, "publish_provided_weights", return_value=published) as pub,
     ):
         response = api_client.post(
@@ -1193,6 +1222,11 @@ def test_the_owner_gives_weights(api_client, local_caller) -> None:
     assert response.status_code == 201, response.text
     assert response.json()["signal_uid"] == "signal-a"
     assert pub.call_args.args[1] == [{"observed_at": WEDNESDAY, "weights": {NVDA: 0.5, AAPL: 0.5}}]
+    # When they take effect, by the portfolio's rule (issue #48); no run has had them yet.
+    read_rule.assert_called_once_with(owned.rebalance_configuration_uid)
+    assert calendar == [(rule, WEDNESDAY)]
+    assert response.json()["weights_effective_at"] == "2026-11-18T21:00:00Z"
+    assert response.json()["weights_effective_recorded"] is False
 
 
 def test_responses_carry_the_signal_but_not_the_owner() -> None:

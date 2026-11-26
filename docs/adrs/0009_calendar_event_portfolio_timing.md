@@ -99,8 +99,10 @@ rows.
 - signal observation, rebalance execution, and valuation timestamps have separate owners;
 - a signal observed after the configured close becomes eligible at the next configured event;
 - a portfolio has no weights before its first configured event at or after its first signal
-  observation; a run before it succeeds and its summary gives the event's time, and a sync's
-  `portfolio_weights_missing` gives it too (amended for issue #41);
+  observation; a run before it succeeds and its summary gives the event's time (amended for
+  issue #41). The configuration, the provided-weights create, the weights route and the run
+  history answer that time, and when the latest weights take effect, as fields, and a sync whose
+  portfolios only wait for it defers its allocation instead of failing (amended for issue #48);
 - early closes are represented by their actual persisted close times;
 - Job crontab timezone cannot change portfolio economic timestamps;
 - no connector code monkeypatches or subclasses canonical ms-markets portfolio valuation logic;

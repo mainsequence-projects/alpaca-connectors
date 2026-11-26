@@ -32,9 +32,12 @@ from alpaca_connectors.holdings.allocation import (
     allocate_sized_target,
     size_account_target,
 )
+from alpaca_connectors.holdings.sizing import PortfolioRebalancePending
 from alpaca_connectors.operations.account_sync import (
     ALLOCATE_STEP,
     CAPTURE_STEP,
+    DEFERRED_MESSAGE,
+    NO_TARGET_MESSAGE,
     SIZE_STEP,
     AccountSyncOperation,
     StepTimes,
@@ -92,8 +95,27 @@ def sync_error(exc: Exception) -> OperationError:
     return SYNC_FAILED
 
 
+def deferred_allocation(pending: PortfolioRebalancePending) -> dict[str, Any]:
+    """The result's ``allocation_deferred``: the portfolios the allocation waits for (issue #48)."""
+    return {
+        "code": pending.code,
+        "message": str(pending),
+        "portfolios": [
+            {
+                "portfolio_uid": portfolio.portfolio_uid,
+                "first_rebalance_at": portfolio.first_rebalance_at,
+                "recorded": portfolio.recorded,
+            }
+            for portfolio in pending.portfolios
+        ],
+    }
+
+
 def sync_result(
-    captured: dict[str, Any], allocation: FundAllocationResult | None = None
+    captured: dict[str, Any],
+    allocation: FundAllocationResult | None = None,
+    *,
+    deferred: PortfolioRebalancePending | None = None,
 ) -> AccountSyncResult:
     allocation = allocation or FundAllocationResult()
     return AccountSyncResult(
@@ -108,6 +130,7 @@ def sync_result(
         position_set_uid=allocation.position_set_uid,
         allocation_applied=allocation.allocation_applied,
         lines=list(allocation.lines),
+        allocation_deferred=deferred_allocation(deferred) if deferred is not None else None,
         extra={"unresolved_symbols": list(captured.get("unresolved_symbols") or [])},
     )
 
@@ -183,9 +206,11 @@ def sync_account(
     outcome at that step, not an HTTP error; only a failure to record the operation itself
     propagates. A snapshot published before a
     later step failed stays published. An account with no target, or a capture that published no
-    snapshot, ends after the capture with the two other steps skipped. Each step's own start and
-    end are recorded on the operation's steps, and logged with the time spent in Alpaca in one
-    line, when the sync ends (issue #46).
+    snapshot, ends after the capture with the two other steps skipped. So does a target whose
+    portfolios without weights only wait for their first rebalance: the sync succeeds, and its
+    result's ``allocation_deferred`` names them with their first rebalance (issue #48). Each
+    step's own start and end are recorded on the operation's steps, and logged with the time
+    spent in Alpaca in one line, when the sync ends (issue #46).
     """
     from alpaca_connectors.markets_api import all_together
 
@@ -220,21 +245,25 @@ def sync_account(
             lambda: _target_or_error(account_uid),
         )
         allocation = None
+        deferred = None
         if captured.get("holdings_set_uid") is not None:
             finish_step(SIZE_STEP)
             if isinstance(target, Exception):
                 raise target
-            sized = size_account_target(
-                account_uid,
-                valuation_time=captured["time_index"],
-                equity=captured.get("equity"),
-                price_reader=alpaca.timed(account_price_reader(credentials)),
-                target=target,
-            )
+            try:
+                sized = size_account_target(
+                    account_uid,
+                    valuation_time=captured["time_index"],
+                    equity=captured.get("equity"),
+                    price_reader=alpaca.timed(account_price_reader(credentials)),
+                    target=target,
+                )
+            except PortfolioRebalancePending as pending:
+                sized, deferred = None, pending
             if sized is not None:
                 finish_step(ALLOCATE_STEP)
                 allocation = allocate_sized_target(account_uid, sized)
-        result = sync_result(captured, allocation)
+        result = sync_result(captured, allocation, deferred=deferred)
     except Exception as exc:
         finish_step(step)
         _log_timings(account_uid, "failed", times, alpaca.seconds)
@@ -248,6 +277,7 @@ def sync_account(
             operation,
             result=result.model_dump(mode="json"),
             skipped=() if allocation is not None else (SIZE_STEP, ALLOCATE_STEP),
+            skipped_message=DEFERRED_MESSAGE if deferred is not None else NO_TARGET_MESSAGE,
             times=times,
         )
     )

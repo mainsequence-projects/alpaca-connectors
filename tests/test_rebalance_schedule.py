@@ -1,4 +1,4 @@
-"""A portfolio's first rebalance, and what a run and a sync say before it (issue #41)."""
+"""A portfolio's first rebalance, and what a run and a sync say before it (issues #41, #48)."""
 
 from __future__ import annotations
 
@@ -11,16 +11,20 @@ import pytest
 
 from alpaca_connectors.holdings import allocation
 from alpaca_connectors.holdings.allocation import size_account_target
-from alpaca_connectors.holdings.sizing import FundAllocationError
+from alpaca_connectors.holdings.sizing import FundAllocationError, PortfolioRebalancePending
 from alpaca_connectors.portfolios import rebalance_schedule
 from alpaca_connectors.portfolios.provided_weights import (
     configuration_uid_from_portfolio_identifier,
     provided_portfolio_unique_identifier,
 )
 from alpaca_connectors.portfolios.rebalance_schedule import (
+    PendingFirstRebalance,
+    PortfolioRebalanceTimes,
     first_rebalance_event,
     first_rebalance_state,
-    missing_weights_message,
+    pending_first_rebalance,
+    portfolio_rebalance_times,
+    run_first_rebalance,
 )
 
 UTC = dt.UTC
@@ -130,55 +134,71 @@ def portfolio(monkeypatch) -> dict[str, Any]:
     return state
 
 
-def test_a_sync_before_the_first_close_says_when_it_is(portfolio) -> None:
+def test_a_portfolio_waiting_for_its_first_rebalance_says_when_it_is(portfolio) -> None:
     identifier = provided_portfolio_unique_identifier(CONFIGURATION_UID)
-    sync = dt.datetime(2026, 11, 18, 16, 10, 26, tzinfo=UTC)
 
-    assert missing_weights_message(identifier, at=sync) == (
-        "A portfolio of the account target has no rebalance yet: its first is at "
-        "2026-11-18T21:00:00+00:00 (NYSE market_close), after this sync at "
-        "2026-11-18T16:10:26+00:00."
-    )
-    assert missing_weights_message(identifier, at=dt.datetime(2026, 11, 18, 23, tzinfo=UTC)) == (
-        "A portfolio of the account target has no weights recorded yet: its first rebalance was "
-        "at 2026-11-18T21:00:00+00:00 (NYSE market_close), and no portfolio run has recorded it "
-        "since."
+    assert pending_first_rebalance(identifier, portfolio_uid="portfolio-uid") == (
+        PendingFirstRebalance(portfolio_uid="portfolio-uid", first_rebalance_at=CLOSE)
     )
 
 
-def test_a_portfolio_it_cannot_explain_keeps_the_generic_refusal(portfolio) -> None:
-    assert missing_weights_message("A", at=CLOSE) is None
+def test_a_portfolio_it_cannot_explain_is_not_waiting(portfolio) -> None:
+    assert pending_first_rebalance("A", portfolio_uid="portfolio-uid") is None
     portfolio["first_observation_at"] = None
     identifier = provided_portfolio_unique_identifier(CONFIGURATION_UID)
-    assert missing_weights_message(identifier, at=CLOSE) is None
+    assert pending_first_rebalance(identifier, portfolio_uid="portfolio-uid") is None
 
 
-def test_the_sync_refuses_with_the_first_rebalance(monkeypatch, portfolio) -> None:
+def _target(monkeypatch, *identifiers: str) -> None:
     from alpaca_connectors import markets_api
 
-    identifier = provided_portfolio_unique_identifier(CONFIGURATION_UID)
-    row = {
-        "target_type": "portfolio",
-        "target_uid": "portfolio-uid",
-        "weight_notional_exposure": "0.1",
-        "portfolio": {"unique_identifier": identifier},
-    }
+    rows = [
+        {
+            "target_type": "portfolio",
+            "target_uid": f"portfolio-uid-{position}",
+            "weight_notional_exposure": "0.1",
+            "portfolio": {"unique_identifier": identifier},
+        }
+        for position, identifier in enumerate(identifiers)
+    ]
     monkeypatch.setattr(
         markets_api,
         "account_target_positions",
-        lambda uid: SimpleNamespace(position_set_uid="set-uid", positions=[row]),
+        lambda uid: SimpleNamespace(position_set_uid="set-uid", positions=rows),
     )
     monkeypatch.setattr(allocation, "read_portfolio_weights", lambda identifiers, *, at: {})
 
+
+def _size() -> Any:
+    return size_account_target(
+        "account-uid",
+        valuation_time=dt.datetime(2026, 11, 18, 16, 10, tzinfo=UTC),
+        equity=100_000.0,
+        price_reader=dict,
+    )
+
+
+def test_a_sync_waits_for_the_first_rebalance_with_its_own_code(monkeypatch, portfolio) -> None:
+    """Issue #48: waiting until the first rebalance is not a failure, and says so as fields."""
+    _target(monkeypatch, provided_portfolio_unique_identifier(CONFIGURATION_UID))
+
+    with pytest.raises(PortfolioRebalancePending) as waiting:
+        _size()
+    assert waiting.value.code == "portfolio_rebalance_pending"
+    assert waiting.value.portfolios == (
+        PendingFirstRebalance(portfolio_uid="portfolio-uid-0", first_rebalance_at=CLOSE),
+    )
+    # The message names no portfolio.
+    assert CONFIGURATION_UID.hex.upper() not in str(waiting.value)
+
+
+def test_a_portfolio_missing_weights_for_another_reason_still_fails(monkeypatch, portfolio) -> None:
+    _target(monkeypatch, provided_portfolio_unique_identifier(CONFIGURATION_UID), "ELSEWHERE")
+
     with pytest.raises(FundAllocationError) as refused:
-        size_account_target(
-            "account-uid",
-            valuation_time=dt.datetime(2026, 11, 18, 16, 10, tzinfo=UTC),
-            equity=None,
-            price_reader=dict,
-        )
+        _size()
+    assert not isinstance(refused.value, PortfolioRebalancePending)
     assert refused.value.code == "portfolio_weights_missing"
-    assert "its first is at 2026-11-18T21:00:00+00:00 (NYSE market_close)" in str(refused.value)
 
 
 def test_an_immediate_portfolio_trades_at_the_next_observed_price() -> None:
@@ -239,7 +259,9 @@ def test_the_first_rebalance_reads_the_stored_calendar_for_both_rules(monkeypatc
     assert "(NYSE close after its first weights)" in state["message"]
 
 
-def test_a_sync_before_an_immediate_portfolio_s_first_run_says_so(monkeypatch, portfolio) -> None:
+def test_an_immediate_portfolio_waits_for_the_close_after_its_first_weights(
+    monkeypatch, portfolio
+) -> None:
     from alpaca_connectors.portfolios import configurations
 
     monkeypatch.setattr(
@@ -252,8 +274,155 @@ def test_a_sync_before_an_immediate_portfolio_s_first_run_says_so(monkeypatch, p
     )
     identifier = provided_portfolio_unique_identifier(CONFIGURATION_UID)
 
-    assert missing_weights_message(identifier, at=CLOSE) == (
-        "A portfolio of the account target has no weights recorded yet: its first rebalance was "
-        "at 2026-11-18T16:07:00+00:00 (NYSE close after its first weights), and no portfolio run "
-        "has recorded it since."
+    assert pending_first_rebalance(identifier, portfolio_uid="p").first_rebalance_at == (
+        FIRST_WEIGHTS
     )
+
+
+# ------------------------------------------------------------------------------------------------
+# The times as fields (issue #48)
+# ------------------------------------------------------------------------------------------------
+LATER_WEIGHTS = dt.datetime(2026, 11, 21, 14, 11, tzinfo=UTC)
+LATER_CLOSE = dt.datetime(2026, 11, 23, 21, 0, tzinfo=UTC)
+
+
+@pytest.fixture
+def calendar(monkeypatch) -> list[dt.datetime]:
+    """The calendar as ``first_rebalance_at`` reads it: Wednesday's close for the first weights,
+    Monday's for Saturday's; the times it was asked about."""
+    asked: list[dt.datetime] = []
+
+    def rebalance_after(rebalance: Any, *, starts_at: dt.datetime) -> dt.datetime:
+        asked.append(starts_at)
+        return CLOSE if starts_at <= CLOSE else LATER_CLOSE
+
+    monkeypatch.setattr(rebalance_schedule, "first_rebalance_at", rebalance_after)
+    return asked
+
+
+def _bounds(monkeypatch, *, row_count: int = 0, last_time: dt.datetime | None = None) -> list:
+    from alpaca_connectors import markets_api
+
+    read: list[str] = []
+    monkeypatch.setattr(
+        markets_api,
+        "portfolio_weights_bounds",
+        lambda identifier: (
+            read.append(identifier) or SimpleNamespace(row_count=row_count, last_time=last_time)
+        ),
+    )
+    return read
+
+
+def test_a_new_portfolio_s_times_are_its_first_close_and_nothing_is_recorded(
+    monkeypatch, calendar
+) -> None:
+    read = _bounds(monkeypatch)
+
+    times = portfolio_rebalance_times(
+        _rebalance(),
+        first_observation_at=FIRST_WEIGHTS,
+        last_observation_at=FIRST_WEIGHTS,
+        portfolio_identifier=None,
+    )
+
+    assert times == PortfolioRebalanceTimes(
+        first_rebalance_at=CLOSE,
+        first_rebalance_recorded=False,
+        weights_effective_at=CLOSE,
+        weights_effective_recorded=False,
+    )
+    # One calendar read for weights that are both the first and the latest, and no Markets read
+    # for a portfolio no run has reached.
+    assert (calendar, read) == ([FIRST_WEIGHTS], [])
+
+
+def test_later_weights_take_effect_at_the_rebalance_after_them(monkeypatch, calendar) -> None:
+    read = _bounds(monkeypatch, row_count=4, last_time=CLOSE)
+
+    times = portfolio_rebalance_times(
+        _rebalance(),
+        first_observation_at=FIRST_WEIGHTS,
+        last_observation_at=LATER_WEIGHTS,
+        portfolio_identifier="ALPACA_PORTFOLIO__X",
+    )
+
+    assert times == PortfolioRebalanceTimes(
+        first_rebalance_at=CLOSE,
+        first_rebalance_recorded=True,
+        weights_effective_at=LATER_CLOSE,
+        weights_effective_recorded=False,
+    )
+    assert sorted(calendar) == [FIRST_WEIGHTS, LATER_WEIGHTS]
+    assert read == ["ALPACA_PORTFOLIO__X"]
+
+    # Markets holds weights at that rebalance, its bounds' time naive or not.
+    _bounds(monkeypatch, row_count=9, last_time=LATER_CLOSE.replace(tzinfo=None))
+    recorded = portfolio_rebalance_times(
+        _rebalance(),
+        first_observation_at=FIRST_WEIGHTS,
+        last_observation_at=LATER_WEIGHTS,
+        portfolio_identifier="ALPACA_PORTFOLIO__X",
+    )
+    assert recorded.weights_effective_recorded is True
+
+
+def test_only_the_first_rebalance_is_read_when_only_it_is_asked(monkeypatch, calendar) -> None:
+    _bounds(monkeypatch)
+
+    times = portfolio_rebalance_times(
+        _rebalance(),
+        first_observation_at=FIRST_WEIGHTS,
+        last_observation_at=LATER_WEIGHTS,
+        portfolio_identifier="ALPACA_PORTFOLIO__X",
+        weights_effective=False,
+    )
+
+    assert (times.first_rebalance_at, times.weights_effective_at) == (CLOSE, None)
+    assert calendar == [FIRST_WEIGHTS]
+
+
+def test_a_signal_without_weights_has_no_times(monkeypatch, calendar) -> None:
+    _bounds(monkeypatch)
+
+    times = portfolio_rebalance_times(
+        _rebalance(),
+        first_observation_at=None,
+        last_observation_at=None,
+        portfolio_identifier="ALPACA_PORTFOLIO__X",
+    )
+
+    assert (times.first_rebalance_at, times.weights_effective_at) == (None, None)
+    assert calendar == []
+
+
+def test_a_run_says_what_its_summary_said_from_when_it_started() -> None:
+    waiting = PortfolioRebalanceTimes(first_rebalance_at=CLOSE, first_rebalance_recorded=False)
+    before = run_first_rebalance(
+        _rebalance(), times=waiting, status="SUCCEEDED", started_at="2026-11-18T16:08:00Z"
+    )
+    assert before == {
+        "rebalanced": False,
+        "first_rebalance_at": "2026-11-18T21:00:00+00:00",
+        "message": (
+            "No rebalance yet: the portfolio's first rebalance is at 2026-11-18T21:00:00+00:00 "
+            "(NYSE market_close). It has weights after a run at or after that time."
+        ),
+    }
+    after = dt.datetime(2026, 11, 19, 2, tzinfo=UTC)
+    # Due, and Markets holds no weights: no run has recorded it.
+    unrecorded = run_first_rebalance(
+        _rebalance(), times=waiting, status="SUCCEEDED", started_at=after
+    )
+    assert unrecorded["rebalanced"] is False
+    assert "no run has recorded that rebalance" in unrecorded["message"]
+    recorded = PortfolioRebalanceTimes(first_rebalance_at=CLOSE, first_rebalance_recorded=True)
+    assert run_first_rebalance(
+        _rebalance(), times=recorded, status="SUCCEEDED", started_at=after
+    ) == {"rebalanced": True, "first_rebalance_at": "2026-11-18T21:00:00+00:00"}
+    # A run that did not succeed, or has not started, has none.
+    for status, started in (("FAILED", after), ("RUNNING", after), ("QUEUED", None)):
+        assert (
+            run_first_rebalance(_rebalance(), times=recorded, status=status, started_at=started)
+            is None
+        )

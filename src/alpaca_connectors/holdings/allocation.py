@@ -21,6 +21,7 @@ from alpaca_connectors.holdings.sizing import (
     AssetTerms,
     Exposure,
     FundAllocationError,
+    PortfolioRebalancePending,
     size_targets,
 )
 
@@ -219,7 +220,9 @@ def size_account_target(
     Returns None when the account has no target, so there is nothing to allocate. The latest
     target is the one in force at a snapshot just captured; Markets refuses one written after it.
     ``target`` is that target (None for none) when the caller read it already, alongside the
-    capture; it is read here only when left ``UNREAD``.
+    capture; it is read here only when left ``UNREAD``. When every portfolio of the target
+    without weights only waits for its first rebalance, it raises ``PortfolioRebalancePending``
+    with them (issue #48); another portfolio without weights fails ``portfolio_weights_missing``.
     """
     from alpaca_connectors.markets_api import account_target_positions
 
@@ -235,14 +238,25 @@ def size_account_target(
     exposures = account_exposures(positions)
     portfolio_identifiers = [e.identifier for e in exposures if e.target_type == "portfolio"]
     weights = read_portfolio_weights(portfolio_identifiers, at=valuation_time)
-    missing = [identifier for identifier in portfolio_identifiers if not weights.get(identifier)]
+    missing = {
+        exposure.identifier: exposure
+        for exposure in exposures
+        if exposure.target_type == "portfolio" and not weights.get(exposure.identifier)
+    }
     if missing:
-        from alpaca_connectors.portfolios.rebalance_schedule import missing_weights_message
+        from alpaca_connectors.markets_api import each_together
+        from alpaca_connectors.portfolios.rebalance_schedule import pending_first_rebalance
 
-        # Issue #41: say when the portfolio's first rebalance is, not only that it has no weights.
-        message = missing_weights_message(missing[0], at=valuation_time)
-        if message is not None:
-            raise FundAllocationError("portfolio_weights_missing", message)
+        # Issue #48: portfolios that only wait for their first rebalance defer the allocation;
+        # any other portfolio without weights fails it below (``portfolio_weights_missing``).
+        pending = each_together(
+            lambda exposure: pending_first_rebalance(
+                exposure.identifier, portfolio_uid=exposure.target_uid
+            ),
+            missing.values(),
+        )
+        if all(item is not None for item in pending):
+            raise PortfolioRebalancePending(pending)
     asset_identifiers = sorted(
         {e.identifier for e in exposures if e.target_type == "asset"}
         | {identifier for legs in weights.values() for identifier in legs}

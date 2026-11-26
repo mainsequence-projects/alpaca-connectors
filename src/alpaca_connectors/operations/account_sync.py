@@ -37,6 +37,10 @@ ACCOUNT_SYNC_STEPS: tuple[tuple[str, str], ...] = (
     (ALLOCATE_STEP, "Allocate the holdings to the account's funds"),
 )
 NO_TARGET_MESSAGE = "Not run: the account has no target, or the capture published no snapshot."
+DEFERRED_MESSAGE = (
+    "Deferred: a portfolio of the account target has not had its first rebalance; the result's "
+    "allocation_deferred says which and when."
+)
 
 UTC = dt.timezone.utc
 
@@ -289,13 +293,15 @@ def _finished_steps(
     skipped: tuple[str, ...],
     message: str | None,
     now: dt.datetime,
+    skipped_message: str = NO_TARGET_MESSAGE,
     times: StepTimes | None = None,
 ) -> list[dict[str, Any]]:
     """Every step in its terminal state.
 
     The sync runs inside one request and is written when it ends. Steps before the failed one
     succeeded, the failed one carries the error's message, and the ones after it did not run.
-    Without a failure every step succeeded, except the ones named in ``skipped``.
+    Without a failure every step succeeded, except the ones named in ``skipped``, which carry
+    ``skipped_message``.
 
     ``times`` holds the start and end of each step that ran, as the sync measured them (issue
     #46). A step it does not name runs from its recorded start, or ``now``, to ``now``.
@@ -311,7 +317,7 @@ def _finished_steps(
         elif failed_seen:
             item.update(status="skipped", message="Not run because a previous step failed.")
         elif item["key"] in skipped:
-            item.update(status="skipped", message=NO_TARGET_MESSAGE)
+            item.update(status="skipped", message=skipped_message)
         else:
             item.update(status="succeeded", message=None)
         item["started_at"] = item.get("started_at") or now.isoformat()
@@ -330,8 +336,10 @@ def succeed_account_sync_operation(
     *,
     result: dict[str, Any],
     skipped: tuple[str, ...] = (),
+    skipped_message: str = NO_TARGET_MESSAGE,
     times: StepTimes | None = None,
 ) -> AccountSyncOperation:
+    """End the sync as succeeded; the ``skipped`` steps say why with ``skipped_message``."""
     now = utc_now()
     return AccountSyncOperation.update(
         operation.uid,
@@ -339,7 +347,13 @@ def succeed_account_sync_operation(
             "status": "succeeded",
             "current_step": None,
             "steps": _finished_steps(
-                operation, failed_step=None, skipped=skipped, message=None, now=now, times=times
+                operation,
+                failed_step=None,
+                skipped=skipped,
+                message=None,
+                now=now,
+                skipped_message=skipped_message,
+                times=times,
             ),
             "result": result,
             "error": None,
@@ -393,6 +407,7 @@ __all__ = [
     "ACCOUNT_SYNC_STEPS",
     "ALLOCATE_STEP",
     "CAPTURE_STEP",
+    "DEFERRED_MESSAGE",
     "NO_TARGET_MESSAGE",
     "SIZE_STEP",
     "AccountSyncOperation",

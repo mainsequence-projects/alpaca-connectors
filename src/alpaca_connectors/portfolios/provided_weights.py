@@ -25,7 +25,7 @@ import math
 import numbers
 import uuid
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from msm.base import new_markets_uid
@@ -75,6 +75,10 @@ class PublishedWeights:
     asset_count: int
     first_observed_at: dt.datetime
     last_observed_at: dt.datetime
+    # When these weights take effect for the portfolio they were given to: the rebalance after
+    # the last of them (issue #48). Set by ``give_portfolio_weights``; None otherwise, or when
+    # its calendar has no rebalance in the search window.
+    weights_effective_at: dt.datetime | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -94,6 +98,10 @@ class ProvidedPortfolioCreation:
     # (issue #46); None when it was not in hand.
     rebalance_configuration: Any = None
     bars_configuration: Any = None
+    # The portfolio's first rebalance, after its first weights (issue #48); computed with the
+    # publication by a create that created, None for one that did not or when the calendar has
+    # no rebalance in the search window.
+    first_rebalance_at: dt.datetime | None = None
 
 
 def provided_portfolio_unique_identifier(configuration_uid: Any) -> str:
@@ -705,14 +713,35 @@ def give_portfolio_weights(
     *,
     owner: AccountOwner,
 ) -> PublishedWeights:
-    """Give the signal the portfolio follows one or more new observations (ADR 0024's route)."""
+    """Give the signal the portfolio follows one or more new observations (ADR 0024's route).
+
+    The answer says when the last of them takes effect for the portfolio (issue #48): the
+    rebalance after it, computed while they are published.
+    """
+    from alpaca_connectors.markets_api import all_together
     from alpaca_connectors.portfolios.configurations import get_portfolio_configuration
 
     configuration = get_portfolio_configuration(configuration_uid)
     if configuration is None:
         raise LookupError(f"Portfolio configuration {configuration_uid!s} does not exist.")
     require_portfolio_owner(configuration, owner)
-    return publish_provided_weights(configuration, observations)
+    latest = list(normalize_observations(observations))[-1]
+    published, effective = all_together(
+        lambda: publish_provided_weights(configuration, observations),
+        lambda: _rebalance_after(configuration.rebalance_configuration_uid, latest),
+    )
+    return replace(published, weights_effective_at=effective)
+
+
+def _rebalance_after(rebalance_configuration_uid: Any, observed_at: dt.datetime) -> Any:
+    """The rebalance after weights observed at ``observed_at``, by the portfolio's rule."""
+    from alpaca_connectors.portfolios import rebalance_schedule
+    from alpaca_connectors.portfolios.configurations import get_rebalance_configuration
+
+    rebalance = get_rebalance_configuration(rebalance_configuration_uid)
+    if rebalance is None:
+        return None
+    return rebalance_schedule.first_rebalance_at(rebalance, starts_at=observed_at)
 
 
 def _upsert_portfolio_row(configuration_uid: Any, rebalance: Any) -> Any:
@@ -972,7 +1001,7 @@ def create_provided_weights_portfolio(
        unique key makes a concurrent create with the same key fail here, before the signal or the
        `Portfolio` exists.
     3. **Publish and `Portfolio`.** The observations are published and the `Portfolio` row is
-       created together.
+       created together, while the first rebalance is read from the calendar (issue #48).
     4. **Configuration.** The configuration row, naming its definition and its `Portfolio`, and
        its own bars configuration, in one transaction. Until then a create with the same key finds
        no finished portfolio.
@@ -994,6 +1023,7 @@ def create_provided_weights_portfolio(
         portfolio_bar_configuration_values,
         stored_portfolio_bar_configuration,
     )
+    from alpaca_connectors.portfolios import rebalance_schedule
     from alpaca_connectors.portfolios.configurations import (
         AlpacaPortfolioConfigurationTable,
         create_rebalance_configuration,
@@ -1133,7 +1163,8 @@ def create_provided_weights_portfolio(
         _raise_first(outcomes)
         rule = named_rebalance if named_rebalance is not None else rebalance
 
-        # 3. Publish and `Portfolio`.
+        # 3. Publish and `Portfolio`. The first rebalance is read from the calendar alongside them,
+        # and a failed read fails the create like any other step (issue #48).
         outcomes = _together(
             lambda: _publish_validated(
                 definition.signal_key,
@@ -1144,8 +1175,9 @@ def create_provided_weights_portfolio(
                 new_signal=True,
             ),
             lambda: _upsert_portfolio_row(configuration_uid, rule),
+            lambda: rebalance_schedule.first_rebalance_at(rule, starts_at=next(iter(normalized))),
         )
-        published, portfolio_row = (_kept(outcome) for outcome in outcomes)
+        published, portfolio_row, first_rebalance = (_kept(outcome) for outcome in outcomes)
         _raise_first(outcomes)
 
         # 4. Configuration, with its own bars configuration, which names it.
@@ -1179,6 +1211,7 @@ def create_provided_weights_portfolio(
         rebalance_configuration_created=rebalance is not None,
         rebalance_configuration=rule,
         bars_configuration=own_bars,
+        first_rebalance_at=first_rebalance,
     )
 
 

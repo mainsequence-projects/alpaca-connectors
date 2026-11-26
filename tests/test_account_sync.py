@@ -33,7 +33,7 @@ from alpaca_connectors.account.ownership import AccountOwner
 from alpaca_connectors.api.app.main import app
 from alpaca_connectors.api.app.schemas import AccountSyncOperationResponse
 from alpaca_connectors.holdings.allocation import FundAllocationResult, SizedAccountTarget
-from alpaca_connectors.holdings.sizing import FundAllocationError
+from alpaca_connectors.holdings.sizing import FundAllocationError, PortfolioRebalancePending
 from alpaca_connectors.operations import account_sync
 from alpaca_connectors.operations.account_sync import (
     AccountSyncOperation,
@@ -188,6 +188,7 @@ def test_a_sync_publishes_one_snapshot_and_answers_succeeded(client, rows) -> No
         "position_set_uid": None,
         "allocation_applied": False,
         "lines": [],
+        "allocation_deferred": None,
         "extra": {"unresolved_symbols": []},
     }
     # An account with no target ends after the capture, as before ADR 0023.
@@ -320,6 +321,52 @@ def test_a_failed_step_records_its_own_times_and_a_skipped_one_none(client, rows
     )
     assert (size.status, size.started_at, size.completed_at) == ("failed", times[1], times[2])
     assert (allocate.status, allocate.started_at) == ("skipped", None)
+
+
+def test_a_sync_waiting_for_a_first_rebalance_succeeds_with_its_allocation_deferred(
+    client, rows
+) -> None:
+    """Issue #48: the holdings were captured and nothing went wrong; the allocation waits, and
+    the result says for which portfolios and until when, as fields under its own code."""
+    from alpaca_connectors.portfolios.rebalance_schedule import PendingFirstRebalance
+
+    first = dt.datetime(2026, 11, 23, 21, tzinfo=dt.timezone.utc)
+    waiting = PortfolioRebalancePending(
+        [PendingFirstRebalance(portfolio_uid="portfolio-uid", first_rebalance_at=first)]
+    )
+    steps: dict[str, Any] = {}
+    response, _ = _sync(client, sized=waiting, steps=steps)
+
+    operation = AccountSyncOperationResponse.model_validate(response.json())
+    assert (operation.status, operation.current_step, operation.error) == ("succeeded", None, None)
+    assert [(step.key, step.status) for step in operation.steps] == [
+        ("capture_holdings", "succeeded"),
+        ("size_targets", "skipped"),
+        ("allocate_funds", "skipped"),
+    ]
+    assert operation.steps[1].message == account_sync.DEFERRED_MESSAGE
+    steps["allocate"].assert_not_called()
+    assert operation.result.holdings_set_uid == HOLDINGS_SET_UID
+    assert (operation.result.position_set_uid, operation.result.allocation_applied) == (
+        None,
+        False,
+    )
+    assert response.json()["result"]["allocation_deferred"] == {
+        "code": "portfolio_rebalance_pending",
+        "message": (
+            "The allocation waits for the first rebalance of a portfolio of the account target."
+        ),
+        "portfolios": [
+            {
+                "portfolio_uid": "portfolio-uid",
+                "first_rebalance_at": "2026-11-23T21:00:00Z",
+                "recorded": False,
+            }
+        ],
+    }
+    # Read again, it is the same operation.
+    again = client.get(f"/v1/operations/{operation.operation_uid}")
+    assert again.json() == response.json()
 
 
 def test_a_capture_that_published_no_snapshot_allocates_nothing(client, rows) -> None:

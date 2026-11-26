@@ -638,12 +638,18 @@ def portfolio_weights_as_of(
     return weights
 
 
-def portfolio_weights_recorded(portfolio_identifier: str) -> bool:
-    """Whether Markets holds any weights of the portfolio (``PortfolioWeightsSeries.bounds``)."""
+def portfolio_weights_bounds(portfolio_identifier: str) -> Any:
+    """The first and last time and row count of the portfolio's weights in Markets
+    (``PortfolioWeightsSeries.bounds``); the times are None without rows."""
     from msm_portfolios.api import PortfolioWeightsSeries
 
     (bounds,) = PortfolioWeightsSeries.bounds([str(portfolio_identifier)])
-    return int(bounds.row_count or 0) > 0
+    return bounds
+
+
+def portfolio_weights_recorded(portfolio_identifier: str) -> bool:
+    """Whether Markets holds any weights of the portfolio (``PortfolioWeightsSeries.bounds``)."""
+    return int(portfolio_weights_bounds(portfolio_identifier).row_count or 0) > 0
 
 
 def publish_portfolio_weights(portfolio_identifier: str, rows: list[dict[str, Any]]) -> Any:
@@ -932,6 +938,7 @@ __all__ = [
     "Retirements",
     "SignalsNotEnded",
     "retire_portfolios",
+    "portfolio_weights_bounds",
     "portfolio_weights_recorded",
     "PortfolioRunEntry",
     "run_portfolio",
