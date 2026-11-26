@@ -17,7 +17,7 @@ from alpaca_connectors.account.ownership import AccountOwner
 from alpaca_connectors.operations import (
     configuration_job_state,
     launch_portfolio_job,
-    list_portfolio_job_runs,
+    list_configuration_runs,
 )
 from alpaca_connectors.portfolios import (
     PortfolioRebalanceConfiguration,
@@ -49,6 +49,7 @@ from ..schemas import (
     PortfolioCreateResponse,
     PortfolioJobRunAcceptedResponse,
     PortfolioJobRunResponse,
+    PortfolioPublishedWeightsResponse,
     PortfolioRebalanceConfigurationCreateRequest,
     PortfolioRebalanceConfigurationResponse,
     PortfolioRebalanceConfigurationUpdateRequest,
@@ -168,7 +169,12 @@ def get_configuration_detail(
         get_bar_configuration,
         portfolio_bar_configuration,
     )
-    from alpaca_connectors.portfolios.provided_weights import ended_portfolio_account_uid
+    from alpaca_connectors.markets_api import all_together
+    from alpaca_connectors.portfolios.provided_weights import (
+        ended_portfolio_account_uid,
+        provided_portfolio_unique_identifier,
+    )
+    from alpaca_connectors.portfolios.rebalance_schedule import portfolio_rebalance_times
     from alpaca_connectors.portfolios.signal_assets import assets_for_signals
     from alpaca_connectors.portfolios.signal_observations import read_signal_observation_bounds
 
@@ -212,9 +218,22 @@ def get_configuration_detail(
             f"Latest holdings for {bars_account['account_name']} within the trailing 30 days"
         )
 
-    history = read_portfolio_history(
-        configuration_uid=configuration_uid,
-        observation_limit=observation_limit,
+    # When its weights take effect (issue #48), read while the value history is.
+    history, times = all_together(
+        lambda: read_portfolio_history(
+            configuration_uid=configuration_uid,
+            observation_limit=observation_limit,
+        ),
+        lambda: portfolio_rebalance_times(
+            rebalance_configuration,
+            first_observation_at=bounds.first_observation_at,
+            last_observation_at=bounds.last_observation_at,
+            portfolio_identifier=(
+                provided_portfolio_unique_identifier(row.uid)
+                if row.portfolio_uid is not None
+                else None
+            ),
+        ),
     )
     observations = [
         {
@@ -240,6 +259,10 @@ def get_configuration_detail(
     return PortfolioConfigurationDetailResponse.model_validate(
         {
             **base.model_dump(mode="json"),
+            "first_rebalance_at": times.first_rebalance_at,
+            "first_rebalance_recorded": times.first_rebalance_recorded,
+            "weights_effective_at": times.weights_effective_at,
+            "weights_effective_recorded": times.weights_effective_recorded,
             "provided_weights": provided_weights,
             "linked_bars": {
                 "name": bars_configuration.name,
@@ -402,6 +425,7 @@ def create_provided_configuration(
     run, run_error = None, None
     if request.run and created.created:
         run, run_error = _start_first_run(created)
+    first_rebalance_at, first_rebalance_recorded = _first_rebalance(created)
     return ProvidedWeightsPortfolioCreateResponse(
         configuration=_created_response(created),
         portfolio_uid=created.portfolio_uid,
@@ -409,6 +433,8 @@ def create_provided_configuration(
         created=created.created,
         bars_configuration_created=created.bars_configuration_created,
         rebalance_configuration_created=created.rebalance_configuration_created,
+        first_rebalance_at=first_rebalance_at,
+        first_rebalance_recorded=first_rebalance_recorded,
         weights=(
             _published_response(created.configuration.uid, created.published)
             if created.published is not None
@@ -417,6 +443,24 @@ def create_provided_configuration(
         run=run,
         run_error=run_error,
     )
+
+
+def _first_rebalance(created: Any) -> tuple[Any, bool]:
+    """A create's first rebalance and whether it is recorded (issue #48).
+
+    A create that created computed it with its publication, and no run can have recorded it yet.
+    One that answered the portfolio a key already made reads it, with what Markets holds.
+    """
+    if created.created:
+        return created.first_rebalance_at, False
+    from alpaca_connectors.portfolios.rebalance_schedule import configuration_rebalance_times
+
+    times = configuration_rebalance_times(
+        created.configuration,
+        rebalance=created.rebalance_configuration,
+        weights_effective=False,
+    )
+    return times.first_rebalance_at, times.first_rebalance_recorded
 
 
 def _created_response(created: Any) -> PortfolioConfigurationResponse:
@@ -503,14 +547,22 @@ def give_weights(
     request: PortfolioWeightsRequest,
     *,
     owner: AccountOwner,
-) -> PublishedWeightsResponse:
-    """Give a provided-weights portfolio one more observation, or several."""
+) -> PortfolioPublishedWeightsResponse:
+    """Give a provided-weights portfolio one more observation, or several.
+
+    The answer says when the latest of them takes effect (issue #48). No run has had them yet, so
+    that rebalance is not recorded.
+    """
     published = give_portfolio_weights(
         configuration_uid,
         [observation.model_dump() for observation in request.observations],
         owner=owner,
     )
-    return _published_response(configuration_uid, published)
+    return PortfolioPublishedWeightsResponse(
+        **_published_response(configuration_uid, published).model_dump(),
+        weights_effective_at=published.weights_effective_at,
+        weights_effective_recorded=False,
+    )
 
 
 def observations_response(configuration_uid: Any, matrix: Any) -> SignalObservationsResponse:
@@ -555,10 +607,58 @@ def run_configuration(configuration_uid: str) -> PortfolioJobRunAcceptedResponse
 
 
 def configuration_runs(configuration_uid: str, *, limit: int) -> list[PortfolioJobRunResponse]:
-    return [
-        PortfolioJobRunResponse.model_validate(asdict(run))
-        for run in list_portfolio_job_runs(configuration_uid, limit=limit)
-    ]
+    """The configuration's newest runs, each with the first rebalance as it saw it (issue #48).
+
+    The runs, the portfolio's rebalance configuration and its signal's bounds are read together;
+    the first rebalance and what Markets holds of it are read only when a run succeeded. A run
+    that succeeded says whether it started at or after that rebalance and whether Markets holds
+    its weights, as the run's summary says; any other run has none.
+    """
+    from alpaca_connectors.markets_api import all_together
+    from alpaca_connectors.portfolios.provided_weights import provided_portfolio_unique_identifier
+    from alpaca_connectors.portfolios.rebalance_schedule import (
+        portfolio_rebalance_times,
+        run_first_rebalance,
+    )
+    from alpaca_connectors.portfolios.signal_observations import read_signal_observation_bounds
+
+    row = get_portfolio_configuration(configuration_uid)
+    if row is None:
+        raise LookupError(f"Portfolio configuration {configuration_uid!s} does not exist.")
+    runs, rebalance, bounds = all_together(
+        lambda: list_configuration_runs(row, kind="portfolio", limit=limit),
+        lambda: get_rebalance_configuration(row.rebalance_configuration_uid),
+        lambda: read_signal_observation_bounds(signal_uid=portfolio_signal_uid(row)),
+    )
+    times = None
+    if rebalance is not None and any(run.status == "SUCCEEDED" for run in runs):
+        times = portfolio_rebalance_times(
+            rebalance,
+            first_observation_at=bounds.first_observation_at,
+            last_observation_at=bounds.last_observation_at,
+            portfolio_identifier=(
+                provided_portfolio_unique_identifier(row.uid)
+                if row.portfolio_uid is not None
+                else None
+            ),
+            weights_effective=False,
+        )
+    responses: list[PortfolioJobRunResponse] = []
+    for run in runs:
+        # A tick's run carries every configuration in ``command_args``; ``configuration_uids``
+        # stays internal.
+        values = {key: value for key, value in asdict(run).items() if key != "configuration_uids"}
+        first_rebalance = (
+            run_first_rebalance(
+                rebalance, times=times, status=run.status, started_at=run.execution_start
+            )
+            if times is not None
+            else None
+        )
+        responses.append(
+            PortfolioJobRunResponse.model_validate({**values, "first_rebalance": first_rebalance})
+        )
+    return responses
 
 
 def list_rebalances(

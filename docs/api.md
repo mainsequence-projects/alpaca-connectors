@@ -228,7 +228,8 @@ Portfolio configurations run on the `alpaca-portfolio` Job ("Alpaca Portfolio") 
 - **Runs.** A run returns 202 with the JobRun UID and a `status_url`. It starts the Job with
   `--configuration-uid <uid>` and is refused while that configuration's newest run is pending or
   running. Run lists and `/v1/operations/job-runs/{job_run_uid}` find a configuration's runs by that
-  argument and return it as `command_args`.
+  argument and return it as `command_args`. A run list's succeeded runs also carry
+  `first_rebalance` ([below](#when-weights-take-effect)).
 
 ## Portfolios
 
@@ -301,6 +302,9 @@ GET|PATCH|DELETE /v1/portfolio-rebalance-configurations/{configuration_uid}
     answer's `run` carries it, or `run_error` says why it did not start, which never fails the
     create (the scheduled run covers it). A repeated create starts no run.
 
+  The answer says when the portfolio first holds weights, `first_rebalance_at` and
+  `first_rebalance_recorded` ([below](#when-weights-take-effect)).
+
   It keeps the rules it had before ADR 0028: the caller owns the portfolio, a named
   feed is not checked, and an inline one needs an account the caller may configure (another
   owner's answers `409 account_owned_by_another`; one without an owner stays open, ADR 0022). The
@@ -367,7 +371,9 @@ market-event timestamps and select the latest observation at or before each even
 The configuration detail `GET` accepts `observation_limit` from 1 through 5,000 (default 2,500). It
 returns the resolved Bars, Rebalance, Job, and canonical portfolio/calendar summaries (read through
 the Markets API), a `provided_weights` block (the signal UID, its first and last observation times
-and its asset count), plus the requested latest values, read from Markets with the ms-markets recipe
+and its asset count), when its weights take effect (`first_rebalance_at`,
+`first_rebalance_recorded`, `weights_effective_at`, `weights_effective_recorded`,
+[below](#when-weights-take-effect)), plus the requested latest values, read from Markets with the ms-markets recipe
 `portfolio_history` (ADR 0031). The history read is scoped by the canonical Portfolio unique
 identifier and runs only when a consumer opens that configuration; API consumers do not need to
 interpret or display related resource UIDs.
@@ -397,6 +403,36 @@ its first provided weights. A run before that event succeeds with no weights. It
 and its log carries the message (issue #41). `rebalanced` is true only when Markets holds the
 portfolio's weights: a run after the event that recorded none reports `rebalanced: false` and says
 that no run has recorded that rebalance.
+
+### When Weights Take Effect
+
+Every later set of weights takes effect the same way, at the rebalance after it; until then the
+portfolio holds the previous ones. An application reads both times as fields, without failing a
+sync or parsing a message
+([issue #48](https://github.com/mainsequence-projects/alpaca-connectors/issues/48)):
+
+| Route | Fields |
+| --- | --- |
+| `POST /v1/portfolio-configurations/provided-weights` | `first_rebalance_at`, `first_rebalance_recorded` |
+| `GET /v1/portfolio-configurations/{uid}` | `first_rebalance_at`, `first_rebalance_recorded`, `weights_effective_at`, `weights_effective_recorded` |
+| `POST /v1/portfolio-configurations/{uid}/weights` | `weights_effective_at`, `weights_effective_recorded` |
+| `GET /v1/portfolio-configurations/{uid}/runs` | each run's `first_rebalance`: `rebalanced`, `first_rebalance_at`, `message` |
+
+- `first_rebalance_at` is the portfolio's first rebalance by its rule, after its first weights.
+  `weights_effective_at` is the rebalance after the latest weights given. The price is the daily
+  bar, so both are a session close: a portfolio created on Saturday 2026-11-21 at 14:11 UTC first
+  rebalances on Monday 2026-11-23 at 21:00 UTC. Either is null when the calendar has no
+  rebalance in the 21 days after those weights.
+- `first_rebalance_recorded` is true once Markets holds any weights of the portfolio, as a run
+  checks it; `weights_effective_recorded` once it holds weights at or after
+  `weights_effective_at`. Both are false on a create that created the portfolio and on the
+  weights route's answer: no run has had those weights yet. A repeated create reads them.
+- The create reads the calendar while it publishes, and a failed read fails the create like any
+  other step; the weights route reads it while the weights are published.
+- A run's `first_rebalance` is what its summary says, from when the run started and what Markets
+  holds now: `rebalanced` is true when it started at or after the first rebalance and Markets
+  holds the portfolio's weights, and `message` says why it recorded none. Only a succeeded run
+  has one; it is null for the others.
 
 ## Account Sync
 
@@ -428,6 +464,26 @@ time outside Markets and MetaTables can be read from the log.
 
 The connector writes no target and trades no delta. An account with no target, and a capture
 that published no snapshot, end after `capture_holdings` with the two other steps `skipped`.
+
+So does a target whose portfolios without weights only wait for their first rebalance
+([issue #48](https://github.com/mainsequence-projects/alpaca-connectors/issues/48)): its first
+rebalance is after the sync, or no run has recorded it yet. The holdings were captured and nothing
+went wrong, so the operation `succeeded`, with `size_targets` and `allocate_funds` `skipped`, and
+its result says which portfolios the allocation waits for, and until when:
+
+```json
+"allocation_deferred": {
+  "code": "portfolio_rebalance_pending",
+  "message": "The allocation waits for the first rebalance of a portfolio of the account target.",
+  "portfolios": [
+    {"portfolio_uid": "...", "first_rebalance_at": "2026-11-23T21:00:00Z", "recorded": false}
+  ]
+}
+```
+
+`allocation_deferred` is null otherwise. A sync after the first rebalance is recorded allocates
+as usual. A portfolio missing weights for another reason still fails the sync with
+`portfolio_weights_missing`, and so does a target that mixes the two.
 
 ```text
 POST /v1/accounts/{account_uid}/actions/sync
@@ -474,9 +530,9 @@ inside the request and answers `200` with a terminal
 - A step that fails after the capture leaves the snapshot published. The operation is `failed`
   with `current_step` naming the step, and the next sync captures again. Its codes are
   `account_equity_missing`, `portfolio_weights_missing` (a portfolio of the target has no
-  weights in this connector at `T`; for a portfolio before its first rebalance, the message
-  gives that rebalance's time, and says whether it is after the sync or not yet recorded by a
-  run, issue #41), `asset_unresolved`, `asset_price_missing`,
+  weights at `T`, and is not only waiting for its first rebalance: a portfolio this connector
+  does not know, whose signal has published nothing, or whose calendar has no rebalance in the
+  search window), `asset_unresolved`, `asset_price_missing`,
   `invalid_account_target`, and the Markets refusals `not_found`, `target_after_snapshot`,
   `invalid_sized_targets`, `plan_changed`, `allocation_exists`, `policy_version_mismatch` and
   `portfolio_retired`. `target_after_snapshot`, `plan_changed` and `policy_version_mismatch`

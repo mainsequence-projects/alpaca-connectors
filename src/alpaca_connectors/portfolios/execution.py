@@ -28,7 +28,10 @@ from alpaca_connectors.portfolios.interpolated_prices import (
     build_account_interpolated_prices,
     resolve_alpaca_bars_tables,
 )
-from alpaca_connectors.portfolios.rebalance_schedule import first_rebalance_state
+from alpaca_connectors.portfolios.rebalance_schedule import (
+    first_rebalance_state,
+    recorded_rebalance_state,
+)
 from alpaca_connectors.portfolios.signal_observations import read_signal_observation_matrix
 
 logger = logging.getLogger(__name__)
@@ -641,19 +644,7 @@ def _first_rebalance(
 
 def _recorded_rebalance(first_rebalance: dict[str, Any], recorded: bool) -> dict[str, Any]:
     """The schedule's first rebalance, as Markets holds it (ms-markets issue 118)."""
-    if recorded:
-        return first_rebalance
-    # The first rebalance was due, and no run has recorded it: the run reports what Markets
-    # holds, not what the schedule expected.
-    return {
-        **first_rebalance,
-        "rebalanced": False,
-        "message": (
-            "The portfolio's first rebalance was due at "
-            f"{first_rebalance['first_rebalance_at']}, and Markets holds no weights of it: "
-            "no run has recorded that rebalance."
-        ),
-    }
+    return recorded_rebalance_state(first_rebalance, recorded)
 
 
 def _finish_run(

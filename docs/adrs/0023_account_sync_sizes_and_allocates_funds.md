@@ -13,6 +13,14 @@ exposure, and the connector sizes it at every sync.
 
 The decision marked (owner) was made by the owner on 2026-11-15.
 
+Amended on 2026-11-26 for
+[issue #48](https://github.com/mainsequence-projects/alpaca-connectors/issues/48): a target whose
+portfolios without weights only wait for their first rebalance does not fail the sync. The sync
+succeeds with `size_targets` and `allocate_funds` skipped, and its result's `allocation_deferred`
+names them under the code `portfolio_rebalance_pending`, each with `portfolio_uid`,
+`first_rebalance_at` and `recorded`. `portfolio_weights_missing` is left for a portfolio missing
+weights for another reason.
+
 Amended on 2026-11-23: the allocation is one Markets call (decision 5). `allocate_account_virtual_funds`
 plans from the same inputs and writes in one transaction, so the separate plan read (12 s in
 Production) is gone.

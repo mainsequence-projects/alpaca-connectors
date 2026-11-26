@@ -411,6 +411,33 @@ class AccountSyncRequest(BaseModel):
     account_uid: str
 
 
+class AccountSyncPendingRebalance(BaseModel):
+    """A portfolio of the account target waiting for its first rebalance (issue #48)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    portfolio_uid: str = Field(description="The ms-markets `Portfolio` the target names.")
+    first_rebalance_at: dt.datetime = Field(
+        description=(
+            "When its first rebalance is: after the sync, or before it with no run that has "
+            "recorded it yet."
+        )
+    )
+    recorded: bool = Field(
+        default=False, description="Whether a portfolio run has recorded that first rebalance."
+    )
+
+
+class AccountSyncAllocationDeferred(BaseModel):
+    """Why a sync that captured the holdings allocated nothing yet (issue #48)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    code: Literal["portfolio_rebalance_pending"]
+    message: str
+    portfolios: list[AccountSyncPendingRebalance] = Field(min_length=1)
+
+
 class AccountSyncResult(BaseModel):
     """The `AccountHoldingsSet` a sync published and its allocation to the account's funds.
 
@@ -430,6 +457,9 @@ class AccountSyncResult(BaseModel):
     # True when this sync wrote the allocation; false when it was already applied or skipped.
     allocation_applied: bool = False
     lines: list[dict[str, Any]] = Field(default_factory=list)
+    # Set when the allocation waits for the first rebalance of the target's portfolios; the
+    # holdings were captured and nothing went wrong (issue #48).
+    allocation_deferred: AccountSyncAllocationDeferred | None = None
     # What this venue adds, here `unresolved_symbols`; callers never depend on it.
     extra: dict[str, Any] = Field(default_factory=dict)
 
@@ -758,6 +788,23 @@ class SignalObservationsResponse(BaseModel):
     assets: list[SignalObservationAssetResponse]
 
 
+class PortfolioRunFirstRebalanceResponse(BaseModel):
+    """A run's view of the portfolio's first rebalance, as its summary states it (issue #48)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    rebalanced: bool = Field(
+        description=(
+            "True when the run started at or after the first rebalance and Markets holds the "
+            "portfolio's weights."
+        )
+    )
+    first_rebalance_at: dt.datetime | None = Field(
+        description="The first rebalance; null when the calendar has none in the search window."
+    )
+    message: str | None = Field(default=None, description="Why the run recorded no weights.")
+
+
 class PortfolioJobRunResponse(BaseModel):
     """One run of the shared portfolio Job; ``command_args`` select its configuration."""
 
@@ -776,6 +823,10 @@ class PortfolioJobRunResponse(BaseModel):
     command_args: list[str]
     logs_url: str | None
     failure_message: str | None
+    first_rebalance: PortfolioRunFirstRebalanceResponse | None = Field(
+        default=None,
+        description="The first rebalance as this run saw it; null unless the run succeeded.",
+    )
 
 
 class PortfolioJobRunAcceptedResponse(BaseModel):
@@ -1002,6 +1053,22 @@ class PublishedWeightsResponse(BaseModel):
     last_observed_at: dt.datetime
 
 
+class PortfolioPublishedWeightsResponse(PublishedWeightsResponse):
+    """Weights given to one portfolio, and when they take effect for it (issue #48)."""
+
+    weights_effective_at: dt.datetime | None = Field(
+        default=None,
+        description=(
+            "The rebalance at which the latest of these weights take effect; until then the "
+            "portfolio holds the previous ones. Null when the calendar has no rebalance in the "
+            "search window."
+        ),
+    )
+    weights_effective_recorded: bool = Field(
+        default=False, description="Whether a portfolio run has recorded that rebalance."
+    )
+
+
 class PortfolioConfigurationUpdateRequest(_ConfigurationRequest):
     name: str | None = Field(default=None, min_length=1, max_length=255)
     description: str | None = None
@@ -1179,6 +1246,18 @@ class ProvidedWeightsPortfolioCreateResponse(BaseModel):
     )
     bars_configuration_created: bool
     rebalance_configuration_created: bool = False
+    first_rebalance_at: dt.datetime | None = Field(
+        default=None,
+        description=(
+            "When the portfolio's first rebalance is, the first one after its first weights: it "
+            "has weights from then (issue #48). Null when the calendar has none in the search "
+            "window."
+        ),
+    )
+    first_rebalance_recorded: bool = Field(
+        default=False,
+        description="Whether a portfolio run has recorded the first rebalance.",
+    )
     weights: PublishedWeightsResponse | None = Field(
         default=None, description="The weights published; null when created is false."
     )
@@ -1261,6 +1340,28 @@ class PortfolioProvidedWeightsResponse(BaseModel):
 class PortfolioConfigurationDetailResponse(PortfolioConfigurationResponse):
     """Resolved detail projection used only after one portfolio is selected."""
 
+    first_rebalance_at: dt.datetime | None = Field(
+        default=None,
+        description=(
+            "When the portfolio's first rebalance is, the first one after its first weights: it "
+            "has weights from then (issue #48). Null when the calendar has none in the search "
+            "window."
+        ),
+    )
+    first_rebalance_recorded: bool = Field(
+        default=False, description="Whether a portfolio run has recorded the first rebalance."
+    )
+    weights_effective_at: dt.datetime | None = Field(
+        default=None,
+        description=(
+            "The rebalance at which the latest weights given take effect; until then the "
+            "portfolio holds the previous ones. Null when the calendar has none in the search "
+            "window."
+        ),
+    )
+    weights_effective_recorded: bool = Field(
+        default=False, description="Whether a portfolio run has recorded that rebalance."
+    )
     provided_weights: PortfolioProvidedWeightsResponse
     linked_bars: PortfolioLinkedBarsResponse
     linked_rebalance: PortfolioLinkedRebalanceResponse

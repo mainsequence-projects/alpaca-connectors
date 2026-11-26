@@ -40,6 +40,7 @@ from .configuration_jobs import (
     configuration_job_state,
     get_configuration_job_run,
     launch_portfolio_job,
+    list_configuration_runs,
     list_portfolio_job_runs,
 )
 
@@ -81,5 +82,6 @@ __all__ = [
     "project_operation_models",
     "set_asset_registration_step",
     "launch_portfolio_job",
+    "list_configuration_runs",
     "list_portfolio_job_runs",
 ]

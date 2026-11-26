@@ -171,7 +171,10 @@ Job needs nothing prepared. See
 
 A run's summary carries `first_rebalance`: `rebalanced` is true only when Markets holds the
 portfolio's weights. A run whose first rebalance was due and recorded no weights says so in its
-`message` and log, instead of reporting the schedule.
+`message` and log, instead of reporting the schedule. The summary is only in the run's log, so
+`GET /v1/portfolio-configurations/{uid}/runs` answers each succeeded run's `first_rebalance`
+again, from when the run started and what Markets holds now
+([API](../api.md#portfolios), issue #48).
 
 ## Job Resources
 

@@ -30,6 +30,25 @@ class FundAllocationError(ValueError):
         super().__init__(message)
 
 
+PORTFOLIO_REBALANCE_PENDING = "portfolio_rebalance_pending"
+
+
+class PortfolioRebalancePending(FundAllocationError):
+    """Every portfolio of the account target that has no weights is waiting for its first
+    rebalance (issue #48): nothing is broken, and the allocation waits for it.
+
+    ``portfolios`` are the ``PendingFirstRebalance`` of those portfolios. A sync answers them as
+    fields of its result, under this code, distinct from ``portfolio_weights_missing``.
+    """
+
+    def __init__(self, portfolios: Sequence[Any]) -> None:
+        super().__init__(
+            PORTFOLIO_REBALANCE_PENDING,
+            "The allocation waits for the first rebalance of a portfolio of the account target.",
+        )
+        self.portfolios = tuple(portfolios)
+
+
 @dataclass(frozen=True, slots=True)
 class Exposure:
     """One row of the account target that has to be sized.
@@ -168,6 +187,8 @@ __all__ = [
     "AssetTerms",
     "Exposure",
     "FundAllocationError",
+    "PORTFOLIO_REBALANCE_PENDING",
+    "PortfolioRebalancePending",
     "exposure_size",
     "size_targets",
     "size_units",

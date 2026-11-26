@@ -26,6 +26,9 @@ from alpaca_connectors.portfolios.portfolio_history import (
     PortfolioPerformance,
     PortfolioValueObservation,
 )
+from alpaca_connectors.portfolios.rebalance_schedule import (
+    PortfolioRebalanceTimes as RebalanceTimes,
+)
 
 CONFIGURATION_UID = "11111111-1111-4111-8111-111111111111"
 SIGNAL_CONFIGURATION_UID = "22222222-2222-4222-8222-222222222222"
@@ -472,11 +475,20 @@ def test_portfolio_detail_resolves_business_labels_and_value_history() -> None:
     )
     account = {"account_name": "Paper account", "is_paper": True}
     bounds = SimpleNamespace(first_observation_at=now, last_observation_at=now)
+    ran = portfolio_row().model_copy(update={"portfolio_uid": uuid.UUID(int=7)})
+    close = dt.datetime(2026, 9, 8, 20, tzinfo=dt.UTC)
+    weights_bounds = SimpleNamespace(row_count=0, last_time=None)
 
     with (
-        patch.object(
-            portfolio_service, "get_portfolio_configuration", return_value=portfolio_row()
-        ),
+        patch.object(portfolio_service, "get_portfolio_configuration", return_value=ran),
+        # The NYSE close after the weights, and what Markets holds of them (issue #48).
+        patch(
+            "alpaca_connectors.portfolios.rebalance_schedule.first_rebalance_at",
+            return_value=close,
+        ) as calendar,
+        patch(
+            "alpaca_connectors.markets_api.portfolio_weights_bounds", return_value=weights_bounds
+        ) as markets,
         patch.object(portfolio_service, "_responses", return_value=[response()]),
         patch.object(
             portfolio_service,
@@ -515,6 +527,11 @@ def test_portfolio_detail_resolves_business_labels_and_value_history() -> None:
     assert detail.linked_rebalance.name == "NYSE close"
     assert detail.canonical_portfolio.observation_count == 1
     assert detail.canonical_portfolio.latest_close == 103.25
+    # Its first weights are its latest: one calendar read, and Markets holds none yet.
+    calendar.assert_called_once_with(rebalance_row(), starts_at=now)
+    markets.assert_called_once_with(f"ALPACA_PORTFOLIO__{CONFIGURATION_UID.replace('-', '')}")
+    assert (detail.first_rebalance_at, detail.first_rebalance_recorded) == (close, False)
+    assert (detail.weights_effective_at, detail.weights_effective_recorded) == (close, False)
 
 
 def test_portfolio_detail_route_loads_latest_100_observations(api_client) -> None:
@@ -642,6 +659,9 @@ def test_only_the_accounts_owner_creates_its_portfolio(api_client, local_caller)
 # ------------------------------------------------------------------------------------------------
 # The create starts the first run when asked (issue #43)
 # ------------------------------------------------------------------------------------------------
+FIRST_CLOSE = dt.datetime(2026, 11, 16, 21, tzinfo=dt.UTC)
+
+
 def _create_and_run(*, run: bool, created: bool = True, run_error=None):
     from alpaca_connectors.account.ownership import AccountOwner
     from alpaca_connectors.api.app.schemas import ProvidedWeightsPortfolioCreateRequest
@@ -664,6 +684,8 @@ def _create_and_run(*, run: bool, created: bool = True, run_error=None):
         rebalance_configuration=SimpleNamespace(uid=REBALANCE_CONFIGURATION_UID),
         bars_configuration=SimpleNamespace(uid=BARS_CONFIGURATION_UID),
         signal_definition=SimpleNamespace(uid=DEFINITION_UID),
+        # Computed with the publication by a create that created (issue #48).
+        first_rebalance_at=FIRST_CLOSE if created else None,
     )
     accepted = PortfolioJobRunAcceptedResponse(
         configuration_uid=CONFIGURATION_UID,
@@ -677,7 +699,13 @@ def _create_and_run(*, run: bool, created: bool = True, run_error=None):
     )
     owner = AccountOwner.main_sequence_user("owner-uid")
     submission = ConfigurationJobSubmission(CONFIGURATION_UID, JOB_UID, JOB_RUN_UID, "PENDING")
+    recorded = RebalanceTimes(first_rebalance_at=FIRST_CLOSE, first_rebalance_recorded=True)
     with (
+        # A repeated create reads the portfolio's first rebalance and what Markets holds of it.
+        patch(
+            "alpaca_connectors.portfolios.rebalance_schedule.configuration_rebalance_times",
+            return_value=recorded,
+        ) as read_times,
         patch.object(service, "create_provided_weights_portfolio", return_value=creation) as make,
         patch.object(service, "_responses", return_value=["configuration"]) as answer,
         patch.object(
@@ -688,6 +716,7 @@ def _create_and_run(*, run: bool, created: bool = True, run_error=None):
     ):
         response = service.create_provided_configuration(request, owner=owner)
     start.answer = answer
+    start.read_times = read_times
     return make, start, response, accepted
 
 
@@ -731,8 +760,134 @@ def test_a_run_that_does_not_start_never_fails_the_create() -> None:
     )
 
 
+def test_the_create_answers_its_first_rebalance() -> None:
+    """Issue #48: when the portfolio first holds weights, as fields of the create's answer."""
+    _, start, response, _ = _create_and_run(run=False)
+    # A created portfolio's was computed with its publication, and no run has recorded it.
+    assert (response.first_rebalance_at, response.first_rebalance_recorded) == (FIRST_CLOSE, False)
+    start.read_times.assert_not_called()
+
+    _, start, response, _ = _create_and_run(run=True, created=False)
+    # A repeated create reads it, with what Markets holds, by the rule it already holds.
+    assert (response.first_rebalance_at, response.first_rebalance_recorded) == (FIRST_CLOSE, True)
+    (configuration,) = start.read_times.call_args.args
+    assert configuration.uid == uuid.UUID(CONFIGURATION_UID)
+    assert start.read_times.call_args.kwargs["rebalance"].uid == REBALANCE_CONFIGURATION_UID
+    assert start.read_times.call_args.kwargs["weights_effective"] is False
+
+
 def test_no_run_is_started_unasked_or_for_a_portfolio_not_created_again() -> None:
     for run, created in ((False, True), (True, False)):
         _, start, response, _ = _create_and_run(run=run, created=created)
         start.assert_not_called()
         assert (response.run, response.run_error, response.weights) == (None, None, None)
+
+
+# ------------------------------------------------------------------------------------------------
+# The run history says what each run saw of the first rebalance (issue #48)
+# ------------------------------------------------------------------------------------------------
+def _run(uid: int, status: str, started: dt.datetime | None):
+    from alpaca_connectors.operations import ConfigurationJobRun
+
+    other = "77777777-7777-4777-8777-777777777777"
+    return ConfigurationJobRun(
+        uid=str(uuid.UUID(int=uid)),
+        job_uid=JOB_UID,
+        job_name="Alpaca Portfolio",
+        configuration_uid=CONFIGURATION_UID,
+        status=status,
+        execution_start=started,
+        execution_end=None,
+        commit_hash=None,
+        runtime_image_uid=None,
+        runtime_image_digest=None,
+        command_args=["--configuration-uid", CONFIGURATION_UID, "--configuration-uid", other],
+        logs_url=None,
+        failure_message="The scheduled portfolio run failed." if status == "FAILED" else None,
+        # A tick's run carries several configurations; this field stays internal.
+        configuration_uids=(CONFIGURATION_UID, other),
+    )
+
+
+def test_each_succeeded_run_says_whether_it_reached_the_first_rebalance(api_client) -> None:
+    close = dt.datetime(2026, 11, 23, 21, tzinfo=dt.UTC)
+    runs = [
+        _run(3, "SUCCEEDED", dt.datetime(2026, 11, 24, 2, tzinfo=dt.UTC)),
+        _run(2, "FAILED", dt.datetime(2026, 11, 23, 2, tzinfo=dt.UTC)),
+        _run(1, "SUCCEEDED", dt.datetime(2026, 11, 21, 14, 12, tzinfo=dt.UTC)),
+    ]
+    ran = portfolio_row().model_copy(update={"portfolio_uid": uuid.UUID(int=7)})
+    bounds = SimpleNamespace(
+        first_observation_at=dt.datetime(2026, 11, 21, 14, 11, tzinfo=dt.UTC),
+        last_observation_at=dt.datetime(2026, 11, 21, 14, 11, tzinfo=dt.UTC),
+    )
+    with (
+        patch.object(portfolio_service, "get_portfolio_configuration", return_value=ran),
+        patch.object(
+            portfolio_service, "get_rebalance_configuration", return_value=rebalance_row()
+        ),
+        patch.object(portfolio_service, "list_configuration_runs", return_value=runs) as listed,
+        patch.object(portfolio_service, "portfolio_signal_uid", return_value="signal-uid"),
+        patch(
+            "alpaca_connectors.portfolios.signal_observations.read_signal_observation_bounds",
+            return_value=bounds,
+        ),
+        patch(
+            "alpaca_connectors.portfolios.rebalance_schedule.first_rebalance_at",
+            return_value=close,
+        ) as calendar,
+        patch(
+            "alpaca_connectors.markets_api.portfolio_weights_bounds",
+            return_value=SimpleNamespace(row_count=0, last_time=None),
+        ),
+    ):
+        result = api_client.get(f"/v1/portfolio-configurations/{CONFIGURATION_UID}/runs?limit=3")
+
+    assert result.status_code == 200, result.text
+    assert listed.call_args.kwargs == {"kind": "portfolio", "limit": 3}
+    # One calendar read for all of them: only the first rebalance is asked.
+    calendar.assert_called_once()
+    newest, failed, first = result.json()
+    assert "configuration_uids" not in newest
+    assert newest["command_args"] == runs[0].command_args
+    # Started after the first rebalance, and Markets holds no weights: no run recorded it.
+    assert newest["first_rebalance"]["rebalanced"] is False
+    assert newest["first_rebalance"]["first_rebalance_at"] == "2026-11-23T21:00:00Z"
+    assert "no run has recorded that rebalance" in newest["first_rebalance"]["message"]
+    assert failed["first_rebalance"] is None
+    # The first run, right after the create on Saturday: nothing yet, and why.
+    assert first["first_rebalance"] == {
+        "rebalanced": False,
+        "first_rebalance_at": "2026-11-23T21:00:00Z",
+        "message": (
+            "No rebalance yet: the portfolio's first rebalance is at 2026-11-23T21:00:00+00:00 "
+            "(NYSE market_close). It has weights after a run at or after that time."
+        ),
+    }
+
+
+def test_runs_that_did_not_succeed_read_no_calendar(api_client) -> None:
+    with (
+        patch.object(
+            portfolio_service, "get_portfolio_configuration", return_value=portfolio_row()
+        ),
+        patch.object(
+            portfolio_service, "get_rebalance_configuration", return_value=rebalance_row()
+        ),
+        patch.object(
+            portfolio_service,
+            "list_configuration_runs",
+            return_value=[_run(1, "RUNNING", dt.datetime(2026, 11, 21, 15, tzinfo=dt.UTC))],
+        ),
+        patch.object(portfolio_service, "portfolio_signal_uid", return_value="signal-uid"),
+        patch(
+            "alpaca_connectors.portfolios.signal_observations.read_signal_observation_bounds",
+            return_value=SimpleNamespace(first_observation_at=None, last_observation_at=None),
+        ),
+        patch("alpaca_connectors.portfolios.rebalance_schedule.first_rebalance_at") as calendar,
+    ):
+        result = api_client.get(f"/v1/portfolio-configurations/{CONFIGURATION_UID}/runs")
+
+    assert result.status_code == 200, result.text
+    assert [run["first_rebalance"] for run in result.json()] == [None]
+    calendar.assert_not_called()

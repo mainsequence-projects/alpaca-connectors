@@ -21,13 +21,13 @@ from ..schemas import (
     PortfolioCreateResponse,
     PortfolioJobRunAcceptedResponse,
     PortfolioJobRunResponse,
+    PortfolioPublishedWeightsResponse,
     PortfolioRebalanceConfigurationCreateRequest,
     PortfolioRebalanceConfigurationResponse,
     PortfolioRebalanceConfigurationUpdateRequest,
     PortfolioWeightsRequest,
     ProvidedWeightsPortfolioCreateRequest,
     ProvidedWeightsPortfolioCreateResponse,
-    PublishedWeightsResponse,
     ResourceCollection,
     ResourceDiscoveryResponse,
     SignalObservationsResponse,
@@ -155,14 +155,15 @@ def provided_weights_portfolio_create(
 
 @router.post(
     "/v1/portfolio-configurations/{configuration_uid}/weights",
-    response_model=PublishedWeightsResponse,
+    response_model=PortfolioPublishedWeightsResponse,
     status_code=201,
 )
 def provided_weights_give(
     configuration_uid: str,
     request: PortfolioWeightsRequest = Body(...),
-) -> PublishedWeightsResponse:
-    """Give the portfolio new weights; only its owner may."""
+) -> PortfolioPublishedWeightsResponse:
+    """Give the portfolio new weights; only its owner may. The answer says when they take
+    effect."""
     try:
         return give_weights(configuration_uid, request, owner=acting_owner())
     except Exception as exc:
