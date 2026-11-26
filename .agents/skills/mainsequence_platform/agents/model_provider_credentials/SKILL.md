@@ -117,6 +117,30 @@ Django exchanges provider authorization and persists the final credential.
 MCP and the calling agent never receive the final credential. Do not call or
 simulate hydrate, flush, exchange, refresh, or a generic HTTP operation.
 
+## Hosted model calls go through the model relay
+
+A hosted Agent session never receives a provider secret. Django answers it a
+session pass and the relay's address, and every model call goes through the
+relay, which holds the secret.
+
+The relay's address is chosen by the platform, not by the user:
+
+- By default it is the platform API's own address plus `/model-relay`.
+- The platform's operators set `MODEL_RELAY_BASE_URL` on the backend only when
+  the relay runs as a workload of its own, when runtimes reach the API on a
+  loopback address, or when the API answers on several host names and model
+  calls must use one. For example, `MODEL_RELAY_BASE_URL=https://model-relay.platform.example.com`
+  makes every hosted session call `https://model-relay.platform.example.com/model-relay`.
+  That host is an example, not a Main Sequence address.
+
+Never tell a user to declare `MODEL_RELAY_BASE_URL` in an Agent's workflow, a
+project's environment or an application: it is a backend setting and does
+nothing there. An application that hydrates its own people's credentials names
+its own relay in its hydrate answer instead; ms-tau-sdk's
+`tau_security_and_access` skill covers that. If hydration answers `409`
+`model_provider_credential_unavailable` saying the relay has no address, report
+it as a platform problem; nothing in the Agent fixes it.
+
 ## Explain provider-sharing trust
 
 ADR-0049's provider-sharing trust policy was approved by the owner on 2026-10-05.

@@ -169,7 +169,7 @@ mainsequence==9.0.41
     #   alpaca-connectors
     #   mainsequence-metatable
     #   ms-markets
-mainsequence-metatable==0.1.84
+mainsequence-metatable==0.1.85
     # via
     #   alpaca-connectors
     #   ms-markets

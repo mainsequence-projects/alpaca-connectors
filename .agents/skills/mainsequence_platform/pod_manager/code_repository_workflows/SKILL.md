@@ -1,6 +1,6 @@
 ---
 name: code-repository-workflows
-description: Create and validate backend-managed API 3.0.0 deployment declarations and optional Job dependencies under .mainsequence/workflows for Jobs, FastAPI applications, Static Sites, and the one branch-owned Harness Agent.
+description: Create and validate backend-managed API 3.0.0 deployment declarations and optional Job dependencies under .mainsequence/workflows for Jobs, FastAPI applications, Static Sites, and branch-owned Harness Agents.
 ---
 
 # Main Sequence CodeRepository Workflows
@@ -88,6 +88,14 @@ WebSocket counts as one request for its whole lifetime, so a FastAPI release
 that serves WebSockets sizes `container_concurrency` for its connections too.
 Total capacity is about `max_scale` x `container_concurrency`.
 
+FastAPI and Harness Agent releases also own `scale_down_delay_seconds` (`60`
+through `3600`): how long Knative keeps replicas after the last request before
+scaling down. Creation omission uses `300` for FastAPI and `900` for Harness
+Agents; update and workflow omission preserve it. A caller that returns within
+the delay finds a warm replica, and later callers wait for a cold start. Lower
+it to save cost on a rarely used release; set `min_scale` when no cold start is
+acceptable.
+
 - Every file requires `api_version`, `name`, and `resources`.
 - `3.0.0` is the only supported version; a file of any other version is
   refused before anything of it is applied, so a repository switches its
@@ -148,13 +156,13 @@ identity. Django creates the `Agent`, derives its Organization Environment from
 the branch, creates the `harness_agent` release, binds both, and returns
 `agent_uid` and `resource_release_uid` as results.
 
-The Agent exists while any workflow file of the branch declares a
-`harness_agent`. Moving the declaration to another file, or renaming its key,
-keeps the same Agent and release. Removing it deletes the release and the
-Agent, with the Agent's sessions.
+Each Agent exists while any workflow file of the branch declares its key as a
+`harness_agent`. Moving the declaration to another file keeps the same Agent
+and release; renaming its key creates a new Agent. Removing it deletes that
+release and Agent, with the Agent's sessions.
 
-Agent creation requires the indexed `.agents/agent_card.json` at the exact
-repository-event commit. Its non-empty top-level `name` and `description`
+Agent creation takes the declaration's `spec.agent_card`, or, without one, the
+indexed `.agents/agent_card.json` at the exact repository-event commit. Its non-empty top-level `name` and `description`
 become the live Agent presentation fields. Missing or malformed cards reject
 reconciliation before an Agent exists; repository and branch metadata are not
 presentation fallbacks.
@@ -179,7 +187,6 @@ resources:
       revision_retention_count: 3
       cpu_request: "1"
       memory_request: 2Gi
-      spot: false
       env_vars:
         - name: FEATURE_MODE
           value: conservative
@@ -192,7 +199,9 @@ Supported `harness_agent.spec` fields are:
 - `automatic_deployment`;
 - `automatic_redeployment`;
 - `revision_retention_count`;
-- `cpu_request`, `memory_request`, `gpu_request`, `gpu_type`, and `spot`;
+- `cpu_request`, `memory_request`, `gpu_request`, and `gpu_type`;
+- `spot`, only as `false`: spot capacity is not offered, and `spot: true` is
+  refused for every resource kind;
 - `command_center_icon`; and
 - `env_vars`.
 
@@ -255,10 +264,17 @@ Provider, model, and thinking are required Agent runtime defaults rather than
 identity. Validate the combination through Django. Use `llm_thinking: off`
 when the selected model has no configurable reasoning level.
 
-A CodeRepositoryBranch owns at most one Harness Agent across all workflow
-files. Two declarations are invalid even when their keys, resources, or files
-differ. The backend enforces this during per-file validation, cross-file event
-validation, branch locking, and the database one-to-one relationship.
+A CodeRepositoryBranch may declare several Harness Agents, in one or more
+files; each is identified by its resource key. Only one of them may omit
+`spec.agent_card` and read `.agents/agent_card.json` (`duplicate_target` in the
+same file, `cross_file_target_conflict` across files). Optional
+`spec.runtime_resources` selects what the Agent's runtime loads from `.tau/`:
+`system_prompt` (a Markdown file under `.tau/`, outside `skills/`, `prompts/` and
+`extensions/`), `skills` (skill folder names) and `extensions` (entries directly
+under `.tau/extensions/`); an empty list loads none and an omitted key loads
+all. Every selected path must exist at the event commit. Extensions are the
+unit of tool selection, so group tools into extensions by the Agents that use
+them.
 
 Automatic deployment builds/selects the ordinary code repository image for the exact
 event commit, creates an immutable ResourceReleaseRevision, and deploys it

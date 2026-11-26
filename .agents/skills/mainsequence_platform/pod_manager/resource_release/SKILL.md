@@ -51,6 +51,14 @@ WebSocket counts as one request for its whole lifetime, so a FastAPI release
 that serves WebSockets sizes `container_concurrency` for its connections too.
 Total capacity is about `max_scale` x `container_concurrency`.
 
+FastAPI and Harness Agent releases also own `scale_down_delay_seconds` (`60`
+through `3600`): how long Knative keeps replicas after the last request before
+scaling down. Creation omission uses `300` for FastAPI and `900` for Harness
+Agents; update and workflow omission preserve it. A caller that returns within
+the delay finds a warm replica, and later callers wait for a cold start. Lower
+it to save cost on a rarely used release; set `min_scale` when no cold start is
+acceptable.
+
 Pod Manager owns release persistence, validation, authorization, image and
 source resolution, automatic promotion, deployment orchestration, and run
 state. MCP owns only protocol adaptation and this operation guidance.
@@ -501,8 +509,9 @@ belong to that release kind.
 Runtime releases accept only:
 
 - positive release-owned `revision_retention_count`;
-- `min_scale`, `max_scale`, `container_concurrency`, `concurrency_target` and
-  `timeout_seconds` within the limits described above; and
+- `min_scale`, `max_scale`, `container_concurrency`, `concurrency_target`,
+  `timeout_seconds` and `scale_down_delay_seconds` within the limits described
+  above; and
 - for FastAPI only, `cors_allowed_origins`, `public_ingress` and `mcp_enabled`.
 
 Added `public_ingress` paths become effective only after a matching ready

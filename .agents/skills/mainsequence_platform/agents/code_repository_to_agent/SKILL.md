@@ -32,9 +32,13 @@ ResourceRelease when it applies the repository workflow. The runtime library
 installed by the project owns its own application layout, startup, configuration,
 local-development, and debugging instructions.
 
-Each CodeRepositoryBranch owns at most one Harness Agent. The branch supplies
+A CodeRepositoryBranch may declare several Harness Agents, one per
+`harness_agent` resource key, built from the same code. The branch supplies
 the source, dependency lock, indexed application resource, code repository image,
-commit, Organization, and Organization Environment.
+commit, Organization, and Organization Environment. To give an Agent a narrower
+role, declare its own `spec.agent_card` and select its system prompt, skills and
+extensions from `.tau/` with `spec.runtime_resources`; only one Agent of a
+branch reads `.agents/agent_card.json`.
 
 The backend derives runtime identity and deployment state. The workflow result
 returns the created Agent UID and ResourceRelease UID. The project lock selects
@@ -244,6 +248,14 @@ timeout; on update omission preserves it and explicit null resets it. An open
 WebSocket counts as one request for its whole lifetime, so a FastAPI release
 that serves WebSockets sizes `container_concurrency` for its connections too.
 Total capacity is about `max_scale` x `container_concurrency`.
+
+FastAPI and Harness Agent releases also own `scale_down_delay_seconds` (`60`
+through `3600`): how long Knative keeps replicas after the last request before
+scaling down. Creation omission uses `300` for FastAPI and `900` for Harness
+Agents; update and workflow omission preserve it. A caller that returns within
+the delay finds a warm replica, and later callers wait for a cold start. Lower
+it to save cost on a rarely used release; set `min_scale` when no cold start is
+acceptable.
 
 Use the backend-provided workflow template as the source for the current field
 shape. The deployment intent has this structure:
