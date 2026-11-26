@@ -220,7 +220,7 @@ more-itertools==11.1.0
     # via
     #   jaraco-classes
     #   jaraco-functools
-ms-markets==6.2.3
+ms-markets==6.2.4
     # via alpaca-connectors
 ms-tau-sdk==2.0.26
     # via alpaca-connectors
