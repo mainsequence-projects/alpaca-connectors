@@ -51,12 +51,12 @@ requires-dist = [
     { name = "empyrical-reloaded", specifier = ">=0.5.12" },
     { name = "fastapi", specifier = ">=0.135.3" },
     { name = "httpx", specifier = ">=0.28.1" },
-    { name = "mainsequence", extras = ["mcp"], specifier = ">=9.0.38,<10" },
-    { name = "mainsequence-metatable", specifier = ">=0.1.86,<0.2" },
+    { name = "mainsequence", extras = ["mcp"], specifier = ">=9.0.43,<10" },
+    { name = "mainsequence-metatable", specifier = ">=0.1.87,<0.2" },
     { name = "mkdocs", specifier = ">=1.6.1" },
     { name = "mkdocs-material", specifier = ">=9.7.6" },
-    { name = "ms-markets", specifier = ">=6.2.5" },
-    { name = "ms-tau-sdk", specifier = ">=2.0.26,<3" },
+    { name = "ms-markets", specifier = ">=6.3.1" },
+    { name = "ms-tau-sdk", specifier = ">=3.0.5,<4" },
     { name = "uvicorn", specifier = ">=0.52.4,<0.53" },
 ]
 
@@ -741,7 +741,7 @@ wheels = [
 
 [[package]]
 name = "mainsequence"
-version = "9.0.41"
+version = "9.0.43"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "cachetools" },
@@ -764,9 +764,9 @@ dependencies = [
     { name = "typer" },
     { name = "urllib3" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/82/3c/b5156f632f11fefe5e09ede05d9d2be6dd934ced72435e4438699ae6af60/mainsequence-9.0.41.tar.gz", hash = "sha256:870bbb7c24eac0e5583aae9b8b3f86ac9208ddb0cff79c437dee9ce4d6887a07", size = 433714, upload-time = "2026-11-24T13:25:39.712Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/ae/6a/80fa300a4243f878c0e578cb08f727df27cc82ddf4d17b1149ace256c505/mainsequence-9.0.43.tar.gz", hash = "sha256:902bb5d8fca41a074e971ae65ca5f358b0810773bca44d329ad65a64ed392898", size = 442263, upload-time = "2026-11-27T10:48:36.163Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/7a/ed/b04818b424e273485d14a99caae3134911b30118b94df056d7172dc1c9c5/mainsequence-9.0.41-py3-none-any.whl", hash = "sha256:eb089a633e13ba2056f96433b9d4dce3915f2cba14537db1ad2e3ddb15972f7c", size = 341228, upload-time = "2026-11-24T13:25:38.27Z" },
+    { url = "https://files.pythonhosted.org/packages/91/da/c46dc079d3874160d60da197d548ea4db88e2b4ebf6fa0938e8c25f482cf/mainsequence-9.0.43-py3-none-any.whl", hash = "sha256:e852655fdfa4e43c822e1046654eb8603dbc92a5069eef19cc6476cd4472541c", size = 344353, upload-time = "2026-11-27T10:48:34.099Z" },
 ]
 
 [package.optional-dependencies]
@@ -776,7 +776,7 @@ mcp = [
 
 [[package]]
 name = "mainsequence-metatable"
-version = "0.1.86"
+version = "0.1.87"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "alembic" },
@@ -809,9 +809,9 @@ dependencies = [
     { name = "urllib3" },
     { name = "uvicorn" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/5f/1e/46ae3661f03fd34934f0af68661a5106615ced2f76b80a4f5b980b36875e/mainsequence_metatable-0.1.86.tar.gz", hash = "sha256:bc35a08753277b96a0ea371f6b0bdbf42477f204611ff847b4a199aaa44d246d", size = 1586508, upload-time = "2026-11-26T16:48:02.29Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/b6/a8/64f94c02f302e51230408c395d80e6842c0445caecd0930b185af907079a/mainsequence_metatable-0.1.87.tar.gz", hash = "sha256:03d17842c378cc76b12e6c55018d348e691d92ed8cfb6479ba1c7dc0139416e8", size = 1590262, upload-time = "2026-11-27T11:07:41.683Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/a3/fe/acdfc84f2fee353aa1bbaabd6fb60b0b39a7b5afcee5ef35f4a8316ed9cb/mainsequence_metatable-0.1.86-py3-none-any.whl", hash = "sha256:302670bbffff3940a11ea4e58463aacb6038289cab8e9cb6ede1b4b3725ebd00", size = 782585, upload-time = "2026-11-26T16:48:00.765Z" },
+    { url = "https://files.pythonhosted.org/packages/60/67/8600e3b7da2dd5b6ed01ef25340a3c4e066361c11ed6009d93bb8e00b726/mainsequence_metatable-0.1.87-py3-none-any.whl", hash = "sha256:841743e9d36f5680ee679466f9ff2d617e4ab541f7eb89240ad8b5a6308c321f", size = 782584, upload-time = "2026-11-27T11:07:40.006Z" },
 ]
 
 [[package]]
@@ -1061,7 +1061,7 @@ wheels = [
 
 [[package]]
 name = "ms-markets"
-version = "6.2.5"
+version = "6.3.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "alembic" },
@@ -1082,14 +1082,14 @@ dependencies = [
     { name = "sqlalchemy" },
     { name = "uvicorn" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/6c/43/df4531dcb0f63249a1341e603ff73f53f3e47a8ee83820f7abb5965d30ff/ms_markets-6.2.5.tar.gz", hash = "sha256:ece31ddf4239f895bbcdf54f08b0bfff46cb8c884e69a1a324b94cf2c5e5e02a", size = 3321897, upload-time = "2026-11-26T19:29:36.115Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/aa/1f/5343daebeb9e6b0e88512ddb0d0d0ecced3b00f1a1f2479799346e3b5375/ms_markets-6.3.1.tar.gz", hash = "sha256:0f8a2776f5221800f59a97b3fe7bf8a7f29cfac24982baef5ca90f51f4dba099", size = 3331283, upload-time = "2026-11-27T11:36:28.354Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/4c/39/dc7481c854e28142d378efc5e353addb74668f0053f2f0a0b0425c22d18c/ms_markets-6.2.5-py3-none-any.whl", hash = "sha256:c90c1d871c7b510b10e5382339fdecdad5f4a7f8ad52009ee6616f668c356ba0", size = 1054377, upload-time = "2026-11-26T19:29:34.467Z" },
+    { url = "https://files.pythonhosted.org/packages/a4/4b/964f42e0f03bc82123c5891e591eda6fa44fae50f638111a8a7f013a39bc/ms_markets-6.3.1-py3-none-any.whl", hash = "sha256:41217062adcd93d6a1c46833ca3e912365dadf179fb86a815a19bc563ae3043c", size = 1058609, upload-time = "2026-11-27T11:36:26.909Z" },
 ]
 
 [[package]]
 name = "ms-tau-sdk"
-version = "2.0.26"
+version = "3.0.5"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
@@ -1100,6 +1100,7 @@ dependencies = [
     { name = "httpx" },
     { name = "jsonschema" },
     { name = "mcp" },
+    { name = "opentelemetry-api" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
     { name = "pyjwt", extra = ["crypto"] },
@@ -1108,9 +1109,9 @@ dependencies = [
     { name = "tau-ai" },
     { name = "uvicorn", extra = ["standard"] },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/a2/16/8bcc757ddeb45977ea4498d279b43869075173943686612243914a18f2e1/ms_tau_sdk-2.0.26.tar.gz", hash = "sha256:537039b2c41568753904ab6113c11ed58894ca9bc434fa3c7f96cd6fb072ae4c", size = 342731, upload-time = "2026-10-24T22:18:46.013Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/87/db/e1fc36f2e9bc2355710639b66a2455377cee6a1552f1e2e4475c01c51377/ms_tau_sdk-3.0.5.tar.gz", hash = "sha256:91cdb2d530fbb638fd3759d93a04328e8064447b0128f71927104a4039000caf", size = 392007, upload-time = "2026-11-27T10:48:30.369Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/a3/a2/cbf9adb2dcfa8f203a9abcfbc5d8d95bab64882582d96722fea50531e199/ms_tau_sdk-2.0.26-py3-none-any.whl", hash = "sha256:b59edc040d7a456357e1fbc94037aac6d7035ed768603b89670392a24e7476e3", size = 364769, upload-time = "2026-10-24T22:18:44.27Z" },
+    { url = "https://files.pythonhosted.org/packages/62/6e/39ab8749725521df936241aeb94329444589fbe9cb8d8d080261f40a9be7/ms_tau_sdk-3.0.5-py3-none-any.whl", hash = "sha256:11912fbb33a87beabd17a3d56dffe884ea52ee95377b2ae7d0fb4bec9760188e", size = 410554, upload-time = "2026-11-27T10:48:29.109Z" },
 ]
 
 [[package]]

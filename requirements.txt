@@ -164,12 +164,12 @@ linkify-it-py==2.2.0
     # via markdown-it-py
 loguru==0.7.3
     # via fastembed
-mainsequence==9.0.41
+mainsequence==9.0.43
     # via
     #   alpaca-connectors
     #   mainsequence-metatable
     #   ms-markets
-mainsequence-metatable==0.1.86
+mainsequence-metatable==0.1.87
     # via
     #   alpaca-connectors
     #   ms-markets
@@ -220,9 +220,9 @@ more-itertools==11.1.0
     # via
     #   jaraco-classes
     #   jaraco-functools
-ms-markets==6.2.5
+ms-markets==6.3.1
     # via alpaca-connectors
-ms-tau-sdk==2.0.26
+ms-tau-sdk==3.0.5
     # via alpaca-connectors
 msgpack==1.2.0
     # via alpaca-py
@@ -244,6 +244,7 @@ opentelemetry-api==1.45.2
     #   mainsequence
     #   mainsequence-metatable
     #   mcp
+    #   ms-tau-sdk
     #   opentelemetry-exporter-http-transport
     #   opentelemetry-exporter-otlp-proto-grpc
     #   opentelemetry-exporter-otlp-proto-http

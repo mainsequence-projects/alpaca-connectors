@@ -58,6 +58,7 @@ def test_hosted_catalog_preserves_alpaca_but_excludes_generic_tools(tmp_path: Pa
                 "thinking_levels": ["medium"],
             },
         ),
+        runtime_resources=None,
         mcp_applications=[
             MCPApplication(name="alpaca", resource_release_uid="test-alpaca-release")
         ],

@@ -131,6 +131,21 @@ ADR 0047), which their workflow grant on the `MainSequenceMarkets` branch lets t
 Harness needs no table role to use these tools. See
 [Table Access And MetaTables Roles](operations/jobs.md#table-access-and-metatables-roles).
 
+Every Alpaca tool call also carries what the Agent was given and which session it serves. Since
+TAU 2.0.29 the runtime passes the caller's W3C `traceparent` and `baggage` on to every
+application call, and since 2.0.30 it names the turn's session in
+`X-MainSequence-Agent-Session-UID`. The API reads neither as identity:
+
+- A requester-bound call acts for its requester and ignores the caller context
+  ([ADR 0019](adrs/0019_account_owners_vouched_for_by_trusted_applications.md)), so a person of a
+  gateway application cannot be named through the Agent. A call the Agent makes as itself acts
+  for the Agent, which is not on the vouching allow-list.
+  `tests/test_account_ownership.py::test_a_requester_bound_call_ignores_the_context` covers the
+  first case.
+- No route reads the session header.
+- Since TAU 3.0.4 the Agent's request, turn and each tool call are spans of the caller's trace, so
+  the API's log lines for a tool call share the Agent's trace id (Main Sequence ADR 0042).
+
 ## Operational Boundaries
 
 - The Organization Environment is derived from the deployed CodeRepositoryBranch and is never a
@@ -249,6 +264,23 @@ limit uses `TAU_MCP_TOOL_TIMEOUT_SECONDS`, which defaults to **60 seconds**, and
 its turn. The current Alpaca MCP catalog declares no per-tool limit and the workflow declares no
 override, so its calls use that default.
 
+Since TAU 2.0.33 a tool call also tells the API how long it will still wait:
+
+- **The deadline travels with the call.** Each call sends the time it has left, in milliseconds,
+  in `Mainsequence-Request-Timeout-Ms`. The API's request identity reads it (Main Sequence 9.0.39
+  and later). A Markets row call then waits for a Markets API that is still starting no longer
+  than that, and answers `503 dependency_starting` with `retryable: true`
+  ([ADR 0020](adrs/0020_dependencies_that_are_starting.md), decision 2).
+- **A sleeping API is woken first.** When the API has scaled to zero, the Agent asks the platform,
+  which wakes it, and waits for it before MCP opens. The wait is twice the release's
+  `scaling.expected_cold_start_seconds`, at least 30 seconds, or 300 seconds while the platform
+  states none. `TAU_MCP_APPLICATION_READY_TIMEOUT_SECONDS` would override it; the workflow does
+  not set it.
+- **A timeout during a start says so.** A call that times out while the API was still starting
+  returns `failure: cold_start_timeout` with `runtime_access_state: waking`, and its message says
+  the call may or may not have run. TAU never sends it again. `.tau/SYSTEM.md` has the Agent read
+  the affected record before anything else, as after any timeout.
+
 Bars and portfolio update tools submit Jobs and return their JobRun UID for status checks.
 Some other mutations, including Asset registration and holdings capture, still execute
 synchronously in the API and can exceed the tool deadline. A timeout is not proof
@@ -267,6 +299,20 @@ the object
 `ms-tau-sdk` is a runtime dependency in `pyproject.toml` and the exported `requirements.txt`. The
 workflow enables automatic deployment and accepts every pushed commit through
 `automatic_redeployment.tag_regex: null`; it contains no image, branch, Environment, or UID.
+
+Model calls go through the platform's model relay (TAU 3.0,
+[its ADR 0030](https://github.com/mainsequence-sdk/ms-tau-sdk/blob/v3.0.5/docs/adrs/0030-hosted-model-calls-go-through-a-relay.md)).
+The hosted Agent never receives the `openai-codex` sign-in:
+
+- The platform answers a session pass and the relay's address.
+- The relay checks the pass and adds the real token.
+- The platform refuses a hosted runtime that does not announce the relay
+  (`tau_runtime_version_unsupported`), so a 2.x Agent cannot start a session.
+- The Agent sets no `TAU_PROVIDER_CREDENTIAL_HYDRATE_RELEASE_UID`, so the platform hydrates and
+  relays, and this repository serves no relay.
+
+The `harness_agent` declares no `runtime_resources` (TAU 2.0.30, its ADR 0026), so the Agent loads
+all of `.tau/`: `SYSTEM.md` and the four skills.
 
 The resource declares `acts_for_requester: true`. Only an Organization admin's push enables it;
 the Agent then calls the platform with the ordinary permissions of the person whose request it
@@ -312,8 +358,9 @@ connection before relying on it.
 
 ## Current local compatibility review
 
-On 2026-11-12 the installed and locked versions were Main Sequence **9.0.33**, TAU **2.0.26**,
-MetaTables (`mainsequence-metatable`) **0.1.63** and ms-markets **3.4.0**.
+On 2026-11-27 the installed and locked versions are Main Sequence **9.0.43**, TAU **3.0.5**,
+MetaTables (`mainsequence-metatable`) **0.1.87** and ms-markets **6.3.1**. The entries below
+record how each range got there.
 
 - Since 2026-10-15 the platform's caller assertions carry only the caller's identity (`sub` and
   `is_organization_admin`, no `team_uids`). The hosted API on Main Sequence 9.0.22 answered every
@@ -389,16 +436,37 @@ MetaTables (`mainsequence-metatable`) **0.1.63** and ms-markets **3.4.0**.
   account's first run with about 45 new daily assets would have failed with
   `TransferLimitError`. Issue #49's deadline failure had already been fixed in 5.3.0, which reads
   10,000 rows a page (MainSequenceMarkets#122). Nothing in this application changes with it.
+- On 2026-11-27 the ranges moved to Main Sequence `>=9.0.43`, TAU `>=3.0.5,<4`, MetaTables
+  `>=0.1.87` and `ms-markets>=6.3.0`, for telemetry: each hop is a span in a platform trace,
+  written as log lines (Main Sequence ADR 0042). The API's request identity makes the launcher's
+  request span the current span, a Job run continues the trace its `TRACEPARENT` names, every
+  call to the platform writes a `dependency.call.completed` or `dependency.call.failed` line, and
+  every log line carries `trace_id`, `span_id` and `parent_span_id`. The Agent's runtime records
+  its request, run, turn and tool calls as spans of the caller's trace. The SDK sets no
+  OpenTelemetry provider and the platform exports no OTLP, so this application configures
+  nothing. ms-markets 6.3.0 has a virtual fund name its target allocation (its migration `0040`,
+  MainSequenceMarkets#157); this application allocates funds only through
+  `allocateAccountVirtualFunds`, so nothing here changes, but the Environment's Markets API must
+  run 6.3.0 first. TAU 3.x is also the first runtime the platform starts: since 2026-11-13 its
+  Tau bootstrap refuses a hosted runtime that does not announce `supported_model_relay_versions`
+  `[1]` (`tau_runtime_version_unsupported`), which 2.0.26 never sends. This Agent sets no
+  `TAU_PROVIDER_CREDENTIAL_HYDRATE_RELEASE_UID`, so the platform's model relay applies and
+  `create_app()` needs no change. In tests, TAU 3.0's application access carries `session_uid` and its
+  bootstrap `runtime_resources`.
+- Later on 2026-11-27 the range moved to `ms-markets>=6.3.1`, which Production's Markets API
+  runs. 6.3.1 only requires Main Sequence 9.0.43 and MetaTables 0.1.86 and changes no behaviour,
+  so nothing in this application changes with it.
 
-`pyproject.toml` keeps non-exact compatibility ranges (`mainsequence[mcp]>=9.0.38,<10`,
-`mainsequence-metatable>=0.1.86,<0.2`, `ms-tau-sdk>=2.0.26,<3`, and `ms-markets>=6.2.5` with no
+`pyproject.toml` keeps non-exact compatibility ranges (`mainsequence[mcp]>=9.0.43,<10`,
+`mainsequence-metatable>=0.1.87,<0.2`, `ms-tau-sdk>=3.0.5,<4`, and `ms-markets>=6.3.1` with no
 upper bound since [ADR 0031](adrs/0031_markets_series_are_published_not_shared.md)), while
 `uv.lock` and the exported `requirements.txt` record the resolution. On 2026-10-14 Main Sequence
 had moved from 9.0.23 to 9.0.24, which stopped scaffolding `AGENTS.md` and ships its guidance in
 the SDK skills, and MetaTables from 0.1.34 to 0.1.35. The earlier SDK upgrade moved the official
 MCP dependency from **1.30.0** to **2.3.0**, with its required transport dependencies.
-With these versions the suite passed 664 tests plus 97 subtests with network
-access blocked (2026-11-12).
+With the 2026-11-12 versions the suite passed 664 tests plus 97 subtests with network access
+blocked. On 2026-11-27 the suite passes offline: 976 tests plus 84 subtests passed with network
+access blocked, and 6 were skipped (the opt-in live end-to-end test and five PostgreSQL tests).
 
 The API now uses MCP 2.x `MCPServer` and its supported stateless JSON ASGI application and
 session-manager lifespan, rather than the removed MCP 1.x low-level decorators. The project
@@ -431,7 +499,9 @@ The requested development skill bundles were explicitly refreshed from the insta
 2026-10-21: Main Sequence 9.0.30, TAU 2.0.23 and MetaTables 0.1.51, and the platform skills from
 the development backend's catalog, which no longer ships `code_repository_design`. The existing
 ms-markets 2.2.10 bundle was left unchanged. The `ms_tau_sdk` bundle was synced again from TAU
-2.0.26 on 2026-10-25. Each bundle's `PINNED_FROM.txt` records its matching version. The
+2.0.26 on 2026-10-25. On 2026-11-27 every bundle was refreshed again: Main Sequence 9.0.43,
+TAU 3.0.5 (`ms-tau skills sync`), MetaTables 0.1.87, ms-markets 6.3.1 and the platform skills.
+Each bundle's `PINNED_FROM.txt` records its matching version. The
 repository-owned business skills remain single-copy. On 2026-10-14 `AGENTS.md` lost the retired SDK
 block and was cut to its developer rules, the operator manual moved to the
 [operator guide](operations/operator-guide.md), and `.tau/SYSTEM.md` became the runtime prompt.
