@@ -1,7 +1,7 @@
 schema=platform-1
 owner=platform
 platform_source_url=http://local-backend:8000/mcp
-platform_retrieved_at_utc=2026-11-26T12:29:46Z
+platform_retrieved_at_utc=2026-11-27T11:08:50Z
 platform_manifest_version=2
 platform_manifest_sha256=b61eeebe9e9f66fdc86890b31eeaca5b449b98bfb0ad5c26c743d36c491e41f6
 platform_ontology_sha256=00f7f14e25a2f31037fc152d247728218ef5f388d362327dc1f5a197ebdb5580

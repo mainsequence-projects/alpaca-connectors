@@ -51,6 +51,20 @@ explicit `TAU_LOCAL_PROVIDER` and `TAU_LOCAL_MODEL`, returns provider-control ev
 the provider credential used for inference. Provider secrets are neither environment settings nor
 local state.
 
+An application that keeps its own people's model credentials can hydrate them instead: set
+`TAU_PROVIDER_CREDENTIAL_HYDRATE_RELEASE_UID` to its release (a hosted Agent declares it in its
+workflow file's `spec.env_vars`; never a `MAINSEQUENCE_` name, which the platform reserves and
+refuses), or, in local mode only,
+`TAU_LOCAL_PROVIDER_CREDENTIAL_HYDRATE_URL` to its service on a loopback origin such as
+`http://127.0.0.1:8611`. Every hydration then names the local session in `agent_session_uid`, and
+readiness hydrates nothing. A loopback address receives no credential of any kind. See ADR 0027.
+In local mode the endpoint answers the real credential. A hosted session receives a pass instead,
+and the release must also serve the model relay under its own RPC URL; the
+`tau_security_and_access` skill says how (ADR 0030). The platform's relay address is chosen by
+the platform's backend setting `MODEL_RELAY_BASE_URL`, or is the platform API's own address when
+that is empty; no Agent or application setting changes it, so never add `MODEL_RELAY_BASE_URL`
+to a `.env` or workflow.
+
 ## Exact local/remote boundary
 
 | Concern | Local-mode behavior |
@@ -59,7 +73,7 @@ local state.
 | Chat history, snapshots, leases, activity, and cancellation | Workspace SQLite |
 | Public A2A Message and Task state | Workspace SQLite |
 | Main Sequence authentication and token refresh | Remote. The token comes from the Main Sequence CLI session, or from an exported JWT pair |
-| Provider authorization, hydration, and inference | Remote and real |
+| Provider authorization, hydration, and inference | Remote and real; hydration comes from a custom endpoint when one is set |
 | Main Sequence MCP catalog and tool calls | Remote and real; platform mutations remain possible |
 | Project instructions, skills, hooks, and extensions | Normal repository `.tau` composition |
 

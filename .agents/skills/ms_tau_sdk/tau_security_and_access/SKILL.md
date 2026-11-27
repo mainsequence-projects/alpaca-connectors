@@ -1,6 +1,6 @@
 ---
 name: tau-security-and-access
-description: Build and review project tools that call the platform or other applications for the person a turn serves, including tools that use a person's Secret without exposing it, and explain how delegation and policies decide what those tools can reach.
+description: Build and review project tools that call the platform or other applications for the person a turn serves, including tools that use a person's Secret without exposing it or read the caller context another application sends, and explain how delegation and policies decide what those tools can reach. Also serve the model relay of an application that hydrates its own people's model credentials.
 ---
 
 # TAU Security and Access
@@ -236,9 +236,53 @@ directly or through a team:
   with the `granting_policies` that would allow it.
 
 Holding `user` delivers the credential, or the endpoint's stored authentication, to the holder's own
-runtime, including local Tau, where it can be copied; removing the policy stops later deliveries,
-not copies already made. To let a team run an Agent on one credential, its owner gives the team
-`user`.
+local Tau, where it can be copied; removing the policy stops later deliveries, not copies already
+made. To let a team run an Agent on one credential, its owner gives the team `user`.
+
+From ms-tau-sdk 3.0.0 a hosted session never receives the secret: it receives a session pass and a
+relay address, and every model call goes through the relay, which holds the secret. The pass works
+only at that relay and only while the run holds the session.
+
+Who chooses the relay address depends on who hydrates:
+
+- **The platform hydrates** (no `TAU_PROVIDER_CREDENTIAL_HYDRATE_RELEASE_UID`): the platform's
+  relay. Its address is the platform API's own address plus `/model-relay`, unless the platform's
+  operators set the backend setting `MODEL_RELAY_BASE_URL` to a relay workload of its own, for
+  example `MODEL_RELAY_BASE_URL=https://model-relay.platform.example.com`, which makes runtimes
+  call `https://model-relay.platform.example.com/model-relay`. That host is an example.
+- **Your own hydrate endpoint hydrates**: your relay, at the address your answer gives, as the
+  next section says.
+
+`MODEL_RELAY_BASE_URL` is never yours to set. Do not declare it in a workflow's `spec.env_vars`,
+an application's environment or a `.env`: no runtime or application reads it. If hydration
+answers `409` `model_provider_credential_unavailable` saying the relay has no address, the
+platform has to fix it.
+
+### Serving the relay of your own hydrate endpoint
+
+An application whose own hydrate endpoint (ADR 0027) answers its people's model credentials, named
+by `TAU_PROVIDER_CREDENTIAL_HYDRATE_RELEASE_UID`, must serve the relay for those
+credentials too, because only it holds them. Use ms-tau-sdk 3.0.1 or later on the runtime: in
+3.0.0 a model call carried only the pass, the application's request identity refused it for
+having no Main Sequence caller, and no hosted session could call a model.
+
+- Mount `ms_tau_sdk.model_relay.create_model_relay_router` on the hydrate release itself, as an
+  ordinary route behind its request identity, for example under `/model-relay`. Do not make it a
+  public route: request identity strips `Authorization` from a public call.
+- In the hosted hydrate answer, give a session pass where the secret goes and
+  `relay_definition: {"base_url": "<the release's RPC URL>/model-relay"}`. The runtime sends the
+  release's token with every model call, as with the hydrate call, and only under that RPC URL: it
+  refuses a relay on another host or path. Never put `base_url` or `headers` in a relayed entry.
+- The runtime moves the pass into `X-Model-Relay-Pass`, with `X-Model-Relay-Pass-Place`, and the
+  router reads it from there. Do not read the pass yourself.
+- In `resolve_pass`, refuse a caller that is not your own Agent: `User.get_logged_user()` is the
+  verified runtime. Then refuse a pass that names no running session, with `RelayRefused` and a
+  detail that holds no pass or secret.
+- In `resolve_upstream`, answer the provider's own address and the real secret for that session.
+- In local mode the endpoint answers the real credential and no relay is called.
+
+The public API page shows the full example, and the Security and access guide's "Running your
+own relay" lists what the application still owns: pass lifetime, URL logging and body size.
 
 ## Agents
 
@@ -294,6 +338,45 @@ if person is None or REPORTS_TEAM_UID not in await person.in_teams([REPORTS_TEAM
 - A check the platform cannot answer raises `BackendError`; it never answers "not a member".
 - The requester carries no team list; `in_teams()` is the only membership check.
 
+## Caller context from another application
+
+An application that serves its own users, such as a service outside Main Sequence, can say which
+of its users the work it sends is for, in W3C `baggage` keys of the form
+`mainsequence.<application>.<name>`. The runtime makes that context OpenTelemetry's current context
+for the request or Task, and a tool reads it with OpenTelemetry's API:
+
+```python
+from opentelemetry import baggage
+
+person = baggage.get_baggage("mainsequence.advisor.person")  # None when the work carries none
+```
+
+- It is the sender's claim, never Main Sequence identity. It names no requester and carries no
+  delegation: `current_requester()` and `platform_client()` never read it, and it grants nothing.
+  Never let it choose whose Secret, credential or data a delegated call uses.
+- Anyone who may give the Agent work can send any context, and a Task's context is whatever its
+  creator sent. Make rules from it only in an Agent whose policies admit only callers trusted to
+  vouch for it; in an HTTP handler, check `request.state.user` first.
+- Use it to narrow what a tool returns, never to widen it. Missing context means no external user:
+  refuse what needs one, and never fall back to everyone's data.
+- It is public. The runtime passes it on with every platform and application call, so never put a
+  secret in it, and know that an application that trusts this Agent's context trusts everyone who
+  may give the Agent work.
+- The Agent's hops are spans of the caller's trace. The runtime records the request, run, turn,
+  and each model, tool and platform call as its own log lines, and a call a tool makes names the
+  tool call's span as its parent. A tool adds nothing for that, and a `traceparent` it sets on a
+  `platform_client()` call replaces the runtime's, so leave it unset. Model calls carry no
+  `traceparent` or `baggage`.
+
+The SDK Security and access guide's **Caller context** section has the full rules, and the runtime
+contract's **Distributed tracing** section lists the spans.
+
+An application that owns sessions for its own people can name each session's person on the
+platform, and the runtime then tells the application which session a tool call serves. If you are
+building that, follow **Session subowners** in the SDK runtime contract
+(`docs/reference/runtime-contract.md`) and the matching bullet in the Security and access guide;
+nothing in this skill restates them.
+
 ## What never reaches the model
 
 Tool results, their `details`, and errors can reach the model provider and the session history.
@@ -334,5 +417,9 @@ Patch the extension module's `current_requester` and `platform_client` with fake
 - Secret values stay inside one call, in headers, never in results, logs, errors, URLs or caches.
 - The naming convention says whose Secrets the tool uses, and the owners of those Secrets know it.
 - A refused delegated call is reported, never retried as the Agent.
+- Caller context only narrows results, comes from callers the Agent's policies trust, and its
+  absence is refused, never read as everyone.
 - The Agent's workload holds no grants it does not need, and none on people's Secrets; `user` is
   enough on an Agent it only sends work to.
+- A hydrate release's model relay is a route of that release behind request identity, its
+  address is under the release's RPC URL, and `resolve_pass` checks the caller and the pass.

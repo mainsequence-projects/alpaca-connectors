@@ -389,9 +389,26 @@ MetaTables (`mainsequence-metatable`) **0.1.63** and ms-markets **3.4.0**.
   account's first run with about 45 new daily assets would have failed with
   `TransferLimitError`. Issue #49's deadline failure had already been fixed in 5.3.0, which reads
   10,000 rows a page (MainSequenceMarkets#122). Nothing in this application changes with it.
+- On 2026-11-27 the ranges moved to Main Sequence `>=9.0.43`, TAU `>=3.0.5,<4`, MetaTables
+  `>=0.1.87` and `ms-markets>=6.3.0`, for telemetry: each hop is a span in a platform trace,
+  written as log lines (Main Sequence ADR 0042). The API's request identity makes the launcher's
+  request span the current span, a Job run continues the trace its `TRACEPARENT` names, every
+  call to the platform writes a `dependency.call.completed` or `dependency.call.failed` line, and
+  every log line carries `trace_id`, `span_id` and `parent_span_id`. The Agent's runtime records
+  its request, run, turn and tool calls as spans of the caller's trace. The SDK sets no
+  OpenTelemetry provider and the platform exports no OTLP, so this application configures
+  nothing. ms-markets 6.3.0 has a virtual fund name its target allocation (its migration `0040`,
+  MainSequenceMarkets#157); this application allocates funds only through
+  `allocateAccountVirtualFunds`, so nothing here changes, but the Environment's Markets API must
+  run 6.3.0 first. TAU 3.x is also the first runtime the platform starts: since 2026-11-13 its
+  Tau bootstrap refuses a hosted runtime that does not announce `supported_model_relay_versions`
+  `[1]` (`tau_runtime_version_unsupported`), which 2.0.26 never sends. This Agent sets no
+  `TAU_PROVIDER_CREDENTIAL_HYDRATE_RELEASE_UID`, so the platform's model relay applies and
+  `create_app()` needs no change. In tests, TAU 3.0's application access carries `session_uid` and its
+  bootstrap `runtime_resources`.
 
-`pyproject.toml` keeps non-exact compatibility ranges (`mainsequence[mcp]>=9.0.38,<10`,
-`mainsequence-metatable>=0.1.86,<0.2`, `ms-tau-sdk>=2.0.26,<3`, and `ms-markets>=6.2.5` with no
+`pyproject.toml` keeps non-exact compatibility ranges (`mainsequence[mcp]>=9.0.43,<10`,
+`mainsequence-metatable>=0.1.87,<0.2`, `ms-tau-sdk>=3.0.5,<4`, and `ms-markets>=6.3.0` with no
 upper bound since [ADR 0031](adrs/0031_markets_series_are_published_not_shared.md)), while
 `uv.lock` and the exported `requirements.txt` record the resolution. On 2026-10-14 Main Sequence
 had moved from 9.0.23 to 9.0.24, which stopped scaffolding `AGENTS.md` and ships its guidance in
