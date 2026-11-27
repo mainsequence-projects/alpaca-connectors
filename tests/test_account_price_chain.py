@@ -11,12 +11,12 @@ from __future__ import annotations
 import datetime as dt
 import socket
 import uuid
-from contextlib import ExitStack, contextmanager
 from types import SimpleNamespace
 from unittest.mock import patch
 
 import pandas as pd
 import pytest
+from conftest import bound_tables
 
 import metatables.updaters.job_mode as job_mode
 from alpaca_connectors.market_data.account_bars import AccountStockBars, AccountStockBarsConfig
@@ -24,7 +24,7 @@ from alpaca_connectors.market_data.alpaca_bars import AlpacaStockBarsFetch
 from alpaca_connectors.market_data.storage import storage_for
 from alpaca_connectors.portfolios import bars_scope, execution
 from alpaca_connectors.portfolios.execution import ResolvedPortfolioConfiguration
-from metatables import TimeIndexMetaTable, TimeIndexTableUpdater
+from metatables import TimeIndexTableUpdater
 
 ACCOUNT_UID = uuid.UUID("66666666-6666-4666-8666-666666666666")
 OTHER_ACCOUNT_UID = uuid.UUID("88888888-8888-4888-8888-888888888888")
@@ -56,33 +56,6 @@ def _scope(*assets: str) -> bars_scope.AccountBarsScope:
     )
 
 
-@contextmanager
-def _bound(*storages: type):
-    """Bind fake backend metadata to storage classes, as the engine does, and restore them."""
-    with ExitStack() as stack:
-        for position, storage in enumerate(storages, start=1):
-            before = dict(vars(storage))
-            storage._bind_meta_table(
-                TimeIndexMetaTable.model_construct(
-                    uid=f"a0000000-0000-4000-8000-{position:012d}",
-                    data_source_uid="d0000000-0000-4000-8000-000000000001",
-                    identifier=storage.__metatable_identifier__,
-                    physical_table_name=storage.__table__.name,
-                    cadence="1d",
-                )
-            )
-
-            def restore(storage=storage, before=before) -> None:
-                for name in set(vars(storage)) - set(before):
-                    delattr(storage, name)
-                for name, value in before.items():
-                    if vars(storage).get(name) is not value:
-                        setattr(storage, name, value)
-
-            stack.callback(restore)
-        yield
-
-
 @pytest.fixture
 def offline(monkeypatch):
     """Refuse every connection: building, checking and rebuilding make no request."""
@@ -103,7 +76,7 @@ def _price_tables():
 # ------------------------------------------------------------------------------------------------
 # No asset enters an update hash (decision 1)
 # ------------------------------------------------------------------------------------------------
-def test_the_accounts_bars_hash_their_account_and_profile_only() -> None:
+def test_the_accounts_bars_hash_their_account_and_profile_only(bound_bars_tables) -> None:
     bars = _bars()
 
     # Only the configuration is saved: no client, no list of assets.
@@ -122,7 +95,7 @@ def test_the_accounts_bars_hash_their_account_and_profile_only() -> None:
 def test_the_accounts_prices_take_their_assets_from_its_bars(offline) -> None:
     from alpaca_connectors.portfolios.interpolated_prices import build_account_interpolated_prices
 
-    with _bound(*_price_tables()):
+    with bound_tables(*_price_tables()):
         prices = build_account_interpolated_prices(account_uid=ACCOUNT_UID, profile=PROFILE)
         again = build_account_interpolated_prices(account_uid=ACCOUNT_UID, profile=PROFILE)
         other = build_account_interpolated_prices(account_uid=OTHER_ACCOUNT_UID, profile=PROFILE)
@@ -141,7 +114,7 @@ def test_the_accounts_prices_take_their_assets_from_its_bars(offline) -> None:
 # ------------------------------------------------------------------------------------------------
 # AccountStockBars resolves everything when it runs (decision 2)
 # ------------------------------------------------------------------------------------------------
-def test_the_bars_fetch_nothing_when_there_is_nothing_to_fetch() -> None:
+def test_the_bars_fetch_nothing_when_there_is_nothing_to_fetch(bound_bars_tables) -> None:
     close = dt.datetime(2026, 11, 20, 21, tzinfo=dt.UTC)
 
     # Every asset already holds its last final bar: no keys, no Alpaca request.
@@ -169,7 +142,9 @@ def test_the_bars_fetch_nothing_when_there_is_nothing_to_fetch() -> None:
     connect.assert_not_called()
 
 
-def test_the_bars_fetch_with_the_accounts_keys_and_a_failure_is_the_nodes() -> None:
+def test_the_bars_fetch_with_the_accounts_keys_and_a_failure_is_the_nodes(
+    bound_bars_tables,
+) -> None:
     frame = pd.DataFrame({"close": [1.0]})
     bars = _bars()
     with (
@@ -194,7 +169,7 @@ def test_the_bars_fetch_with_the_accounts_keys_and_a_failure_is_the_nodes() -> N
         bars.update()
 
 
-def test_the_bars_resolve_the_accounts_keys_themselves() -> None:
+def test_the_bars_resolve_the_accounts_keys_themselves(bound_bars_tables) -> None:
     registration = {"account_uid": str(ACCOUNT_UID), "is_paper": True}
     bars = _bars()
     with (
@@ -421,7 +396,7 @@ def test_two_portfolios_of_an_account_make_seven_nodes_and_each_rebuilds(
         calendar_identifier="NYSE",
         session_label="regular",
     )
-    with _bound(
+    with bound_tables(
         *_price_tables(),
         AlpacaPortfolioCalendarEventsStorage,
         AlpacaPortfolioRebalanceStateStorage,

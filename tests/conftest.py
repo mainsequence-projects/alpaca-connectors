@@ -15,6 +15,7 @@ import os
 import threading
 import time
 from collections.abc import Callable
+from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -241,6 +242,48 @@ def keyring():
         yield ring
     finally:
         set_keyring_source(None)
+
+
+@contextmanager
+def bound_tables(*storages: type):
+    """Bind fake backend metadata to storage classes, as the engine does, and restore them.
+
+    A ``TimeIndexTableUpdater`` looks up its output table's catalog row when it is built unless
+    the table is already bound; a bound table makes no lookup.
+    """
+    from metatables import TimeIndexMetaTable
+
+    with ExitStack() as stack:
+        for position, storage in enumerate(storages, start=1):
+            before = dict(vars(storage))
+            storage._bind_meta_table(
+                TimeIndexMetaTable.model_construct(
+                    uid=f"a0000000-0000-4000-8000-{position:012d}",
+                    data_source_uid="d0000000-0000-4000-8000-000000000001",
+                    identifier=storage.__metatable_identifier__,
+                    physical_table_name=storage.__table__.name,
+                    cadence="1d",
+                )
+            )
+
+            def restore(storage=storage, before=before) -> None:
+                for name in set(vars(storage)) - set(before):
+                    delattr(storage, name)
+                for name, value in before.items():
+                    if vars(storage).get(name) is not value:
+                        setattr(storage, name, value)
+
+            stack.callback(restore)
+        yield
+
+
+@pytest.fixture
+def bound_bars_tables():
+    """Every bars profile's table bound, so an ``AccountStockBars`` builds without the backend."""
+    from alpaca_connectors.market_data.storage import project_storage_models
+
+    with bound_tables(*project_storage_models()):
+        yield
 
 
 @pytest.fixture(autouse=True)

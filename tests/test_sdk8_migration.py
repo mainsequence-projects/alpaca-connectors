@@ -103,7 +103,7 @@ def test_portfolio_price_source_resolves_the_migration_catalog_identity() -> Non
     )
 
 
-def test_interpolated_prices_take_their_assets_from_the_accounts_bars() -> None:
+def test_interpolated_prices_take_their_assets_from_the_accounts_bars(bound_bars_tables) -> None:
     import uuid
 
     from alpaca_connectors.market_data.account_bars import AccountStockBars

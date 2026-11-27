@@ -1337,7 +1337,9 @@ def test_a_signals_assets_are_one_read_of_the_signal_asset_table() -> None:
     assert signal_assets.assets_for_signals([]) == []
 
 
-def test_the_bars_run_prices_a_portfolios_configuration_with_its_accounts_bars() -> None:
+def test_the_bars_run_prices_a_portfolios_configuration_with_its_accounts_bars(
+    bound_bars_tables,
+) -> None:
     from alpaca_connectors.market_data.account_bars import AccountStockBars
     from alpaca_connectors.market_data.services import build_market_data_update
 
