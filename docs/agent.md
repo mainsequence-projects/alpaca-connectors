@@ -359,7 +359,7 @@ connection before relying on it.
 ## Current local compatibility review
 
 On 2026-11-27 the installed and locked versions are Main Sequence **9.0.43**, TAU **3.0.5**,
-MetaTables (`mainsequence-metatable`) **0.1.87** and ms-markets **6.3.0**. The entries below
+MetaTables (`mainsequence-metatable`) **0.1.87** and ms-markets **6.3.1**. The entries below
 record how each range got there.
 
 - Since 2026-10-15 the platform's caller assertions carry only the caller's identity (`sub` and
@@ -453,9 +453,12 @@ record how each range got there.
   `TAU_PROVIDER_CREDENTIAL_HYDRATE_RELEASE_UID`, so the platform's model relay applies and
   `create_app()` needs no change. In tests, TAU 3.0's application access carries `session_uid` and its
   bootstrap `runtime_resources`.
+- Later on 2026-11-27 the range moved to `ms-markets>=6.3.1`, which Production's Markets API
+  runs. 6.3.1 only requires Main Sequence 9.0.43 and MetaTables 0.1.86 and changes no behaviour,
+  so nothing in this application changes with it.
 
 `pyproject.toml` keeps non-exact compatibility ranges (`mainsequence[mcp]>=9.0.43,<10`,
-`mainsequence-metatable>=0.1.87,<0.2`, `ms-tau-sdk>=3.0.5,<4`, and `ms-markets>=6.3.0` with no
+`mainsequence-metatable>=0.1.87,<0.2`, `ms-tau-sdk>=3.0.5,<4`, and `ms-markets>=6.3.1` with no
 upper bound since [ADR 0031](adrs/0031_markets_series_are_published_not_shared.md)), while
 `uv.lock` and the exported `requirements.txt` record the resolution. On 2026-10-14 Main Sequence
 had moved from 9.0.23 to 9.0.24, which stopped scaffolding `AGENTS.md` and ships its guidance in
@@ -497,7 +500,7 @@ The requested development skill bundles were explicitly refreshed from the insta
 the development backend's catalog, which no longer ships `code_repository_design`. The existing
 ms-markets 2.2.10 bundle was left unchanged. The `ms_tau_sdk` bundle was synced again from TAU
 2.0.26 on 2026-10-25. On 2026-11-27 every bundle was refreshed again: Main Sequence 9.0.43,
-TAU 3.0.5 (`ms-tau skills sync`), MetaTables 0.1.87, ms-markets 6.3.0 and the platform skills.
+TAU 3.0.5 (`ms-tau skills sync`), MetaTables 0.1.87, ms-markets 6.3.1 and the platform skills.
 Each bundle's `PINNED_FROM.txt` records its matching version. The
 repository-owned business skills remain single-copy. On 2026-10-14 `AGENTS.md` lost the retired SDK
 block and was cut to its developer rules, the operator manual moved to the
