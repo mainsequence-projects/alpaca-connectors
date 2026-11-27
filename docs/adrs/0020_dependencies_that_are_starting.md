@@ -11,6 +11,11 @@ by the same change. Decision 2 bounds a wait by the caller's deadline only with 
 Amended on 2026-11-13 with [decision 5](#decision): a Job waits up to 300 s for a release that
 is waking, after the scheduled dispatchers kept failing on a Markets API that was still asleep.
 
+Updated on 2026-11-27: the repository is on mainsequence 9.0.43, so decision 2 bounds a row call
+by the caller's deadline. The Alpaca Agent sends that deadline with every tool call from
+ms-tau-sdk 2.0.33 (the lock has 3.0.5), so the Agent's calls are bounded by the time their tool
+call has left ([Agent](../agent.md#application-tool-timeouts)).
+
 ## Context
 
 The connector scales to zero, and so do the two Main Sequence releases it works through:
