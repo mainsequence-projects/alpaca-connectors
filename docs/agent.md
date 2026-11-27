@@ -462,15 +462,8 @@ had moved from 9.0.23 to 9.0.24, which stopped scaffolding `AGENTS.md` and ships
 the SDK skills, and MetaTables from 0.1.34 to 0.1.35. The earlier SDK upgrade moved the official
 MCP dependency from **1.30.0** to **2.3.0**, with its required transport dependencies.
 With the 2026-11-12 versions the suite passed 664 tests plus 97 subtests with network access
-blocked. On 2026-11-27 it has 976 tests and 84 subtests, 6 of them skipped:
-
-- Six tests, added with [ADR 0033](adrs/0033_an_accounts_portfolios_share_one_price_chain.md) on
-  2026-11-26, build MetaTables updaters whose catalog lookup reaches the hosted MetaTables
-  deployment of the checkout's branch.
-- In the main checkout they passed in one run, and one of them failed in the next while the
-  deployment was still waking.
-- In a worktree on a branch with no registered Environment, all six fail.
-- Every other test passed in both runs made after the TAU 3.0 test fixes.
+blocked. On 2026-11-27 the suite passes offline: 976 tests plus 84 subtests passed with network
+access blocked, and 6 were skipped (the opt-in live end-to-end test and five PostgreSQL tests).
 
 The API now uses MCP 2.x `MCPServer` and its supported stateless JSON ASGI application and
 session-manager lifespan, rather than the removed MCP 1.x low-level decorators. The project
