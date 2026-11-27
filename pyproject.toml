@@ -11,9 +11,9 @@ license-files = ["LICENSE"]
 requires-python = ">=3.13,<3.14"
 dependencies = [
     # Keep compatible ranges here and let uv.lock capture the reproducible environment.
-    "ms-markets>=6.2.5",
-    "mainsequence[mcp]>=9.0.38,<10",
-    "mainsequence-metatable>=0.1.86,<0.2",
+    "ms-markets>=6.3.0",
+    "mainsequence[mcp]>=9.0.43,<10",
+    "mainsequence-metatable>=0.1.87,<0.2",
     # 0.45.0 is the first release whose asset model knows the TXSE exchange.
     "alpaca-py>=0.45.0",
     "mkdocs>=1.6.1",
@@ -23,7 +23,7 @@ dependencies = [
     "httpx>=0.28.1",
     "empyrical-reloaded>=0.5.12",
     # Runtime of the `harness_agent` (api/agent/main.py); the platform runs it from this image.
-    "ms-tau-sdk>=2.0.26,<3",
+    "ms-tau-sdk>=3.0.5,<4",
 ]
 
 [project.scripts]

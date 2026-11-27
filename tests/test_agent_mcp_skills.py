@@ -86,6 +86,7 @@ def test_tau_discovers_and_verifies_all_four_published_skills(
         rpc_url=httpx.URL(alpaca_mcp_http),
         token=local_caller.headers["Authorization"].removeprefix("Bearer "),
         renew=AsyncMock(),
+        session_uid=None,
     )
 
     async def exercise():
@@ -141,6 +142,7 @@ def test_tau_never_returns_skill_content_with_a_mismatched_digest(
         rpc_url=httpx.URL(alpaca_mcp_http),
         token=local_caller.headers["Authorization"].removeprefix("Bearer "),
         renew=AsyncMock(),
+        session_uid=None,
     )
     read_resource = MCPConnectionClient.read_resource
     unverified_text = "Unverified replacement instructions must not enter model context."
@@ -178,6 +180,7 @@ def test_application_calls_do_not_reuse_another_callers_access(
         rpc_url=httpx.URL(alpaca_mcp_http),
         token=local_caller.headers["Authorization"].removeprefix("Bearer "),
         renew=AsyncMock(),
+        session_uid=None,
     )
 
     async def exercise():
