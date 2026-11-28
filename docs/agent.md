@@ -359,7 +359,7 @@ connection before relying on it.
 ## Current local compatibility review
 
 On 2026-11-28 the installed and locked versions are Main Sequence **9.0.47**, TAU **3.0.7**,
-MetaTables (`mainsequence-metatable`) **0.1.88** and ms-markets **6.4.0**. The entries below
+MetaTables (`mainsequence-metatable`) **0.1.88** and ms-markets **6.4.1**. The entries below
 record how each range got there.
 
 - Since 2026-10-15 the platform's caller assertions carry only the caller's identity (`sub` and
@@ -484,9 +484,18 @@ record how each range got there.
   - the startup prewarm asks once for the Markets API's runtime access;
   - the Job gate waits with the SDK's `wait_for_runtime_access`;
   - a Markets start is recognised by the SDK's errors alone.
+- Later on 2026-11-28 the range moved to `ms-markets>=6.4.1`, which Production's Markets API
+  runs. 6.4.1 changes documentation only; its producer-boundary skill now says that Markets
+  calls are spans of the caller's trace and that `ReleaseCallError` reaches the caller unchanged.
+  Nothing in this application changes with it.
+- **The Agent answers again.** On 2026-11-28, after `bce4241` deployed, a read-only Message to the
+  Production Agent answered (A2A 200) in session `d8bb353d-4d28-4288-9d21-24a6e8536453`:
+  - the relayed model call recorded real usage (1,971 tokens in, 88 out);
+  - the Agent listed the Alpaca tools and called `alpaca_project_state`;
+  - it replied `relay-ok 0 accounts`, ending with `stop`.
 
 `pyproject.toml` keeps non-exact compatibility ranges (`mainsequence[mcp]>=9.0.47,<10`,
-`mainsequence-metatable>=0.1.88,<0.2`, `ms-tau-sdk>=3.0.7,<4`, and `ms-markets>=6.4.0` with no
+`mainsequence-metatable>=0.1.88,<0.2`, `ms-tau-sdk>=3.0.7,<4`, and `ms-markets>=6.4.1` with no
 upper bound since [ADR 0031](adrs/0031_markets_series_are_published_not_shared.md)), while
 `uv.lock` and the exported `requirements.txt` record the resolution. On 2026-10-14 Main Sequence
 had moved from 9.0.23 to 9.0.24, which stopped scaffolding `AGENTS.md` and ships its guidance in
@@ -529,8 +538,8 @@ the development backend's catalog, which no longer ships `code_repository_design
 ms-markets 2.2.10 bundle was left unchanged. The `ms_tau_sdk` bundle was synced again from TAU
 2.0.26 on 2026-10-25. On 2026-11-27 every bundle was refreshed again: Main Sequence 9.0.43,
 TAU 3.0.5 (`ms-tau skills sync`), MetaTables 0.1.87, ms-markets 6.3.1 and the platform skills.
-On 2026-11-28 the Main Sequence 9.0.47, TAU 3.0.7 and MetaTables 0.1.88 bundles were refreshed;
-the ms-markets bundle was refreshed from 6.4.0. Each bundle's `PINNED_FROM.txt` records its matching version. The
+On 2026-11-28 the Main Sequence 9.0.47, TAU 3.0.7 and MetaTables 0.1.88 bundles were refreshed,
+then the ms-markets bundle from 6.4.1 and the platform skills, which had not changed. Each bundle's `PINNED_FROM.txt` records its matching version. The
 repository-owned business skills remain single-copy. On 2026-10-14 `AGENTS.md` lost the retired SDK
 block and was cut to its developer rules, the operator manual moved to the
 [operator guide](operations/operator-guide.md), and `.tau/SYSTEM.md` became the runtime prompt.
