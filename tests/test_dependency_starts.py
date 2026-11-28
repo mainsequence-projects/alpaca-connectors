@@ -12,8 +12,9 @@ import logging
 import sys
 import threading
 import time
+from collections.abc import Callable
 from types import SimpleNamespace
-from typing import Literal
+from typing import Any, Literal
 from unittest.mock import patch
 
 import pytest
@@ -45,7 +46,23 @@ REGISTRATION = {
 }
 
 
-def runtime_access(state: str, *, active_revision_uid: str | None = "revision"):
+@pytest.fixture(autouse=True)
+def _no_kept_release_access():
+    """Each test starts with no release access kept in the process, as a new process does."""
+    from mainsequence.client.release_calls import release_runtime_cache
+
+    release_runtime_cache.clear()
+    yield
+    release_runtime_cache.clear()
+
+
+def runtime_access(
+    state: str,
+    *,
+    active_revision_uid: str | None = "revision",
+    retry_after_ms: int | None = 3000,
+    expected_cold_start_seconds: float | None = None,
+):
     """The platform's answer about a release that cannot take requests yet, or ever.
 
     Built with the SDK's own model, so a change to the answer's shape fails here (MetaTables
@@ -57,7 +74,12 @@ def runtime_access(state: str, *, active_revision_uid: str | None = "revision"):
         {
             "resource_release_uid": RELEASE_UID,
             "release_kind": "fastapi",
-            "runtime_access": {"state": state, "can_request": False, "retry_after_ms": 3000},
+            "scaling": {"expected_cold_start_seconds": expected_cold_start_seconds},
+            "runtime_access": {
+                "state": state,
+                "can_request": False,
+                "retry_after_ms": retry_after_ms,
+            },
             "runtime_presence": {
                 "phase": "starting" if state == "waking" else state,
                 "replicas": {"desired": 1, "actual": 0},
@@ -70,7 +92,7 @@ def runtime_access(state: str, *, active_revision_uid: str | None = "revision"):
 
 
 class FakeClock:
-    """A discovery's clock and sleep, so its 30 s limit passes at once."""
+    """A wait's clock and sleep, so its limit passes at once."""
 
     def __init__(self) -> None:
         self.now = 0.0
@@ -82,30 +104,32 @@ class FakeClock:
         self.now += seconds
 
     def module(self) -> SimpleNamespace:
-        return SimpleNamespace(monotonic=self.monotonic, sleep=self.sleep)
+        return SimpleNamespace(monotonic=self.monotonic, sleep=self.sleep, time=time.time)
 
 
-def platform_answers(monkeypatch: pytest.MonkeyPatch, state: str) -> None:
-    """ms-markets finds the Markets API by UID, and the platform answers ``state`` every time."""
-    from msm.client import discovery
+def platform_answers(monkeypatch: pytest.MonkeyPatch, answer: Callable[[], Any]) -> FakeClock:
+    """ms-markets finds the Markets API by UID, and the platform answers ``answer()`` each time.
 
-    from mainsequence.client import ResourceRelease
+    Since ms-markets 6.4.0 a Markets call waits for its release in the SDK's own
+    ``mainsequence.client.release_calls``, whose clock this fakes.
+    """
+    from mainsequence.client import ResourceRelease, release_calls
 
-    monkeypatch.setattr(discovery, "time", FakeClock().module())
+    clock = FakeClock()
+    monkeypatch.setattr(release_calls, "time", clock.module())
     monkeypatch.delenv("MARKETS_API_URL", raising=False)
     monkeypatch.setenv("MARKETS_API_RELEASE_UID", RELEASE_UID)
-    monkeypatch.setattr(
-        ResourceRelease, "resolve_runtime_access", lambda self, **kwargs: runtime_access(state)
-    )
+    monkeypatch.setattr(ResourceRelease, "resolve_runtime_access", lambda self, **kwargs: answer())
+    return clock
 
 
-def markets_discovery_error(monkeypatch: pytest.MonkeyPatch, state: str) -> Exception:
-    """What ms-markets raises when it gives up on a Markets API the platform answers ``state`` for."""
-    from msm.client import discovery
+def markets_call_error(monkeypatch: pytest.MonkeyPatch, state: str, **answer: Any) -> Exception:
+    """What a Markets API call raises when the platform answers ``state`` for its release."""
+    from msm.client import MarketsClient
 
-    platform_answers(monkeypatch, state)
-    with pytest.raises(discovery.MarketsApiResolutionError) as raised:
-        discovery.resolve_markets_api_endpoint()
+    platform_answers(monkeypatch, lambda: runtime_access(state, **answer))
+    with pytest.raises(Exception) as raised:
+        MarketsClient.from_environment().request("GET", "/health")
     return raised.value
 
 
@@ -138,12 +162,15 @@ def metatables_token_refresh_error(
 # --- What is a start ---------------------------------------------------------------------------
 
 
-def test_a_markets_api_discovery_that_gives_up_while_it_wakes_is_a_start(monkeypatch) -> None:
-    assert is_dependency_starting(markets_discovery_error(monkeypatch, "waking"))
+def test_a_markets_api_call_that_gives_up_while_it_wakes_is_a_start(monkeypatch) -> None:
+    assert is_dependency_starting(markets_call_error(monkeypatch, "waking"))
 
 
 def test_a_markets_api_that_cannot_take_requests_is_a_failure(monkeypatch) -> None:
-    assert not is_dependency_starting(markets_discovery_error(monkeypatch, "failed"))
+    # The platform's rule (ADR 0041): an answer without a retry hint is final.
+    assert not is_dependency_starting(
+        markets_call_error(monkeypatch, "failed", retry_after_ms=None)
+    )
 
 
 def test_a_metatables_token_refresh_that_gives_up_while_it_wakes_is_a_start(monkeypatch) -> None:
@@ -258,8 +285,8 @@ def test_a_failed_discovery_is_started_again_by_the_next_call() -> None:
 
 
 def test_a_row_call_while_the_markets_api_wakes_is_a_start(monkeypatch) -> None:
-    """ms-markets' own discovery, run by the backend, gives up on a waking Markets API."""
-    platform_answers(monkeypatch, "waking")
+    """The backend's client, ms-markets' own, gives up on a waking Markets API in the SDK's wait."""
+    platform_answers(monkeypatch, lambda: runtime_access("waking"))
     backend = MarketsApiBackend()
 
     with pytest.raises(Exception) as raised:
@@ -272,40 +299,45 @@ def test_a_row_call_while_the_markets_api_wakes_is_a_start(monkeypatch) -> None:
 
 
 def markets_api_that_wakes_after(monkeypatch: pytest.MonkeyPatch, seconds: float) -> FakeClock:
-    """The platform answers ``waking`` until ``seconds`` pass on the discovery's clock, then ready.
+    """The platform answers ``waking`` until ``seconds`` pass on the SDK's clock, then ready.
 
     That is how every scheduled dispatcher run of 2026-11-12 and 2026-11-13 met the Markets API.
+    The platform expects a 20 s cold start, so the SDK's own limit for a call is 40 s.
     """
-    from msm.client import discovery
+    from mainsequence.client import ResourceReleaseRuntimeAccess
 
-    from mainsequence.client import ResourceRelease
+    ready = ResourceReleaseRuntimeAccess.model_validate(
+        {
+            "resource_release_uid": RELEASE_UID,
+            "release_kind": "fastapi",
+            "runtime_access": {"state": "ready", "can_request": True, "retry_after_ms": None},
+            "runtime_presence": {
+                "phase": "serving",
+                "replicas": {"desired": 1, "actual": 1},
+                "detail": "The release serves.",
+            },
+            "routing": {"state": "routable", "active_revision_uid": "revision"},
+            "access": {"mode": "token", "rpc_url": "https://markets.example.test", "token": "t"},
+        }
+    )
+    clock: FakeClock
 
-    clock = FakeClock()
-    ready = SimpleNamespace(
-        resource_release_uid=RELEASE_UID,
-        release_kind="fastapi",
-        runtime_access=SimpleNamespace(state="ready", can_request=True, retry_after_ms=None),
-        routing=SimpleNamespace(state="routable", active_revision_uid="revision"),
-        access={"mode": "token", "rpc_url": "https://markets.example.test", "token": "token"},
-    )
-    monkeypatch.setattr(discovery, "time", clock.module())
-    monkeypatch.delenv("MARKETS_API_URL", raising=False)
-    monkeypatch.setenv("MARKETS_API_RELEASE_UID", RELEASE_UID)
-    monkeypatch.setattr(
-        ResourceRelease,
-        "resolve_runtime_access",
-        lambda self, **kwargs: ready if clock.now >= seconds else runtime_access("waking"),
-    )
+    def answer():
+        if clock.now >= seconds:
+            return ready
+        return runtime_access("waking", expected_cold_start_seconds=20)
+
+    clock = platform_answers(monkeypatch, answer)
     return clock
 
 
-def test_ms_markets_own_limit_gives_up_on_a_markets_api_asleep_overnight(monkeypatch) -> None:
+def test_a_markets_call_alone_gives_up_on_a_markets_api_asleep_overnight(monkeypatch) -> None:
     from msm.client import MarketsClient
 
     markets_api_that_wakes_after(monkeypatch, 60)
 
-    with pytest.raises(Exception, match="within 30 s") as raised:
-        MarketsClient.from_environment()
+    with pytest.raises(Exception, match="still starting after 40s") as raised:
+        MarketsClient.from_environment().request("GET", "/health")
     assert is_dependency_starting(raised.value)
 
 
@@ -314,14 +346,14 @@ def test_a_job_waits_out_a_markets_api_asleep_overnight(monkeypatch) -> None:
 
     client = dependencies.markets_client(discovery_timeout=dependencies.JOB_WAKE_SECONDS)
 
-    assert client.base_url == "https://markets.example.test"
+    assert client.release_uid == RELEASE_UID
     assert 60 <= clock.now < dependencies.JOB_WAKE_SECONDS
 
 
 def test_a_job_still_fails_on_a_markets_api_that_never_wakes(monkeypatch) -> None:
     clock = markets_api_that_wakes_after(monkeypatch, float("inf"))
 
-    with pytest.raises(Exception, match="within 300 s") as raised:
+    with pytest.raises(Exception, match="still starting after 300s") as raised:
         dependencies.markets_client(discovery_timeout=dependencies.JOB_WAKE_SECONDS)
     assert is_dependency_starting(raised.value)
     assert clock.now == dependencies.JOB_WAKE_SECONDS
@@ -377,15 +409,24 @@ def test_prewarm_starts_the_markets_api_without_waiting_for_it(
 ) -> None:
     from msm.api.remote import active_remote_backend
 
+    from mainsequence.client import ResourceRelease
+
     monkeypatch.setenv("APP_NAME", RELEASE_UID)
-    asked, released, client = threading.Event(), threading.Event(), object()
+    asked, released, woken = threading.Event(), threading.Event(), threading.Event()
+    client = SimpleNamespace(release_uid=RELEASE_UID)
 
     def from_environment(cls):
         asked.set()
         released.wait(5)
         return client
 
+    def resolve_runtime_access(self, **kwargs):
+        assert self.uid == RELEASE_UID
+        woken.set()
+        return runtime_access("waking")
+
     monkeypatch.setattr("msm.client.MarketsClient.from_environment", classmethod(from_environment))
+    monkeypatch.setattr(ResourceRelease, "resolve_runtime_access", resolve_runtime_access)
 
     started = time.monotonic()
     prewarm_dependencies()
@@ -396,6 +437,8 @@ def test_prewarm_starts_the_markets_api_without_waiting_for_it(
     assert isinstance(backend, MarketsApiBackend)
     released.set()
     assert backend.client is client
+    # Finding the release no longer asks for its access (ms-markets 6.4.0); the prewarm asks once.
+    assert woken.wait(2)
 
 
 def test_prewarm_never_fails_startup(clean_identity_environment, monkeypatch) -> None:
@@ -454,7 +497,7 @@ def test_the_api_starts_the_markets_api_before_attaching_its_runtime(
     [
         pytest.param(lambda monkeypatch: DependencyStarting(), id="past-the-caller-deadline"),
         pytest.param(
-            lambda monkeypatch: markets_discovery_error(monkeypatch, "waking"),
+            lambda monkeypatch: markets_call_error(monkeypatch, "waking"),
             id="markets-api-waking",
         ),
         pytest.param(
@@ -505,7 +548,9 @@ def test_the_callers_deadline_bounds_the_wait_for_the_markets_api(api_client) ->
 
 
 def test_a_release_that_cannot_start_is_not_reported_as_starting(api_client, monkeypatch) -> None:
-    with patch(CREATE_ACCOUNT, side_effect=markets_discovery_error(monkeypatch, "failed")):
+    with patch(
+        CREATE_ACCOUNT, side_effect=markets_call_error(monkeypatch, "failed", retry_after_ms=None)
+    ):
         response = api_client.post("/v1/accounts", json=REGISTRATION)
 
     assert response.status_code == 503

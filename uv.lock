@@ -55,7 +55,7 @@ requires-dist = [
     { name = "mainsequence-metatable", specifier = ">=0.1.88,<0.2" },
     { name = "mkdocs", specifier = ">=1.6.1" },
     { name = "mkdocs-material", specifier = ">=9.7.6" },
-    { name = "ms-markets", specifier = ">=6.3.1" },
+    { name = "ms-markets", specifier = ">=6.4.0" },
     { name = "ms-tau-sdk", specifier = ">=3.0.7,<4" },
     { name = "uvicorn", specifier = ">=0.52.4,<0.53" },
 ]
@@ -1061,7 +1061,7 @@ wheels = [
 
 [[package]]
 name = "ms-markets"
-version = "6.3.1"
+version = "6.4.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "alembic" },
@@ -1082,9 +1082,9 @@ dependencies = [
     { name = "sqlalchemy" },
     { name = "uvicorn" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/aa/1f/5343daebeb9e6b0e88512ddb0d0d0ecced3b00f1a1f2479799346e3b5375/ms_markets-6.3.1.tar.gz", hash = "sha256:0f8a2776f5221800f59a97b3fe7bf8a7f29cfac24982baef5ca90f51f4dba099", size = 3331283, upload-time = "2026-11-27T11:36:28.354Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/c3/bf/737ced38cd82292cf710f6c10d1c686460441b0fb6372497b7c9a6c68c8d/ms_markets-6.4.0.tar.gz", hash = "sha256:6c29e34161f90918bca2ca536a5a9075dcdb465f906e0e0cbc9a4f199a6f0468", size = 3336147, upload-time = "2026-11-28T09:50:37.327Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/a4/4b/964f42e0f03bc82123c5891e591eda6fa44fae50f638111a8a7f013a39bc/ms_markets-6.3.1-py3-none-any.whl", hash = "sha256:41217062adcd93d6a1c46833ca3e912365dadf179fb86a815a19bc563ae3043c", size = 1058609, upload-time = "2026-11-27T11:36:26.909Z" },
+    { url = "https://files.pythonhosted.org/packages/6c/36/31ccc6ce8b715fa3f7c5423410f0ce6e57d1b63871b52fafa7b724a065d5/ms_markets-6.4.0-py3-none-any.whl", hash = "sha256:c27cc4c260b951ad20d39920b58c23106b8150173a655f0adabcf3eddc346a94", size = 1058937, upload-time = "2026-11-28T09:50:35.809Z" },
 ]
 
 [[package]]

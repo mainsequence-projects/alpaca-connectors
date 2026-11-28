@@ -16,6 +16,26 @@ by the caller's deadline. The Alpaca Agent sends that deadline with every tool c
 ms-tau-sdk 2.0.33 (the lock has 3.0.5), so the Agent's calls are bounded by the time their tool
 call has left ([Agent](../agent.md#application-tool-timeouts)).
 
+Amended on 2026-11-28 for ms-markets 6.4.0, which sends each Markets API call through the SDK's
+`ResourceRelease.call` (MainSequenceMarkets#160). Finding the Markets API now only names its
+release: it no longer asks for the release's runtime access, takes no `timeout`, and never
+raises `last state: waking`. The decisions stay; how they are carried out changes:
+
+- **Decision 1:** the API's startup still finds the Markets API on its own thread, then asks
+  once for its runtime access, which is what starts a release that is asleep.
+- **Decision 2:** a row call still waits for the discovery only as long as its caller. The call
+  itself then waits for a release that is starting inside the SDK, within the caller's
+  deadline, else the SDK's own limit: twice the cold start the platform expects, at least 30 s,
+  or 300 s while it states none.
+- **Decision 3:** a Markets API start reaches the connector as the SDK's
+  `ReleaseReadinessTimeoutError`, `ReleaseDeadlineTooShortError` or
+  `ReleaseColdStartTimeoutError`, already starts. The `last state: waking` message now marks only
+  a MetaTables discovery. `ReleaseUnavailableError` and its `ReleaseNotDeployedError` stay
+  failures.
+- **Decision 5:** the schema gate's `markets_client` builds ms-markets' own client, then waits for
+  its release with the SDK's `wait_for_runtime_access(wait_timeout_seconds=300)`. That keeps the
+  access the client's calls then reuse. A `MARKETS_API_URL` is called as it is.
+
 ## Context
 
 The connector scales to zero, and so do the two Main Sequence releases it works through:
