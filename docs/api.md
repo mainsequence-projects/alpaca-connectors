@@ -787,6 +787,34 @@ The token is short-lived; request a new one when calls start answering 401. The 
 standalone development mode sends no token, so it gets 401 from a local API until the site sends
 one.
 
+### Trace context
+
+Each request is a span of its caller's trace (Main Sequence ADR 0042), and the API passes that trace
+on to the Markets API. None of it is this application's code:
+
+- **The request's context.** The SDK's request identity makes the request's W3C `traceparent` and
+  `baggage` its OpenTelemetry context, with baggage only for a verified caller. In a deployment the
+  current span is the one the platform's launcher records for the request. A request without a
+  `traceparent` starts its own trace.
+- **Markets calls.** Since ms-markets 6.4.0 each call goes through the SDK's
+  `ResourceRelease.call`, which names the current span as its parent, carries the baggage and writes
+  one `dependency.call.*` line. MetaTables 0.1.88 does the same for its calls to the MetaTables
+  API. A `MARKETS_API_URL` override, for a local Markets API, carries no trace context.
+- **Alpaca calls.** Alpaca is no Main Sequence release and is sent neither header.
+
+What the application must keep is the context on every thread that does a request's work:
+
+- **Sync routes and MCP tools** run on anyio's worker threads, which copy it.
+- **Calls made together** (`markets_api.all_together`, `read_alpaca_asset_records`) run each call in
+  `contextvars.copy_context()`, so they also keep the caller's deadline and their log lines keep
+  the trace.
+- **Jobs.** A Job run continues the trace in its `TRACEPARENT` and `BAGGAGE`, which the SDK attaches
+  when `mainsequence` is imported.
+
+`tests/test_trace_context.py` sends a request with both headers, as a local and as a hosted caller,
+over REST and over MCP. It checks that the Markets call ms-markets' own client sends is a child span
+of that trace with that baggage, including calls made together.
+
 ## Deployment
 
 `.mainsequence/workflows/alpaca-connectors-api.yaml` declares the registered FastAPI resource with
