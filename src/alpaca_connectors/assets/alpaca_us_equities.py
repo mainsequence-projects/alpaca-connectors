@@ -412,7 +412,12 @@ def read_alpaca_asset_record(trading_client: Any, lookup_key: str) -> Any | None
 
 
 def read_alpaca_asset_records(trading_client: Any, lookup_keys: list[str]) -> dict[str, Any]:
-    """Alpaca assets by id or symbol, read concurrently; a key Alpaca does not know is absent."""
+    """Alpaca assets by id or symbol, read concurrently; a key Alpaca does not know is absent.
+
+    Each read runs in a copy of the caller's context, so it keeps the request's trace, caller
+    context and deadline in its log lines, as a read in the request's own thread does.
+    """
+    import contextvars
     from concurrent.futures import ThreadPoolExecutor
 
     keys = list(dict.fromkeys(key for key in lookup_keys if key))
@@ -422,9 +427,13 @@ def read_alpaca_asset_records(trading_client: Any, lookup_keys: list[str]) -> di
         records = [read_alpaca_asset_record(trading_client, keys[0])]
     else:
         with ThreadPoolExecutor(max_workers=min(len(keys), ALPACA_ASSET_READ_WORKERS)) as pool:
-            records = list(
-                pool.map(lambda key: read_alpaca_asset_record(trading_client, key), keys)
-            )
+            futures = [
+                pool.submit(
+                    contextvars.copy_context().run, read_alpaca_asset_record, trading_client, key
+                )
+                for key in keys
+            ]
+            records = [future.result() for future in futures]
     return {key: record for key, record in zip(keys, records, strict=True) if record is not None}
 
 
