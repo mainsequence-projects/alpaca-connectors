@@ -157,14 +157,7 @@ def test_a_metatables_api_that_is_unavailable_or_not_deployed_is_a_failure(monke
     )
 
 
-class ReleaseCallStandIn(Exception):
-    """The SDK's release-call errors (mainsequence 9.0.39, ADR 0041), for an SDK without them."""
-
-    def __init__(self, message: str, **facts: object) -> None:
-        super().__init__(message)
-
-
-def test_the_sdks_own_start_errors_are_starts(monkeypatch) -> None:
+def test_the_sdks_own_start_errors_are_starts() -> None:
     import mainsequence.client as sdk_client
 
     starts = (
@@ -172,12 +165,8 @@ def test_the_sdks_own_start_errors_are_starts(monkeypatch) -> None:
         "ReleaseDeadlineTooShortError",
         "ReleaseColdStartTimeoutError",
     )
-    failures = ("ReleaseUnavailableError", "ReleaseRequestTimeoutError")
-    for name in (*starts, *failures):
-        if not hasattr(sdk_client, name):
-            monkeypatch.setattr(
-                sdk_client, name, type(name, (ReleaseCallStandIn,), {}), raising=False
-            )
+    # A release with no active revision (mainsequence 9.0.46) is a failure, not a start.
+    failures = ("ReleaseUnavailableError", "ReleaseNotDeployedError", "ReleaseRequestTimeoutError")
 
     def error(name: str) -> Exception:
         return getattr(sdk_client, name)("The release ...", resource_release_uid=RELEASE_UID)
@@ -206,16 +195,11 @@ def test_a_start_is_found_through_the_errors_raised_from_it() -> None:
 
 
 def test_the_caller_deadline_comes_from_the_sdk_request_identity(monkeypatch) -> None:
-    monkeypatch.setitem(
-        sys.modules,
-        "mainsequence._request_deadline",
-        SimpleNamespace(remaining_request_seconds=lambda: 7.5),
-    )
-    assert dependencies.caller_remaining_seconds() == 7.5
-
-    # mainsequence before 9.0.39 reads no deadline: no request has a limit.
-    monkeypatch.setitem(sys.modules, "mainsequence._request_deadline", None)
+    # Outside a request no caller has set a limit.
     assert dependencies.caller_remaining_seconds() is None
+
+    monkeypatch.setattr("mainsequence.client.remaining_request_seconds", lambda: 7.5)
+    assert dependencies.caller_remaining_seconds() == 7.5
 
 
 # --- Waiting for the Markets API ---------------------------------------------------------------
@@ -497,10 +481,7 @@ def test_registration_answers_dependency_starting_while_a_release_starts(
 
 
 def test_the_callers_deadline_bounds_the_wait_for_the_markets_api(api_client) -> None:
-    """Through the SDK's request identity, which reads the deadline from mainsequence 9.0.39."""
-    pytest.importorskip(
-        "mainsequence._request_deadline", reason="this SDK reads no caller deadline"
-    )
+    """Through the SDK's request identity, which reads the caller's deadline."""
     from msm.api.remote import use_remote_backend
 
     released = threading.Event()
