@@ -164,12 +164,12 @@ linkify-it-py==2.2.0
     # via markdown-it-py
 loguru==0.7.3
     # via fastembed
-mainsequence==9.0.43
+mainsequence==9.0.47
     # via
     #   alpaca-connectors
     #   mainsequence-metatable
     #   ms-markets
-mainsequence-metatable==0.1.87
+mainsequence-metatable==0.1.88
     # via
     #   alpaca-connectors
     #   ms-markets
@@ -222,7 +222,7 @@ more-itertools==11.1.0
     #   jaraco-functools
 ms-markets==6.3.1
     # via alpaca-connectors
-ms-tau-sdk==3.0.5
+ms-tau-sdk==3.0.7
     # via alpaca-connectors
 msgpack==1.2.0
     # via alpaca-py

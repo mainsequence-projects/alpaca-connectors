@@ -358,8 +358,8 @@ connection before relying on it.
 
 ## Current local compatibility review
 
-On 2026-11-27 the installed and locked versions are Main Sequence **9.0.43**, TAU **3.0.5**,
-MetaTables (`mainsequence-metatable`) **0.1.87** and ms-markets **6.3.1**. The entries below
+On 2026-11-28 the installed and locked versions are Main Sequence **9.0.47**, TAU **3.0.7**,
+MetaTables (`mainsequence-metatable`) **0.1.88** and ms-markets **6.3.1**. The entries below
 record how each range got there.
 
 - Since 2026-10-15 the platform's caller assertions carry only the caller's identity (`sub` and
@@ -456,9 +456,29 @@ record how each range got there.
 - Later on 2026-11-27 the range moved to `ms-markets>=6.3.1`, which Production's Markets API
   runs. 6.3.1 only requires Main Sequence 9.0.43 and MetaTables 0.1.86 and changes no behaviour,
   so nothing in this application changes with it.
+- On 2026-11-28 the ranges moved to TAU `>=3.0.7,<4`, Main Sequence `>=9.0.47` and MetaTables
+  `>=0.1.88`:
+  - **The Agent's answers.** Until 2026-11-27 every relayed model answer reached the Agent cut to
+    its first chunk ([ms-tau-sdk#150](https://github.com/mainsequence-sdk/ms-tau-sdk/issues/150)).
+    The platform's `GZipMiddleware` compressed each chunk of the relay's async stream as its own
+    gzip member, and httpx decodes only the first, so a Codex turn ended as `stop` with no content
+    and zero usage. The platform fixed it
+    ([tdag-django#1307](https://github.com/Main-Sequence-Server-Side/tdag-django/issues/1307));
+    nothing in this application changes for it.
+  - **TAU 3.0.6 and 3.0.7.** A session keeps its lease through a platform restart, and only a
+    model's reply is logged as a model call. An application call right after a redeploy, when
+    the platform answers `unavailable` with `retry_after_ms`, now waits instead of failing.
+    `TAU_LOCAL_MCP_APPLICATIONS` lets a local Agent use a local API; this repository does not set
+    it.
+  - **Main Sequence 9.0.46 and 9.0.47.** The caller's remaining time is public as
+    `mainsequence.client.remaining_request_seconds`, which `alpaca_connectors.dependencies` now
+    imports instead of the private `mainsequence._request_deadline`. Its fallbacks for an SDK
+    before 9.0.39 are gone. 9.0.47 removes `reads_as_caller()`, which this application never used.
+  - **MetaTables 0.1.88.** Its API refuses every run start from an older client (its ADR 0034),
+    so this application's Jobs need 0.1.88 once that API runs it.
 
-`pyproject.toml` keeps non-exact compatibility ranges (`mainsequence[mcp]>=9.0.43,<10`,
-`mainsequence-metatable>=0.1.87,<0.2`, `ms-tau-sdk>=3.0.5,<4`, and `ms-markets>=6.3.1` with no
+`pyproject.toml` keeps non-exact compatibility ranges (`mainsequence[mcp]>=9.0.47,<10`,
+`mainsequence-metatable>=0.1.88,<0.2`, `ms-tau-sdk>=3.0.7,<4`, and `ms-markets>=6.3.1` with no
 upper bound since [ADR 0031](adrs/0031_markets_series_are_published_not_shared.md)), while
 `uv.lock` and the exported `requirements.txt` record the resolution. On 2026-10-14 Main Sequence
 had moved from 9.0.23 to 9.0.24, which stopped scaffolding `AGENTS.md` and ships its guidance in
@@ -501,7 +521,8 @@ the development backend's catalog, which no longer ships `code_repository_design
 ms-markets 2.2.10 bundle was left unchanged. The `ms_tau_sdk` bundle was synced again from TAU
 2.0.26 on 2026-10-25. On 2026-11-27 every bundle was refreshed again: Main Sequence 9.0.43,
 TAU 3.0.5 (`ms-tau skills sync`), MetaTables 0.1.87, ms-markets 6.3.1 and the platform skills.
-Each bundle's `PINNED_FROM.txt` records its matching version. The
+On 2026-11-28 the Main Sequence 9.0.47, TAU 3.0.7 and MetaTables 0.1.88 bundles were refreshed;
+the ms-markets 6.3.1 bundle was unchanged. Each bundle's `PINNED_FROM.txt` records its matching version. The
 repository-owned business skills remain single-copy. On 2026-10-14 `AGENTS.md` lost the retired SDK
 block and was cut to its developer rules, the operator manual moved to the
 [operator guide](operations/operator-guide.md), and `.tau/SYSTEM.md` became the runtime prompt.

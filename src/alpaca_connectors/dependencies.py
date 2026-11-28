@@ -62,13 +62,11 @@ class DependencyStarting(RuntimeError):
 def caller_remaining_seconds() -> float | None:
     """Seconds the current request's caller will still wait; ``None`` when it set no limit.
 
-    The SDK's request identity reads the caller's ``Mainsequence-Request-Timeout-Ms`` from
-    mainsequence 9.0.39 (its ADR 0041); with an earlier SDK no request has a limit.
+    The SDK's request identity reads the caller's ``Mainsequence-Request-Timeout-Ms`` (its ADR
+    0041); ``mainsequence.client.remaining_request_seconds`` is public from mainsequence 9.0.46.
     """
-    try:
-        from mainsequence._request_deadline import remaining_request_seconds
-    except ImportError:
-        return None
+    from mainsequence.client import remaining_request_seconds
+
     return remaining_request_seconds()
 
 
@@ -98,14 +96,12 @@ def _causes(exc: BaseException) -> Iterator[BaseException]:
 
 
 def _sdk_starting_errors() -> tuple[type[BaseException], ...]:
-    try:
-        from mainsequence.client import (
-            ReleaseColdStartTimeoutError,
-            ReleaseDeadlineTooShortError,
-            ReleaseReadinessTimeoutError,
-        )
-    except ImportError:  # mainsequence before 9.0.39 raises none of them
-        return ()
+    from mainsequence.client import (
+        ReleaseColdStartTimeoutError,
+        ReleaseDeadlineTooShortError,
+        ReleaseReadinessTimeoutError,
+    )
+
     return (
         ReleaseReadinessTimeoutError,
         ReleaseDeadlineTooShortError,
