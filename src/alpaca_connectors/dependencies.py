@@ -1,23 +1,31 @@
 """The Main Sequence releases this connector works through, and their starts (ADR 0020).
 
-The connector reaches two releases that scale to zero: the Markets API, which ms-markets finds in
-the caller's Environment on the first Markets row call (``msm.client``, ADR 0018), and the
-MetaTables API, which ``metatables.client.endpoint`` finds when the runtime attaches this project's
-tables. Each library asks the platform for the release's runtime access, which also starts a
-release that is asleep, and polls until it serves or its own limit (30 s) ends.
+The connector reaches two releases that scale to zero:
 
-- On the API's startup, ``prewarm_dependencies`` starts finding the Markets API on its own thread,
-  so a caller that woke this API finds the Markets API starting as well. The runtime attachment
-  that follows starts, and waits for, the MetaTables API. Nothing is started outside a hosted
-  release.
-- A Markets row call waits for that discovery only as long as its request's caller will still
-  wait, then raises ``DependencyStarting``; the discovery goes on, so the caller's retry finds the
-  Markets API. Without a caller deadline it waits for ms-markets' own limit.
+- **The Markets API**, which ms-markets finds in the caller's Environment on the first Markets row
+  call (``msm.client``, ADR 0018). Since ms-markets 6.4.0 finding it only names the release, and
+  each call goes through the SDK's ``ResourceRelease.call``. That asks the platform for the
+  release's runtime access, which starts a release that is asleep, and waits for it within the
+  caller's deadline, else the SDK's own limit.
+- **The MetaTables API**, which ``metatables.client.endpoint`` finds when the runtime attaches this
+  project's tables. It asks for the release's runtime access and polls until the release serves
+  or its own limit (30 s) ends.
+
+What this module does with them:
+
+- On the API's startup, ``prewarm_dependencies`` finds the Markets API on its own thread and asks
+  once for its runtime access, so a caller that woke this API finds the Markets API starting as
+  well. The runtime attachment that follows starts, and waits for, the MetaTables API. Nothing is
+  started outside a hosted release.
+- A Markets row call waits for the discovery only as long as its request's caller will still wait,
+  then raises ``DependencyStarting``; the discovery goes on, so the caller's retry finds the
+  Markets API.
 - ``is_dependency_starting`` tells a start from a failure. The API answers a start as
   ``503 dependency_starting`` with ``Retry-After`` (``alpaca_connectors.api.app.errors``).
 - A Job has no caller to answer, so it waits out a start instead: the schema gate, the first
-  thing each scheduled launcher does, finds both releases waiting up to ``JOB_WAKE_SECONDS``
-  (ADR 0020, decision 5). A release asleep since the previous night takes longer than 30 s.
+  thing each scheduled launcher does, waits up to ``JOB_WAKE_SECONDS`` for both releases (ADR
+  0020, decision 5). A release asleep since the previous night can take longer than the SDK's
+  own limit, which is twice the cold start the platform expects.
 """
 
 from __future__ import annotations
@@ -74,14 +82,16 @@ def is_dependency_starting(exc: BaseException) -> bool:
     """Whether ``exc``, or an error it was raised from, is a release that is still starting.
 
     That is ``DependencyStarting``, the SDK's readiness, deadline and cold-start errors (ADR 0041),
-    and an ms-markets or MetaTables discovery that gave up while the platform still reported the
-    release waking. A release that is unavailable, missing or ambiguous is a failure.
+    which every Markets API call raises since ms-markets 6.4.0, and a MetaTables discovery that
+    gave up while the platform still reported the release waking. A release that is unavailable,
+    missing or ambiguous is a failure.
     """
+    from metatables.client.endpoint import ApiResolutionError
+
     starting = (DependencyStarting, *_sdk_starting_errors())
-    discovery = _discovery_errors()
     return any(
         isinstance(error, starting)
-        or (isinstance(error, discovery) and _STILL_WAKING in str(error))
+        or (isinstance(error, ApiResolutionError) and _STILL_WAKING in str(error))
         for error in _causes(exc)
     )
 
@@ -109,20 +119,14 @@ def _sdk_starting_errors() -> tuple[type[BaseException], ...]:
     )
 
 
-def _discovery_errors() -> tuple[type[BaseException], ...]:
-    from msm.client.discovery import MarketsApiResolutionError
-
-    from metatables.client.endpoint import ApiResolutionError
-
-    return (MarketsApiResolutionError, ApiResolutionError)
-
-
 class MarketsApiBackend(LazyRemoteBackend):
     """ms-markets' lazy Markets API backend, found on its own thread and waited for by deadline.
 
     ``start`` runs the factory (ms-markets' ``MarketsClient.from_environment``) on a daemon thread,
     outside any request, one discovery at a time; a discovery that failed is started again by the
     next call. ``client`` waits for it at most as long as the request's caller will still wait.
+    Since ms-markets 6.4.0 the discovery only finds the release; each call then waits for a
+    release that is starting inside the SDK's ``ResourceRelease.call``, within the same deadline.
     """
 
     def __init__(self, factory: Callable[[], Any] | None = None) -> None:
@@ -166,25 +170,33 @@ class MarketsApiBackend(LazyRemoteBackend):
 
 
 def markets_client(*, discovery_timeout: float) -> Any:
-    """A Markets API client whose discovery waits up to ``discovery_timeout`` for a waking release.
+    """A Markets API client whose release serves, waiting up to ``discovery_timeout`` for it.
 
-    It resolves the endpoint as ms-markets' ``MarketsClient.from_environment`` does (the
-    ``MARKETS_API_URL`` and ``MARKETS_API_RELEASE_UID`` overrides, else discovery in the caller's
-    Environment), which always waits ms-markets' own limit.
+    ms-markets' ``MarketsClient.from_environment`` finds the release (the ``MARKETS_API_URL`` and
+    ``MARKETS_API_RELEASE_UID`` overrides, else discovery in the caller's Environment) without
+    asking for its access, and its first call waits for a release that is starting only for the
+    SDK's own limit. So for a release this waits first with the SDK's ``wait_for_runtime_access``,
+    which keeps the access the client's calls then reuse. A ``MARKETS_API_URL`` is called as it is.
     """
     from msm.client import MarketsClient
-    from msm.client.discovery import resolve_markets_api_endpoint
 
-    endpoint = resolve_markets_api_endpoint(timeout=discovery_timeout)
-    return MarketsClient(endpoint.url, headers=endpoint.headers)
+    from mainsequence.client import ResourceRelease
+
+    client = MarketsClient.from_environment()
+    if client.release_uid is not None:
+        ResourceRelease.by_uid(client.release_uid).wait_for_runtime_access(
+            wait_timeout_seconds=discovery_timeout
+        )
+    return client
 
 
 def prewarm_dependencies() -> None:
-    """Start finding the Markets API without waiting for it, on a hosted release only.
+    """Start the Markets API without waiting for it, on a hosted release only.
 
-    Asking the platform for the Markets API's runtime access starts it, so a caller that woke this
-    API does not find the Markets API asleep. This never blocks or fails startup: the discovery
-    runs on its own thread, and a failure is logged and left to the first row call to retry.
+    Finding the Markets API runs on its own thread; asking the platform once for its runtime
+    access then starts a release that is asleep, so a caller that woke this API does not find
+    the Markets API asleep. This never blocks or fails startup: a failure is logged and left to
+    the first row call, which finds the release again and waits for it.
     """
     if not any(os.environ.get(name) for name in _HOSTED_MARKERS):
         return
@@ -193,9 +205,29 @@ def prewarm_dependencies() -> None:
 
         backend = use_markets_api()
         if isinstance(backend, MarketsApiBackend):
-            backend.start()
+            threading.Thread(
+                target=_wake_markets_api,
+                args=(backend.start(),),
+                name="markets-api-wake",
+                daemon=True,
+            ).start()
     except Exception:
         logger.warning("Could not start finding the Markets API at startup.", exc_info=True)
+
+
+def _wake_markets_api(discovery: Future[Any]) -> None:
+    """Ask the platform once for the found release's runtime access, which starts it."""
+    if discovery.exception() is not None:  # already logged by the discovery
+        return
+    release_uid = getattr(discovery.result(), "release_uid", None)
+    if release_uid is None:
+        return
+    try:
+        from mainsequence.client import ResourceRelease
+
+        ResourceRelease.by_uid(release_uid).resolve_runtime_access()
+    except Exception:
+        logger.warning("Could not start the Markets API at startup.", exc_info=True)
 
 
 __all__ = [
